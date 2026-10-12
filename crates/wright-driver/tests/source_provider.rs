@@ -2008,3 +2008,276 @@ fn opy_rules_content_reports_names_unavailable() {
     assert_eq!(stuns, 2, "two 0.75s stuns: {actions:?}");
     cleanup(dir);
 }
+
+/// #638: the first `check`/`compile` drains the session's diagnostic buffer
+/// into the load-time envelope; the cached `Loaded` keeps its load
+/// diagnostics so an identical repeated request reports the same set instead
+/// of `diagnostics: []` without calling the provider.
+#[test]
+fn a_repeated_check_reports_the_same_provider_diagnostics() {
+    let (dir, entry) = temp_entry();
+    let operations = Arc::new(Mutex::new(Vec::new()));
+    let provider_diagnostic = |code: &str| Diagnostic {
+        code: code.to_string(),
+        stage: Stage::Frontend,
+        severity: wright_driver::Severity::Warning,
+        message: format!("{code} message"),
+        status: None,
+        span: None,
+        source: None,
+    };
+    let provider = RecordingProvider {
+        target: Arc::new(Mutex::new(None)),
+        operations: Arc::clone(&operations),
+        check_compilation: Some(SourceCompilation {
+            workshop_text: None,
+            locale: None,
+            provenance: wright_driver::SourceProvenance::Unmapped,
+            diagnostics: vec![provider_diagnostic("check-warning")],
+            source_identity: None,
+        }),
+        compilation: Some(SourceCompilation {
+            workshop_text: Some(workshop_fixture("synthetic/basic-rule")),
+            locale: None,
+            provenance: wright_driver::SourceProvenance::Unmapped,
+            diagnostics: vec![provider_diagnostic("compile-warning")],
+            source_identity: None,
+        }),
+        check_failure: None,
+        failure: None,
+    };
+    let mut session = CompilerSession::with_source_provider(
+        SessionConfig {
+            input: InputSpec::Path(entry),
+            kind: SourceKind::Opy,
+            ..SessionConfig::default()
+        },
+        Box::new(provider),
+    )
+    .expect("provider session");
+
+    let first = session.check();
+    assert!(first.ok, "first check: {:?}", first.diagnostics);
+    let second = session.check();
+    assert!(second.ok, "repeated check: {:?}", second.diagnostics);
+    let codes = |diagnostics: &[Diagnostic]| {
+        diagnostics
+            .iter()
+            .map(|d| d.code.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(codes(&first.diagnostics), codes(&second.diagnostics));
+    assert!(
+        second
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "check-warning" || d.code == "compile-warning"),
+        "the repeated check keeps the provider diagnostics: {second:?}"
+    );
+    assert_eq!(
+        *operations.lock().expect("operation lock"),
+        vec!["check", "compile"],
+        "the repeated check is served from the cached load"
+    );
+    cleanup(dir);
+}
+
+/// #638: an LPP provider without the compile capability declines
+/// `lpp/compile` through `capability-unavailable`, not `Unsupported` —
+/// `check` must still keep the check-only path and report the provider's
+/// own diagnostics.
+#[cfg(unix)]
+#[test]
+fn a_check_only_lpp_provider_keeps_the_check_only_path() {
+    use std::os::unix::fs::PermissionsExt;
+
+    const PROVIDER: &str = r#"#!/usr/bin/env python3
+import json, sys, pathlib
+entry = pathlib.Path(__file__).resolve().parent.joinpath("main.opy").as_uri()
+def reply(id, result=None, error=None):
+    message = {"jsonrpc": "2.0", "id": id}
+    message.update({"error": error} if error else {"result": result})
+    print(json.dumps(message), flush=True)
+def lpp_error(id, kind, details, text):
+    reply(id, error={"code": -32000, "message": text, "data": {"lpp": {"kind": kind, "details": details}}})
+for line in sys.stdin:
+    request = json.loads(line)
+    id, method = request["id"], request["method"]
+    if method == "lpp/initialize":
+        if request["params"]["protocolVersion"] != "1.1":
+            lpp_error(id, "protocolVersionMismatch", {"supportedProtocolVersions": ["1.1"]}, "unsupported")
+        else:
+            reply(id, {"protocolVersion": "1.1", "serverInfo": {"name": "fake", "version": "0"},
+                       "languages": [{"id": "opy", "extensions": ["opy"]}],
+                       "capabilities": {"check": True, "projectLoading": True}})
+    elif method == "lpp/check":
+        reply(id, {"documents": [{"uri": entry, "version": 0, "diagnostics": [
+            {"range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 4}},
+             "severity": "warning", "code": "opy-lint", "message": "provider warning"}]}]})
+    else:
+        reply(id, {})
+"#;
+
+    let (dir, entry) = temp_entry();
+    let script = dir.join("fake-provider");
+    std::fs::write(&script, PROVIDER).expect("provider script");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(entry),
+        kind: SourceKind::Opy,
+        source_backend: SourceBackend::Provider,
+        opy_provider: wright_driver::OpyProviderConfig::with_executable(script),
+        ..SessionConfig::default()
+    })
+    .expect("session");
+
+    let check = session.check();
+    assert!(
+        check.ok,
+        "check-only provider check: {:?}",
+        check.diagnostics
+    );
+    assert!(
+        check.diagnostics.iter().any(|d| d.code == "opy-lint"),
+        "the provider's check diagnostic survives the degrade arm: {check:?}"
+    );
+    cleanup(dir);
+}
+
+/// #638: the version-mismatch retry asks for the highest mutually supported
+/// version from `supportedProtocolVersions` (LPP §19.2) rather than a fixed
+/// next rung — and every initialize path sends `clientInfo.name: "wright"`.
+#[cfg(unix)]
+#[test]
+fn a_version_mismatch_retries_at_the_highest_mutual_version() {
+    use std::os::unix::fs::PermissionsExt;
+
+    const PROVIDER: &str = r#"#!/usr/bin/env python3
+import json, sys, os, pathlib
+log = pathlib.Path(__file__).resolve().parent.joinpath("init-log")
+artifact = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifact.ws")).read()
+supported = ["1.0", "1.1", "1.3"]
+def reply(id, result=None, error=None):
+    message = {"jsonrpc": "2.0", "id": id}
+    message.update({"error": error} if error else {"result": result})
+    print(json.dumps(message), flush=True)
+def lpp_error(id, kind, details, text):
+    reply(id, error={"code": -32000, "message": text, "data": {"lpp": {"kind": kind, "details": details}}})
+for line in sys.stdin:
+    request = json.loads(line)
+    id, method = request["id"], request["method"]
+    if method == "lpp/initialize":
+        params = request["params"]
+        with open(log, "a") as f:
+            f.write(json.dumps({"version": params["protocolVersion"],
+                                "client": params["clientInfo"]["name"]}) + "\n")
+        if params["protocolVersion"] not in supported:
+            lpp_error(id, "protocolVersionMismatch", {"supportedProtocolVersions": supported}, "unsupported")
+        else:
+            reply(id, {"protocolVersion": params["protocolVersion"], "serverInfo": {"name": "fake", "version": "0"},
+                       "languages": [{"id": "opy", "extensions": ["opy"]}],
+                       "capabilities": {"check": True, "compile": True, "projectLoading": True}})
+    elif method == "lpp/compile":
+        reply(id, {"diagnostics": [], "artifact": {"format": "workshop-rs/text-v1", "content": artifact}})
+    else:
+        reply(id, {})
+"#;
+
+    let (dir, entry) = temp_entry();
+    let script = dir.join("fake-provider");
+    std::fs::write(&script, PROVIDER).expect("provider script");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    std::fs::write(
+        dir.join("artifact.ws"),
+        workshop_fixture("synthetic/basic-rule"),
+    )
+    .expect("artifact");
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(entry),
+        kind: SourceKind::Opy,
+        source_backend: SourceBackend::Provider,
+        opy_provider: wright_driver::OpyProviderConfig::with_executable(script),
+        ..SessionConfig::default()
+    })
+    .expect("session");
+
+    let compile = session.compile();
+    assert!(compile.ok, "negotiated compile: {:?}", compile.diagnostics);
+    let attempts: Vec<serde_json::Value> = std::fs::read_to_string(dir.join("init-log"))
+        .expect("init log")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("log line"))
+        .collect();
+    assert_eq!(
+        attempts,
+        vec![
+            serde_json::json!({"version": "1.4", "client": "wright"}),
+            serde_json::json!({"version": "1.3", "client": "wright"}),
+        ],
+        "the retry asks for the highest mutual version, not the next fixed rung"
+    );
+    cleanup(dir);
+}
+
+/// #638: a directory target loads through the LPP 1.3 source-identity
+/// contract — a negotiated session that does not advertise `sourceIdentity`
+/// is refused with a typed capability diagnostic rather than silently
+/// proceeding without a canonical identity.
+#[cfg(unix)]
+#[test]
+fn a_directory_target_requires_the_source_identity_capability() {
+    use std::os::unix::fs::PermissionsExt;
+
+    const PROVIDER: &str = r#"#!/usr/bin/env python3
+import json, sys, os
+artifact = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifact.ws")).read()
+def reply(id, result=None, error=None):
+    message = {"jsonrpc": "2.0", "id": id}
+    message.update({"error": error} if error else {"result": result})
+    print(json.dumps(message), flush=True)
+for line in sys.stdin:
+    request = json.loads(line)
+    id, method = request["id"], request["method"]
+    if method == "lpp/initialize":
+        reply(id, {"protocolVersion": request["params"]["protocolVersion"], "serverInfo": {"name": "fake", "version": "0"},
+                   "languages": [{"id": "opy", "extensions": ["opy"]}],
+                   "capabilities": {"check": True, "compile": True, "projectLoading": True}})
+    elif method == "lpp/compile":
+        reply(id, {"diagnostics": [], "sourceIdentity": "0" * 64,
+                   "artifact": {"format": "workshop-rs/text-v1", "content": artifact}})
+    else:
+        reply(id, {})
+"#;
+
+    let (dir, _entry) = temp_entry();
+    let script = dir.join("fake-provider");
+    std::fs::write(&script, PROVIDER).expect("provider script");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    std::fs::write(
+        dir.join("artifact.ws"),
+        workshop_fixture("synthetic/basic-rule"),
+    )
+    .expect("artifact");
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(dir.clone()),
+        kind: SourceKind::Opy,
+        source_backend: SourceBackend::Provider,
+        opy_provider: wright_driver::OpyProviderConfig::with_executable(script),
+        ..SessionConfig::default()
+    })
+    .expect("session");
+
+    let check = session.check();
+    assert!(
+        !check.ok,
+        "a sourceIdentity-less directory session must refuse"
+    );
+    assert!(
+        check
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "capability-unavailable"),
+        "the refusal is the typed capability diagnostic: {check:?}"
+    );
+    cleanup(dir);
+}

@@ -125,6 +125,38 @@ pub trait LanguageProvider {
         })
     }
 
+    /// Initialize at an arbitrary negotiated protocol version — the
+    /// dispatch the highest-mutual-version retry needs after a
+    /// `protocolVersionMismatch` (LPP §19.2, #638). The default maps each
+    /// version constant to its named initializer; a version with no named
+    /// initializer is a client-side mismatch. Transport implementations
+    /// override this to send the version verbatim.
+    fn initialize_version(
+        &mut self,
+        protocol_version: &str,
+        client_info: Option<&ClientInfo>,
+    ) -> Result<InitializeResult, ProviderError> {
+        match protocol_version {
+            crate::LPP_PROTOCOL_VERSION => self.initialize(client_info),
+            crate::LPP_PROJECT_LOADING_PROTOCOL_VERSION => {
+                self.initialize_project_loading(client_info)
+            }
+            crate::LPP_DIRECTORY_TARGET_PROTOCOL_VERSION => {
+                self.initialize_project_target(client_info)
+            }
+            crate::LPP_ARTIFACT_NEGOTIATION_PROTOCOL_VERSION => {
+                self.initialize_artifact_negotiation(client_info)
+            }
+            crate::LPP_LOOKUP_PROTOCOL_VERSION => self.initialize_lookup(client_info),
+            _ => Err(ProviderError::ProtocolVersionMismatch {
+                supported: Vec::new(),
+                message: format!(
+                    "the provider client has no LPP {protocol_version} session initializer"
+                ),
+            }),
+        }
+    }
+
     /// The negotiated capabilities, after a successful initialize.
     fn capabilities(&self) -> Result<&NegotiatedCapabilities, ProviderError>;
 
@@ -436,6 +468,14 @@ impl LanguageProvider for StdioLanguageProvider {
         client_info: Option<&ClientInfo>,
     ) -> Result<InitializeResult, ProviderError> {
         self.initialize_with_version(LPP_LOOKUP_PROTOCOL_VERSION, client_info)
+    }
+
+    fn initialize_version(
+        &mut self,
+        protocol_version: &str,
+        client_info: Option<&ClientInfo>,
+    ) -> Result<InitializeResult, ProviderError> {
+        self.initialize_with_version(protocol_version, client_info)
     }
 
     fn capabilities(&self) -> Result<&NegotiatedCapabilities, ProviderError> {
@@ -837,18 +877,18 @@ mod tests {
 
     #[test]
     fn initialize_parse_failure_resets_the_session_for_retry() {
+        // `languages` is a required initialize field: omitting it keeps this
+        // a genuine malformed response, unlike an absent capability id,
+        // which is a legal subset advertisement (#638).
         let mut missing = init_result_json();
-        missing["capabilities"]
-            .as_object_mut()
-            .expect("object")
-            .remove("compile");
+        missing.as_object_mut().expect("object").remove("languages");
         let (mut provider, fake) = Fake::spawn(vec![
             FakeStep::Respond(ok_response(missing)),
             FakeStep::Respond(ok_response(init_result_json())),
         ]);
         let first = provider
             .initialize(None)
-            .expect_err("missing capability field");
+            .expect_err("missing required field");
         assert_eq!(first.code(), "provider-malformed");
         assert_eq!(
             provider.client.phase(),

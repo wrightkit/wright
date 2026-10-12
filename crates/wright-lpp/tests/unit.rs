@@ -738,7 +738,10 @@ fn capability_require_refuses_unnegotiated_capabilities() {
         references: true,
         rename: true,
         edit_validation: true,
+        source_identity: false,
         lookup: false,
+        resolve_ids: false,
+        other: std::collections::BTreeMap::new(),
     };
     assert!(capabilities.require(Capability::Check).is_ok());
     let error = capabilities
@@ -761,6 +764,43 @@ fn capability_require_refuses_unnegotiated_capabilities() {
             Capability::Rename,
             Capability::EditValidation,
         ]
+    );
+}
+
+/// #638: a provider MAY advertise any capability subset — an absent id reads
+/// as not offered instead of failing `provider-malformed`, and ids newer than
+/// this client's model are retained rather than silently dropped.
+#[test]
+fn capability_subsets_deserialize_and_unknown_ids_survive() {
+    let sparse: Capabilities =
+        serde_json::from_value(serde_json::json!({"check": true})).expect("subset parses");
+    assert!(sparse.check);
+    assert!(!sparse.compile);
+    assert!(!sparse.source_identity);
+    assert!(sparse.other.is_empty());
+
+    let forward: Capabilities = serde_json::from_value(serde_json::json!({
+        "check": true,
+        "sourceIdentity": true,
+        "resolveIds": true,
+        "futureCapability": {"details": 1},
+    }))
+    .expect("newer ids parse");
+    assert!(forward.source_identity);
+    assert!(forward.resolve_ids);
+    assert_eq!(
+        forward.other.get("futureCapability"),
+        Some(&serde_json::json!({"details": 1})),
+        "an unmodelled capability id is retained verbatim"
+    );
+
+    // Serializing back round-trips the retained ids alongside the modelled
+    // ones, so a forwarded negotiation does not lose them.
+    let serialized = serde_json::to_value(&forward).expect("serialize");
+    assert_eq!(serialized["sourceIdentity"], serde_json::json!(true));
+    assert_eq!(
+        serialized["futureCapability"],
+        serde_json::json!({"details": 1})
     );
 }
 
@@ -798,11 +838,13 @@ fn capability_ids_and_methods_match_the_spec_table() {
     assert_eq!(Capability::parse("bogus"), None);
 }
 
+/// #638: capability fields are optional on the wire — an absent id is a
+/// declined capability, not a malformed initialize result.
 #[test]
-fn initialize_result_requires_all_capability_fields() {
+fn initialize_result_accepts_capability_subsets() {
     let complete: Value = init_result_json();
     let parsed: wright_lpp::InitializeResult =
-        serde_json::from_value(complete).expect("all eight capability fields present");
+        serde_json::from_value(complete).expect("full capability set parses");
     assert!(parsed.capabilities.supports(Capability::Compile));
 
     let mut missing = init_result_json();
@@ -810,11 +852,16 @@ fn initialize_result_requires_all_capability_fields() {
         .as_object_mut()
         .expect("object")
         .remove("compile");
-    let error = serde_json::from_value::<wright_lpp::InitializeResult>(missing);
-    assert!(
-        error.is_err(),
-        "a missing capability field must fail deserialization"
-    );
+    let parsed: wright_lpp::InitializeResult =
+        serde_json::from_value(missing).expect("an absent capability id is not a malformed result");
+    assert!(!parsed.capabilities.supports(Capability::Compile));
+    assert!(parsed.capabilities.supports(Capability::Check));
+
+    let mut empty = init_result_json();
+    empty["capabilities"] = serde_json::json!({});
+    let parsed: wright_lpp::InitializeResult =
+        serde_json::from_value(empty).expect("a capability-free result parses");
+    assert!(parsed.capabilities.supported().is_empty());
 }
 
 #[test]

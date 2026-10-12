@@ -64,6 +64,11 @@ pub struct Loaded {
     /// program, when one ran. `None` when the loaded program is the authored
     /// parse and `semantic_issues` can run on it directly (#442).
     pub(crate) completeness_issues: Option<Vec<workshop_rs::rules::SemanticIssue>>,
+    /// Diagnostics the load itself produced — a provider's own diagnostics
+    /// and source-map warnings — replayed whenever this cached snapshot
+    /// serves a request so a repeated `check`/`compile` reports the same
+    /// provider diagnostics as the first (#638).
+    pub(crate) load_diagnostics: Arc<Vec<Diagnostic>>,
 }
 
 /// Provenance of the semantic program handed to Wright's analyzer.
@@ -302,6 +307,11 @@ impl CompilerSession {
                 || (self.loaded_operation == Some(ProviderOperation::Compile)
                     && provider_operation == ProviderOperation::Check)
             {
+                // The cached snapshot still reports the diagnostics its
+                // own load produced — a repeated `check`/`compile` must not
+                // silently return an empty provider-diagnostic set (#638).
+                self.diagnostics
+                    .extend(loaded.load_diagnostics.iter().cloned());
                 return Ok(loaded.clone());
             }
         }
@@ -385,6 +395,7 @@ impl CompilerSession {
             provenance: Provenance::Source,
             source_files: Arc::new(source_files),
             completeness_issues,
+            load_diagnostics: Arc::new(Vec::new()),
         };
         self.loaded = Some(loaded.clone());
         Ok(loaded)
@@ -407,6 +418,10 @@ impl CompilerSession {
             ..SourceTarget::new(language, entry, resolved.cwd.clone())
         }
         .with_project_root(resolved.root.clone());
+        // Diagnostics appended from here belong to the loaded snapshot:
+        // they are captured onto `Loaded` so a later cache hit replays the
+        // same provider diagnostics (#638).
+        let diagnostics_start = self.diagnostics.len();
         if self.source_provider.is_none() {
             let spawn = |session: &Self| {
                 session
@@ -433,22 +448,54 @@ impl CompilerSession {
                 .as_ref()
                 .is_err_and(|error| error.code() == "protocol-version-mismatch")
             {
+                // LPP §19.2: retry at the highest mutually supported
+                // version the provider advertised, honoring the target's
+                // floor — entry requests need 1.1 project loading, and a
+                // directory target cannot drop below the 1.3
+                // source-identity contract it loads under (#638).
+                let supported = initialize
+                    .as_ref()
+                    .err()
+                    .map(|error| error.supported_protocol_versions())
+                    .unwrap_or_default();
                 let _ = provider.shutdown();
                 provider = spawn(self)?;
-                initialize = match resolved.target {
-                    InputTarget::File => provider.initialize_project_loading(Some(&client_info)),
-                    InputTarget::Directory => {
-                        provider.initialize_project_target(Some(&client_info))
-                    }
+                initialize = match mutual_protocol_version(&supported, resolved.target) {
+                    Some(version) => provider.initialize_version(version, Some(&client_info)),
+                    None => Err(wright_lpp::ProviderError::ProtocolVersionMismatch {
+                        supported,
+                        message: format!(
+                            "no mutually supported LPP protocol version serves a {:?} target",
+                            resolved.target
+                        ),
+                    }),
                 };
             }
-            initialize.map_err(|error| {
+            let init = initialize.map_err(|error| {
                 crate::source_provider::provider_error(
                     error,
                     "the 'opy' source provider could not be initialized",
                 )
                 .diagnostic()
             })?;
+            // A directory target's canonical identity is the provider's
+            // `sourceIdentity` (LPP 1.3): the spec requires the client to
+            // refuse a session that negotiated without the capability
+            // (#638).
+            if resolved.target == InputTarget::Directory && !init.capabilities.source_identity {
+                return Err(crate::source_provider::provider_error(
+                    wright_lpp::ProviderError::lpp(
+                        wright_lpp::LppErrorKind::CapabilityUnavailable,
+                        serde_json::json!({
+                            "capability": "sourceIdentity",
+                            "method": "lpp/compile",
+                        }),
+                        "directory targets require the LPP 1.3 'sourceIdentity' capability",
+                    ),
+                    "the 'opy' source provider could not be initialized",
+                )
+                .diagnostic());
+            }
             self.source_provider = Some(Box::new(crate::source_provider::LppSourceProvider::new(
                 provider,
                 self.config.locale.clone(),
@@ -487,7 +534,16 @@ impl CompilerSession {
                         }
                         compilation
                     }
-                    Err(SourceProviderError::Unsupported { .. }) => check,
+                    // A provider without the compile capability keeps the
+                    // check-only path: `Unsupported` covers non-LPP
+                    // providers, while an LPP provider declines through
+                    // `capability-unavailable` (#638).
+                    Err(error)
+                        if matches!(error, SourceProviderError::Unsupported { .. })
+                            || error.code() == "capability-unavailable" =>
+                    {
+                        check
+                    }
                     Err(error) => {
                         self.diagnostics.extend(check.diagnostics);
                         return Err(error.diagnostic());
@@ -550,6 +606,7 @@ impl CompilerSession {
                 provenance: Provenance::Unmapped,
                 source_files: Arc::new(vec![resolved.display.clone()]),
                 completeness_issues: None,
+                load_diagnostics: Arc::new(Vec::new()),
             });
         }
         let Some(workshop_text) = compilation.workshop_text else {
@@ -643,6 +700,7 @@ impl CompilerSession {
             provenance,
             source_files: Arc::new(source_files),
             completeness_issues: None,
+            load_diagnostics: Arc::new(self.diagnostics[diagnostics_start..].to_vec()),
         };
         self.loaded = Some(loaded.clone());
         // Reaching here means a canonical artifact was parsed and validated;
@@ -906,7 +964,7 @@ impl CompilerSession {
             })?;
         provider
             .initialize(Some(&wright_lpp::ClientInfo {
-                name: crate::result::DRIVER_VERSION.to_string(),
+                name: wright_lpp::LPP_CLIENT_NAME.to_string(),
                 version: crate::result::DRIVER_VERSION.to_string(),
             }))
             .map_err(|e| {
@@ -1315,4 +1373,84 @@ fn provider_error_diagnostic(error: wright_lpp::ProviderError, operation: &str) 
         crate::source_provider::provider_failure_stage(&error),
         format!("the provider could not {operation} the artifact: {error}"),
     )
+}
+
+/// The highest LPP version both sides implement, honoring the target's
+/// negotiation floor (LPP §19.2, #638): entry requests cannot drop below
+/// 1.1 project loading, and a directory target cannot drop below the 1.3
+/// `sourceIdentity` contract its canonical load depends on.
+fn mutual_protocol_version(supported: &[String], target: InputTarget) -> Option<&'static str> {
+    let floor = match target {
+        InputTarget::Directory => wright_lpp::LPP_SOURCE_IDENTITY_PROTOCOL_VERSION,
+        _ => wright_lpp::LPP_PROJECT_LOADING_PROTOCOL_VERSION,
+    };
+    wright_lpp::LPP_SUPPORTED_PROTOCOL_VERSIONS
+        .iter()
+        .copied()
+        .filter(|version| protocol_version_tuple(version) >= protocol_version_tuple(floor))
+        .filter(|version| supported.iter().any(|s| s == version))
+        .max_by_key(|version| protocol_version_tuple(version))
+}
+
+/// `major.minor` as an ordered pair; an unparseable version sorts before
+/// every real one so it can never win the mutual computation.
+fn protocol_version_tuple(version: &str) -> (u32, u32) {
+    let mut parts = version.split('.');
+    let major = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    (major, minor)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #638: the highest-mutual retry applies the target's negotiation
+    /// floor — entry requests cannot drop below LPP 1.1 project loading,
+    /// and a directory target cannot drop below the 1.3 source-identity
+    /// contract.
+    #[test]
+    fn mutual_protocol_version_honors_the_target_floor() {
+        let supported =
+            |versions: &[&str]| versions.iter().map(|v| v.to_string()).collect::<Vec<_>>();
+
+        // Highest mutual wins over the nearest advertised version.
+        assert_eq!(
+            mutual_protocol_version(&supported(&["1.0", "1.1", "1.3"]), InputTarget::File),
+            Some("1.3")
+        );
+        assert_eq!(
+            mutual_protocol_version(&supported(&["1.1", "1.4"]), InputTarget::File),
+            Some("1.4")
+        );
+
+        // A file entry cannot negotiate below the 1.1 project-loading
+        // contract its `check_entry`/`compile_entry` calls require.
+        assert_eq!(
+            mutual_protocol_version(&supported(&["1.0"]), InputTarget::File),
+            None
+        );
+        assert_eq!(
+            mutual_protocol_version(&supported(&["1.0", "1.1"]), InputTarget::File),
+            Some("1.1")
+        );
+
+        // A directory target cannot negotiate below the 1.3
+        // source-identity contract.
+        assert_eq!(
+            mutual_protocol_version(&supported(&["1.1", "1.2"]), InputTarget::Directory),
+            None
+        );
+        assert_eq!(
+            mutual_protocol_version(&supported(&["1.2", "1.3"]), InputTarget::Directory),
+            Some("1.3")
+        );
+
+        // LPP 1.6 (`resolveIds`) parses but is not negotiated: the client
+        // has no `lpp/resolveIds` implementation.
+        assert_eq!(
+            mutual_protocol_version(&supported(&["1.6"]), InputTarget::File),
+            None
+        );
+    }
 }

@@ -418,7 +418,7 @@ fn column_to_position(
     })
 }
 
-fn utf16_to_char_column(line: &str, units: u32) -> Option<u32> {
+pub(crate) fn utf16_to_char_column(line: &str, units: u32) -> Option<u32> {
     let offset = utf16_offset_to_char(line, units as usize);
     (char_offset_to_utf16(line, offset) == units as usize).then_some(offset as u32 + 1)
 }
