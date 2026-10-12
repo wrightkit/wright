@@ -89,6 +89,30 @@ pub fn run_validated(
 
 pub use self::run as run_canonical;
 
+/// Whether a value contains nothing but literals — the condition under
+/// which a short-circuit fold may discard it. `GlobalVariable`,
+/// `PlayerVariable`, `Subroutine`, `EventPlayer`, and `Call` all carry
+/// identifier occurrences (or nested operands that may), so dropping them
+/// would remove occurrences semantic services index (#639).
+fn literal_only(value: &workshop_rs::Value) -> bool {
+    use workshop_rs::Value;
+    match value {
+        Value::Number(_)
+        | Value::String(_)
+        | Value::LocalizedString(_)
+        | Value::Bool(_)
+        | Value::Null
+        | Value::Enum { .. } => true,
+        Value::Array(values) => values.iter().all(literal_only),
+        Value::Vector { x, y, z } => literal_only(x) && literal_only(y) && literal_only(z),
+        Value::GlobalVariable(_)
+        | Value::PlayerVariable { .. }
+        | Value::Subroutine(_)
+        | Value::EventPlayer
+        | Value::Call { .. } => false,
+    }
+}
+
 fn fold_action_once(action: &mut workshop_rs::Action, nodes: &mut usize) -> usize {
     *nodes += 1;
     use workshop_rs::Action;
@@ -174,6 +198,11 @@ fn fold_value_once(value: &mut workshop_rs::Value, nodes: &mut usize) -> bool {
                 > 0;
             if args.len() == 2 {
                 if let (Value::Number(left), Value::Number(right)) = (&args[0], &args[1]) {
+                    // Folding must not turn a valid program into an invalid
+                    // one: `Divide(1, 0)` and friends produce NaN/infinity,
+                    // which post-validation rejects as non-canonical — leave
+                    // the call unfolded so the profile keeps the input's
+                    // pass/fail result (#639).
                     let result = match name.as_str() {
                         "+" | "add" => Some(left + right),
                         "-" | "subtract" => Some(left - right),
@@ -186,7 +215,8 @@ fn fold_value_once(value: &mut workshop_rs::Value, nodes: &mut usize) -> bool {
                         ">" => Some(if left > right { 1.0 } else { 0.0 }),
                         ">=" => Some(if left >= right { 1.0 } else { 0.0 }),
                         _ => None,
-                    };
+                    }
+                    .filter(|result| result.is_finite());
                     if let Some(result) = result {
                         *value = if matches!(name.as_str(), "==" | "!=" | "<" | "<=" | ">" | ">=") {
                             Value::Bool(result != 0.0)
@@ -196,6 +226,11 @@ fn fold_value_once(value: &mut workshop_rs::Value, nodes: &mut usize) -> bool {
                         changed = true;
                     }
                 } else {
+                    // The short-circuit folds discard the other operand
+                    // entirely — apply them only when that operand is
+                    // literal-only, so a folded `Or(True, Global.g)` cannot
+                    // drop the identifier occurrence `references` and
+                    // `semanticRename` index (#639).
                     let boolean_result = match (&args[0], &args[1]) {
                         (Value::Bool(left), Value::Bool(right)) if name == "and" => {
                             Some(*left && *right)
@@ -203,10 +238,16 @@ fn fold_value_once(value: &mut workshop_rs::Value, nodes: &mut usize) -> bool {
                         (Value::Bool(left), Value::Bool(right)) if name == "or" => {
                             Some(*left || *right)
                         }
-                        (Value::Bool(true), _) if name == "or" => Some(true),
-                        (_, Value::Bool(true)) if name == "or" => Some(true),
-                        (Value::Bool(false), _) if name == "and" => Some(false),
-                        (_, Value::Bool(false)) if name == "and" => Some(false),
+                        (Value::Bool(true), other) | (other, Value::Bool(true))
+                            if name == "or" && literal_only(other) =>
+                        {
+                            Some(true)
+                        }
+                        (Value::Bool(false), other) | (other, Value::Bool(false))
+                            if name == "and" && literal_only(other) =>
+                        {
+                            Some(false)
+                        }
                         _ => None,
                     };
                     if let Some(result) = boolean_result {
@@ -229,7 +270,8 @@ fn fold_value_once(value: &mut workshop_rs::Value, nodes: &mut usize) -> bool {
                         "sqrt" | "squareRoot" => Some(number.sqrt()),
                         "abs" | "absoluteValue" => Some(number.abs()),
                         _ => None,
-                    };
+                    }
+                    .filter(|result| result.is_finite());
                     if let Some(result) = result {
                         *value = Value::Number(result);
                         changed = true;
@@ -281,6 +323,99 @@ mod tests {
             assert!(
                 program.settings.is_some(),
                 "{profile:?} must preserve the settings carrier"
+            );
+        }
+    }
+
+    /// #639: folding must not turn a valid program into an invalid one —
+    /// `Divide(1, 0)` produces infinity and `sqrt(-1)` produces NaN, both
+    /// rejected by post-validation, so non-finite fold results stay
+    /// unfolded and the profile preserves the input's pass/fail result.
+    #[test]
+    fn non_finite_fold_results_stay_unfolded() {
+        use workshop_rs::{Action, Event, Program, Rule, Value, Variable};
+
+        let mut program = Program::new();
+        program.global_variable(Variable::with_index("a", 0));
+        program.rule(
+            Rule::new("r", Event::Global)
+                .action(Action::SetGlobalVariable {
+                    variable: "a".to_string(),
+                    value: Value::call("divide", [1.0.into(), 0.0.into()]),
+                })
+                .action(Action::SetGlobalVariable {
+                    variable: "a".to_string(),
+                    value: Value::call("sqrt", [(-1.0).into()]),
+                }),
+        );
+
+        run_canonical(&mut program, Profile::Compat).expect("pipeline runs");
+        for action in &program.rules[0].actions {
+            let Action::SetGlobalVariable { value, .. } = action else {
+                panic!("set-global action")
+            };
+            assert!(
+                matches!(value, Value::Call { .. }),
+                "a non-finite fold result must not be emitted: {value:?}"
+            );
+        }
+    }
+
+    /// #639: the short-circuit folds discard the other operand — they apply
+    /// only when that operand is literal-only, so a folded `Or(True,
+    /// Global.g)` cannot drop the identifier occurrence semantic services
+    /// index, while a literal operand still folds.
+    #[test]
+    fn short_circuit_folds_drop_only_literal_operands() {
+        use workshop_rs::{Action, Condition, Event, Program, Rule, Value, Variable};
+
+        let fold_one = |value: Value| {
+            let mut program = Program::new();
+            program.global_variable(Variable::with_index("g", 0));
+            program.rule(
+                Rule::new("r", Event::Global)
+                    .condition(Condition::new(value))
+                    .action(Action::Call {
+                        name: "probe".to_string(),
+                        args: Vec::new(),
+                    }),
+            );
+            run_canonical(&mut program, Profile::Compat).expect("pipeline runs");
+            program.rules[0].conditions[0].value.clone()
+        };
+        let global_g = || Value::GlobalVariable("g".to_string());
+
+        // An identifier-bearing operand survives: `Or(True, Global.g)`
+        // keeps its `g` read, as do the `and`/`or` mirrored forms and a
+        // call carrying an occurrence.
+        for value in [
+            Value::call("or", [true.into(), global_g()]),
+            Value::call("or", [global_g(), true.into()]),
+            Value::call("and", [false.into(), global_g()]),
+            Value::call("and", [global_g(), false.into()]),
+            Value::call("or", [true.into(), Value::call("firstOf", [global_g()])]),
+        ] {
+            assert!(
+                matches!(fold_one(value), Value::Call { .. }),
+                "an occurrence-carrying operand must not be folded away"
+            );
+        }
+
+        // Literal-only operands still fold, including nested literal
+        // containers and the all-Bool forms.
+        for value in [
+            Value::call("or", [true.into(), 0.0.into()]),
+            Value::call(
+                "or",
+                [Value::Array(vec![1.0.into(), "x".into()]), true.into()],
+            ),
+            Value::call("and", [false.into(), 0.0.into()]),
+            Value::call("and", [false.into(), false.into()]),
+            Value::call("or", [false.into(), true.into()]),
+        ] {
+            assert!(
+                matches!(fold_one(value), Value::Bool(_)),
+                "a literal-only operand still folds"
             );
         }
     }
