@@ -344,6 +344,129 @@ fn malformed_requests_are_structured_errors() {
     assert_eq!(responses[0]["error"]["code"], "malformed-request");
 }
 
+/// Write raw bytes to the transport's stdin — the UTF-8 cases need bytes no
+/// `String` can hold (#642).
+fn run_bytes(transport: &str, input: &Path, bytes: &[u8]) -> std::process::Output {
+    let mut child = Command::new(wright())
+        .args(["serve", "--transport", transport])
+        .arg(input)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("wright spawns");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(bytes)
+        .expect("stdin writes");
+    child.wait_with_output().unwrap()
+}
+
+#[test]
+fn invalid_utf8_on_stdin_is_a_parse_error_not_a_clean_eof() {
+    let input = corpus_workshop("synthetic/basic-rule");
+
+    // stdio: the malformed request gets the transport's own error shape and
+    // the line-aligned stream survives for the next request (#642).
+    let output = run_bytes(
+        "stdio",
+        &input,
+        b"{\"op\":\"capabilities\"}\n\xff\xfe\n{\"op\":\"capabilities\"}\n",
+    );
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert!(lines[0].contains("\"result\""));
+    assert!(
+        lines[1].contains("malformed-request"),
+        "the non-UTF-8 line reports a structured error: {}",
+        lines[1]
+    );
+    assert!(
+        lines[2].contains("\"result\""),
+        "the session answers the request after the bad line"
+    );
+
+    // jsonrpc: -32700 with a null id, and the following request still runs.
+    let output = run_bytes(
+        "jsonrpc",
+        &input,
+        b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"check\"}\n\xff\n{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"check\"}\n",
+    );
+    assert!(output.status.success());
+    let responses: Vec<serde_json::Value> = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(responses.len(), 3, "{responses:?}");
+    assert_eq!(responses[0]["id"], 1);
+    assert_eq!(responses[1]["id"], serde_json::Value::Null);
+    assert_eq!(responses[1]["error"]["code"], -32700);
+    assert_eq!(responses[2]["id"], 2);
+    assert!(responses[2].get("result").is_some());
+
+    // mcp: same JSON-RPC parse error shape after initialization.
+    let output = run_bytes(
+        "mcp",
+        &input,
+        b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\"}}\n\xff\n{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"}\n",
+    );
+    assert!(output.status.success());
+    let responses: Vec<serde_json::Value> = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(responses.len(), 3, "{responses:?}");
+    assert_eq!(responses[1]["error"]["code"], -32700);
+    assert_eq!(responses[1]["id"], serde_json::Value::Null);
+    assert_eq!(responses[2]["id"], 2);
+}
+
+#[test]
+fn a_tools_call_without_an_id_is_an_invalid_request() {
+    // Only `notifications/*` methods may omit `id` silently; a `tools/call`
+    // without one is not a notification and must not vanish (#642).
+    let responses = run_lines(
+        "mcp",
+        &corpus_workshop("synthetic/basic-rule"),
+        &[
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#,
+            r#"{"jsonrpc":"2.0","method":"tools/call","params":{"name":"wright_check","arguments":{}}}"#,
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+            r#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#,
+        ],
+    );
+    assert_eq!(responses.len(), 3, "{responses:?}");
+    assert_eq!(responses[1]["id"], serde_json::Value::Null);
+    assert_eq!(responses[1]["error"]["code"], -32600);
+    assert_eq!(responses[2]["id"], 2);
+    assert!(responses[2].get("result").is_some());
+}
+
+#[test]
+fn legacy_jsonrpc_methods_reject_a_params_key() {
+    // Verification (#642): a `params` key on a legacy method was already
+    // -32602; this test records the contract.
+    let responses = run_lines(
+        "jsonrpc",
+        &corpus_workshop("synthetic/basic-rule"),
+        &[
+            r#"{"jsonrpc":"2.0","id":1,"method":"compile","params":{}}"#,
+            r#"{"jsonrpc":"2.0","id":2,"method":"compile"}"#,
+        ],
+    );
+    assert_eq!(responses.len(), 2);
+    assert_eq!(responses[0]["id"], 1);
+    assert_eq!(responses[0]["error"]["code"], -32602);
+    assert_eq!(responses[1]["id"], 2);
+    assert!(responses[1].get("result").is_some());
+}
+
 #[test]
 fn capability_negotiation_is_preserved() {
     let responses = run_lines(
