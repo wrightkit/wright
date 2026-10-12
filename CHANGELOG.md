@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/wrightkit/wright/compare/v0.17.0...v0.17.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* **driver:** drop the unreachable retained-source validation fallback ([#628](https://github.com/wrightkit/wright/issues/628)) ([bb7f496](https://github.com/wrightkit/wright/commit/bb7f496e95ca2a4dad6770c5801541431c1c9a94)), closes [#626](https://github.com/wrightkit/wright/issues/626)
+
 ## [0.17.0](https://github.com/wrightkit/wright/compare/v0.16.1...v0.17.0) (2026-10-11)
 
 
