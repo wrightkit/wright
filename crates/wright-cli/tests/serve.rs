@@ -1623,6 +1623,40 @@ fn serve_applies_the_cli_lint_policy_to_the_session() {
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty(), "no request was served");
 
+    // An unknown rule id is a startup usage error on every policy surface —
+    // a typo must not silently leave the intended rule enabled (#640).
+    let unknown_config = dir.join("unknown.yaml");
+    std::fs::write(
+        &unknown_config,
+        "rules:\n  not-a-rule:\n    enabled: false\n",
+    )
+    .unwrap();
+    for args in [
+        vec!["--disable-rule".to_string(), "not-a-rule".to_string()],
+        vec!["--rule-severity".to_string(), "not-a-rule:warn".to_string()],
+        vec![
+            "--lint-config".to_string(),
+            unknown_config.to_string_lossy().into_owned(),
+        ],
+    ] {
+        let output = Command::new(wright())
+            .arg("serve")
+            .args(&args)
+            .arg(&input)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "serve {args:?} must refuse an unknown rule id"
+        );
+        assert!(output.stdout.is_empty(), "no request was served");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("not-a-rule"),
+            "the message names the unknown id"
+        );
+    }
+
     // A local YAML rule file is discoverable through lintRules.
     let rule_file = dir.join("smoke.yaml");
     std::fs::write(
