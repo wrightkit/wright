@@ -284,25 +284,39 @@ class RunTest(unittest.TestCase):
             baseline = _doc({"p": {"status": "ok", "metrics": {"m": _metric(1000)}}})
             baseline_path.write_text(json.dumps(baseline))
             before = baseline_path.read_bytes()
-            drifting = _doc({"p": {"status": "ok", "metrics": {"m": _metric(4000)}}})
+            drifting = _doc({"p": {"status": "ok", "metrics": {}}})
             with mock.patch.object(metrics, "run_metrics", return_value=drifting):
                 code = _check_main(baseline_path)
             self.assertEqual(code, 1)
             self.assertEqual(baseline_path.read_bytes(), before)
 
-    def test_skip_latency_ignores_latency_but_not_size(self):
+    def test_size_and_latency_drift_report_without_failing(self):
+        # Drift is reviewed, not gated: a fix legitimately moves sizes.
         with tempfile.TemporaryDirectory() as tmp:
             baseline_path = Path(tmp) / "baseline.json"
             baseline = _doc({"p": {"status": "ok", "metrics": {"m": _metric(1000)}}})
             baseline_path.write_text(json.dumps(baseline))
             slower = _doc({"p": {"status": "ok", "metrics": {"m": _metric(1000, latency_ms=900.0)}}})
+            bigger = _doc({"p": {"status": "ok", "metrics": {"m": _metric(4000)}}})
             with mock.patch.object(metrics, "run_metrics", return_value=slower) as run:
-                self.assertEqual(_check_main(baseline_path), 1)
+                self.assertEqual(_check_main(baseline_path), 0)
                 self.assertEqual(_check_main(baseline_path, "--skip-latency"), 0)
             self.assertEqual(run.call_args.args[2:], (1, None, 1))
-            bigger = _doc({"p": {"status": "ok", "metrics": {"m": _metric(4000)}}})
             with mock.patch.object(metrics, "run_metrics", return_value=bigger):
-                self.assertEqual(_check_main(baseline_path, "--skip-latency"), 1)
+                self.assertEqual(_check_main(baseline_path, "--skip-latency"), 0)
+
+    def test_split_keeps_only_independent_failures_blocking(self):
+        base = _doc({"p": {"status": "ok", "metrics": {"m": {"error": "x"}, "n": _metric(1000)}}})
+        run = _doc({"p": {"status": "ok", "metrics": {"m": _metric(), "n": _metric(4000)}}})
+        blocking, drift = metrics.split_changes(metrics.compare_metrics(base, run)[0])
+        self.assertEqual(blocking, [])
+        self.assertEqual({(v["metric"], v["change"]) for v in drift}, {("m", "now-measured"), ("n", "increase")})
+
+    def test_refusal_envelope_is_an_error_not_a_measurement(self):
+        refusal = {"ok": False, "diagnostics": [{"code": "source-provider-unsupported"}]}
+        self.assertEqual(metrics.envelope_failure(refusal), "source-provider-unsupported")
+        self.assertEqual(metrics.envelope_failure({"ok": False, "diagnostics": []}), "not-ok")
+        self.assertIsNone(metrics.envelope_failure({"ok": True, "diagnostics": [{"code": "w"}]}))
 
 
 def _check_main(baseline_path: Path, *extra: str) -> int:
