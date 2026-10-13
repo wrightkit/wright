@@ -155,27 +155,54 @@ pub(crate) fn run(args: ServeArgs) -> ExitCode {
 }
 
 fn serve_stdio(service: &mut ToolService<'_>) -> ExitCode {
-    serve_lines(|line| Some(dispatch(service, line)))
+    serve_lines(|line| {
+        let line = match line {
+            Ok(line) => line,
+            // A non-UTF-8 line is a malformed request on this transport too
+            // (#642).
+            Err(_) => {
+                return Some(
+                    json!({ "error": { "code": "malformed-request", "message": "request is not valid UTF-8" } })
+                        .to_string(),
+                );
+            }
+        };
+        Some(dispatch(service, line))
+    })
 }
 
 fn serve_jsonrpc(service: &mut ToolService<'_>) -> ExitCode {
     serve_lines(|line| {
-        match serde_json::from_str(line) {
-            Ok(value) => jsonrpc_dispatch(service, value),
-            Err(_) => Some(jsonrpc_error(Value::Null, -32700, "Parse error")),
+        let value = match line {
+            Ok(line) => serde_json::from_str(line).ok(),
+            // Invalid UTF-8 is a JSON-RPC parse error, never a clean EOF
+            // (#642).
+            Err(_) => None,
+        };
+        match value {
+            Some(value) => jsonrpc_dispatch(service, value),
+            None => Some(jsonrpc_error(Value::Null, -32700, "Parse error")),
         }
         .map(|response| response.to_string())
     })
 }
 
-pub(crate) fn serve_lines(mut dispatch: impl FnMut(&str) -> Option<String>) -> ExitCode {
+/// Read newline-delimited requests from stdin and write each response the
+/// dispatch produces. Input is split on raw `b'\n'` bytes and every line is
+/// UTF-8 validated *before* dispatch: an invalid line is delivered as `Err`
+/// so the transport emits its own parse error — the byte stream stays
+/// line-aligned and the session never dies as a silent success (#642).
+pub(crate) fn serve_lines(
+    mut dispatch: impl FnMut(Result<&str, std::str::Utf8Error>) -> Option<String>,
+) -> ExitCode {
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
-    for line in std::io::stdin().lock().lines().map_while(Result::ok) {
-        if line.trim().is_empty() {
+    for line in std::io::stdin().lock().split(b'\n').map_while(Result::ok) {
+        let line = std::str::from_utf8(&line);
+        if line.is_ok_and(|line| line.trim().is_empty()) {
             continue;
         }
-        if dispatch(&line).is_some_and(|response| writeln!(out, "{response}").is_err()) {
+        if dispatch(line).is_some_and(|response| writeln!(out, "{response}").is_err()) {
             break;
         }
     }

@@ -52,8 +52,21 @@ fn build_tools(service: &ToolService<'_>) -> (Vec<Tool>, String, String) {
 pub(crate) fn serve_mcp(service: &mut ToolService<'_>) -> ExitCode {
     let (tools, name, version) = build_tools(service);
     serve_lines(|line| {
-        dispatch_message(service, &tools, &name, &version, line)
-            .map(|response| response.to_string())
+        dispatch_message(
+            service,
+            &tools,
+            &name,
+            &version,
+            match line {
+                Ok(line) => line,
+                // Invalid UTF-8 is a JSON-RPC parse error, not a clean EOF
+                // (#642).
+                Err(_) => {
+                    return Some(error_response(Value::Null, -32700, "Parse error").to_string());
+                }
+            },
+        )
+        .map(|response| response.to_string())
     })
 }
 
@@ -78,9 +91,14 @@ fn dispatch_message(
         return Some(error_response(Value::Null, -32600, "Invalid Request"));
     };
     let Some(id) = object.get("id").cloned() else {
-        // Notifications (initialized, cancelled, progress) carry no id and
-        // get no response.
-        return None;
+        // `notifications/*` methods carry no id and get no response. Any
+        // other method without an id is not a notification — it is an
+        // invalid request, and a `tools/call` must never silently vanish
+        // (#642).
+        if method.starts_with("notifications/") {
+            return None;
+        }
+        return Some(error_response(Value::Null, -32600, "Invalid Request"));
     };
     if !matches!(id, Value::Null | Value::String(_) | Value::Number(_)) {
         return Some(error_response(Value::Null, -32600, "Invalid Request"));
@@ -308,6 +326,46 @@ mod tests {
         .unwrap();
         assert_eq!(response["id"], Value::Null);
         assert_eq!(response["error"]["code"], -32600);
+    }
+
+    #[test]
+    fn id_less_messages_follow_notification_rules() {
+        // `notifications/*` methods may omit `id` silently; every other
+        // method without an `id` is an invalid request, and a `tools/call`
+        // must never silently vanish (#642).
+        use wright_driver::{CompilerSession, InputSpec, SessionConfig, SourceKind};
+        let input = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("tests/fixtures/workshop/synthetic/basic-rule.ws");
+        let mut session = CompilerSession::new(SessionConfig {
+            input: InputSpec::Path(input),
+            kind: SourceKind::Workshop,
+            ..SessionConfig::default()
+        })
+        .unwrap();
+        let mut service = ToolService::new(&mut session).unwrap();
+        let (tools, name, version) = build_tools(&service);
+
+        let response = dispatch_message(
+            &mut service,
+            &tools,
+            &name,
+            &version,
+            r#"{"jsonrpc":"2.0","method":"tools/call","params":{"name":"wright_check","arguments":{}}}"#,
+        )
+        .unwrap();
+        assert_eq!(response["id"], Value::Null);
+        assert_eq!(response["error"]["code"], -32600);
+
+        let response = dispatch_message(
+            &mut service,
+            &tools,
+            &name,
+            &version,
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+        );
+        assert!(response.is_none(), "a real notification gets no response");
     }
 
     #[test]
