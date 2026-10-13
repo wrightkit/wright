@@ -1,0 +1,10 @@
+# Gate definitions: what counts as passing. Changes need owner review.
+# Ordinary code and tests stay unowned.
+/.github/CODEOWNERS @Teakowa
+/.github/workflows/ @Teakowa
+/benchmarks/metrics/baseline-*.json @Teakowa
+/benchmarks/metrics/corpus.json @Teakowa
+# Token budgets and blocking-change rules are defined here
+/benchmarks/metrics/metrics.py @Teakowa
+# Committed expectation of the `wright check --json` contract
+/crates/wright-cli/tests/snapshots/*.snap @Teakowa
