@@ -39,23 +39,18 @@ Issue contract.
 - [Embedding/tool API](embedding.md): programmatic session/query/edit services.
 - [Agent contract](agent-contract.md): versioned session requests, results, and
   transport mappings for coding agents and embedding consumers.
-- [Agent benchmark](agent-benchmark.md): product-level benchmark contract for
-  general coding agents working with Wright.
+- Agent benchmark: owned by the private `wrightkit/benchmark-suite`
+  ([ADR-0026](adr/0026-agent-benchmark-ownership.md)); it measures a pinned
+  Wright release through the released binary and `wright-agent/v1`.
 - [Agent-facing metrics](agent-metrics.md): drift metrics over the
   `wright-agent/v1` surface and common CLI commands against a versioned
   corpus and committed baseline.
-- [Agent benchmark how-to](agent-benchmark-howto.md): run the benchmark and
-  publish the results page.
-- [Agent benchmark comparison spec](specs/SPEC-414-agent-benchmark-comparison.md):
-  proposed multi-condition, multi-model benchmark and tool-call analysis.
 - [Language services & LSP](language-services.md): editor-neutral language
   services and LSP framing.
 - [Integration verification](compatibility.md): owner boundaries and
   Wright-owned tests.
 - [Licensing/provenance boundary](licensing.md): third-party reference and
   licensing constraints.
-- [Seeded defect injection](specs/SPEC-534-seeded-defect-injection.md):
-  scenario families generated from a seed project and a defect class
 - [Extensible lint rules](specs/SPEC-309-extensible-lint-rules.md): canonical
   facts, local declarative rules, metadata, and project configuration.
 - [Release/distribution](release.md): packaging and publication contract.

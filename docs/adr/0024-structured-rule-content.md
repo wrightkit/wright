@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-10-11
-- Related: [Issue #615](https://github.com/wrightkit/wright/issues/615), [Issue #536](https://github.com/wrightkit/wright/issues/536), [Issue #595](https://github.com/wrightkit/wright/issues/595), [ADR-0015](0015-canonical-facts-and-declarative-lint-policy.md), [ADR-0021](0021-name-and-signature-lookup.md), [ADR-0022](0022-shared-surface-for-semantic-queries.md), [SPEC-414](../specs/SPEC-414-agent-benchmark-comparison.md), [Agent contract](../agent-contract.md)
+- Related: [Issue #615](https://github.com/wrightkit/wright/issues/615), [Issue #536](https://github.com/wrightkit/wright/issues/536), [Issue #595](https://github.com/wrightkit/wright/issues/595), [ADR-0015](0015-canonical-facts-and-declarative-lint-policy.md), [ADR-0021](0021-name-and-signature-lookup.md), [ADR-0022](0022-shared-surface-for-semantic-queries.md), `SPEC-414`, [Agent contract](../agent-contract.md)
 
 ## Context
 

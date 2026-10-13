@@ -718,7 +718,7 @@ fn assert_default_surface_parity(operation: &str, args: &[&str], request: Value)
         None,
     );
     let seed =
-        workspace_root().join("benchmarks/agent/scenarios/understand-score-flow/seed/mode.ws");
+        workspace_root().join("benchmarks/metrics/corpus/seed-understand-score-flow/mode.ws");
     assert_default_surface_parity_on_input(
         operation,
         args,
@@ -736,8 +736,8 @@ fn assert_default_surface_parity(operation: &str, args: &[&str], request: Value)
                 .map(|p| p.executable)
         });
     if let Some(provider) = provider {
-        let seed = workspace_root()
-            .join("benchmarks/agent/scenarios/understand-opy-project/seed/mode.opy");
+        let seed =
+            workspace_root().join("benchmarks/metrics/corpus/seed-understand-opy-project/mode.opy");
         assert_default_surface_parity_on_input(
             operation,
             args,

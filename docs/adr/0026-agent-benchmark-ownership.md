@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-10-13
-- Related: [Issue #665](https://github.com/wrightkit/wright/issues/665), [Issue #669](https://github.com/wrightkit/wright/issues/669), [Issue #670](https://github.com/wrightkit/wright/issues/670), [SPEC-414](../specs/SPEC-414-agent-benchmark-comparison.md) Q-004, [SPEC-534](../specs/SPEC-534-seeded-defect-injection.md), [Agent benchmark](../agent-benchmark.md), [Agent-facing metrics](../agent-metrics.md)
+- Related: [Issue #665](https://github.com/wrightkit/wright/issues/665), [Issue #669](https://github.com/wrightkit/wright/issues/669), [Issue #670](https://github.com/wrightkit/wright/issues/670), `SPEC-414` Q-004, `SPEC-534`, Agent benchmark (`wrightkit/benchmark-suite`), [Agent-facing metrics](../agent-metrics.md)
 
 ## Context
 
