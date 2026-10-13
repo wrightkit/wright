@@ -86,7 +86,7 @@ def main() -> None:
 
     run(
         "compile",
-        [str(wright), "compile", str(args.compile), "--profile", "compat"],
+        [str(wright), "compile", str(args.compile), "--profile", "compat", "-o", "-"],
     )
     run("check", [str(wright), "check", str(args.check), "--profile", "compat"])
 

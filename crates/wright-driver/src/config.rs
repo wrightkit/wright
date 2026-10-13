@@ -93,7 +93,6 @@ pub struct SessionConfig {
     pub source_backend: SourceBackend,
     pub locale: Option<String>,
     pub root: Option<PathBuf>,
-    pub output: Option<PathBuf>,
     pub format: OutputFormat,
     pub profile: wright_transform::Profile,
     pub lint: LintConfig,
@@ -132,9 +131,6 @@ impl SessionConfig {
         }
         if self.root != other.root {
             changed.push("root");
-        }
-        if self.output != other.output {
-            changed.push("output");
         }
         if self.format != other.format {
             changed.push("format");

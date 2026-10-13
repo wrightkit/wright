@@ -666,12 +666,11 @@
       "properties": {
         "output": {
           "type": "object",
-          "required": ["text", "sha256", "locale", "written_to", "input_identity"],
+          "required": ["sha256", "locale", "written_to", "input_identity"],
           "properties": {
-            "text": { "type": "string" },
-            "sha256": { "type": "string" },
+            "sha256": { "type": "string", "description": "SHA-256 of the written program." },
             "locale": { "type": "string" },
-            "written_to": { "type": "string" },
+            "written_to": { "type": "string", "description": "The file the program was written to." },
             "input_identity": { "type": "string", "description": "The loaded input's primary entry source digest — same semantics as `project.inputIdentity`." }
           },
           "additionalProperties": true
@@ -850,7 +849,16 @@
       "additionalProperties": false
     },
     "CapabilitiesRequest": { "type": "object", "properties": { "op": { "const": "capabilities" } }, "required": ["op"], "additionalProperties": false },
-    "CompileRequest": { "type": "object", "properties": { "op": { "const": "compile" } }, "required": ["op"], "additionalProperties": false },
+    "CompileRequest": {
+      "type": "object",
+      "properties": {
+        "op": { "const": "compile" },
+        "output": { "type": "string", "description": "File to write the program to; default `<entry stem>.ow` in the service's working directory." },
+        "force": { "type": "boolean", "default": false, "description": "Replace an existing output file. The service never prompts, so a repeat compile to the same file needs force: true. The input source file is never overwritten." }
+      },
+      "required": ["op"],
+      "additionalProperties": false
+    },
     "CheckRequest": { "type": "object", "properties": { "op": { "const": "check" } }, "required": ["op"], "additionalProperties": false },
     "AnalyzeRequest": {
       "type": "object",

@@ -61,7 +61,7 @@ impl Activity {
         let output = Arc::new(Mutex::new(()));
         #[cfg(test)]
         let frame = Arc::new(AtomicUsize::new(0));
-        write_activity_line(&output, None, None);
+        write_activity_line(&output, &done, None, None);
         visible.store(true, Ordering::Release);
         let t_done = Arc::clone(&done);
         let t_status = Arc::clone(&status);
@@ -73,7 +73,7 @@ impl Activity {
             let mut f = 0;
             while !t_done.load(Ordering::Acquire) {
                 let event = *t_status.lock().expect("lock");
-                write_activity_line(&t_output, event, Some(SPINNER[f]));
+                write_activity_line(&t_output, &t_done, event, Some(SPINNER[f]));
                 f = (f + 1) % SPINNER.len();
                 #[cfg(test)]
                 t_frame.store(f, Ordering::Release);
@@ -99,13 +99,31 @@ impl ProgressObserver for Activity {
         if self.done.load(Ordering::Acquire) {
             return;
         }
+        if event.phase == ProgressPhase::Confirmation {
+            // Stop drawing and leave the line clean for the prompt.
+            self.done.store(true, Ordering::Release);
+            let _guard = self.output.lock().expect("lock");
+            if self.visible.swap(false, Ordering::AcqRel) {
+                let _ = write!(std::io::stderr(), "\r\x1b[2K\r");
+                let _ = std::io::stderr().flush();
+            }
+            return;
+        }
         *self.status.lock().expect("lock") = Some(event);
-        write_activity_line(&self.output, Some(event), None);
+        write_activity_line(&self.output, &self.done, Some(event), None);
     }
 }
 
-fn write_activity_line(output: &Mutex<()>, event: Option<ProgressEvent>, spinner: Option<char>) {
+fn write_activity_line(
+    output: &Mutex<()>,
+    done: &AtomicBool,
+    event: Option<ProgressEvent>,
+    spinner: Option<char>,
+) {
     let _guard = output.lock().expect("lock");
+    if done.load(Ordering::Acquire) {
+        return;
+    }
     let label = event
         .map(progress_label)
         .unwrap_or_else(|| "Starting workflow".to_string());
@@ -127,6 +145,7 @@ fn progress_label(event: ProgressEvent) -> String {
         ProgressPhase::Linting => "Running lint rules",
         ProgressPhase::Emission => "Emitting Workshop",
         ProgressPhase::Conversion => "Reconstructing source",
+        ProgressPhase::Confirmation => "Waiting for confirmation",
     };
     match (event.count, event.unit) {
         (Some(count), Some(ProgressUnit::Files)) => format!("{label} {count} files"),
@@ -305,7 +324,7 @@ fn render_text<T: serde::Serialize + ResultPresentation>(
         source_base,
         subject,
     };
-    if !matches!(envelope.command.as_str(), "compile" | "convert") {
+    if !envelope.result.is_artifact_stream() {
         render_verdict(envelope, pres.color);
     }
     let mut ordered: Vec<&wright_driver::Diagnostic> = envelope.diagnostics.iter().collect();
@@ -467,10 +486,15 @@ fn render_github<T: serde::Serialize + ResultPresentation>(
         "::group::{}",
         escape_workflow_data(&format!("wright {}", envelope.command))
     );
-    if matches!(envelope.command.as_str(), "compile" | "convert") {
+    if envelope.result.is_artifact_stream() {
         envelope.result.render_body(&github_context(subject));
     } else {
         eprintln!("{} {}", summary_status(envelope), envelope.command);
+        if envelope.command == "compile" {
+            if let Some(metadata) = envelope.result.metadata() {
+                eprintln!("  {metadata}");
+            }
+        }
     }
     eprintln!("::endgroup::");
     emit_summary(envelope);
@@ -626,17 +650,37 @@ pub(crate) trait ResultPresentation {
         None
     }
     fn render_body(&self, ctx: &RenderContext<'_>);
+    /// Whether the body is the command's source artifact, printed instead of
+    /// a verdict (`convert`, `compile -o -`).
+    fn is_artifact_stream(&self) -> bool {
+        false
+    }
     fn render_github_findings(&self) {}
     fn update_summary_status(&self, _status: &mut SummaryStatus) {}
 }
 
 impl ResultPresentation for CompileResult {
+    fn metadata(&self) -> Option<String> {
+        let output = self.output.as_ref().filter(|o| o.written_to != "stdout")?;
+        Some(format!(
+            "wrote {} (sha256 {})",
+            output.written_to, output.sha256
+        ))
+    }
+    fn is_artifact_stream(&self) -> bool {
+        self.output
+            .as_ref()
+            .is_some_and(|o| o.written_to == "stdout")
+    }
     fn render_body(&self, _ctx: &RenderContext<'_>) {
         render_compile(self);
     }
 }
 
 impl ResultPresentation for ConvertResult {
+    fn is_artifact_stream(&self) -> bool {
+        true
+    }
     fn render_body(&self, _ctx: &RenderContext<'_>) {
         render_convert(self);
     }

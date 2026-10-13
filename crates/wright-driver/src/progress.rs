@@ -25,6 +25,9 @@ pub enum ProgressPhase {
     Emission,
     /// Reconstruct a source-language project.
     Conversion,
+    /// Wait for the caller's answer to an overwrite question; observers
+    /// that draw a live line must stop drawing.
+    Confirmation,
 }
 
 /// The unit associated with optional bounded phase metadata.

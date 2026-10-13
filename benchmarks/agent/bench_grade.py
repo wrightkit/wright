@@ -55,7 +55,7 @@ def oracle_compile(source: Path, out: Path) -> dict:
 
 
 def wright_compile(wright: str, source: Path, out: Path) -> dict:
-    proc = subprocess.run([wright, "compile", str(source), "-o", str(out)], capture_output=True, text=True)
+    proc = subprocess.run([wright, "compile", str(source), "-o", str(out), "--force"], capture_output=True, text=True)
     if proc.returncode == 0:
         return {"status": "ok"}
     return {"status": "error", "error": proc.stderr.strip()[:300]}
