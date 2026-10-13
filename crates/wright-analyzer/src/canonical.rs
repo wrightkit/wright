@@ -11,5 +11,5 @@ pub use cfg::BLOCK_KINDS;
 pub(crate) use cfg::matching_end;
 pub use service::SemanticService;
 pub use symbols::*;
-pub use traversal::live_actions;
 pub(crate) use traversal::{dead_actions, unwrapped};
+pub use traversal::{live_actions, subroutine_callee};

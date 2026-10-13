@@ -1417,11 +1417,9 @@ impl<'a> ToolService<'a> {
             .filter(|rule| !rule.disabled)
             .flat_map(|rule| {
                 wright_analyzer::canonical::live_actions(&rule.actions).filter_map(
-                    move |(_, action)| match action {
-                        workshop_rs::Action::CallSubroutine { subroutine } => {
-                            Some(json!({ "caller": rule.name, "callee": subroutine }))
-                        }
-                        _ => None,
+                    move |(_, action)| {
+                        wright_analyzer::canonical::subroutine_callee(action)
+                            .map(|callee| json!({ "caller": rule.name, "callee": callee }))
                     },
                 )
             })

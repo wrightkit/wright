@@ -394,16 +394,18 @@
           "tokens": 91469.0
         },
         "agent:costEstimate": {
-          "bytes": 13068,
+          "bytes": 13479,
           "counts": {
+            "finding.expensive-loop-check": 2,
             "finding.ongoing-condition-hot-path": 55,
-            "items": 55,
+            "finding.repeated-value": 1,
+            "items": 58,
             "programActions": 1978,
             "programRules": 369,
             "waitActions": 233
           },
           "latencyMs": 453.9,
-          "tokens": 3267.0
+          "tokens": 3369.8
         },
         "agent:findings": {
           "bytes": 23412,
@@ -442,13 +444,15 @@
           "tokens": 306.5
         },
         "agent:lint": {
-          "bytes": 24324,
+          "bytes": 25298,
           "counts": {
+            "finding.expensive-loop-check": 2,
             "finding.ongoing-condition-hot-path": 55,
-            "items": 55
+            "finding.repeated-value": 1,
+            "items": 58
           },
           "latencyMs": 27.9,
-          "tokens": 6081.0
+          "tokens": 6324.5
         },
         "agent:lint?brief": {
           "bytes": 2252,
@@ -606,14 +610,16 @@
           "tokens": 184.5
         },
         "cli:lint": {
-          "bytes": 38465,
+          "bytes": 40156,
           "counts": {
             "diagnostics": 0,
+            "lint.finding.expensive-loop-check": 2,
             "lint.finding.ongoing-condition-hot-path": 55,
-            "lint.items": 55
+            "lint.finding.repeated-value": 1,
+            "lint.items": 58
           },
           "latencyMs": 5801.9,
-          "tokens": 9616.2
+          "tokens": 10039.0
         },
         "cli:lint?brief": {
           "bytes": 3509,
