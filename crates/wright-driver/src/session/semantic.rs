@@ -169,16 +169,30 @@ fn cost_facts(
         workshop_rs::actions::ElementCountError,
     >,
 ) -> serde_json::Value {
-    let counts = serde_json::json!({
-        "rules": program.rules.len(),
-        "conditions": program.rules.iter().map(|rule| rule.conditions.len()).sum::<usize>(),
-        "actions": program.rules.iter().map(|rule| rule.actions.len()).sum::<usize>(),
-        "waits": program
-            .rules
+    let mut actions = 0usize;
+    let mut waits = 0usize;
+    let live_rules = program.rules.iter().filter(|rule| !rule.disabled);
+    let mut rules = 0usize;
+    let mut conditions = 0usize;
+    for rule in live_rules {
+        rules += 1;
+        conditions += rule
+            .conditions
             .iter()
-            .flat_map(|rule| &rule.actions)
-            .filter(|action| matches!(action, workshop_rs::Action::Call { name, .. } if name == "wait"))
-            .count(),
+            .filter(|condition| !condition.disabled)
+            .count();
+        for (_, action) in wright_analyzer::canonical::live_actions(&rule.actions) {
+            actions += 1;
+            if matches!(action, workshop_rs::Action::Call { name, .. } if name == "wait") {
+                waits += 1;
+            }
+        }
+    }
+    let counts = serde_json::json!({
+        "rules": rules,
+        "conditions": conditions,
+        "actions": actions,
+        "waits": waits,
     });
     let mut cost = serde_json::json!({ "counts": counts });
     match element_count {

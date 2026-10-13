@@ -7,7 +7,9 @@ use workshop_rs::{Action, Event, ModifyOp, Program, Rule, Value};
 
 use super::cfg::{is_wait, matching_end};
 use super::symbols::{ActionId, RuleId, ValueId, value_identity_map};
-use super::traversal::{visit_action_roots, visit_value_tree};
+use super::traversal::{
+    dead_actions, live_actions, opens_block, unwrapped, visit_action_roots, visit_value_tree,
+};
 use crate::analysis::{Boundedness, EvidenceClass, Severity};
 use crate::registry::LintConfig;
 
@@ -50,22 +52,27 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
         if rule.disabled {
             continue;
         }
+        let dead = dead_actions(&rule.actions);
         if config.is_enabled("ongoing-condition-hot-path") {
             findings.extend(ongoing_condition_findings(
                 program, rule_id, rule, &value_ids,
             ));
         }
         for (action_id, action) in rule.actions.iter().enumerate() {
+            if dead[action_id] {
+                continue;
+            }
             let Some((start, end)) = loop_body(rule, action_id) else {
                 continue;
             };
             let body = &rule.actions[start..end];
-            if config.is_enabled("min-wait-loop") && body.iter().any(|action| is_wait(action, true))
+            if config.is_enabled("min-wait-loop")
+                && live_actions(body).any(|(_, action)| is_wait(action, true))
             {
                 findings.push(Finding { code: "min-wait-loop".into(), severity: Severity::Warning, message: "loop body waits at the workshop minimum rate; the loop runs at maximum frequency".into(), span: program.action_span(rule_id, action_id), rule: rule_id, action: Some(action_id), value: None, evidence: EvidenceClass::StaticIndicator, boundedness: None, fix: None });
             }
             if config.is_enabled("expensive-loop-check") {
-                for (offset, body_action) in body.iter().enumerate() {
+                for (offset, body_action) in live_actions(body) {
                     let body_action_id = start + offset;
                     let mut expensive = Vec::new();
                     visit_action_roots(body_action, &mut |argument, value| {
@@ -102,9 +109,10 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
             }
             if let Action::While { condition } = action {
                 if config.is_enabled("while-without-wait")
-                    && !body.iter().any(|action| is_wait(action, false))
+                    && !live_actions(body).any(|(_, action)| is_wait(action, false))
                 {
-                    let boundedness = while_boundedness(condition, body, &program.subroutines);
+                    let boundedness =
+                        while_boundedness(condition, body, &dead[start..end], &program.subroutines);
                     let severity = match boundedness {
                         Boundedness::StaticallyBounded => Severity::Info,
                         Boundedness::ObviouslyUnbounded | Boundedness::Unknown => Severity::Warning,
@@ -130,13 +138,19 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
                 )
             {
                 findings.extend(repeated_value_findings(
-                    program, rule_id, rule, action_id, start, body, &value_ids,
+                    program,
+                    rule_id,
+                    rule,
+                    action_id,
+                    start..end,
+                    &dead,
+                    &value_ids,
                 ));
             }
         }
         if config.is_enabled("duplicate-condition") {
             findings.extend(duplicate_condition_findings(
-                program, rule_id, rule, &value_ids,
+                program, rule_id, rule, &dead, &value_ids,
             ));
         }
     }
@@ -317,12 +331,13 @@ fn duplicate_condition_findings(
     program: &Program,
     rule_id: RuleId,
     rule: &Rule,
+    dead: &[bool],
     value_ids: &HashMap<usize, ValueId>,
 ) -> Vec<Finding> {
     // A repeated condition is unreachable only as a later branch of the same
     // `If`/`Else If` chain, so conditions are compared within the chain that
     // owns them. Non-`If` blocks still push an entry so their `End` stays
-    // aligned; a `disabled` action is unwrapped only to detect a block opener.
+    // aligned; `disabled` statements and their regions are not live.
     enum Block<'a> {
         IfChain(Vec<&'a Value>),
         Other,
@@ -330,6 +345,9 @@ fn duplicate_condition_findings(
     let mut blocks: Vec<Block> = Vec::new();
     let mut findings = Vec::new();
     for (action_id, action) in rule.actions.iter().enumerate() {
+        if dead[action_id] {
+            continue;
+        }
         match action {
             Action::ElseIf { condition } => {
                 let Some(Block::IfChain(seen)) = blocks.last_mut() else {
@@ -359,21 +377,15 @@ fn duplicate_condition_findings(
             Action::End => {
                 blocks.pop();
             }
-            _ => {
-                let mut current = action;
-                while let Action::Disabled { action } = current {
-                    current = action;
+            _ => match action {
+                Action::If { condition } => {
+                    blocks.push(Block::IfChain(vec![condition]));
                 }
-                match current {
-                    Action::If { condition } => {
-                        blocks.push(Block::IfChain(vec![condition]));
-                    }
-                    Action::While { .. }
-                    | Action::ForGlobalVariable { .. }
-                    | Action::ForPlayerVariable { .. } => blocks.push(Block::Other),
-                    _ => {}
-                }
-            }
+                Action::While { .. }
+                | Action::ForGlobalVariable { .. }
+                | Action::ForPlayerVariable { .. } => blocks.push(Block::Other),
+                _ => {}
+            },
         }
     }
     findings
@@ -513,17 +525,7 @@ fn elseif_branch_end(actions: &[Action], elseif: usize) -> Option<usize> {
                 depth -= 1;
             }
             _ => {
-                let mut current = action;
-                while let Action::Disabled { action } = current {
-                    current = action;
-                }
-                if matches!(
-                    current,
-                    Action::If { .. }
-                        | Action::While { .. }
-                        | Action::ForGlobalVariable { .. }
-                        | Action::ForPlayerVariable { .. }
-                ) {
+                if opens_block(action) {
                     depth += 1;
                 }
             }
@@ -537,11 +539,7 @@ fn elseif_branch_end(actions: &[Action], elseif: usize) -> Option<usize> {
 fn chain_if_index(actions: &[Action], elseif: usize) -> Option<usize> {
     let mut depth = 0usize;
     for index in (0..elseif).rev() {
-        let mut action = &actions[index];
-        while let Action::Disabled { action: inner } = action {
-            action = inner;
-        }
-        match action {
+        match unwrapped(&actions[index]) {
             Action::End => depth += 1,
             Action::If { .. } if depth == 0 => return Some(index),
             Action::If { .. }
@@ -929,10 +927,13 @@ fn repeated_value_findings(
     rule_id: RuleId,
     rule: &Rule,
     loop_action: ActionId,
-    body_start: usize,
-    body: &[Action],
+    body_range: Range<usize>,
+    dead: &[bool],
     value_ids: &HashMap<usize, ValueId>,
 ) -> Vec<Finding> {
+    let body_start = body_range.start;
+    let body = &rule.actions[body_range.clone()];
+    let body_dead = &dead[body_range];
     let mut collected = Collected::new();
     if let Action::While { condition } = &rule.actions[loop_action] {
         collect_value_tree(
@@ -946,6 +947,10 @@ fn repeated_value_findings(
     }
     let mut action = 0;
     while action < body.len() {
+        if body_dead[action] {
+            action += 1;
+            continue;
+        }
         if matches!(
             body[action],
             Action::While { .. }
@@ -956,20 +961,16 @@ fn repeated_value_findings(
             continue;
         }
         let action_id = body_start + action;
-        if !matches!(body[action], Action::Disabled { .. }) {
-            visit_action_roots(&body[action], &mut |argument, value| {
-                collect_value_tree(
-                    value,
-                    argument,
-                    None,
-                    &mut |path| {
-                        program.action_argument_value_span(rule_id, action_id, argument, path)
-                    },
-                    &mut collected,
-                    OccurrenceOrigin::BodyAction(action),
-                );
-            });
-        }
+        visit_action_roots(&body[action], &mut |argument, value| {
+            collect_value_tree(
+                value,
+                argument,
+                None,
+                &mut |path| program.action_argument_value_span(rule_id, action_id, argument, path),
+                &mut collected,
+                OccurrenceOrigin::BodyAction(action),
+            );
+        });
         action += 1;
     }
 
@@ -1262,6 +1263,7 @@ fn while_without_wait_message(boundedness: Boundedness) -> String {
 fn while_boundedness(
     condition: &Value,
     body: &[Action],
+    body_dead: &[bool],
     subroutines: &[workshop_rs::Subroutine],
 ) -> Boundedness {
     if matches!(condition, Value::Bool(true)) {
@@ -1272,13 +1274,22 @@ fn while_boundedness(
     };
     let mut progresses = false;
     for (start, end) in direct_action_ranges(body) {
-        if action_has_unprovable_loop(body, start, end, subroutines) {
+        if body_dead[start] {
+            continue;
+        }
+        if action_has_unprovable_loop(body, body_dead, start, end, subroutines) {
             return Boundedness::Unknown;
         }
         match modify_direction(&body[start], &variable) {
             Some(direction) if direction == toward => progresses = true,
             Some(_) => return Boundedness::Unknown,
-            None if region_writes(&body[start..end], &variable, subroutines) => {
+            None if region_writes(
+                &body[start..end],
+                &body_dead[start..end],
+                &variable,
+                subroutines,
+            ) =>
+            {
                 return Boundedness::Unknown;
             }
             None => {}
@@ -1375,12 +1386,14 @@ fn modify_direction(action: &Action, variable: &CounterVariable) -> Option<i32> 
 
 fn region_writes(
     actions: &[Action],
+    dead: &[bool],
     variable: &CounterVariable,
     subroutines: &[workshop_rs::Subroutine],
 ) -> bool {
     actions
         .iter()
-        .any(|action| action_writes(action, variable, subroutines))
+        .zip(dead)
+        .any(|(action, dead)| !dead && action_writes(action, variable, subroutines))
 }
 
 fn action_writes(
@@ -1414,47 +1427,54 @@ fn action_writes(
         Action::Call { name, .. } => subroutines
             .iter()
             .any(|subroutine| subroutine.name == *name),
-        Action::Disabled { action } => action_writes(action, variable, subroutines),
         _ => false,
     }
 }
 
 fn action_has_unprovable_loop(
     actions: &[Action],
+    dead: &[bool],
     start: usize,
     end: usize,
     subroutines: &[workshop_rs::Subroutine],
 ) -> bool {
-    let inner = if end > start + 1 {
-        &actions[start + 1..end - 1]
+    let (inner, inner_dead) = if end > start + 1 {
+        (&actions[start + 1..end - 1], &dead[start + 1..end - 1])
     } else {
-        &[]
+        (&[][..], &[][..])
     };
     match &actions[start] {
         Action::While { condition } => {
-            while_boundedness(condition, inner, subroutines) != Boundedness::StaticallyBounded
-                || region_has_unprovable_loop(inner, subroutines)
+            while_boundedness(condition, inner, inner_dead, subroutines)
+                != Boundedness::StaticallyBounded
+                || region_has_unprovable_loop(inner, inner_dead, subroutines)
         }
         Action::ForGlobalVariable { variable, step, .. } => {
             let finite_step = step_direction(step).is_some();
             !finite_step
                 || region_writes(
                     inner,
+                    inner_dead,
                     &CounterVariable::Global(variable.clone()),
                     subroutines,
                 )
-                || region_has_unprovable_loop(inner, subroutines)
+                || region_has_unprovable_loop(inner, inner_dead, subroutines)
         }
         Action::ForPlayerVariable { .. } => true,
-        Action::If { .. } => region_has_unprovable_loop(inner, subroutines),
+        Action::If { .. } => region_has_unprovable_loop(inner, inner_dead, subroutines),
         _ => false,
     }
 }
 
-fn region_has_unprovable_loop(actions: &[Action], subroutines: &[workshop_rs::Subroutine]) -> bool {
+fn region_has_unprovable_loop(
+    actions: &[Action],
+    dead: &[bool],
+    subroutines: &[workshop_rs::Subroutine],
+) -> bool {
     direct_action_ranges(actions)
         .into_iter()
-        .any(|(start, end)| action_has_unprovable_loop(actions, start, end, subroutines))
+        .filter(|(start, _)| !dead[*start])
+        .any(|(start, end)| action_has_unprovable_loop(actions, dead, start, end, subroutines))
 }
 
 fn direct_action_ranges(actions: &[Action]) -> Vec<(usize, usize)> {

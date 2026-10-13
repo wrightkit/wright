@@ -583,6 +583,144 @@ rule ("disabled blocks") {
 }
 
 #[test]
+fn disabled_block_body_stays_dead_through_its_own_end() {
+    // #633: a `disabled` block opener claims the region through its own
+    // `End`; it must not close the enclosing `While` early, and the live
+    // `Wait` stays in the loop body.
+    let source = r#"
+rule ("outer loop") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        While(True);
+            disabled If(True);
+                Wait(0.016, Ignore Condition);
+            End;
+            Wait(1, Ignore Condition);
+        End;
+    }
+}
+"#;
+    let service = workshop_service_from_text(source);
+    let findings = query(&service, serde_json::json!({"op": "getFindings"}));
+    let findings = findings.as_array().unwrap();
+    assert!(
+        !findings
+            .iter()
+            .any(|finding| finding["code"] == "while-without-wait"),
+        "the live Wait keeps the loop out of while-without-wait: {findings:?}"
+    );
+
+    let rule = id_for(
+        &service,
+        serde_json::json!({"op": "listRules"}),
+        "outer loop",
+    );
+    let cfg = query(&service, serde_json::json!({"op": "getCfg", "rule": rule}));
+    let blocks = cfg["blocks"].as_array().unwrap();
+    let header = blocks
+        .iter()
+        .find(|block| block["kind"] == "while")
+        .expect("the live While produces a loop header");
+    assert_eq!(header["actions"], serde_json::json!([0]));
+    let body = header["successors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|edge| edge["kind"] == "true")
+        .map(|edge| &blocks[edge["to"].as_u64().unwrap() as usize])
+        .expect("the loop header has a body edge");
+    assert_eq!(body["waits"], true, "the loop body holds the live Wait");
+    assert!(
+        body["actions"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!(4)),
+        "the loop body contains the live Wait at index 4: {body:?}"
+    );
+    for dead in [1usize, 2, 3] {
+        assert!(
+            !blocks.iter().any(|block| block["actions"]
+                .as_array()
+                .is_some_and(|actions| actions.contains(&serde_json::json!(dead)))),
+            "the disabled If region's action {dead} is in no CFG block"
+        );
+    }
+}
+
+#[test]
+fn a_disabled_wait_is_not_live_for_loop_checks() {
+    // #633: a `Wait` inside a disabled block does not count — the loop
+    // warns it has no live wait, and dead code fires no `min-wait-loop`.
+    let source = r#"
+rule ("disabled wait") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        While(True);
+            disabled If(True);
+                Wait(0.016, Ignore Condition);
+            End;
+        End;
+    }
+}
+"#;
+    let service = workshop_service_from_text(source);
+    let findings = query(&service, serde_json::json!({"op": "getFindings"}));
+    let findings = findings.as_array().unwrap();
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding["code"] == "while-without-wait"),
+        "a loop whose only wait is disabled reports while-without-wait: {findings:?}"
+    );
+    assert!(
+        !findings
+            .iter()
+            .any(|finding| finding["code"] == "min-wait-loop"),
+        "a disabled wait fires no min-wait-loop: {findings:?}"
+    );
+}
+
+#[test]
+fn disabled_rules_and_statements_contribute_no_persistent_objects() {
+    // #633: persistent-object facts see only live actions — a disabled
+    // rule, a `disabled` object creation, and a `disabled` cleanup call
+    // all contribute nothing.
+    let mut program = Program::new();
+    let mut off = Rule::new("off", Event::Global).action(Action::call("createHudText", []));
+    off.disabled = true;
+    program.rule(off);
+    program.rule(
+        Rule::new("on", Event::Global)
+            .action(Action::Disabled {
+                action: Box::new(Action::call("createHudText", [])),
+            })
+            .action(Action::call("createEffect", []))
+            .action(Action::Disabled {
+                action: Box::new(Action::call("destroyEffect", [])),
+            }),
+    );
+    let program = Box::leak(Box::new(program));
+    let service = SemanticService::new(program);
+    let objects = query(&service, serde_json::json!({"op": "getPersistentObjects"}));
+    let objects = objects.as_array().unwrap();
+    assert_eq!(
+        objects.len(),
+        1,
+        "only the live createEffect reports: {objects:?}"
+    );
+    assert_eq!(objects[0]["kind"], "effect");
+    assert_eq!(objects[0]["rule"], 1);
+    assert_eq!(
+        objects[0]["sameKindCleanupInRule"], false,
+        "a disabled cleanup call does not count: {objects:?}"
+    );
+}
+
+#[test]
 fn while_without_wait_severity_override_applies_to_each_boundedness_class() {
     let source = r#"
 variables {

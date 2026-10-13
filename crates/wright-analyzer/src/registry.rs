@@ -650,10 +650,7 @@ impl LintRegistry {
 fn canonical_cfg_available(actions: &[workshop_rs::Action]) -> bool {
     let mut control_flow = Vec::<(bool, bool)>::new();
     for action in actions {
-        let action = match action {
-            workshop_rs::Action::Disabled { action } => action.as_ref(),
-            action => action,
-        };
+        let action = crate::canonical::unwrapped(action);
         match action {
             workshop_rs::Action::If { .. } => control_flow.push((true, false)),
             workshop_rs::Action::While { .. }

@@ -1414,13 +1414,16 @@ impl<'a> ToolService<'a> {
         let edges = program
             .rules
             .iter()
+            .filter(|rule| !rule.disabled)
             .flat_map(|rule| {
-                rule.actions.iter().filter_map(move |action| match action {
-                    workshop_rs::Action::CallSubroutine { subroutine } => {
-                        Some(json!({ "caller": rule.name, "callee": subroutine }))
-                    }
-                    _ => None,
-                })
+                wright_analyzer::canonical::live_actions(&rule.actions).filter_map(
+                    move |(_, action)| match action {
+                        workshop_rs::Action::CallSubroutine { subroutine } => {
+                            Some(json!({ "caller": rule.name, "callee": subroutine }))
+                        }
+                        _ => None,
+                    },
+                )
             })
             .collect::<Vec<_>>();
         self.select_result(
@@ -1520,13 +1523,20 @@ impl<'a> ToolService<'a> {
         let locale = CompilerSession::locale_for(loaded);
         let text = workshop_rs::emitter::emit(&loaded.program, self.session.catalog(), &locale)
             .unwrap_or_default();
-        let waits = loaded
+        let live = loaded
             .program
             .rules
             .iter()
-            .flat_map(|r| &r.actions)
-            .filter(|a| matches!(a, workshop_rs::Action::Call { name, .. } if name == "wait"))
-            .count();
+            .filter(|rule| !rule.disabled)
+            .flat_map(|rule| wright_analyzer::canonical::live_actions(&rule.actions));
+        let mut program_actions = 0;
+        let mut waits = 0;
+        for (_, action) in live {
+            program_actions += 1;
+            if matches!(action, workshop_rs::Action::Call { name, .. } if name == "wait") {
+                waits += 1;
+            }
+        }
         let findings = wright_analyzer::canonical::analyze(
             &loaded.program,
             &wright_analyzer::registry::LintConfig::default(),
@@ -1546,8 +1556,13 @@ impl<'a> ToolService<'a> {
         let mut result = json!({
             "exact": {
                 "emittedBytes": text.len(),
-                "programActions": loaded.program.rules.iter().map(|r| r.actions.len()).sum::<usize>(),
-                "programRules": loaded.program.rules.len(),
+                "programActions": program_actions,
+                "programRules": loaded
+                    .program
+                    .rules
+                    .iter()
+                    .filter(|rule| !rule.disabled)
+                    .count(),
                 "waitActions": waits,
             },
             "findings": findings,
