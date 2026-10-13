@@ -892,6 +892,13 @@ impl CompilerSession {
                 return self.finish("compile", result);
             }
         };
+        if self
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == crate::diag::Severity::Error)
+        {
+            return self.finish("compile", result);
+        }
         match crate::output::write_program(&output.text, entry.as_deref(), write) {
             Ok(written_to) => {
                 result.output = Some(CompiledOutput {

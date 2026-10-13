@@ -811,3 +811,29 @@ fn compile_to_asks_before_replacing_and_never_replaces_the_input() {
     assert_eq!(std::fs::read_to_string(&input).unwrap(), source);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A failed compile writes no file, neither the explicit path nor the default.
+#[test]
+fn failed_compile_writes_no_file() {
+    use wright_driver::{CompileWrite, OutputDest, Overwrite};
+
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("failed-compile");
+    std::fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("broken.ws");
+    std::fs::write(&input, "rule (\"x\") { event { Ongoing - Global; }").unwrap();
+    let explicit = dir.join("explicit.ow");
+    let envelope = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(input),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap()
+    .compile_to(CompileWrite {
+        dest: OutputDest::Path(explicit.clone()),
+        overwrite: Overwrite::Force,
+    });
+    assert!(!envelope.ok);
+    assert!(envelope.result.output.is_none());
+    assert!(!explicit.exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}

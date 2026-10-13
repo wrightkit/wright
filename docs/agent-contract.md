@@ -208,12 +208,13 @@ and `output.sha256`, without the program text.
   in the service process's working directory. Unlike the CLI, `-` is not
   special: the service never streams the program.
 - An existing file is replaced only when the request sets `force: true`;
-  otherwise the envelope carries `output-exists` with exit 2. The agent has
-  no terminal, so the service never prompts.
+  otherwise the envelope carries `output-exists` with exit 2. The service
+  never prompts, so every repeat compile to the same file needs `force: true`.
 - The input source file is never overwritten, even with `force`
   (`output-is-input`, exit 2).
-- A failed compile writes no file. The JSON-RPC `compile` method is the same
-  request with neither field.
+- A failed compile writes no file. The JSON-RPC `compile` alias takes no
+  parameters and uses the defaults (no `force`); callers needing `output` or
+  `force` use the `request` method.
 
 ### Freshness and id validity (#471, #512)
 
