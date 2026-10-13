@@ -99,6 +99,9 @@ pub(crate) enum UpdateCommand {
 
 #[derive(Debug, Args)]
 pub(crate) struct UpdateSelfArgs {
+    /// Report the available update without modifying the installation.
+    #[arg(long)]
+    pub(crate) check: bool,
     /// Install an exact version instead of the latest stable release.
     #[arg(long, value_name = "VERSION")]
     pub(crate) version: Option<String>,
@@ -108,6 +111,9 @@ pub(crate) struct UpdateSelfArgs {
 pub(crate) struct UpdateProviderArgs {
     /// Provider to install or update; omitted updates installed providers only.
     pub(crate) provider: Option<ProviderNameArg>,
+    /// Report the available update without installing anything.
+    #[arg(long)]
+    pub(crate) check: bool,
     /// Install an exact release instead of the latest stable release.
     #[arg(long, value_name = "VERSION", requires = "provider")]
     pub(crate) version: Option<String>,
@@ -120,9 +126,11 @@ pub(crate) enum ProviderNameArg {
 
 pub(crate) fn run(args: &UpdateArgs) -> Result<u8, UpdateError> {
     match &args.command {
-        Some(UpdateCommand::SelfUpdate(sub)) => self_update(args.check, sub.version.as_deref()),
+        Some(UpdateCommand::SelfUpdate(sub)) => {
+            self_update(args.check || sub.check, sub.version.as_deref())
+        }
         Some(UpdateCommand::Provider(sub)) => Ok(provider_target(
-            args.check,
+            args.check || sub.check,
             sub.version.as_deref(),
             sub.provider.is_some(),
         )),
@@ -145,7 +153,7 @@ fn update_all(check_only: bool) -> u8 {
             code = fold(code, error.exit_code());
         }
     }
-    fold(code, provider_target(check_only, None, false));
+    code = fold(code, provider_target(check_only, None, false));
     code
 }
 
@@ -201,9 +209,12 @@ fn provider_report(previous: Option<&str>, resolved: &ResolvedOpyProvider) {
             resolved.executable.display()
         ),
         Some(current) => match compare_versions(current, version) {
-            Ordering::Equal => println!("opy provider {version} is already up to date"),
-            Ordering::Less => println!("updated opy provider {current} -> {version}"),
-            Ordering::Greater => println!("downgraded opy provider {current} -> {version}"),
+            Some(Ordering::Equal) => println!("opy provider {version} is already up to date"),
+            Some(Ordering::Less) => println!("updated opy provider {current} -> {version}"),
+            Some(Ordering::Greater) => println!("downgraded opy provider {current} -> {version}"),
+            // A provider-reported version outside the release grammar cannot
+            // be ordered; report what is installed without a direction.
+            None => println!("opy provider {version} is active (was {current})"),
         },
     }
 }
@@ -242,15 +253,18 @@ fn provider_check(
         return exit::SUCCESS;
     };
     match compare_versions(current, &target) {
-        Ordering::Equal => println!("opy provider {current} is already up to date"),
-        Ordering::Less => println!(
+        Some(Ordering::Equal) => println!("opy provider {current} is already up to date"),
+        Some(Ordering::Less) => println!(
             "update available: opy provider {current} -> {target} (run `wright update provider opy` to install)"
         ),
-        Ordering::Greater if requested.is_some() => println!(
+        Some(Ordering::Greater) if requested.is_some() => println!(
             "opy provider {target} is older than the installed {current}; `wright update provider opy --version {target}` would downgrade"
         ),
-        Ordering::Greater => println!(
+        Some(Ordering::Greater) => println!(
             "installed opy provider {current} is newer than the latest release {target}; keeping {current}"
+        ),
+        None => println!(
+            "installed opy provider {current} is not a recognized release version; latest release is {target}"
         ),
     }
     exit::SUCCESS
@@ -283,7 +297,7 @@ fn self_update(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateEr
     })?;
     if !install_dir.join("wright-lsp").is_file() {
         return Err(UpdateError::failed(format!(
-            "wright-lsp was not found next to wright at {}; this installation was not created by the official installer — reinstall with `curl -fsSL https://wrightkit.dev/install.sh | bash` to restore a matched pair",
+            "wright-lsp was not found next to wright at {}; this installation was not created by the official installer — reinstall with `curl -fsSL https://install.wrightkit.dev/wright/install.sh | bash` to restore a matched pair",
             install_dir.display()
         )));
     }
@@ -302,11 +316,11 @@ fn self_update(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateEr
     };
 
     match compare_versions(&current, &target_version) {
-        Ordering::Equal => {
+        Some(Ordering::Equal) => {
             println!("wright {current} is already at version {target_version}");
             return Ok(exit::SUCCESS);
         }
-        Ordering::Greater => {
+        Some(Ordering::Greater) => {
             if check_only {
                 println!(
                     "installed wright {current} is newer than requested {target_version}; no update is needed"
@@ -317,7 +331,15 @@ fn self_update(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateEr
                 "requested version {target_version} is older than the installed version {current}; refusing to downgrade"
             )));
         }
-        Ordering::Less => {}
+        Some(Ordering::Less) => {}
+        // `current` is `CARGO_PKG_VERSION` and `target_version` already
+        // parsed, so this arm is unreachable by construction — but a version
+        // outside the release grammar is a failure, never a panic (#641).
+        None => {
+            return Err(UpdateError::failed(format!(
+                "could not compare installed version '{current}' with '{target_version}'"
+            )));
+        }
     }
 
     if check_only {
@@ -360,7 +382,7 @@ fn detect_platform_for(os: &str, arch: &str) -> Result<Platform, UpdateError> {
         ("darwin", "aarch64") => "aarch64-apple-darwin",
         _ => {
             return Err(UpdateError::unsupported(format!(
-                "unsupported platform {os}/{arch} (supported: linux/x86_64, darwin/x86_64, darwin/aarch64); use the official installer (curl -fsSL https://wrightkit.dev/install.sh | bash) or a package manager"
+                "unsupported platform {os}/{arch} (supported: linux/x86_64, darwin/x86_64, darwin/aarch64); use the official installer (curl -fsSL https://install.wrightkit.dev/wright/install.sh | bash) or a package manager"
             )));
         }
     };
@@ -378,16 +400,23 @@ fn env_arch() -> String {
     std::env::var("WRIGHT_INSTALL_ARCH").unwrap_or_else(|_| std::env::consts::ARCH.to_string())
 }
 
+/// Package-manager ownership is recognized only from whole path components:
+/// a directory merely containing `scoop` or `winget` as a substring (a
+/// `scooped` download folder, a `mywinget` checkout) is a standalone
+/// installation with self-update guidance (#641).
 fn detect_provenance(exe: &Path) -> Provenance {
-    let path = std::fs::canonicalize(exe)
-        .unwrap_or_else(|_| exe.to_path_buf())
-        .to_string_lossy()
-        .to_lowercase();
-    if path.contains("homebrew") || path.contains("cellar") {
+    let path = std::fs::canonicalize(exe).unwrap_or_else(|_| exe.to_path_buf());
+    let is_component = |name: &str| {
+        path.to_string_lossy()
+            .to_lowercase()
+            .split(['/', '\\'])
+            .any(|component| component == name)
+    };
+    if is_component("homebrew") || is_component("cellar") {
         Provenance::Homebrew
-    } else if path.contains("scoop") {
+    } else if is_component("scoop") {
         Provenance::Scoop
-    } else if path.contains("winget") {
+    } else if is_component("winget") {
         Provenance::WinGet
     } else {
         Provenance::Standalone
@@ -524,7 +553,7 @@ fn ensure_writable(install_dir: &Path) -> Result<(), UpdateError> {
     let probe = install_dir.join(format!(".wright-update-probe-{}", std::process::id()));
     std::fs::write(&probe, b"").map_err(|e| {
         UpdateError::failed(format!(
-            "installation directory {} is not writable ({e}); fix permissions or reinstall with the official installer (curl -fsSL https://wrightkit.dev/install.sh | bash)",
+            "installation directory {} is not writable ({e}); fix permissions or reinstall with the official installer (curl -fsSL https://install.wrightkit.dev/wright/install.sh | bash)",
             install_dir.display()
         ))
     })?;
@@ -551,7 +580,7 @@ fn replace_binary(source: &Path, destination: &Path) -> Result<(), UpdateError> 
     }
     std::fs::rename(source, destination).map_err(|error| {
         UpdateError::failed(format!(
-            "could not replace {}: {error}; reinstall with the official installer (curl -fsSL https://wrightkit.dev/install.sh | bash)",
+            "could not replace {}: {error}; reinstall with the official installer (curl -fsSL https://install.wrightkit.dev/wright/install.sh | bash)",
             destination.display()
         ))
     })
@@ -575,7 +604,7 @@ fn check_version(exe: &Path, version: &str) -> Result<(), UpdateError> {
     let reported = String::from_utf8_lossy(&output.stdout);
     if !reported.contains(version) {
         return Err(UpdateError::failed(format!(
-            "smoke check failed: `{} --version` did not report version {version} (got {:?}); reinstall with the official installer (curl -fsSL https://wrightkit.dev/install.sh | bash)",
+            "smoke check failed: `{} --version` did not report version {version} (got {:?}); reinstall with the official installer (curl -fsSL https://install.wrightkit.dev/wright/install.sh | bash)",
             exe.display(),
             reported.trim()
         )));
@@ -617,30 +646,117 @@ fn fetch(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>, Updat
     Ok(bytes)
 }
 
-fn parse_version(version: &str) -> Result<(u64, u64, u64), UpdateError> {
-    let core = version.strip_prefix('v').unwrap_or(version);
+/// A release version in the grammar `install.sh` accepts:
+/// `v?[0-9]+.[0-9]+.[0-9]+` plus one optional `[-+][0-9A-Za-z.-]+` suffix.
+/// A `-` suffix is a semver prerelease (lower precedence than the release);
+/// a `+` suffix is build metadata and ignored for ordering.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Version {
+    core: (u64, u64, u64),
+    prerelease: Vec<PrereleaseIdent>,
+}
+
+/// One dot-separated prerelease identifier: numeric identifiers order below
+/// alphanumeric ones (semver 2.0.0 §11).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PrereleaseIdent {
+    Numeric(u64),
+    Text(String),
+}
+
+impl Ord for PrereleaseIdent {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Self::Numeric(a), Self::Numeric(b)) => a.cmp(b),
+            (Self::Numeric(_), Self::Text(_)) => Ordering::Less,
+            (Self::Text(_), Self::Numeric(_)) => Ordering::Greater,
+            (Self::Text(a), Self::Text(b)) => a.cmp(b),
+        }
+    }
+}
+
+impl PartialOrd for PrereleaseIdent {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Version {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.core.cmp(&other.core).then_with(|| {
+            match (self.prerelease.is_empty(), other.prerelease.is_empty()) {
+                (true, true) => Ordering::Equal,
+                // A release outranks its own prereleases.
+                (true, false) => Ordering::Greater,
+                (false, true) => Ordering::Less,
+                (false, false) => self.prerelease.cmp(&other.prerelease),
+            }
+        })
+    }
+}
+
+impl PartialOrd for Version {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+fn parse_version(version: &str) -> Result<Version, UpdateError> {
+    parse_version_str(version).ok_or_else(|| {
+        UpdateError::Usage(format!(
+            "invalid version '{version}' (expected semver like 0.1.0)"
+        ))
+    })
+}
+
+fn parse_version_str(version: &str) -> Option<Version> {
+    let rest = version.strip_prefix('v').unwrap_or(version);
+    let (core, suffix) = match rest.find(['-', '+']) {
+        Some(index) => rest.split_at(index),
+        None => (rest, ""),
+    };
     let mut parts = core.split('.');
     let (Some(major), Some(minor), Some(patch), None) =
         (parts.next(), parts.next(), parts.next(), parts.next())
     else {
-        return Err(UpdateError::Usage(format!(
-            "invalid version '{version}' (expected semver like 0.1.0)"
-        )));
+        return None;
     };
-    let parse = |part: &str| {
-        part.parse::<u64>().map_err(|_| {
-            UpdateError::Usage(format!(
-                "invalid version '{version}' (expected semver like 0.1.0)"
-            ))
-        })
+    let core = (
+        major.parse::<u64>().ok()?,
+        minor.parse::<u64>().ok()?,
+        patch.parse::<u64>().ok()?,
+    );
+    let prerelease = match suffix.as_bytes().first() {
+        None => Vec::new(),
+        // Build metadata does not participate in precedence.
+        Some(b'+') => Vec::new(),
+        Some(b'-') => suffix[1..]
+            .split('.')
+            .map(|ident| {
+                ident
+                    .parse::<u64>()
+                    .map(PrereleaseIdent::Numeric)
+                    .unwrap_or_else(|_| PrereleaseIdent::Text(ident.to_string()))
+            })
+            .collect(),
+        _ => return None,
     };
-    Ok((parse(major)?, parse(minor)?, parse(patch)?))
+    if !suffix.is_empty()
+        && (suffix[1..].is_empty()
+            || !suffix[1..]
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-'))
+    {
+        return None;
+    }
+    Some(Version { core, prerelease })
 }
 
-fn compare_versions(a: &str, b: &str) -> Ordering {
-    let a = parse_version(a).expect("current version is a valid semver");
-    let b = parse_version(b).expect("resolved/requested version is a valid semver");
-    a.cmp(&b)
+/// Ordering of two version strings; `None` when either side is not in the
+/// release grammar — provider-reported versions are external input, so this
+/// never panics the way `.expect()` on a suffix did (#641).
+fn compare_versions(a: &str, b: &str) -> Option<Ordering> {
+    Some(parse_version_str(a)?.cmp(&parse_version_str(b)?))
 }
 
 fn truncate(value: &str) -> String {
@@ -663,9 +779,35 @@ mod tests {
 
     #[test]
     fn parse_version_accepts_stable_semver_and_leading_v() {
-        assert_eq!(parse_version("0.1.0").unwrap(), (0, 1, 0));
-        assert_eq!(parse_version("v0.2.10").unwrap(), (0, 2, 10));
-        assert_eq!(parse_version("9.9.9").unwrap(), (9, 9, 9));
+        assert_eq!(parse_version("0.1.0").unwrap().core, (0, 1, 0));
+        assert_eq!(parse_version("v0.2.10").unwrap().core, (0, 2, 10));
+        assert_eq!(parse_version("9.9.9").unwrap().core, (9, 9, 9));
+    }
+
+    #[test]
+    fn parse_version_accepts_the_suffixes_install_sh_accepts() {
+        // `install.sh` validates `v?[0-9]+.[0-9]+.[0-9]+([-+][0-9A-Za-z.-]+)?`
+        // — `update self --version` must not reject a version the installer
+        // would install (#641).
+        for good in [
+            "0.1.0-beta.1",
+            "v0.1.0-rc",
+            "0.1.0+build.5",
+            "1.2.3-nightly",
+        ] {
+            assert!(
+                parse_version(good).is_ok(),
+                "{good:?} is accepted by install.sh"
+            );
+        }
+        let version = parse_version("0.1.0-beta.1").unwrap();
+        assert_eq!(
+            version.prerelease,
+            vec![
+                PrereleaseIdent::Text("beta".to_string()),
+                PrereleaseIdent::Numeric(1)
+            ]
+        );
     }
 
     #[test]
@@ -677,8 +819,13 @@ mod tests {
             "1..3",
             "a.b.c",
             "1.2.x",
-            "0.1.0-beta.1",
             "",
+            // install.sh accepts exactly one suffix: a prerelease-then-build
+            // chain and an empty suffix body are outside its grammar.
+            "0.1.0-rc+build",
+            "0.1.0-",
+            "0.1.0+",
+            "0.1.0-rc_1",
         ] {
             assert!(parse_version(bad).is_err(), "{bad:?} must be rejected");
         }
@@ -699,11 +846,39 @@ mod tests {
     #[test]
     fn compare_versions_orders_numerically() {
         use std::cmp::Ordering::*;
-        assert_eq!(compare_versions("0.1.0", "0.1.0"), Equal);
-        assert_eq!(compare_versions("0.2.0", "0.1.0"), Greater);
-        assert_eq!(compare_versions("0.1.10", "0.1.9"), Greater);
-        assert_eq!(compare_versions("0.2.0", "0.10.0"), Less);
-        assert_eq!(compare_versions("1.0.0", "0.9.9"), Greater);
+        assert_eq!(compare_versions("0.1.0", "0.1.0"), Some(Equal));
+        assert_eq!(compare_versions("0.2.0", "0.1.0"), Some(Greater));
+        assert_eq!(compare_versions("0.1.10", "0.1.9"), Some(Greater));
+        assert_eq!(compare_versions("0.2.0", "0.10.0"), Some(Less));
+        assert_eq!(compare_versions("1.0.0", "0.9.9"), Some(Greater));
+    }
+
+    #[test]
+    fn compare_versions_orders_prereleases_by_semver_precedence() {
+        use std::cmp::Ordering::*;
+        // A release outranks its prereleases; prerelease identifiers compare
+        // per semver 2.0.0 §11 (numeric < alphanumeric, numeric numerically).
+        assert_eq!(compare_versions("0.2.0-beta.1", "0.2.0"), Some(Less));
+        assert_eq!(compare_versions("0.2.0", "0.2.0-rc.1"), Some(Greater));
+        assert_eq!(compare_versions("0.2.0-alpha", "0.2.0-alpha.1"), Some(Less));
+        assert_eq!(
+            compare_versions("0.2.0-alpha.1", "0.2.0-alpha"),
+            Some(Greater)
+        );
+        assert_eq!(
+            compare_versions("0.2.0-beta.2", "0.2.0-beta.10"),
+            Some(Less)
+        );
+        // Build metadata does not participate in precedence.
+        assert_eq!(compare_versions("0.2.0+build.1", "0.2.0"), Some(Equal));
+        assert_eq!(
+            compare_versions("0.2.0+build.1", "0.2.0+build.2"),
+            Some(Equal)
+        );
+        // External input (a provider-reported version) outside the release
+        // grammar yields no ordering instead of the old `.expect()` panic.
+        assert_eq!(compare_versions("nightly", "0.2.0"), None);
+        assert_eq!(compare_versions("0.2.0", ""), None);
     }
 
     #[test]
@@ -751,6 +926,20 @@ mod tests {
         );
         assert_eq!(
             provenance_of("/usr/local/bin/wright"),
+            Provenance::Standalone
+        );
+        // Package-manager names only count as whole path components (#641):
+        // `scooped`, `mywinget`, and `homebrewed` directories are standalone.
+        assert_eq!(
+            provenance_of("/c/Users/me/scooped/apps/wright/wright.exe"),
+            Provenance::Standalone
+        );
+        assert_eq!(
+            provenance_of("/opt/mywinget/bin/wright"),
+            Provenance::Standalone
+        );
+        assert_eq!(
+            provenance_of("/Users/me/homebrewed/wright"),
             Provenance::Standalone
         );
     }

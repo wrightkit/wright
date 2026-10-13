@@ -1779,6 +1779,59 @@ fn completion_install_explicit_shell_and_dir() {
 }
 
 #[test]
+fn completion_shell_positional_before_install_selects_that_shell() {
+    // `wright completion bash install` accepts `bash` ahead of the
+    // subcommand; it must install the bash completion, not the detected
+    // shell's (#641).
+    let dir = temp_dir();
+    let output = Command::new(wright())
+        .args([
+            "completion",
+            "bash",
+            "install",
+            "--dir",
+            dir.to_str().unwrap(),
+        ])
+        .env("WRIGHT_SHELL", "")
+        .env("SHELL", "/bin/zsh")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("installed bash completion"),
+        "the pre-subcommand positional wins over SHELL detection: {stdout}"
+    );
+    assert!(dir.join("wright").is_file(), "{stdout}");
+
+    // An explicit install positional still wins over the outer one.
+    let output = Command::new(wright())
+        .args([
+            "completion",
+            "bash",
+            "install",
+            "fish",
+            "--dir",
+            dir.to_str().unwrap(),
+        ])
+        .env("WRIGHT_SHELL", "")
+        .env("SHELL", "/bin/zsh")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("installed fish completion"),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn agent_install_writes_the_guide_and_refreshes_it() {
     let dir = temp_dir();
     let target = dir.join("wright");

@@ -280,13 +280,24 @@ fn provider_env(server: &MockServer) -> Vec<(&'static str, String)> {
 
 /// A fresh install directory holding copies of the real test binary.
 fn install_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("wright-update-it-{}-{tag}", std::process::id()));
+    install_dir_under(std::env::temp_dir(), tag)
+}
+
+fn install_dir_under(parent: PathBuf, tag: &str) -> PathBuf {
+    let dir = parent.join(format!("wright-update-it-{}-{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let wright = env!("CARGO_BIN_EXE_wright");
     std::fs::copy(wright, dir.join("wright")).unwrap();
     std::fs::copy(wright, dir.join("wright-lsp")).unwrap();
     dir
+}
+
+/// An install directory under a whole `homebrew` path component, the shape
+/// Homebrew's prefix actually produces (`/opt/homebrew/bin`, a Cellar
+/// path) — provenance detection matches components, not substrings (#641).
+fn homebrew_install_dir(tag: &str) -> PathBuf {
+    install_dir_under(std::env::temp_dir().join("homebrew"), tag)
 }
 
 fn run_update(dir: &Path, args: &[&str], env: &[(&'static str, String)]) -> std::process::Output {
@@ -783,9 +794,9 @@ fn package_managed_wright_skips_self_update_but_updates_providers() {
     if provider_target().is_none() {
         return;
     }
-    // The install directory name makes provenance detection classify the
-    // executable as Homebrew-managed.
-    let dir = install_dir("homebrew-managed");
+    // An install path under a `homebrew` component makes provenance
+    // detection classify the executable as Homebrew-managed.
+    let dir = homebrew_install_dir("managed");
     seed_provider(&dir, PROVIDER_OLD);
     let mut files = HashMap::new();
     provider_release(PROVIDER_RELEASE, &mut files);
@@ -821,7 +832,7 @@ fn package_managed_wright_skips_self_update_but_updates_providers() {
 
 #[test]
 fn explicit_self_update_still_refuses_package_managed_installations() {
-    let dir = install_dir("homebrew-self");
+    let dir = homebrew_install_dir("self");
     let before = read(&dir.join("wright"));
     let output = run_update(&dir, &["update", "self"], &[]);
     assert_eq!(output.status.code(), Some(3));
@@ -831,6 +842,151 @@ fn explicit_self_update_still_refuses_package_managed_installations() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(read(&dir.join("wright")), before);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn update_self_check_reports_availability_without_modifying_files() {
+    // `update self --check` resolves the same way as `update --check`
+    // restricted to the self target (#641).
+    let server = MockServer::new(release(RELEASE).files);
+    let dir = install_dir("self-check");
+    let before = read(&dir.join("wright"));
+    let output = run_update(&dir, &["update", "self", "--check"], &server.env());
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("update available") && stdout.contains(RELEASE),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains("opy provider"),
+        "the self target does not report providers: {stdout}"
+    );
+    assert_eq!(
+        read(&dir.join("wright")),
+        before,
+        "--check modifies nothing"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn update_provider_check_reports_availability_without_installing() {
+    if provider_target().is_none() {
+        return;
+    }
+    let dir = install_dir("provider-check-flag");
+    seed_provider(&dir, PROVIDER_OLD);
+    let mut files = HashMap::new();
+    provider_release(PROVIDER_RELEASE, &mut files);
+    let server = MockServer::new(files);
+    let output = run_update(
+        &dir,
+        &["update", "provider", "--check"],
+        &provider_env(&server),
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains(&format!(
+            "update available: opy provider {PROVIDER_OLD} -> {PROVIDER_RELEASE}"
+        )),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(
+        std::fs::read_to_string(provider_store(&dir).join("active"))
+            .unwrap()
+            .trim(),
+        PROVIDER_OLD,
+        "--check must not touch the active provider"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_failed_provider_update_makes_update_exit_nonzero() {
+    if provider_target().is_none() {
+        return;
+    }
+    // The self target skips (package-managed install) while the installed
+    // provider's update fails: `update` must not discard the failure (#641).
+    let dir = homebrew_install_dir("provider-fails");
+    seed_provider(&dir, PROVIDER_OLD);
+    // No provider routes at all: the latest-version fetch 404s.
+    let server = MockServer::new(HashMap::new());
+    let output = run_update(&dir, &["update"], &provider_env(&server));
+    assert_ne!(
+        output.status.code(),
+        Some(0),
+        "a failed provider update must not report success"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("opy"),
+        "stderr names the failing target: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_prerelease_pinned_version_installs() {
+    // `install.sh` accepts prerelease suffixes; `--version` uses the same
+    // grammar, and prerelease precedence keeps 9.9.9-beta.1 above the
+    // installed stable (#641).
+    let server = MockServer::new(release("9.9.9-beta.1").files);
+    let dir = install_dir("self-prerelease");
+    let output = run_update(
+        &dir,
+        &["update", "self", "--version", "9.9.9-beta.1"],
+        &server.env(),
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&read(&dir.join("wright"))).contains("fake wright 9.9.9-beta.1"),
+        "the prerelease payload was installed"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn standalone_install_in_a_scooped_directory_still_self_updates() {
+    // A directory named `scooped` is not Scoop: provenance only matches whole
+    // path components, so self-update runs instead of being refused (#641).
+    let server = MockServer::new(release(RELEASE).files);
+    let dir = install_dir_under(std::env::temp_dir().join("scooped"), "standalone");
+    let output = run_update(&dir, &["update"], &server.env());
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("skipped wright self-update"),
+        "a `scooped` component must not be classified as Scoop: {stdout}"
+    );
+    assert!(
+        String::from_utf8_lossy(&read(&dir.join("wright")))
+            .contains(&format!("fake wright {RELEASE}")),
+        "the standalone binary updated"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
