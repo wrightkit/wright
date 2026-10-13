@@ -17,6 +17,13 @@ import bench_report
 GRADER_UNAVAILABLE = "a required grader was unavailable"
 
 
+def provider_mismatches(results: list[dict]) -> list[str]:
+    """Provider toolchain identities that differ across the loaded runs, per language — merging
+    them would put trials checked and compiled under different providers in one result set (#656)."""
+    return [f"{language} ({', '.join(sorted(labels.values()))})"
+            for language, labels in sorted(bench_report.provider_records(results).items()) if len(labels) > 1]
+
+
 def regrade_trial(result: dict, dest: Path, scenario: dict, wright: str) -> bool:
     """Copy the stored trial into `dest` and re-grade it when the grader hash changed.
 
@@ -57,14 +64,15 @@ def regrade_trial(result: dict, dest: Path, scenario: dict, wright: str) -> bool
     return True
 
 
-def regrade(dirs: list[Path], wright: str, load_scenario, out: Path) -> dict:
+def regrade(dirs: list[Path], wright: str, load_scenario, out: Path, allow_provider_mismatch: bool = False) -> dict:
     """Copy every completed trial under `dirs` into `out`, re-grading hash-mismatched trials.
 
     `out` is laid out as `<out>/<run-dir-name>/<trial path>` so the result is
     consumable by `report`, `score`, and `publish` exactly like a run
     directory. A trial dir without a parseable contract `result.json` is not
     a finished trial and is skipped, as `load` does everywhere. No input
-    directory is modified.
+    directory is modified. Runs recorded under different provider versions are
+    not merged unless `allow_provider_mismatch` says the comparison is intended.
     """
     resolved = [base.resolve() for base in dirs]
     out = out.resolve()
@@ -76,11 +84,16 @@ def regrade(dirs: list[Path], wright: str, load_scenario, out: Path) -> dict:
         raise SystemExit("input directories must have distinct names")
     if out.exists() and any(out.iterdir()):
         raise SystemExit(f"--out {out} already exists and is not empty")
+    runs = {base: bench_report.load([base]) for base in resolved}
+    mismatches = provider_mismatches([result for loaded in runs.values() for result in loaded])
+    if mismatches and not allow_provider_mismatch:
+        raise SystemExit("runs were recorded under different providers: " + "; ".join(mismatches)
+                         + " — refusing to merge them into one result set; pass --allow-provider-mismatch when the comparison is intended")
     scenarios: dict[str, dict] = {}
     graded = copied = changed = 0
     transitions: dict[str, set] = {}
     for base in resolved:
-        for result in bench_report.load([base]):
+        for result in runs[base]:
             scenario_id = result["scenario"]
             if scenario_id not in scenarios:
                 scenarios[scenario_id] = load_scenario(scenario_id)
@@ -110,8 +123,8 @@ def regrade(dirs: list[Path], wright: str, load_scenario, out: Path) -> dict:
     return summary
 
 
-def main(dirs: list[Path], wright: str, load_scenario, out: Path) -> int:
-    summary = regrade(dirs, wright, load_scenario, out)
+def main(dirs: list[Path], wright: str, load_scenario, out: Path, allow_provider_mismatch: bool = False) -> int:
+    summary = regrade(dirs, wright, load_scenario, out, allow_provider_mismatch)
     if summary["regraded"] == 0:
         print(f"every recorded grader hash is current; {summary['copied']} trial(s) copied to {summary['out']}")
     else:

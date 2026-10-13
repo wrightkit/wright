@@ -15,8 +15,10 @@ from pathlib import Path
 
 import agent_bench
 import bench_grade
+import bench_publish
 import bench_regrade
 import bench_report
+import bench_score
 import bench_trace
 import wiki_skill
 
@@ -1143,8 +1145,8 @@ class RegradeTest(unittest.TestCase):
         spec = json.loads((self.scenarios / "scenario.json").read_text())
         return {**spec, "dir": self.scenarios}
 
-    def stored_trial(self, name: str, grader_hash: str, usable: bool = True) -> Path:
-        trial = self.out / "runs" / "tiny" / "fake" / f"none-none_off-{name}"
+    def stored_trial(self, name: str, grader_hash: str, usable: bool = True, root: str = "runs", providers=None) -> Path:
+        trial = self.out / root / "tiny" / "fake" / f"none-none_off-{name}"
         (trial / "workspace").mkdir(parents=True)
         (trial / "workspace" / "mode.ws").write_text(self.WORKSPACE)
         (trial / "agent.log").write_text("exit=0\n")
@@ -1152,7 +1154,7 @@ class RegradeTest(unittest.TestCase):
             "contract": agent_bench.RESULT_CONTRACT, "status": "completed", "language": "workshop",
             "condition": {"tool": "none", "level": "bin", "skills": [], "knowledge": "none", "network": "off", "label": "none/none/off"},
             "scenario": "tiny", "agent": {"id": "fake", "command": "true", "exit": 0, "seconds": 0.1},
-            "environment": {"timestamp": "2026-10-11T00:00:00+00:00"},
+            "environment": {"timestamp": "2026-10-11T00:00:00+00:00", **({"providers": providers} if providers is not None else {})},
             "passed": True, "usable": usable,
             "checks": [{"id": "has-text", "kind": "contains", "passed": True, "detail": "1 occurrence(s) in mode.ws"}],
             "grader": {"hash": grader_hash, "oracle": None},
@@ -1258,6 +1260,27 @@ class RegradeTest(unittest.TestCase):
             bench_regrade.regrade([self.out / "runs", self.out / "other" / "runs"], WRIGHT, self.scenario, self.out / "regraded")
         self.assertFalse((self.out / "regraded").exists())
 
+    def test_a_merge_across_different_provider_versions_is_refused_until_requested(self):
+        """#656: regrade refuses to put trials graded under different providers in one result set."""
+        current = bench_grade.grader_hash(self.scenario("tiny"))
+        self.stored_trial("1", current, providers={"opy": {"name": "opy-provider", "version": "0.3.9", "oracle": "0.5.2"}})
+        self.stored_trial("1", current, root="other", providers={"opy": {"name": "opy-provider", "version": "0.3.10", "oracle": "0.5.2"}})
+        with self.assertRaisesRegex(SystemExit, "--allow-provider-mismatch"):
+            bench_regrade.regrade([self.out / "runs", self.out / "other"], WRIGHT, self.scenario, self.out / "regraded")
+        self.assertFalse((self.out / "regraded").exists())  # refused before copying anything
+        summary = bench_regrade.regrade([self.out / "runs", self.out / "other"], WRIGHT, self.scenario, self.out / "regraded", allow_provider_mismatch=True)
+        self.assertEqual(summary["trials"], 2)
+        self.assertTrue((self.out / "regraded" / "runs" / "tiny" / "fake" / "none-none_off-1" / "result.json").is_file())
+        self.assertTrue((self.out / "regraded" / "other" / "tiny" / "fake" / "none-none_off-1" / "result.json").is_file())
+
+    def test_a_merge_across_the_same_provider_versions_is_allowed(self):
+        current = bench_grade.grader_hash(self.scenario("tiny"))
+        providers = {"opy": {"name": "opy-provider", "version": "0.3.10", "oracle": "0.5.2"}}
+        self.stored_trial("1", current, providers=providers)
+        self.stored_trial("1", current, root="other", providers=providers)
+        summary = bench_regrade.regrade([self.out / "runs", self.out / "other"], WRIGHT, self.scenario, self.out / "regraded")
+        self.assertEqual(summary["trials"], 2)
+
     def test_report_regrade_leaves_no_scratch_inside_the_run_directory(self):
         current = bench_grade.grader_hash(self.scenario("tiny"))
         trial = self.stored_trial("1", current)
@@ -1269,6 +1292,123 @@ class RegradeTest(unittest.TestCase):
             sorted(p.name for p in trial.iterdir()),
             ["agent.log", "result.json", "workspace"],
         )
+
+
+class ProviderIdentityTest(unittest.TestCase):
+    """#656: the run identity records the language toolchain — provider name and version as the
+    installed provider reports them, and the pinned oracle version — per language a scenario uses."""
+
+    def setUp(self):
+        (agent_bench.ROOT / "target").mkdir(exist_ok=True)
+        self.out = Path(tempfile.mkdtemp(dir=agent_bench.ROOT / "target")).resolve()
+        self.addCleanup(shutil.rmtree, self.out, True)
+
+    def fake_provider(self, base: Path, name: str, version: str, reply=None) -> Path:
+        """A provider executable scripted to answer `lpp/initialize` with a chosen serverInfo."""
+        store = base / "providers" / "opy"
+        executable = store / version / agent_bench._host_provider_target() / "opy-provider"
+        executable.parent.mkdir(parents=True)
+        executable.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, sys\n"
+            f"reply = {reply!r}\n"
+            "for line in sys.stdin:\n"
+            "    req = json.loads(line)\n"
+            "    answer = reply(req) if callable(reply) else {'jsonrpc': '2.0', 'id': req['id'], 'result': {'protocolVersion': req['params']['protocolVersion'], 'serverInfo': {'name': '" + name + "', 'version': '" + version + "'}, 'languages': [], 'capabilities': {}}}\n"
+            "    print(json.dumps(answer), flush=True)\n")
+        executable.chmod(0o755)
+        (store / "active").write_text(version + "\n")
+        return executable
+
+    @unittest.skipUnless(agent_bench._host_provider_target(), "no OPY provider target exists for this host")
+    def test_the_identity_is_what_the_installed_provider_reports(self):
+        base = self.out / "data"
+        self.fake_provider(base, "fake-provider", "9.9.9")
+        with patch.dict(os.environ, {"WRIGHT_PROVIDER_DATA_DIR": str(base)}):
+            providers = agent_bench.provider_identities({"language": "opy"})
+        self.assertEqual(providers["opy"]["name"], "fake-provider")
+        self.assertEqual(providers["opy"]["version"], "9.9.9")
+        self.assertEqual(providers["opy"]["oracle"], bench_grade.oracle_version())
+
+    @unittest.skipUnless(agent_bench._host_provider_target(), "no OPY provider target exists for this host")
+    def test_the_identity_renegotiates_at_the_providers_advertised_version(self):
+        base = self.out / "data"
+        store = base / "providers" / "opy"
+        executable = store / "0.1.0" / agent_bench._host_provider_target() / "opy-provider"
+        executable.parent.mkdir(parents=True)
+        executable.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, sys\n"
+            "for line in sys.stdin:\n"
+            "    req = json.loads(line)\n"
+            "    if req['params']['protocolVersion'] != '1.2':\n"
+            "        print(json.dumps({'jsonrpc': '2.0', 'id': req['id'], 'error': {'code': -32000, 'message': 'version', 'data': {'lpp': {'kind': 'protocolVersionMismatch', 'details': {'supportedProtocolVersions': ['1.1', '1.2']}}}}}), flush=True)\n"
+            "    else:\n"
+            "        print(json.dumps({'jsonrpc': '2.0', 'id': req['id'], 'result': {'protocolVersion': '1.2', 'serverInfo': {'name': 'old-provider', 'version': '0.1.0'}, 'languages': [], 'capabilities': {}}}), flush=True)\n")
+        executable.chmod(0o755)
+        (store / "active").write_text("0.1.0\n")
+        with patch.dict(os.environ, {"WRIGHT_PROVIDER_DATA_DIR": str(base)}):
+            self.assertEqual(agent_bench.provider_server_info(executable), {"name": "old-provider", "version": "0.1.0"})
+
+    def test_a_provider_that_cannot_answer_keeps_the_store_version(self):
+        store = self.out / "data" / "providers" / "opy"
+        store.mkdir(parents=True)
+        (store / "active").write_text("7.7.7\n")  # pinned, but the executable is gone
+        with patch.dict(os.environ, {"WRIGHT_PROVIDER_DATA_DIR": str(self.out / "data")}):
+            providers = agent_bench.provider_identities({"language": "opy"})
+        self.assertEqual(providers["opy"]["name"], "opy-provider")
+        self.assertEqual(providers["opy"]["version"], "7.7.7")
+
+    def test_no_install_records_empty_identity_and_workshop_records_none(self):
+        with patch.dict(os.environ, {"WRIGHT_PROVIDER_DATA_DIR": str(self.out / "nothing")}):
+            providers = agent_bench.provider_identities({"language": "opy"})
+        self.assertIsNone(providers["opy"]["name"])
+        self.assertIsNone(providers["opy"]["version"])
+        self.assertEqual(agent_bench.provider_identities({"language": "workshop"}), {})
+
+    @unittest.skipUnless(Path(WRIGHT).is_file() and agent_bench._host_provider_target(), "build wright first or set WRIGHT_BIN; no OPY provider target exists for this host")
+    def test_evaluate_writes_the_provider_identity_into_the_run_identity(self):
+        base = self.out / "data"
+        self.fake_provider(base, "fake-provider", "9.9.9")
+        args = argparse.Namespace(wright=WRIGHT, agent_id="fake", agent_cmd="true", timeout=60, infra_retries=2,
+                                  skill_dirs={}, private_suite=None, agent_model=None, agent_effort=None)
+        cell = agent_bench.normalize_cell({"tool": "none", "skills": [], "knowledge": "none", "network": "off"})
+        with patch.dict(os.environ, {"WRIGHT_PROVIDER_DATA_DIR": str(base)}):
+            opy = agent_bench.base_result(agent_bench.load_scenario("repair-opy-runaway-loop"), cell, args, self.out / "opy", 0.0, 0)
+            workshop = agent_bench.base_result(agent_bench.load_scenario(SCENARIO), cell, args, self.out / "ws", 0.0, 0)
+        self.assertEqual(opy["environment"]["providers"], {"opy": {"name": "fake-provider", "version": "9.9.9", "oracle": bench_grade.oracle_version()}})
+        self.assertEqual(workshop["environment"]["providers"], {})
+
+    def test_the_score_refuses_canonical_runs_under_different_provider_versions(self):
+        runs = [
+            {"contract": agent_bench.RESULT_CONTRACT, "scenario": f"s{i}", "family": "f", "language": "opy", "split": "test",
+             "condition": {"label": bench_score.CANONICAL}, "agent": {"id": "m", "exit": 0, "seconds": 1.0}, "status": "completed",
+             "usable": True, "passed": True,
+             "environment": {"providers": {"opy": {"name": "opy-provider", "version": v}}, "skills": {"wright-skill": {"sha256": "s"}}}}
+            for i, v in ((1, "0.3.9"), (2, "0.3.10"))
+        ]
+        self.assertIn("providers", bench_score.card(runs, "opy", [])["refused"])
+
+    def test_the_published_environment_carries_the_provider_identity(self):
+        try:
+            import jsonschema  # noqa: F401
+        except ImportError:
+            self.skipTest("publish validation needs jsonschema")
+        identity = {"wright": "wright 0.18.0", "wrightSha256": "0" * 64,
+                    "providers": {"opy": {"name": "opy-provider", "version": "0.3.10", "oracle": "0.5.2"}},
+                    "skills": {"wright-skill": "a" * 64},
+                    "suite": {"version": "v2", "publicHash": "0" * 64, "privateHash": None, "hash": "0" * 64, "mode": "public sample", "scenarios": 4},
+                    "protocol": {"timeoutSeconds": 1800, "infraRetries": 2},
+                    "fileReadEnforcement": "allow-list", "fileWriteEnforcement": "trial-directory-only", "networkEnforcement": "canary-checked"}
+        environment = bench_publish.environment({"identity": identity})
+        self.assertEqual(environment["providers"], {"opy": {"name": "opy-provider", "version": "0.3.10", "oracle": "0.5.2"}})
+        bundle = {"contract": "wright-agent-results/v1", "excluded": [], "entries": [{
+            "id": "run-" + "a" * 24,
+            "agent": {"program": "x", "version": "1.0", "model": "m", "effort": None, "skills": [{"name": "wright-skill", "sha256": "a" * 64}]},
+            "environment": environment,
+            "tracks": [{"language": "opy", "score": 50.0, "ci95": [0.0, 100.0], "ciMethod": bench_score.METHOD,
+                        "trialsPerScenario": 3, "scenarios": 8, "validRuns": 24, "provisional": [], "exclusions": []}]}]}
+        bench_publish.validate(bundle)  # the provider fields are part of the public contract, not junk the schema drops
 
 
 @unittest.skipUnless(sys.platform == "darwin", "file flags are the macOS enforcement")
@@ -1609,6 +1749,34 @@ class ReportTest(unittest.TestCase):
         text, _ = bench_report.render([run, bare])
         self.assertIn("| m | wright+wright-skill/none/off | tool 1.2 | m-1 | high | 2: bash, read | wright |", text)
         self.assertIn("| m | none/none/off | not recorded | not recorded | not recorded | not recorded | none |", text)
+
+    def test_report_prints_provider_versions_beside_the_wright_version(self):
+        """#656: the report header shows the toolchain identity each run recorded."""
+        runs = [self.result("wright/none/off", 1, True, 80, wright="wright 0.18.0 (wright-driver 0.18.0)",
+                            providers={"opy": {"name": "opy-provider", "version": "0.3.10", "oracle": "0.5.2"}})]
+        text, summary = bench_report.render(runs)
+        self.assertIn("Wright: wright 0.18.0 (wright-driver 0.18.0)", text)
+        self.assertIn("Providers: opy: opy-provider 0.3.10 (oracle 0.5.2)", text)
+        self.assertEqual(summary["providers"], {"opy": [{"name": "opy-provider", "version": "0.3.10", "oracle": "0.5.2"}]})
+
+    def test_a_report_over_different_provider_versions_says_so(self):
+        runs = [
+            self.result("wright/none/off", 1, True, 80, providers={"opy": {"name": "opy-provider", "version": "0.3.9", "oracle": None}}),
+            self.result("wright/none/off", 2, True, 90, providers={"opy": {"name": "opy-provider", "version": "0.3.10", "oracle": None}}),
+        ]
+        text, _ = bench_report.render(runs)
+        self.assertIn("PROVIDERS: runs recorded different opy toolchains", text)
+        self.assertIn("opy-provider 0.3.9", text)
+        self.assertIn("opy-provider 0.3.10", text)
+
+    def test_pairs_recorded_under_different_providers_are_dropped(self):
+        runs = [
+            self.result("none/none/off", 1, False, 100, wrightSha256="x", providers={"opy": {"name": "opy-provider", "version": "0.3.9"}}),
+            self.result("wright/none/off", 1, True, 80, wrightSha256="x", providers={"opy": {"name": "opy-provider", "version": "0.3.10"}}),
+        ]
+        text, _ = bench_report.render(runs)
+        self.assertIn("differ in providers", text)
+        self.assertIn("Non-comparable pairs dropped", text)
 
     def test_provider_failures_do_not_count_as_agent_failures(self):
         good = self.result("none/none/off", 1, True, 100)

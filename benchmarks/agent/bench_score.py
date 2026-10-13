@@ -47,6 +47,14 @@ def read_enforcement(run: dict) -> str | None:
     return enforcement.get("mode") if isinstance(enforcement, dict) else enforcement
 
 
+def provider_label(language: str, record: dict | None) -> str:
+    """`opy: opy-provider 0.3.10 (oracle 0.5.2)` — the language toolchain behind a result, for display."""
+    if not record:
+        return f"{language}: not recorded"
+    label = f"{language}: {record.get('name') or 'provider'} {record.get('version') or '?'}"
+    return f"{label} (oracle {record['oracle']})" if record.get("oracle") else label
+
+
 def suite_identity(suite: dict) -> dict:
     """Only the versioned public identity belongs in published artifacts."""
     return {**{k: suite.get(k) for k in ("version", "publicHash", "privateHash", "hash", "scenarios")},
@@ -91,6 +99,7 @@ def identity_of(run: dict) -> dict:
     info["model"], info["effort"] = model, effort
     return {
         "wrightSha256": env.get("wrightSha256"), "wright": env.get("wright"),
+        "providers": env.get("providers") or {},  # the language toolchain that checked and compiled the run's sources
         "skills": {name: s["sha256"] for name, s in sorted((env.get("skills") or {}).items())},
         "suite": suite_identity(env.get("suite") or {}),
         "agent": run["agent"]["id"], "model": info.get("model"), "effort": info.get("effort"),
@@ -183,6 +192,7 @@ def render(c: dict) -> str:
         f"Trials:      {c['trialsPerScenario']} per scenario ({c['validRuns']} valid runs)", f"Scenarios:   {c['scenarios']} held-out", "",
         f"Suite:       {c['suite'].get('version')} {c['suite'].get('hash')}",
         f"Public hash: {c['suite'].get('publicHash')}", f"Private hash: {c['suite'].get('privateHash') or 'none'}", f"Wright:      {ident['wright']} sha256 {ident['wrightSha256']}",
+        f"Providers:   {', '.join(provider_label(lang, p) for lang, p in sorted((ident.get('providers') or {}).items())) or 'none recorded'}",
         f"Skills:      {', '.join(f'{n} {h}' for n, h in ident['skills'].items()) or 'none'}", f"Harness:     {', '.join(c['harness']) or 'not recorded'}",
         f"Network:     {', '.join(x or 'not recorded' for x in c['networkEnforcement'])}", f"File writes: {', '.join(x or 'not recorded' for x in c['fileWriteEnforcement'])}",
         f"File reads:  {', '.join(x or 'not recorded' for x in c['fileReadEnforcement'])}",
@@ -197,7 +207,7 @@ def render(c: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-COMPARABLE = ("wrightSha256", "skills", "suite", "fileReadEnforcement", "fileWriteEnforcement", "networkEnforcement")  # what must match for two cards to be read side by side; agent, model, and effort are what is being compared
+COMPARABLE = ("wrightSha256", "skills", "suite", "providers", "fileReadEnforcement", "fileWriteEnforcement", "networkEnforcement")  # what must match for two cards to be read side by side; agent, model, and effort are what is being compared
 
 
 def compare(dirs: list[Path]) -> str:

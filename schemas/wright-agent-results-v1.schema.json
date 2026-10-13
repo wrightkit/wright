@@ -152,6 +152,57 @@
         "wrightSha256": {
           "$ref": "#/$defs/sha256"
         },
+        "providers": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/text"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "version": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/text"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "oracle": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/text"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "version",
+                  "oracle"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
         "skills": {
           "type": "array",
           "items": {
@@ -203,6 +254,7 @@
       "required": [
         "wright",
         "wrightSha256",
+        "providers",
         "skills",
         "suite",
         "protocol",

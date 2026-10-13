@@ -385,7 +385,7 @@ with the workspace, `agent.log`, snapshots, and the Wright trace beside it.
 | Field | Meaning |
 | --- | --- |
 | `condition`, `agent`, `agentInfo`, `protocol`, `status` | Cell with its `label`; agent label/command/exit/seconds; the system and tools the adapter reports; timeout and infra retries; `completed`, `provider-interrupted`, `timeout`, `agent-error`, or `invalid` |
-| `environment`, `grader` | OS/Python/Wright version and sha256, harness commit, suite version and hash, skill identities (`skills`), wiki identity, grader hash and oracle version |
+| `environment`, `grader` | OS/Python/Wright version and sha256, harness commit, suite version and hash, skill identities (`skills`), wiki identity, language-provider name/version and oracle version per language the scenario's grading uses (`providers`), grader hash and oracle version |
 | `checks`, `passed`, `usable`, `failedLayers` | Per-check outcome; `usable` is `passed` with no error-severity lint finding and no unsafe edits; `usableReason` names the blocking cause |
 | `authorities`, `disagreement` | Validity per authority and any Wright/oracle disagreement |
 | `diagnostics`, `lintFindings`, `unsafeEdits` | Remaining `wright check` diagnostics, lint rule codes, files changed outside `writable` |
@@ -418,7 +418,10 @@ trial; token comparison only where both are usable), per-scenario and per-split
 tables, expectation rates, friction, output size per command, bounded-output
 adoption (the share of Wright uses carrying `--brief` or a selection
 flag/field, per condition), and diagnostics.
-Diagnostics flag headroom (baseline usable rate of at least 95%), infrastructure
+The report header prints the Wright version next to the language-provider
+name and version each run recorded; a report built from runs with different
+provider versions says so. Diagnostics flag headroom (baseline usable rate of
+at least 95%), infrastructure
 failures, invalid runs, trial variance, and, with `--regrade`, a grader that
 gives different verdicts on the same stored workspace.
 
@@ -453,7 +456,8 @@ track (Wright Workshop Agent Score, Wright OPY Agent Score; contract
 over scenarios, and gives a two-stage bootstrap 95% interval (10,000 draws, seed
 467) and Pass^k as a secondary figure. Provider-interrupted, invalid, and
 agent-error runs are published as exclusions; timeouts count. The score is
-refused if the runs differ in Wright binary, skill hashes, suite hash, agent,
+refused if the runs differ in Wright binary, provider versions, skill hashes,
+suite hash, agent,
 model, effort, protocol, or file-read/file-write/network enforcement — a run
 where the agent could read answer keys does not score beside a sandboxed one —
 and it is marked provisional with fewer than eight
@@ -515,7 +519,7 @@ python3 benchmarks/agent/agent_bench.py compare ~/.local/share/wright-agent-benc
 ```
 
 which prints one table of scores, intervals, trials, and exclusions, and warns when
-the runs differ in the Wright binary, skill contents, or suite (scenarios, grader,
+the runs differ in the Wright binary, provider versions, skill contents, or suite (scenarios, grader,
 oracle lock). Scores are comparable when it prints no warning. Keep the Wright
 binary, skills, and scenarios unchanged between runs; changes to the rest of the
 harness are disclosed in each card's `Harness` line and do not block comparison.
