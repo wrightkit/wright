@@ -28,7 +28,7 @@ The held-out scenarios already live in the private `wrightkit/benchmark-suite`, 
 - A Wright change that moves agent behavior is detected by the benchmark after release instead of being adjusted alongside it.
 - Wright's CI stops paying for harness tests on product changes.
 - The repository routing table in `wrightkit/.github` gains the benchmark suite as the owner of the agent benchmark.
-- Evaluation work in `agent-lab` is consolidated into the same home rather than kept as a third location.
+- `benchmark-suite` is the only maintained evaluation location. The evaluations in `agent-lab` stay there frozen as a historical record. They are not moved, because they grade with `agent-lab`'s pre-Wright tools, which Wright now covers. Cases worth keeping are ported as `benchmark-suite` scenarios when needed.
 
 ## Compatibility impact
 
