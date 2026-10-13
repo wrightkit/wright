@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.20.0](https://github.com/wrightkit/wright/compare/v0.19.0...v0.20.0) (2026-10-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* pre-1.0 wright-result/v1 and wright-agent/v1 results default to essential content; brief is removed and all requests complete lists.
+* **cli:** result.output.text is removed from the wright-result/v1 compile result and compile no longer prints the program to stdout by default (ADR-0025).
+
+### Features
+
+* **bench:** record scenario-cost metrics for the recommended call sequences ([#681](https://github.com/wrightkit/wright/issues/681)) ([b66c155](https://github.com/wrightkit/wright/commit/b66c155c278453991e3050e83337ff4934c9d9d0)), closes [#671](https://github.com/wrightkit/wright/issues/671)
+* **cli:** write compile output to a file ([#678](https://github.com/wrightkit/wright/issues/678)) ([c95371d](https://github.com/wrightkit/wright/commit/c95371d83154a27bf2174b29531cffafbc4d128e))
+* default to essential output on every surface ([#677](https://github.com/wrightkit/wright/issues/677)) ([d137029](https://github.com/wrightkit/wright/commit/d13702923d5ff8376520cafe0e693f2fb325e6ce))
+
+
+### Code Refactoring
+
+* **bench:** decouple product tests and metrics corpus from benchmarks/agent ([#676](https://github.com/wrightkit/wright/issues/676)) ([f28beb0](https://github.com/wrightkit/wright/commit/f28beb007308ab9b0a77f35701c03780cd452715)), closes [#669](https://github.com/wrightkit/wright/issues/669)
+
 ## [0.19.0](https://github.com/wrightkit/wright/compare/v0.18.0...v0.19.0) (2026-10-13)
 
 
