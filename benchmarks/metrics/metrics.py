@@ -449,12 +449,9 @@ def default_counts(payload) -> dict:
     return counts
 
 
-def run_cli_commands(
-    wright: str, entry: Path, kind: str, project_dir: Path, repeats: int
-) -> dict:
-    """Measure default JSON and text forms; address refs/cfg through queries."""
-    metrics: dict[str, dict] = {}
-    scratch = tempfile.TemporaryDirectory(prefix="wright-metrics-")
+def discover_addresses(wright: str, entry: Path, kind: str, project_dir: Path) -> dict:
+    """Globally unique rule/symbol names, keyed by the `inspect` subcommand
+    (`cfg`, `refs`) that addresses them."""
     addresses = {}
     with ServeSession(wright, entry, kind, project_dir) as session:
         for op, address in (("rules", "cfg"), ("symbols", "refs")):
@@ -464,6 +461,16 @@ def run_cli_commands(
                     addresses[address] = name
             except (queue.Empty, TimeoutError):
                 break
+    return addresses
+
+
+def run_cli_commands(
+    wright: str, entry: Path, kind: str, project_dir: Path, repeats: int
+) -> dict:
+    """Measure default JSON and text forms; address refs/cfg through queries."""
+    metrics: dict[str, dict] = {}
+    scratch = tempfile.TemporaryDirectory(prefix="wright-metrics-")
+    addresses = discover_addresses(wright, entry, kind, project_dir)
     for command in CLI_COMMANDS + [f"inspect {sub}" for sub in INSPECT_COMMANDS]:
         for form in (["json"] if command == "compile" else ["json", "text"]):
             key = f"cli:{command}" + ("?text" if form == "text" else "")
@@ -501,6 +508,82 @@ def run_cli_commands(
             )
     scratch.cleanup()
     return metrics
+
+
+def accumulate_scenario(steps: list[list[str]], execute) -> dict:
+    """Cumulative size of one scenario's call sequence.
+
+    ``execute(step)`` returns ``(output bytes, failure or None)``. Any failing
+    step makes the whole scenario an ``error``: a partial sequence is not a
+    measurement."""
+    total = 0
+    for index, step in enumerate(steps, 1):
+        size, failure = execute(step)
+        if failure:
+            return {"error": f"step {index} ({' '.join(step)}): {failure}"}
+        total += size
+    return metric_record([total], None, {"steps": len(steps)})
+
+
+def run_scenarios(
+    wright: str, entry: Path, kind: str, project_dir: Path, scenarios: list[dict]
+) -> dict:
+    """`scenario:<id>` metrics: each recommended call sequence in its default
+    text form, run as separate CLI invocations."""
+    metrics: dict[str, dict] = {}
+    addresses = discover_addresses(wright, entry, kind, project_dir)
+    placeholders = {"{symbol}": addresses.get("refs"), "{rule}": addresses.get("cfg")}
+
+    def execute(step: list[str]) -> tuple[int, str | None]:
+        argv = [wright]
+        for word in step:
+            if word in placeholders:
+                if placeholders[word] is None:
+                    return 0, "no globally unique declared name"
+                word = placeholders[word]
+            argv.append(word)
+        argv += [str(entry), "--kind", kind, "-f", "text"]
+        completed = subprocess.run(argv, capture_output=True, cwd=project_dir)
+        failure = None
+        if completed.returncode not in (0, 1):
+            failure = f"exit-{completed.returncode}"
+        return len(completed.stdout), failure
+
+    for scenario in scenarios:
+        metrics[f"scenario:{scenario['id']}"] = accumulate_scenario(
+            scenario["steps"], execute
+        )
+    return metrics
+
+
+def scenario_ratios(projects: dict, scenarios: list[dict], corpus_projects: list[dict]) -> dict:
+    """Per scenario: the largest measured project and its token ratio to each
+    seed project that ran the same scenario."""
+    ratios: dict[str, dict] = {}
+    for scenario in scenarios:
+        key = f"scenario:{scenario['id']}"
+        tokens = {
+            pid: p["metrics"][key]["tokens"]
+            for pid, p in projects.items()
+            if "tokens" in (p.get("metrics") or {}).get(key, {})
+        }
+        if not tokens:
+            continue
+        largest = max(tokens, key=tokens.get)
+        seeds = [
+            p["id"] for p in corpus_projects
+            if p["id"].startswith("seed-") and p["id"] in tokens
+            and scenario["id"] in p.get("scenarios", [])
+        ]
+        ratios[scenario["id"]] = {
+            "largest": largest,
+            "tokens": tokens[largest],
+            "vsSeed": {
+                seed: round(tokens[largest] / tokens[seed], 1)
+                for seed in seeds if tokens[seed]
+            },
+        }
+    return ratios
 
 
 def wright_version(wright: str) -> str:
@@ -587,6 +670,10 @@ def run_metrics(
                 repeats if cli_repeats is None else cli_repeats,
             )
         )
+        selected = [
+            sc for sc in corpus.get("scenarios", []) if sc["id"] in project.get("scenarios", [])
+        ]
+        metrics.update(run_scenarios(wright, entry, project["kind"], directory, selected))
         failed = all("error" in m or "skipped" in m for m in metrics.values())
         projects[pid] = {
             "status": "error" if failed else "ok",
@@ -603,6 +690,9 @@ def run_metrics(
         "opyProvider": provider_version(),
         "defaultTokenBudget": DEFAULT_TOKEN_BUDGET,
         "projects": projects,
+        "scenarioRatios": scenario_ratios(
+            projects, corpus.get("scenarios", []), corpus["projects"]
+        ),
     }
 
 
@@ -818,8 +908,11 @@ def _compare_metric(
 
 def split_changes(violations: list[dict]) -> tuple[list[dict], list[dict]]:
     """(blocking, drift): drift is every change that is not in BLOCKING_CHANGES."""
-    blocking = [v for v in violations if v["change"] in BLOCKING_CHANGES]
-    return blocking, [v for v in violations if v["change"] not in BLOCKING_CHANGES]
+    # Scenario metrics are not yet a gate (#665): every change is drift.
+    def blocks(v: dict) -> bool:
+        return v["change"] in BLOCKING_CHANGES and not v["metric"].startswith("scenario:")
+
+    return [v for v in violations if blocks(v)], [v for v in violations if not blocks(v)]
 
 
 def _format_change(v: dict) -> str:
@@ -831,7 +924,12 @@ def _format_change(v: dict) -> str:
     return f"  {v['project']}/{v['metric']}: {v['change']}"
 
 
-def print_report(blocking: list[dict], drift: list[dict], warnings: list[str]) -> None:
+def print_report(
+    blocking: list[dict], drift: list[dict], warnings: list[str], ratios: dict | None = None
+) -> None:
+    for scenario, ratio in (ratios or {}).items():
+        vs = ", ".join(f"{seed} x{value}" for seed, value in ratio["vsSeed"].items())
+        print(f"scenario {scenario}: largest {ratio['largest']} {ratio['tokens']} tokens; vs {vs}")
     for warning in warnings:
         print(f"warning: {warning}", file=sys.stderr)
     if drift:
@@ -947,7 +1045,7 @@ def main() -> int:
         baseline, current = strip_latency(baseline), strip_latency(current)
     violations, warnings = compare_metrics(baseline, current)
     blocking, drift = split_changes(violations)
-    print_report(blocking, drift, warnings)
+    print_report(blocking, drift, warnings, current.get("scenarioRatios"))
     return 1 if blocking else 0
 
 

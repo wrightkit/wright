@@ -28,6 +28,29 @@ agent-facing cost, not behavior.
   stored. OPY entries need the OPY provider (`wright update provider opy`);
   without it they report `skipped` instead of failing.
 
+## Scenario metrics
+
+`corpus.json` also lists `scenarios`: per family (`understand`, `modify`,
+`repair`) the call sequence that
+[`agent-guide/wright/SKILL.md`](../agent-guide/wright/SKILL.md) recommends,
+each with a `source` citing the guide lines it derives from. A project opts in
+with `scenarios: [...]`; the `seed-*` projects run their own family and the
+pinned externals (`bastion`, `overwatch-ai-pve`) run all three. `{symbol}` and
+`{rule}` in a step are replaced by a globally unique declared name, as for the
+`inspect refs` and `inspect cfg` CLI metrics.
+
+Each run records `scenario:<id>`: the estimated tokens (`bytes / 4`) of every
+step's default text output, summed over the sequence (a repeated step counts
+each time). Steps run as separate CLI invocations and no latency is recorded.
+Exit 0 and 1 are results; any other exit, or a name that cannot be resolved,
+makes the metric an `error` for that project, never a partial sum. The run also
+records `scenarioRatios`: per scenario, the largest project and its ratio to
+each seed project, printed by `check`.
+
+Scenario metrics are **not yet a gate** (#665 decides the standard). `check`
+reports their movement, including a change to or from `error`, as drift and
+never fails on them; they have no budget or ceiling.
+
 ## Commands
 
 ```sh
