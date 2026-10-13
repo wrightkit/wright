@@ -325,6 +325,44 @@ class RunTest(unittest.TestCase):
         self.assertIsNone(metrics.envelope_failure({"ok": True, "diagnostics": [{"code": "w"}]}))
 
 
+class ScenarioTest(unittest.TestCase):
+    def test_sequence_sums_every_step(self):
+        sizes = {"check": 400, "lint": 200, "analyze": 600}
+        record = metrics.accumulate_scenario(
+            [["check"], ["lint"], ["analyze"], ["check"]], lambda step: (sizes[step[0]], None)
+        )
+        self.assertEqual((record["bytes"], record["tokens"]), (1600, 400.0))
+        self.assertEqual(record["counts"], {"steps": 4})
+
+    def test_failed_or_refused_step_is_an_error_not_a_partial_sum(self):
+        def execute(step):
+            return (500, "exit-3") if step == ["lint"] else (100, None)
+
+        record = metrics.accumulate_scenario([["check"], ["lint"], ["analyze"]], execute)
+        self.assertEqual(set(record), {"error"})
+        self.assertIn("step 2", record["error"])
+
+    def test_scenario_changes_never_block(self):
+        base = _doc({"p": {"status": "ok", "metrics": {"scenario:s": _metric(1000)}}})
+        for run_metric in ({"error": "step 1 (check): exit-3"}, _metric(9000)):
+            run = _doc({"p": {"status": "ok", "metrics": {"scenario:s": run_metric}}})
+            blocking, drift = metrics.split_changes(metrics.compare_metrics(base, run)[0])
+            self.assertEqual(blocking, [])
+            self.assertTrue(drift)
+
+    def test_ratio_compares_largest_project_to_each_seed(self):
+        projects = {
+            "seed-a": {"metrics": {"scenario:s": {"tokens": 100.0}}},
+            "seed-b": {"metrics": {"scenario:s": {"tokens": 50.0}}},
+            "big": {"metrics": {"scenario:s": {"tokens": 1000.0}}},
+        }
+        corpus_projects = [{"id": i, "scenarios": ["s"]} for i in projects]
+        ratios = metrics.scenario_ratios(projects, [{"id": "s"}], corpus_projects)
+        self.assertEqual(
+            ratios["s"], {"largest": "big", "tokens": 1000.0, "vsSeed": {"seed-a": 10.0, "seed-b": 20.0}}
+        )
+
+
 def _check_main(baseline_path: Path, *extra: str) -> int:
     """Invoke `check` against a canned baseline without touching wright."""
     argv = ["metrics.py", "check", "--baseline", str(baseline_path), *extra]

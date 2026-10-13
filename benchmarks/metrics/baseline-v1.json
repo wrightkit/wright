@@ -457,6 +457,27 @@
           "bytes": 4150,
           "counts": {},
           "tokens": 1037.5
+        },
+        "scenario:modify": {
+          "bytes": 15636,
+          "counts": {
+            "steps": 7
+          },
+          "tokens": 3909.0
+        },
+        "scenario:repair": {
+          "bytes": 11955,
+          "counts": {
+            "steps": 6
+          },
+          "tokens": 2988.8
+        },
+        "scenario:understand": {
+          "bytes": 3306,
+          "counts": {
+            "steps": 4
+          },
+          "tokens": 826.5
         }
       },
       "status": "ok"
@@ -922,6 +943,27 @@
           "bytes": 4229,
           "counts": {},
           "tokens": 1057.2
+        },
+        "scenario:modify": {
+          "bytes": 16722,
+          "counts": {
+            "steps": 7
+          },
+          "tokens": 4180.5
+        },
+        "scenario:repair": {
+          "bytes": 12786,
+          "counts": {
+            "steps": 6
+          },
+          "tokens": 3196.5
+        },
+        "scenario:understand": {
+          "bytes": 3698,
+          "counts": {
+            "steps": 4
+          },
+          "tokens": 924.5
         }
       },
       "status": "ok"
@@ -1327,6 +1369,13 @@
           "bytes": 117,
           "counts": {},
           "tokens": 29.2
+        },
+        "scenario:modify": {
+          "bytes": 4131,
+          "counts": {
+            "steps": 7
+          },
+          "tokens": 1032.8
         }
       },
       "status": "ok"
@@ -1741,6 +1790,13 @@
           "bytes": 117,
           "counts": {},
           "tokens": 29.2
+        },
+        "scenario:modify": {
+          "bytes": 4564,
+          "counts": {
+            "steps": 7
+          },
+          "tokens": 1141.0
         }
       },
       "status": "ok"
@@ -2142,6 +2198,13 @@
           "bytes": 540,
           "counts": {},
           "tokens": 135.0
+        },
+        "scenario:repair": {
+          "bytes": 2968,
+          "counts": {
+            "steps": 6
+          },
+          "tokens": 742.0
         }
       },
       "status": "ok"
@@ -2543,6 +2606,13 @@
           "bytes": 548,
           "counts": {},
           "tokens": 137.0
+        },
+        "scenario:repair": {
+          "bytes": 3089,
+          "counts": {
+            "steps": 6
+          },
+          "tokens": 772.2
         }
       },
       "status": "ok"
@@ -2955,6 +3025,13 @@
           "bytes": 117,
           "counts": {},
           "tokens": 29.2
+        },
+        "scenario:understand": {
+          "bytes": 1085,
+          "counts": {
+            "steps": 4
+          },
+          "tokens": 271.2
         }
       },
       "status": "ok"
@@ -3369,6 +3446,13 @@
           "bytes": 117,
           "counts": {},
           "tokens": 29.2
+        },
+        "scenario:understand": {
+          "bytes": 1096,
+          "counts": {
+            "steps": 4
+          },
+          "tokens": 274.0
         }
       },
       "status": "ok"
@@ -3787,6 +3871,32 @@
         }
       },
       "status": "ok"
+    }
+  },
+  "scenarioRatios": {
+    "modify": {
+      "largest": "overwatch-ai-pve",
+      "tokens": 4180.5,
+      "vsSeed": {
+        "seed-modify-opy-project": 4.0,
+        "seed-modify-target-score": 3.7
+      }
+    },
+    "repair": {
+      "largest": "overwatch-ai-pve",
+      "tokens": 3196.5,
+      "vsSeed": {
+        "seed-repair-opy-runaway-loop": 4.3,
+        "seed-repair-runaway-loop": 4.1
+      }
+    },
+    "understand": {
+      "largest": "overwatch-ai-pve",
+      "tokens": 924.5,
+      "vsSeed": {
+        "seed-understand-opy-project": 3.4,
+        "seed-understand-score-flow": 3.4
+      }
     }
   },
   "wright": "wright 0.19.0 (wright-driver 0.19.0)"
