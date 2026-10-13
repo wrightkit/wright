@@ -139,9 +139,8 @@ finding entry leads with severity, rule id, and message before its `-->`
 location and one-line source frame. Evidence class and boundedness trail
 dimmed as secondary metadata; pseudo-path spans degrade to position notes.
 Repeated findings keep the shared collapse — one entry naming its finding
-count, capped at ten listed locations — and the closing footer carries
-affected-file and skipped-evaluation counts plus interactive elapsed time.
-The `wright-result/v1` envelope keeps the driver's finding set and order,
+count, using the selected locations — and interactive elapsed time stays presentation-only.
+The `wright-result/v1` envelope uses the same selected finding set,
 and the GitHub Actions renderer is unchanged.
 
 The `inspect` queries follow the same human-first hierarchy (#446) on the
@@ -166,12 +165,14 @@ subcommand leads with its subject and summary before its detail:
   ordered by severity with consecutive identical findings collapsed into one
   counted entry.
 
-Detail lists bound at ten entries per section and close with
-`... N more <item>(s) (--format json prints the complete result)`; JSON
-remains the complete machine-readable answer and is never truncated by the
-presentation bound. When a query fails — an unmatched or ambiguous name —
-the verdict and diagnostics render without result metadata, so a default
-result can never masquerade as an answer.
+Text and compact JSON present the same selected items. Detail lists default
+to at most 20 items, with their total and an expansion hint when truncated;
+`--all` lifts the default cap. The analyze report keeps its ranked top-five
+hotspots, risks and variables and top-three condition trees, with the same
+explicit expansion metadata. JSON is the structured form for programmatic
+processing. Verdicts still describe the full set. When a query fails, its
+verdict and diagnostics render without result metadata, so a default result
+cannot masquerade as an answer.
 
 This document is the normative contract for the compiler driver and CLI.
 It defines the shared driver model, the command surface, exit codes,

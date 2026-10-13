@@ -473,20 +473,19 @@ fn check_success_renders_a_compact_deterministic_summary() {
 }
 
 #[test]
-fn check_text_reorder_never_reaches_the_json_envelope() {
+fn check_json_prioritizes_blocking_diagnostics_like_text() {
     let path = temp_file("mixed.txt", MIXED_CHECK_SOURCE);
     let output = run(&["check", path.to_str().unwrap(), "-f", "json"]);
     assert_eq!(output.status.code(), Some(1));
     let envelope = parse_json(&output.stdout);
-    // JSON preserves the driver's production order and the same diagnostic
-    // set; only the text layer reorders by severity.
+    // Both formats prioritize blocking diagnostics without changing the set.
     let severities: Vec<&str> = envelope["diagnostics"]
         .as_array()
         .unwrap()
         .iter()
         .map(|diagnostic| diagnostic["severity"].as_str().unwrap())
         .collect();
-    assert_eq!(severities, ["warning", "warning", "error"]);
+    assert_eq!(severities, ["error", "warning", "warning"]);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -532,22 +531,22 @@ fn analyze_over_workshop_input_reports_semantic_facts() {
     let envelope = parse_json(&output.stdout);
     assert!(envelope["result"]["program"]["findings"].is_null());
     assert!(
-        !envelope["result"]["facts"]["symbols"]
+        !envelope["result"]["variables"]
             .as_array()
             .unwrap()
             .is_empty()
     );
     assert!(
-        !envelope["result"]["facts"]["rules"]
+        !envelope["result"]["hotspots"]
             .as_array()
             .unwrap()
             .is_empty()
     );
     assert!(
-        envelope["result"]["facts"]["persistentObjects"].is_array(),
+        envelope["result"]["persistentObjects"].is_object(),
         "analyze reports persistent-object facts (#429)"
     );
-    let cost = &envelope["result"]["facts"]["cost"];
+    let cost = &envelope["result"]["cost"];
     assert!(
         cost["elementCount"].as_u64().is_some_and(|total| total > 0),
         "analyze reports the canonical element count (#445): {cost}"
@@ -556,13 +555,13 @@ fn analyze_over_workshop_input_reports_semantic_facts() {
         cost["counts"]["actions"].as_u64().is_some(),
         "analyze reports structural counts (#445): {cost}"
     );
-    let rule = &envelope["result"]["facts"]["rules"][0];
+    let rule = &envelope["result"]["hotspots"][0];
     assert!(
         rule["elements"].as_u64().is_some(),
         "analyze attributes element cost to rules (#445): {rule}"
     );
     assert!(
-        envelope["result"]["facts"]["risks"].is_array(),
+        envelope["result"]["risks"].is_array(),
         "analyze reports performance/stability risk facts (#445)"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -575,7 +574,8 @@ fn inspect_over_workshop_input_lists_rules_and_symbols() {
     assert!(output.status.success());
     let envelope = parse_json(&output.stdout);
     assert!(!envelope["result"]["rules"].as_array().unwrap().is_empty());
-    assert!(!envelope["result"]["symbols"].as_array().unwrap().is_empty());
+    assert!(envelope["result"]["symbols"].is_null());
+    assert!(envelope["result"]["counts"]["symbols"].as_u64().unwrap() > 0);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -604,36 +604,17 @@ fn lint_over_workshop_input_reports_findings_in_text_and_json() {
     let envelope = parse_json(&output.stdout);
     assert_eq!(envelope["command"], "lint");
     assert_eq!(envelope["ok"], true);
-    assert!(
-        envelope["result"]["input_identity"].as_str().unwrap().len() == 64,
-        "lint carries the SHA-256 input identity"
-    );
     let findings = envelope["result"]["findings"].as_array().unwrap();
     assert!(!findings.is_empty(), "control-flow produces findings");
     for finding in findings {
         assert!(finding["evidence"].is_string(), "findings carry evidence");
         assert!(
-            finding["span"]["path"].is_string(),
+            finding["location"].is_string(),
             "finding spans carry the resolved path"
         );
     }
-    let rules = envelope["result"]["rules"].as_array().unwrap();
-    assert!(!rules.is_empty(), "first-party rules are reported");
-    assert_eq!(
-        envelope["result"]["config"]["rules"]
-            .as_object()
-            .unwrap()
-            .len(),
-        rules.len()
-    );
-    for rule in rules {
-        assert!(rule["id"].is_string() && rule["effectiveSeverity"].is_string());
-        assert_eq!(
-            rule.as_object().unwrap().len(),
-            2,
-            "lint inlines only id and effectiveSeverity; full metadata is lintRules (#431): {rule}"
-        );
-    }
+    assert!(envelope["result"]["rules"].is_null());
+    assert!(envelope["result"]["config"].is_null());
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -669,7 +650,7 @@ fn lint_fix_previews_and_writes_validated_fixes() {
     let path = path.to_str().unwrap();
 
     // Findings carry the materialized fix transaction.
-    let output = run(&["lint", path, "-f", "json"]);
+    let output = run(&["lint", path, "--fix", "-f", "json"]);
     assert!(output.status.success(), "{}", command_result(&output));
     let findings = parse_json(&output.stdout)["result"]["findings"]
         .as_array()
@@ -801,7 +782,7 @@ fn span_path_is_consistent_across_input_spellings() {
         "json",
     ]);
     assert!(absolute.status.success(), "{}", command_result(&absolute));
-    let absolute_path = parse_json(&absolute.stdout)["result"]["findings"][0]["span"]["path"]
+    let absolute_path = parse_json(&absolute.stdout)["result"]["findings"][0]["location"]
         .as_str()
         .unwrap()
         .to_string();
@@ -813,7 +794,7 @@ fn span_path_is_consistent_across_input_spellings() {
         .output()
         .expect("wright runs");
     assert!(bare.status.success(), "{}", command_result(&bare));
-    let bare_path = parse_json(&bare.stdout)["result"]["findings"][0]["span"]["path"]
+    let bare_path = parse_json(&bare.stdout)["result"]["findings"][0]["location"]
         .as_str()
         .unwrap()
         .to_string();
@@ -825,12 +806,12 @@ fn span_path_is_consistent_across_input_spellings() {
         .output()
         .expect("wright runs");
     assert!(relative.status.success(), "{}", command_result(&relative));
-    let relative_path = parse_json(&relative.stdout)["result"]["findings"][0]["span"]["path"]
+    let relative_path = parse_json(&relative.stdout)["result"]["findings"][0]["location"]
         .as_str()
         .unwrap()
         .to_string();
 
-    assert_eq!(absolute_path, "loop.txt");
+    assert!(absolute_path.starts_with("loop.txt:"));
     assert_eq!(
         bare_path, absolute_path,
         "the bare-name (cwd) spelling must agree with the absolute spelling"
@@ -867,11 +848,6 @@ fn lint_rule_flags_control_findings() {
             .all(|finding| finding["code"] != "min-wait-loop"),
         "the disabled rule must produce no findings"
     );
-    assert_eq!(
-        envelope["result"]["config"]["rules"]["min-wait-loop"]["enabled"],
-        false
-    );
-
     // --rule-severity overrides the effective severity of a rule. The
     // control-flow fixture produces no expensive-loop-check findings, so
     // the assertion is on the rules metadata.
@@ -879,7 +855,7 @@ fn lint_rule_flags_control_findings() {
         "lint",
         path.to_str().unwrap(),
         "--rule-severity",
-        "expensive-loop-check:warn",
+        "min-wait-loop:error",
         "-f",
         "json",
     ]);
@@ -889,12 +865,13 @@ fn lint_rule_flags_control_findings() {
         String::from_utf8_lossy(&output.stderr)
     );
     let envelope = parse_json(&output.stdout);
-    let rules = envelope["result"]["rules"].as_array().unwrap();
-    let exp_loop = rules
-        .iter()
-        .find(|rule| rule["id"] == "expensive-loop-check")
-        .unwrap();
-    assert_eq!(exp_loop["effectiveSeverity"], "warning");
+    assert!(
+        envelope["result"]["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["code"] == "min-wait-loop" && finding["severity"] == "error")
+    );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -915,15 +892,12 @@ fn lint_lists_a_local_yaml_rule_loaded_with_the_rule_flag() {
     ]);
     assert!(output.status.success(), "{}", command_result(&output));
     let envelope = parse_json(&output.stdout);
-    let rules = envelope["result"]["rules"].as_array().unwrap();
-    let local = rules
-        .iter()
-        .find(|rule| rule["id"] == "community/cli-smoke")
-        .expect("every registered rule, including a --rule YAML rule, appears");
-    assert_eq!(
-        local,
-        &serde_json::json!({ "id": "community/cli-smoke", "effectiveSeverity": "warning" }),
-        "local rules carry the same compact shape (#431)"
+    assert!(
+        envelope["result"]["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["code"] == "community/cli-smoke")
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
     let _ = std::fs::remove_dir_all(rule_file.parent().unwrap());
@@ -991,12 +965,13 @@ fn lint_selection_filters_findings_and_reports_withheld() {
     // --file selects by file identity: the reported span.path is
     // root-relative, and the absolute input path exactly as passed selects
     // the same file.
-    let reported_path = parse_json(&run(&["lint", path, "-f", "json"]).stdout)
-        ["result"]["findings"][0]["span"]["path"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let output = run(&["lint", path, "--file", &reported_path, "-f", "json"]);
+    let reported_path =
+        parse_json(&run(&["lint", path, "-f", "json"]).stdout)["result"]["findings"][0]["location"]
+            .as_str()
+            .unwrap()
+            .to_string();
+    let reported_path = reported_path.rsplitn(3, ':').last().unwrap();
+    let output = run(&["lint", path, "--file", reported_path, "-f", "json"]);
     let envelope = parse_json(&output.stdout);
     assert_eq!(envelope["result"]["findings"].as_array().unwrap().len(), 10);
     let output = run(&["lint", path, "--file", path, "-f", "json"]);
@@ -1100,78 +1075,87 @@ fn lint_max_reports_the_withheld_count_in_text_and_json() {
 }
 
 #[test]
-fn brief_bounds_lint_analyze_and_inspect_results() {
-    // #532: `--brief` returns counts, the highest-priority items, and an
-    // expansion path — the same small shape on every command, in text and
-    // JSON, with the full result one flag away.
-    let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
-
-    let output = run(&["lint", path.to_str().unwrap(), "--brief"]);
+fn essential_reports_bound_lists_and_expose_expansion() {
+    let rules = (0..21).map(|i|format!("rule (\"Rule{i}\") {{ event {{ Ongoing - Global; }} actions {{ Wait(1, Ignore Condition); }} }}")).collect::<Vec<_>>().join("\n");
+    let path = temp_file("many-rules.ws", &rules);
+    let result =
+        parse_json(&run(&["inspect", path.to_str().unwrap(), "-f", "json"]).stdout)["result"]
+            .clone();
+    assert_eq!(result["rules"].as_array().unwrap().len(), 20);
+    assert_eq!(result["truncation"]["rules"]["total"], 21);
     assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+        result["truncation"]["rules"]["expand"]
+            .as_str()
+            .unwrap()
+            .contains("--all")
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("10 findings"), "counts line: {stdout}");
-    assert!(stdout.contains("brief"), "counts name the form: {stdout}");
-    assert!(stdout.contains("Top findings"), "{stdout}");
-    assert!(
-        stdout.contains("expand") || stdout.contains("drop"),
-        "{stdout}"
-    );
-
-    for command in ["lint", "analyze", "inspect"] {
-        let output = run(&[command, path.to_str().unwrap(), "--brief", "-f", "json"]);
-        assert!(
-            output.status.success(),
-            "{command}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let result = parse_json(&output.stdout)["result"].clone();
-        assert_eq!(result["brief"], true, "{command}");
-        assert!(
-            result["items"].as_array().unwrap().len() <= 5,
-            "{command} items bounded: {result}"
-        );
-        assert!(
-            result["counts"].is_object() && result["expand"].is_string(),
-            "{command} counts+expand: {result}"
-        );
-    }
-
-    let lint = parse_json(&run(&["lint", path.to_str().unwrap(), "--brief", "-f", "json"]).stdout)
+    let output = run(&["inspect", path.to_str().unwrap()]);
+    assert!(String::from_utf8_lossy(&output.stdout).contains("showing 20 of 21"));
+    let full = parse_json(&run(&["inspect", path.to_str().unwrap(), "--all", "-f", "json"]).stdout)
         ["result"]
         .clone();
-    assert_eq!(lint["counts"]["findings"]["total"], 10);
-    assert!(lint["findings"].is_null(), "full findings withheld: {lint}");
-
-    let analyze = parse_json(
-        &run(&["analyze", path.to_str().unwrap(), "--brief", "-f", "json"]).stdout,
-    )["result"]
-        .clone();
-    assert_eq!(analyze["counts"]["risks"]["total"], 10);
-    assert!(analyze["facts"].is_null(), "full facts withheld: {analyze}");
-
-    let inspect = parse_json(
-        &run(&["inspect", path.to_str().unwrap(), "--brief", "-f", "json"]).stdout,
-    )["result"]
-        .clone();
-    assert_eq!(inspect["counts"]["references"], 58);
-    assert!(inspect["symbols"].is_null(), "detail withheld: {inspect}");
-
-    // `--brief` is the bare-inspect form; the detail queries keep their own
-    // options and reject the combination.
-    let output = run(&["inspect", "--brief", "symbols", path.to_str().unwrap()]);
+    assert_eq!(full["rules"].as_array().unwrap().len(), 21);
+    assert!(full.get("symbols").is_none());
     assert!(
-        !output.status.success(),
-        "brief+subcommand is a usage error"
+        !run(&["inspect", path.to_str().unwrap(), "--brief"])
+            .status
+            .success()
     );
-
+    for query in ["rules", "symbols"] {
+        let json = run(&["inspect", query, path.to_str().unwrap(), "-f", "json"]);
+        let value = parse_json(&json.stdout)["result"].clone();
+        let list = value
+            .as_array()
+            .or_else(|| value[query].as_array())
+            .or_else(|| value["items"].as_array())
+            .unwrap();
+        assert_eq!(list.len(), 20);
+        assert!(
+            value["truncation"]
+                .as_object()
+                .unwrap()
+                .values()
+                .all(|note| note["total"] == 21
+                    && note["expand"].as_str().unwrap().contains("--all"))
+        );
+        let text = run(&["inspect", query, path.to_str().unwrap()]);
+        assert!(String::from_utf8_lossy(&text.stdout).contains("showing 20 of 21"));
+        let all = parse_json(
+            &run(&[
+                "inspect",
+                query,
+                path.to_str().unwrap(),
+                "--all",
+                "-f",
+                "json",
+            ])
+            .stdout,
+        )["result"]
+            .clone();
+        let list = all
+            .as_array()
+            .or_else(|| all[query].as_array())
+            .or_else(|| all["items"].as_array())
+            .unwrap();
+        assert_eq!(list.len(), 21);
+    }
+    let content = parse_json(
+        &run(&[
+            "inspect",
+            "rules",
+            path.to_str().unwrap(),
+            "--content",
+            "--all",
+            "-f",
+            "json",
+        ])
+        .stdout,
+    )["result"]
+        .clone();
+    assert_eq!(content["rules"].as_array().unwrap().len(), 21);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
-
-// ── #635: full/brief verdict parity, risk selection, span paths ──────────────
+// ── #635: default/all verdict parity, risk selection, span paths ──────────────
 
 /// A program whose only risk is the wait-less `While(True)` warning — the
 /// smallest input that separates the verdict paths #635 joined.
@@ -1188,13 +1172,12 @@ const WAITLESS_LOOP: &str = "rule (\"r\") {
 ";
 
 #[test]
-fn analyze_full_and_brief_report_the_same_verdict() {
-    // The full result's verdict accounts for `facts.risks` severities exactly
-    // like the brief form — the same input reports one verdict.
+fn analyze_default_and_all_report_the_same_verdict() {
+    // Expansion must preserve the same complete-set verdict.
     let path = temp_file("waitless.txt", WAITLESS_LOOP);
     for args in [
         vec!["analyze", path.to_str().unwrap()],
-        vec!["analyze", path.to_str().unwrap(), "--brief"],
+        vec!["analyze", path.to_str().unwrap(), "--all"],
     ] {
         let output = run(&args);
         assert!(
@@ -1208,19 +1191,19 @@ fn analyze_full_and_brief_report_the_same_verdict() {
 
     // The same parity holds under a selection: `lint --severity error`
     // reports an empty selected set but the full set's WARN verdict, and the
-    // brief form must agree rather than judging the filtered counts.
+    // expanded form must agree rather than judging the filtered counts.
     let lint = run(&["lint", path.to_str().unwrap(), "--severity", "error"]);
     let lint_stdout = String::from_utf8_lossy(&lint.stdout);
     assert!(lint_stdout.contains("WARN lint"), "{lint_stdout}");
-    let brief = run(&[
+    let expanded = run(&[
         "lint",
         path.to_str().unwrap(),
         "--severity",
         "error",
-        "--brief",
+        "--all",
     ]);
-    let brief_stdout = String::from_utf8_lossy(&brief.stdout);
-    assert!(brief_stdout.contains("WARN lint"), "{brief_stdout}");
+    let expanded_stdout = String::from_utf8_lossy(&expanded.stdout);
+    assert!(expanded_stdout.contains("WARN lint"), "{expanded_stdout}");
 
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -1244,7 +1227,7 @@ fn analyze_selection_narrows_facts_risks() {
     ]);
     assert!(output.status.success());
     let envelope = parse_json(&output.stdout);
-    let risks = envelope["result"]["facts"]["risks"].as_array().unwrap();
+    let risks = envelope["result"]["risks"].as_array().unwrap();
     assert_eq!(risks.len(), 2);
     assert!(risks.iter().all(|risk| risk["code"] == "repeated-value"));
     assert_eq!(envelope["result"]["selection"]["total"], 10);
@@ -1259,12 +1242,7 @@ fn analyze_selection_narrows_facts_risks() {
         "json",
     ]);
     let envelope = parse_json(&output.stdout);
-    assert!(
-        envelope["result"]["facts"]["risks"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(envelope["result"]["risks"].as_array().unwrap().is_empty());
     assert_eq!(envelope["result"]["selection"]["total"], 10);
 
     // The text verdict still reports the full set's severity, and `--max`
@@ -1284,7 +1262,7 @@ fn inspect_json_resolves_span_paths() {
     // `inspect --format json` resolves `path` on every span like
     // `inspect symbols` and `analyze` already do.
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
-    let output = run(&["inspect", path.to_str().unwrap(), "-f", "json"]);
+    let output = run(&["inspect", "rules", path.to_str().unwrap(), "-f", "json"]);
     assert!(output.status.success());
     let result = parse_json(&output.stdout)["result"].clone();
 
@@ -1525,7 +1503,7 @@ fn lint_text_presents_a_finding_with_location_context_and_secondary_metadata() {
     // The message leads; the location and source frame follow; the evidence
     // class trails dimmed as secondary metadata.
     assert!(stdout.contains("WARN lint"), "{stdout}");
-    assert!(stdout.contains("1 warning(s) across 6 rule(s)"), "{stdout}");
+    assert!(stdout.contains("1 warning(s)"), "{stdout}");
     let message = stdout
         .find("warning[min-wait-loop]: loop body waits")
         .expect("primary line: {stdout}");
@@ -2707,10 +2685,7 @@ fn refs_reports_references_and_usage_for_a_named_symbol() {
         "locations carry source positions: {stdout}"
     );
     // 18 references bound to a first page; JSON is the complete path (#446).
-    assert!(
-        stdout.contains("... 8 more reference(s) (--format json prints the complete result)"),
-        "{stdout}"
-    );
+    assert!(!stdout.contains("more reference(s)"), "{stdout}");
 
     let output = run(&["inspect", "refs", "cakePos", path, "-f", "json"]);
     assert!(output.status.success(), "{}", command_result(&output));
@@ -2840,10 +2815,7 @@ fn callgraph_highlight_sections_fold_beyond_the_bound() {
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("sub0: 2 caller(s)"), "{stdout}");
-    assert!(
-        stdout.contains("... 2 more subroutine(s) (--format json prints the complete result)"),
-        "{stdout}"
-    );
+    assert!(stdout.contains("showing 20 of 24"), "{stdout}");
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
 
@@ -3072,10 +3044,7 @@ fn inspect_overview_and_cfg_bound_large_detail() {
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("13 rule(s)"), "{stdout}");
-    assert!(
-        stdout.contains("... 3 more rule(s) (--format json prints the complete result)"),
-        "{stdout}"
-    );
+    assert!(!stdout.contains("more rule(s)"), "{stdout}");
 
     let output = run(&["inspect", "cfg", "r0", path]);
     assert!(output.status.success(), "{}", command_result(&output));
@@ -3084,10 +3053,7 @@ fn inspect_overview_and_cfg_bound_large_detail() {
         stdout.contains("14 block(s), 17 edge(s)"),
         "shape summary: {stdout}"
     );
-    assert!(
-        stdout.contains("... 4 more block(s) (--format json prints the complete result)"),
-        "{stdout}"
-    );
+    assert!(!stdout.contains("more block(s)"), "{stdout}");
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
 

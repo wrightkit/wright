@@ -145,6 +145,9 @@ pub(crate) struct SemanticCompareArgs {
 /// the finding-selection options (#430).
 #[derive(Debug, Args)]
 pub(crate) struct ReportArgs {
+    /// Return every selected item instead of the default bounded report.
+    #[arg(long)]
+    pub(crate) all: bool,
     #[command(flatten)]
     pub(crate) common: CommonArgs,
     #[command(flatten)]
@@ -152,17 +155,16 @@ pub(crate) struct ReportArgs {
 }
 
 /// Arguments of `analyze`: shared workflow options, finding selection, and
-/// `--brief` — the summary form of the report (#532).
+/// an explicit expansion option.
 #[derive(Debug, Args)]
 pub(crate) struct AnalyzeArgs {
     #[command(flatten)]
     pub(crate) common: CommonArgs,
     #[command(flatten)]
     pub(crate) select: SelectArgs,
-    /// Print the brief form: counts, the costliest rules, and how to
-    /// expand — the full report stays one option away.
+    /// Return every item in the report.
     #[arg(long)]
-    pub(crate) brief: bool,
+    pub(crate) all: bool,
 }
 
 /// Finding-selection options shared by `check`, `analyze`, `lint`, and
@@ -332,11 +334,9 @@ impl LookupKindArg {
 pub(crate) struct InspectArgs {
     #[command(flatten)]
     pub(crate) common: CommonArgs,
-    /// Print the brief form of the bare summary: counts, the leading rules,
-    /// and how to expand (#532). The query subcommands keep their own
-    /// selection options.
+    /// Return every rule name in the overview.
     #[arg(long)]
-    pub(crate) brief: bool,
+    pub(crate) all: bool,
     #[command(subcommand)]
     pub(crate) query: Option<InspectQuery>,
 }
@@ -364,6 +364,9 @@ pub(crate) enum InspectQuery {
 /// selection fields and `--content` (ADR-0024).
 #[derive(Debug, Args)]
 pub(crate) struct RulesArgs {
+    /// Return every selected item instead of the default bounded report.
+    #[arg(long)]
+    pub(crate) all: bool,
     #[command(flatten)]
     pub(crate) common: CommonArgs,
     /// Add each selected rule's conditions and actions as canonical call
@@ -391,6 +394,9 @@ pub(crate) struct RulesArgs {
 /// `CommonArgs` already assigns `--kind` to input-frontend selection.
 #[derive(Debug, Args)]
 pub(crate) struct SymbolsArgs {
+    /// Return every selected item instead of the default bounded report.
+    #[arg(long)]
+    pub(crate) all: bool,
     #[command(flatten)]
     pub(crate) common: CommonArgs,
     /// Report only symbols of this kind.
@@ -410,6 +416,9 @@ pub(crate) struct SymbolsArgs {
 /// options plus the reference selection fields (#531).
 #[derive(Debug, Args)]
 pub(crate) struct RefsArgs {
+    /// Return every selected item instead of the default bounded report.
+    #[arg(long)]
+    pub(crate) all: bool,
     /// The declared name of the symbol to look up.
     #[arg(value_name = "NAME")]
     pub(crate) name: String,
@@ -435,6 +444,9 @@ pub(crate) struct RefsArgs {
 /// options plus the block selection fields (#531).
 #[derive(Debug, Args)]
 pub(crate) struct CfgArgs {
+    /// Return every selected item instead of the default bounded report.
+    #[arg(long)]
+    pub(crate) all: bool,
     /// The declared name of the rule to look up.
     #[arg(value_name = "RULE")]
     pub(crate) rule: String,
@@ -453,6 +465,9 @@ pub(crate) struct CfgArgs {
 /// edge selection fields (#531).
 #[derive(Debug, Args)]
 pub(crate) struct CallgraphArgs {
+    /// Return every selected item instead of the default bounded report.
+    #[arg(long)]
+    pub(crate) all: bool,
     #[command(flatten)]
     pub(crate) common: CommonArgs,
     /// Report only edges out of this rule.
@@ -473,13 +488,12 @@ pub(crate) struct LintArgs {
     pub(crate) common: CommonArgs,
     #[command(flatten)]
     pub(crate) select: SelectArgs,
-    /// Print the brief form: finding counts by severity, the
-    /// highest-severity findings, and how to expand (#532).
+    /// Return every finding.
     #[arg(long)]
-    pub(crate) brief: bool,
+    pub(crate) all: bool,
     /// Show the automated fixes lint offers for fixable findings as a
     /// validated diff, without writing (#556).
-    #[arg(long, conflicts_with = "brief")]
+    #[arg(long, conflicts_with = "all")]
     pub(crate) fix: bool,
     /// Apply the fixes `--fix` previews: each fix is re-validated against
     /// the current source before writing; a stale source refuses and

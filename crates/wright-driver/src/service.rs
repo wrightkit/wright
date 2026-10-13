@@ -110,23 +110,25 @@ pub enum ToolRequest {
     /// Compile the loaded project.
     Compile,
     /// Check the loaded project.
-    Check,
+    Check {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        all: bool,
+    },
     /// Analyze the loaded project; optionally narrowed by an inline
     /// selection (`severity`, `rule`, `file`, `max`; #635) applied to
-    /// `facts.risks`, and optionally returned in the brief form (#532).
+    /// `facts.risks`; presentation returns the essential report.
     Analyze {
         #[serde(flatten)]
         selection: crate::select::FindingSelection,
-        /// Return the brief summary form (#532): counts, the
-        /// highest-priority items, and how to expand.
+        /// Return every item in the presentation lists.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        brief: bool,
+        all: bool,
     },
     /// Inspect the loaded project.
     Inspect {
-        /// Return the brief summary form (#532).
+        /// Return every item in the presentation lists.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        brief: bool,
+        all: bool,
     },
     /// The loaded canonical program summary (origin, files, counts, findings).
     Project,
@@ -144,6 +146,8 @@ pub enum ToolRequest {
         max: Option<usize>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         content: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        all: bool,
     },
     /// Symbols, optionally filtered by `kind` and narrowed by an inline
     /// selection (`file`, `max`; #531).
@@ -154,6 +158,8 @@ pub enum ToolRequest {
         file: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         max: Option<usize>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        all: bool,
     },
     /// References to a symbol, addressed by its numeric id or its name
     /// (#429); optionally narrowed by an inline selection (`kind`, `rule`,
@@ -168,6 +174,8 @@ pub enum ToolRequest {
         file: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         max: Option<usize>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        all: bool,
     },
     /// Usage counts for a symbol, addressed by its numeric id or its name
     /// (#429).
@@ -181,22 +189,32 @@ pub enum ToolRequest {
         kind: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         max: Option<usize>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        all: bool,
     },
     /// Every static-analysis finding, optionally narrowed by an inline
     /// selection (`severity`, `rule`, `file`, `max`; #430).
-    Findings(crate::select::FindingSelection),
+    Findings {
+        #[serde(flatten)]
+        selection: crate::select::FindingSelection,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        all: bool,
+    },
     /// Persistent Workshop object facts, separate from lint diagnostics.
-    PersistentObjects,
+    PersistentObjects {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        all: bool,
+    },
     /// Lint findings plus per-rule id/effective severity and the effective
     /// configuration (#98); `lintRules` serves full rule metadata (#431).
     /// Optionally narrowed by an inline selection (#430), and optionally
-    /// returned in the brief summary form (#532).
+    /// returned in the essential presentation form.
     Lint {
         #[serde(flatten)]
         selection: crate::select::FindingSelection,
-        /// Return the brief summary form (#532).
+        /// Return every item in the presentation lists.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        brief: bool,
+        all: bool,
     },
     /// The registered lint rules with full metadata and the effective lint
     /// configuration.
@@ -211,10 +229,17 @@ pub enum ToolRequest {
         callee: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         max: Option<usize>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        all: bool,
     },
     /// Generated-resource cost estimates (exact counts + findings),
     /// optionally narrowed by an inline selection (#430).
-    CostEstimate(crate::select::FindingSelection),
+    CostEstimate {
+        #[serde(flatten)]
+        selection: crate::select::FindingSelection,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        all: bool,
+    },
     /// Target/catalog metadata (actions, values, events, enum domains).
     TargetMetadata,
     /// Validate and preview a caller-supplied source-edit transaction
@@ -510,8 +535,58 @@ impl<'a> ToolService<'a> {
     /// read (#617); a provider that declines its compile keeps the
     /// check-only path.
     pub fn handle(&mut self, request: &ToolRequest) -> ToolResponse {
+        let response = self.handle_full(request);
+        let ToolResponse::Ok { mut result } = response else {
+            return response;
+        };
         match request {
-            ToolRequest::Check | ToolRequest::Compile => self.refresh_workflow(),
+            ToolRequest::Check { all } => crate::essential::envelope(&mut result, *all),
+            ToolRequest::Analyze { all, .. } => {
+                result["result"] = crate::essential::analyze(&result["result"], *all);
+                crate::essential::envelope(&mut result, *all);
+            }
+            ToolRequest::Inspect { all } => {
+                result["result"] = crate::essential::inspect(&result["result"], *all);
+                crate::essential::envelope(&mut result, *all);
+            }
+            ToolRequest::Lint { all, .. } => result = crate::essential::lint(&result, *all),
+            ToolRequest::References { symbol, all, .. } => {
+                let id = match self.symbol_address(symbol) {
+                    Ok(id) => id,
+                    Err(error) => return ToolResponse::Error { error },
+                };
+                let usage = match self.semantic_query(Request::GetUsage { symbol: id }) {
+                    ToolResponse::Ok { result } => result,
+                    other => return other,
+                };
+                let mut payload = usage;
+                if let Some(selected) = result.as_object_mut() {
+                    payload["references"] = selected.remove("references").unwrap_or_default();
+                    if let Some(selection) = selected.remove("selection") {
+                        payload["selection"] = selection;
+                    }
+                } else {
+                    payload["references"] = result;
+                }
+                result = crate::essential::query(&payload, *all);
+            }
+            ToolRequest::Rules { all, .. }
+            | ToolRequest::Symbols { all, .. }
+            | ToolRequest::Cfg { all, .. }
+            | ToolRequest::Findings { all, .. }
+            | ToolRequest::PersistentObjects { all }
+            | ToolRequest::CallGraph { all, .. }
+            | ToolRequest::CostEstimate { all, .. } => {
+                result = crate::essential::query(&result, *all)
+            }
+            _ => {}
+        }
+        ToolResponse::Ok { result }
+    }
+
+    pub(crate) fn handle_full(&mut self, request: &ToolRequest) -> ToolResponse {
+        match request {
+            ToolRequest::Check { .. } | ToolRequest::Compile => self.refresh_workflow(),
             _ if Self::reads_program(request) => {
                 if let Err(error) = self.refresh() {
                     return ToolResponse::Error { error };
@@ -538,7 +613,7 @@ impl<'a> ToolService<'a> {
     fn reads_program(request: &ToolRequest) -> bool {
         !matches!(
             request,
-            ToolRequest::Check
+            ToolRequest::Check { .. }
                 | ToolRequest::Compile
                 | ToolRequest::Capabilities
                 | ToolRequest::TargetMetadata
@@ -780,12 +855,12 @@ impl<'a> ToolService<'a> {
                     .expect("compile result serializes");
                 ToolResponse::Ok { result }
             }
-            ToolRequest::Check => {
+            ToolRequest::Check { .. } => {
                 let result =
                     serde_json::to_value(self.session.check()).expect("check result serializes");
                 ToolResponse::Ok { result }
             }
-            ToolRequest::Analyze { selection, brief } => {
+            ToolRequest::Analyze { selection, all: _ } => {
                 if let Some(error) = self.selection_error(selection) {
                     return error;
                 }
@@ -795,27 +870,20 @@ impl<'a> ToolService<'a> {
                         .as_ref()
                         .expect("the refresh gate guarantees a snapshot"),
                 );
-                let mut result =
+                let result =
                     serde_json::to_value(self.session.analyze_loaded(loaded, &semantic, selection))
                         .expect("analyze result serializes");
-                if *brief {
-                    result["result"] = crate::brief::analyze(&result["result"]);
-                }
                 ToolResponse::Ok { result }
             }
-            ToolRequest::Inspect { brief } => {
+            ToolRequest::Inspect { all: _ } => {
                 let loaded = self.snapshot().clone();
                 let semantic = Arc::clone(
                     self.semantic
                         .as_ref()
                         .expect("the refresh gate guarantees a snapshot"),
                 );
-                let mut result =
-                    serde_json::to_value(self.session.inspect_loaded(loaded, &semantic))
-                        .expect("inspect result serializes");
-                if *brief {
-                    result["result"] = crate::brief::inspect(&result["result"]);
-                }
+                let result = serde_json::to_value(self.session.inspect_loaded(loaded, &semantic))
+                    .expect("inspect result serializes");
                 ToolResponse::Ok { result }
             }
             ToolRequest::Project => self.ok(self.project()),
@@ -825,16 +893,24 @@ impl<'a> ToolService<'a> {
                 file,
                 max,
                 content,
-            } => self.rules(name, rule.as_ref(), file, max, *content),
-            ToolRequest::Symbols { kind, file, max } => {
-                self.symbols(kind.as_deref(), file.as_deref(), *max)
-            }
+                all,
+            } => self.rules(
+                name,
+                rule.as_ref(),
+                file,
+                &max.or_else(|| (*all && *content).then_some(usize::MAX)),
+                *content,
+            ),
+            ToolRequest::Symbols {
+                kind, file, max, ..
+            } => self.symbols(kind.as_deref(), file.as_deref(), *max),
             ToolRequest::References {
                 symbol,
                 kind,
                 rule,
                 file,
                 max,
+                ..
             } => self.references(
                 symbol,
                 kind.as_deref(),
@@ -846,20 +922,23 @@ impl<'a> ToolService<'a> {
                 Ok(symbol) => self.semantic_query(Request::GetUsage { symbol }),
                 Err(error) => ToolResponse::Error { error },
             },
-            ToolRequest::Cfg { rule, kind, max } => match self.rule_address(rule) {
+            ToolRequest::Cfg {
+                rule, kind, max, ..
+            } => match self.rule_address(rule) {
                 Ok(rule) => self.cfg(rule, kind.as_deref(), *max),
                 Err(error) => ToolResponse::Error { error },
             },
-            ToolRequest::Findings(selection) => self.findings(selection),
-            ToolRequest::PersistentObjects => self.persistent_objects(),
-            ToolRequest::Lint { selection, brief } => self.lint(selection, *brief),
+            ToolRequest::Findings { selection, .. } => self.findings(selection),
+            ToolRequest::PersistentObjects { .. } => self.persistent_objects(),
+            ToolRequest::Lint { selection, all: _ } => self.lint(selection),
             ToolRequest::LintRules => self.configured_semantic().handle(&Request::LintRules),
             ToolRequest::CallGraph {
                 caller,
                 callee,
                 max,
+                ..
             } => self.call_graph(caller.as_deref(), callee.as_deref(), *max),
-            ToolRequest::CostEstimate(selection) => self.cost_estimate(selection),
+            ToolRequest::CostEstimate { selection, .. } => self.cost_estimate(selection),
             ToolRequest::TargetMetadata => self.ok(self.target_metadata()),
             ToolRequest::ValidateEdit {
                 sources,
@@ -1464,9 +1543,8 @@ impl<'a> ToolService<'a> {
     /// Full rule metadata is served once by `lintRules` rather than inlined
     /// into every `lint` response (#431). A `selection` member records the
     /// true total and withheld count when the request selected a subset
-    /// (#430); a `brief` request returns the summary form over the selected
-    /// set instead (#532).
-    fn lint(&self, selection: &crate::select::FindingSelection, brief: bool) -> ToolResponse {
+    /// (#430). Wire presentation omits configuration and caps findings.
+    fn lint(&self, selection: &crate::select::FindingSelection) -> ToolResponse {
         if let Some(error) = self.selection_error(selection) {
             return error;
         }
@@ -1492,10 +1570,15 @@ impl<'a> ToolService<'a> {
             self.session.catalog(),
             &CompilerSession::locale_for(loaded),
         );
+        let ok = !findings
+            .iter()
+            .any(|finding| finding["severity"] == "error");
         let (findings, outcome) =
             selection.apply_findings(findings, &crate::select::file_bases(&self.snapshot().input));
         let mut result = json!({
             "inputIdentity": self.snapshot().input.identity,
+            "ok": ok,
+            "exit": if ok { 0 } else { crate::result::exit::SOURCE_ERROR },
             "rules": crate::result::compact_lint_rules(lint_rules.get("rules")),
             "config": lint_rules.get("config").cloned().unwrap_or_else(|| json!({})),
             "findings": findings,
@@ -1503,9 +1586,6 @@ impl<'a> ToolService<'a> {
         });
         if let Some(outcome) = outcome {
             result["selection"] = serde_json::to_value(outcome).expect("selection serializes");
-        }
-        if brief {
-            result = crate::brief::lint(&result);
         }
         self.ok(result)
     }
@@ -1657,7 +1737,7 @@ fn request_label(request: &ToolRequest) -> &'static str {
     match request {
         ToolRequest::Capabilities => "req::capabilities",
         ToolRequest::Compile => "req::compile",
-        ToolRequest::Check => "req::check",
+        ToolRequest::Check { .. } => "req::check",
         ToolRequest::Analyze { .. } => "req::analyze",
         ToolRequest::Inspect { .. } => "req::inspect",
         ToolRequest::Project => "req::project",
@@ -1666,12 +1746,12 @@ fn request_label(request: &ToolRequest) -> &'static str {
         ToolRequest::References { .. } => "req::references",
         ToolRequest::Usage { .. } => "req::usage",
         ToolRequest::Cfg { .. } => "req::cfg",
-        ToolRequest::Findings(_) => "req::findings",
-        ToolRequest::PersistentObjects => "req::persistentObjects",
+        ToolRequest::Findings { .. } => "req::findings",
+        ToolRequest::PersistentObjects { .. } => "req::persistentObjects",
         ToolRequest::Lint { .. } => "req::lint",
         ToolRequest::LintRules => "req::lintRules",
         ToolRequest::CallGraph { .. } => "req::callGraph",
-        ToolRequest::CostEstimate(_) => "req::costEstimate",
+        ToolRequest::CostEstimate { .. } => "req::costEstimate",
         ToolRequest::TargetMetadata => "req::targetMetadata",
         ToolRequest::ValidateEdit { .. } => "req::validateEdit",
         ToolRequest::SemanticRename { .. } => "req::semanticRename",

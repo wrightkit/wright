@@ -31,25 +31,25 @@ def reference(scenario: str = SCENARIO) -> str:
 
 
 class BoundedUsesTest(unittest.TestCase):
-    """#532: `--brief` and the selection flags/fields count as bounded uses."""
+    """#532: default forms and the selection flags/fields count as bounded uses."""
 
     def test_cli_classification(self):
-        self.assertTrue(bench_trace.bounded_cli(["lint", "m.ws", "--brief"]))
+        self.assertTrue(bench_trace.bounded_cli(["lint", "m.ws"]))
         self.assertTrue(bench_trace.bounded_cli(["lint", "m.ws", "--severity", "warning"]))
         self.assertTrue(bench_trace.bounded_cli(["inspect", "symbols", "m.ws", "--only", "rule"]))
         self.assertTrue(bench_trace.bounded_cli(["inspect", "refs", "x", "m.ws", "--rule", "r"]))
         # `lint --rule` loads a rule file; it does not select findings.
-        self.assertFalse(bench_trace.bounded_cli(["lint", "m.ws", "--rule", "local.yaml"]))
-        self.assertFalse(bench_trace.bounded_cli(["analyze", "m.ws"]))
-        self.assertFalse(bench_trace.bounded_cli(["check", "m.ws", "-f", "json"]))
+        self.assertFalse(bench_trace.bounded_cli(["lint", "m.ws", "--all", "--rule", "local.yaml"]))
+        self.assertFalse(bench_trace.bounded_cli(["analyze", "m.ws", "--all"]))
+        self.assertTrue(bench_trace.bounded_cli(["check", "m.ws", "-f", "json"]))
 
     def test_request_classification(self):
-        self.assertTrue(bench_trace.bounded_request({"op": "analyze", "args": {"brief": True}}))
+        self.assertTrue(bench_trace.bounded_request({"op": "analyze", "args": {}}))
         self.assertTrue(bench_trace.bounded_request({"op": "lint", "args": {"severity": "warning"}}))
         self.assertTrue(bench_trace.bounded_request({"op": "references", "args": {"symbol": 0, "rule": "r"}}))
-        self.assertFalse(bench_trace.bounded_request({"op": "analyze", "args": {"brief": False}}))
-        # `rule` on cfg is the required address, not a selection.
-        self.assertFalse(bench_trace.bounded_request({"op": "cfg", "args": {"rule": 0}}))
+        self.assertFalse(bench_trace.bounded_request({"op": "analyze", "args": {"all": True}}))
+        # cfg is bounded by default even when rule supplies its address.
+        self.assertTrue(bench_trace.bounded_request({"op": "cfg", "args": {"rule": 0}}))
         self.assertFalse(bench_trace.bounded_request({"op": "project", "args": {}}))
 
 
@@ -1010,17 +1010,16 @@ class AgentBenchTest(unittest.TestCase):
         self.assertEqual(result["expectations"]["E03"]["status"], "pass")
 
     def test_bounded_forms_are_counted_in_tool_use(self):
-        # #532: `--brief` and selection flags/fields show up as bounded uses.
-        agent = (f"cp {reference()}/* . && wright lint mode.ws --brief -f json >/dev/null; "
+        # #672: default capped forms and selections show up as bounded uses.
+        agent = (f"cp {reference()}/* . && wright lint mode.ws -f json >/dev/null; "
                  "wright analyze mode.ws -f json >/dev/null; "
-                 "printf '{\"op\":\"inspect\",\"brief\":true}\\n{\"op\":\"lint\",\"severity\":\"warning\"}\\n{\"op\":\"cfg\",\"rule\":0}\\n' "
+                 "printf '{\"op\":\"inspect\",\"all\":false}\\n{\"op\":\"lint\",\"severity\":\"warning\"}\\n{\"op\":\"cfg\",\"rule\":0}\\n' "
                  "| wright serve mode.ws >/dev/null")
         result = self.trial(agent)
         use = result["toolUse"]["wright"]
         self.assertEqual(use["invocations"], 5)
-        # lint --brief, inspect?brief, lint?severity — analyze stays full and
-        # cfg's `rule` is its address, not a selection.
-        self.assertEqual(use["boundedUses"], 3)
+        # Every measured decision/query form now defaults to bounded output.
+        self.assertEqual(use["boundedUses"], 5)
 
     def test_final_state_validation_expectation(self):
         edit = f"cp {reference()}/mode.ws mode.ws"

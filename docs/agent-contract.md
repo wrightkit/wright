@@ -176,21 +176,21 @@ the successful `result` payload.
 | --- | --- | --- |
 | `capabilities` | none | Service name/version, `wright-agent/v1`, result contract, operation names, `result_schemas` (operation → committed-schema definition), languages, and profiles |
 | `compile` | none | `wright-result/v1` compile envelope |
-| `check` | none | `wright-result/v1` check envelope |
-| `analyze` | optional `brief` | `wright-result/v1` analysis envelope; the brief form when `brief` is true |
-| `inspect` | optional `brief` | `wright-result/v1` inspection envelope; the brief form when `brief` is true |
+| `check` | optional `all` | `wright-result/v1` check envelope |
+| `analyze` | optional selection, optional `all` | `wright-result/v1` essential analysis envelope |
+| `inspect` | optional `all` | `wright-result/v1` overview and rule names |
 | `project` | none | Loaded program origin, files, counts, and findings summary |
 | `rules` | optional selection, optional `content` | Canonical Workshop rules — each entry carries `id`, `name`, `event` (the rule's event binding, `subroutine:<name>` for subroutine rules), and `span`; `{"rules": [...], "selection": {...}}` when a selection is applied. See [Rule content](#rule-content-adr-0024) |
-| `symbols` | optional selection | Symbols; `{"symbols": [...], "selection": {...}}` when `file`/`max` is applied (a `kind`-only request keeps the bare array) |
-| `references` | required `symbol` (id or name), optional selection | References for the symbol; `{"references": [...], "selection": {...}}` when a selection is applied |
+| `symbols` | optional selection, optional `all` | Symbols; `{"symbols": [...], "selection": {...}}` when `file`/`max` is applied (a `kind`-only request keeps the bare array) |
+| `references` | required `symbol` (id or name), optional selection and `all` | Usage header and references for the symbol; `{"references": [...], "selection": {...}}` when a selection is applied |
 | `usage` | required `symbol` (id or name) | Usage counts for the symbol, plus its resolved `id` and `kind` |
-| `cfg` | required `rule` (index or name), optional selection | Control-flow graph for the rule, plus `selection` when a selection is applied |
-| `findings` | optional selection | Wright static-analysis findings; `{"findings": [...], "selection": {...}}` when a selection is applied |
-| `persistentObjects` | none | Persistent Workshop object facts |
-| `lint` | optional selection, optional `brief` | Lint findings, per-rule id/effective severity, effective configuration, and `selection` when applied; the brief form when `brief` is true |
+| `cfg` | required `rule` (index or name), optional selection and `all` | Control-flow graph for the rule, plus `selection` when a selection is applied |
+| `findings` | optional selection, optional `all` | Wright static-analysis findings; `{"findings": [...], "selection": {...}}` when a selection is applied |
+| `persistentObjects` | optional `all` | Persistent Workshop object facts |
+| `lint` | optional selection, optional `all` | Finding counts by severity and actionable findings; effective policy is available from `lintRules` |
 | `lintRules` | none | Registered lint rules with full metadata and effective configuration |
-| `callGraph` | optional selection | Subroutine call graph; `{"edges": [...], "selection": {...}}` when a selection is applied |
-| `costEstimate` | optional selection | Exact generated-resource counts, findings, and `selection` when applied |
+| `callGraph` | optional selection, optional `all` | Subroutine call graph; `{"edges": [...], "selection": {...}}` when a selection is applied |
+| `costEstimate` | optional selection, optional `all` | Exact generated-resource counts, findings, and `selection` when applied |
 | `targetMetadata` | none | Canonical target/catalog metadata |
 | `validateEditTransaction` | `transaction`, optional `sources` | Atomic validation status, diagnostics, and previews when valid |
 | `semanticRename` | `target`, optional `sources` | Validated rename transaction or structured refusal |
@@ -377,33 +377,31 @@ that matches nothing in the loaded program — is a structured
   subroutine name), `max`.
 
 The `file` field resolves like finding selection: any spelling that resolves
-to the same source file selects it. Requests without selection fields receive
-the previous shapes unchanged (bare arrays for `rules`, `symbols`,
-`references`, `callGraph`; the unextended object for `cfg`) — including
-`symbols` requests carrying only the pre-existing `kind` field. The CLI options
+to the same source file selects it. A capped list reports a `truncation` member with its total, shown and withheld counts, and an `expand` hint. Unselected arrays become `{items, truncation}` only when capped. Explicit selection wrappers retain their own totals. The CLI options
 `--only`, `--rule`, `--file`, `--caller`, `--callee`, and `--max` on `inspect`
 subcommands drive the same `wright-driver` selection.
 
-### Brief results (#532)
+### Essential default results
 
-`analyze`, `inspect`, and `lint` accept an optional `brief` field (the CLI's
-`--brief`; defaults preserve the full result on every surface). A brief
-result is the small object `{"brief": true, "program"?, "counts", "items",
-"expand", "selection"?}`: `program` repeats the operation's program summary
-when one exists, `counts` totals the collections the full result reports
-(findings/risks by severity, rules, symbols, references, elements, skipped),
-`items` carries at most five highest-priority entries — highest-severity
-findings for `lint`, the costliest rules for `analyze`, the leading rules for
-`inspect` — and `expand` names the way back to the full result. `lint`
-composes `brief` with finding selection: selection narrows the finding set
-first, the counts and items describe the selected set, and the `selection`
-member keeps the pre-selection total.
+CLI text, CLI JSON, stdio, JSON-RPC, and MCP expose the same actionable
+content. JSON is compact and deterministic. `check` reports its verdict and
+diagnostics; `lint` reports severity counts and actionable findings;
+`analyze` reports overview, cost, hotspots, complexity, risks, and top
+variables; bare `inspect` reports the overview, rule names, and detail commands.
+Lint and risk findings carry code, severity, message, evidence, and a compact
+`location` (`path:line:column`) when mapped. Full spans and fix transactions
+are available from `findings`; lint policy is available from `lintRules`.
+Persistent-object details are queried through `persistentObjects`.
 
-CLI (`--brief`), `serve` (`"brief": true`), and the MCP tools
-(`wright_analyze`, `wright_inspect`, `wright_lint` with `brief` in their
-generated input schemas) return the same brief payload for the same input and
-form. `capabilities.result_schemas` names the `$defs` definition describing
-each advertised operation's result, including the brief form for these three.
+Full fact dumps are available only through the in-process `CompilerSession`
+API; external callers use the narrower semantic operations.
+
+General lists default to at most 20 items; lint also bounds its compact result to 5500 bytes before the envelope so long finding messages cannot consume the default token budget; the ranked analyze report keeps its top-five hotspots, risks, and variables and top-three condition trees. Capped lists report their total, truncation, and how to
+see the rest. `all: true` lifts the default cap (CLI `--all`); filters and an
+explicit `max` continue to apply. Verdicts and exit codes are computed on the
+complete set before truncation. Static catalogs are not capped. `brief` and
+`--brief` are removed. [ADR-0025](adr/0025-essential-default-output.md) records
+this breaking pre-1.0 shape change without a contract-id bump.
 
 Edit transactions use source identities and half-open, 1-based line/column
 ranges. Provider positions use 0-based line/character coordinates. Wright
@@ -599,6 +597,10 @@ the response/error model requires a new major contract such as
 `wright-agent/v2`; the v1 schema and its compatibility tests remain in place.
 The CLI result envelope has its independent `wright-result/v1` version; its
 evolution policy is defined in [`docs/cli/machine-contract.md`](cli/machine-contract.md).
+
+[ADR-0025](adr/0025-essential-default-output.md) records the essential-default
+shape change across both contracts, including the removal of `brief` and full
+external fact dumps. The complete typed Rust API remains available.
 
 One recorded exception applies to the same rule in both contracts, decided
 before the 1.0 contract freeze (#134): the `lint` result's `rules` member

@@ -12,13 +12,13 @@ Wright is the semantic tooling for these projects: it parses, validates, lints, 
 
 - **Is it correct?** `check`. It is only the correctness gate: it passes code that will freeze a server, such as a `While(True)` with no `Wait`.
 - **Is it risky or expensive?** `lint` for stable-rule findings, `analyze` for element cost, hotspots, and shared state. Run these alongside `check`, before and after a change.
-- **What does this symbol or rule do, and what breaks if I change it?** `inspect` (symbols, refs, cfg, callgraph, cost) resolves by name and follows semantics where grep only matches text. It works on raw Workshop and on OPY through the provider (see the language notes).
+- **What does this symbol or rule do, and what breaks if I change it?** `inspect` (symbols, refs, cfg, callgraph, cost) resolves by name and follows semantics where grep only matches text. For OPY, these queries inspect the provider's compiled artifact (see the language notes).
 - **Many questions about one project?** `wright serve` loads it once.
-- **Result too large to read at once?** `--brief` on `analyze`, `lint`, or a bare `inspect` (v0.11.0+) returns the counts and top items with an `expand` pointer back to the full result; use the full result when you need every item.
+- **Need more detail?** Results show the verdict and actionable content by default. Long lists show at most 20 items, their total, and how to see the rest. Use `--all` for every item in a list and the `inspect` subcommands for specific detail.
 - **Unsure of a name, or a name was rejected?** `wright lookup <query> --language workshop|opy` (v0.11.0+) resolves the owner-accepted spelling and signature; `--within <enum or callable>` lists its members or parameters. Check before writing in a language you do not know, and again when `check` rejects a name.
 - **Need Workshop output, or OPY from raw Workshop?** `compile`, `convert`. `convert` reconstructs, it does not recover your source.
 
-Prefer `--format json` when you will act on the result. Take a baseline before editing and compare after, so you can separate your findings from existing ones.
+Read text output by default. Use `--format json` when a program processes the result; it contains the same information as text, in structured form. Take a baseline before editing and compare after, so you can separate your findings from existing ones.
 
 ## Judgment that is easy to miss
 

@@ -36,9 +36,16 @@ fn tool_service_queries_canonical_workshop() {
             max: None,
             rule: None,
             content: false,
+            all: true,
         },
-        ToolRequest::Findings(FindingSelection::default()),
-        ToolRequest::CostEstimate(FindingSelection::default()),
+        ToolRequest::Findings {
+            selection: FindingSelection::default(),
+            all: true,
+        },
+        ToolRequest::CostEstimate {
+            selection: FindingSelection::default(),
+            all: true,
+        },
     ] {
         assert!(matches!(service.handle(&request), ToolResponse::Ok { .. }));
     }
@@ -87,24 +94,13 @@ fn tool_service_lint_queries_keep_the_session_configuration() {
 
     let lint = match service.handle(&ToolRequest::Lint {
         selection: FindingSelection::default(),
-        brief: false,
+        all: true,
     }) {
         ToolResponse::Ok { result } => result,
         ToolResponse::Error { error } => panic!("lint failed: {error:?}"),
     };
-    assert_eq!(lint["config"], lint_rules["config"]);
-    // #431: `lint` inlines only the finding-interpretation fields;
-    // `lintRules` remains the full-metadata surface.
-    let lint_rule = lint["rules"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|rule| rule["id"] == "min-wait-loop")
-        .expect("lint lists every registered rule");
-    assert_eq!(
-        lint_rule,
-        &serde_json::json!({ "id": "min-wait-loop", "effectiveSeverity": "error" })
-    );
+    assert!(lint.get("config").is_none());
+    assert!(lint.get("rules").is_none());
     let full_rule = lint_rules["rules"]
         .as_array()
         .unwrap()
@@ -120,8 +116,10 @@ fn tool_service_lint_queries_keep_the_session_configuration() {
         .expect("the fixture triggers min-wait-loop");
     assert_eq!(configured_finding["severity"], "error");
 
-    let default_findings = match service.handle(&ToolRequest::Findings(FindingSelection::default()))
-    {
+    let default_findings = match service.handle(&ToolRequest::Findings {
+        selection: FindingSelection::default(),
+        all: true,
+    }) {
         ToolResponse::Ok { result } => result,
         ToolResponse::Error { error } => panic!("findings failed: {error:?}"),
     };
@@ -148,15 +146,15 @@ fn tool_service_routes_workflows_through_the_agent_request_contract() {
     assert_eq!(capabilities.agent_contract, "wright-agent/v1");
     for (request, command) in [
         (ToolRequest::Compile, "compile"),
-        (ToolRequest::Check, "check"),
+        (ToolRequest::Check { all: true }, "check"),
         (
             ToolRequest::Analyze {
                 selection: Default::default(),
-                brief: false,
+                all: true,
             },
             "analyze",
         ),
-        (ToolRequest::Inspect { brief: false }, "inspect"),
+        (ToolRequest::Inspect { all: true }, "inspect"),
     ] {
         let ToolResponse::Ok { result } = service.handle(&request) else {
             panic!("{command} returns its structured envelope");
@@ -184,16 +182,22 @@ fn agent_finding_selection_filters_and_truncates_without_touching_defaults() {
     };
 
     // No selection fields: the bare array result is unchanged.
-    let plain = result_of(ToolRequest::Findings(FindingSelection::default()));
+    let plain = result_of(ToolRequest::Findings {
+        selection: FindingSelection::default(),
+        all: true,
+    });
     assert!(plain.is_array(), "the default result stays a bare array");
     assert_eq!(plain.as_array().unwrap().len(), 10);
 
     // `severity` is a threshold; `error` selects none of the warning findings
     // while the summary still reports the true total.
-    let errors = result_of(ToolRequest::Findings(FindingSelection {
-        severity: Some(Severity::Error),
-        ..FindingSelection::default()
-    }));
+    let errors = result_of(ToolRequest::Findings {
+        selection: FindingSelection {
+            severity: Some(Severity::Error),
+            ..FindingSelection::default()
+        },
+        all: true,
+    });
     assert!(errors["findings"].as_array().unwrap().is_empty());
     assert_eq!(
         errors["selection"],
@@ -207,7 +211,7 @@ fn agent_finding_selection_filters_and_truncates_without_touching_defaults() {
             max: Some(2),
             ..FindingSelection::default()
         },
-        brief: false,
+        all: true,
     });
     assert_eq!(lint["findings"].as_array().unwrap().len(), 2);
     assert_eq!(
@@ -216,10 +220,13 @@ fn agent_finding_selection_filters_and_truncates_without_touching_defaults() {
     );
 
     // The same fields apply to `costEstimate` findings.
-    let cost = result_of(ToolRequest::CostEstimate(FindingSelection {
-        max: Some(1),
-        ..FindingSelection::default()
-    }));
+    let cost = result_of(ToolRequest::CostEstimate {
+        selection: FindingSelection {
+            max: Some(1),
+            ..FindingSelection::default()
+        },
+        all: true,
+    });
     assert_eq!(cost["findings"].as_array().unwrap().len(), 1);
     assert!(cost["selection"]["withheld"].as_u64().unwrap() > 0);
 }
@@ -234,27 +241,33 @@ fn an_unknown_rule_id_is_a_service_error_not_an_empty_result() {
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
     for request in [
-        ToolRequest::Findings(FindingSelection {
-            rule: Some("not-a-rule".to_string()),
-            ..FindingSelection::default()
-        }),
+        ToolRequest::Findings {
+            selection: FindingSelection {
+                rule: Some("not-a-rule".to_string()),
+                ..FindingSelection::default()
+            },
+            all: true,
+        },
         ToolRequest::Lint {
             selection: FindingSelection {
                 rule: Some("not-a-rule".to_string()),
                 ..FindingSelection::default()
             },
-            brief: false,
+            all: true,
         },
-        ToolRequest::CostEstimate(FindingSelection {
-            rule: Some("not-a-rule".to_string()),
-            ..FindingSelection::default()
-        }),
+        ToolRequest::CostEstimate {
+            selection: FindingSelection {
+                rule: Some("not-a-rule".to_string()),
+                ..FindingSelection::default()
+            },
+            all: true,
+        },
         ToolRequest::Analyze {
             selection: FindingSelection {
                 rule: Some("not-a-rule".to_string()),
                 ..FindingSelection::default()
             },
-            brief: false,
+            all: true,
         },
     ] {
         match service.handle(&request) {
@@ -352,17 +365,14 @@ fn analyze_selection_narrows_risks_and_reports_the_outcome() {
             &mut service,
             &ToolRequest::Analyze {
                 selection,
-                brief: false,
+                all: true,
             },
         )
     };
 
     // No selection: the bare result keeps every risk and no `selection`.
     let plain = analyze(FindingSelection::default());
-    assert_eq!(
-        plain["result"]["facts"]["risks"].as_array().unwrap().len(),
-        10
-    );
+    assert_eq!(plain["result"]["risks"].as_array().unwrap().len(), 10);
     assert!(plain["result"].get("selection").is_none());
 
     // `severity` is a threshold: `error` selects none of the warnings while
@@ -371,12 +381,7 @@ fn analyze_selection_narrows_risks_and_reports_the_outcome() {
         severity: Some(Severity::Error),
         ..FindingSelection::default()
     });
-    assert!(
-        errors["result"]["facts"]["risks"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(errors["result"]["risks"].as_array().unwrap().is_empty());
     assert_eq!(
         errors["result"]["selection"],
         serde_json::json!({"total": 10, "withheld": 0})
@@ -388,7 +393,7 @@ fn analyze_selection_narrows_risks_and_reports_the_outcome() {
         max: Some(2),
         ..FindingSelection::default()
     });
-    let risks = bounded["result"]["facts"]["risks"].as_array().unwrap();
+    let risks = bounded["result"]["risks"].as_array().unwrap();
     assert_eq!(risks.len(), 2);
     assert!(risks.iter().all(|risk| risk["code"] == "repeated-value"));
     assert_eq!(
@@ -402,39 +407,31 @@ fn analyze_selection_narrows_risks_and_reports_the_outcome() {
         file: Some(input.to_str().unwrap().to_string()),
         ..FindingSelection::default()
     });
-    assert_eq!(
-        here["result"]["facts"]["risks"].as_array().unwrap().len(),
-        10
-    );
+    assert_eq!(here["result"]["risks"].as_array().unwrap().len(), 10);
     let elsewhere = analyze(FindingSelection {
         file: Some("elsewhere.ws".to_string()),
         ..FindingSelection::default()
     });
-    assert!(
-        elsewhere["result"]["facts"]["risks"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(elsewhere["result"]["risks"].as_array().unwrap().is_empty());
     assert_eq!(
         elsewhere["result"]["selection"],
         serde_json::json!({"total": 10, "withheld": 0})
     );
 
-    // The brief form keeps the selected counts plus the outcome member.
-    let brief = result_of(
+    // Essential presentation preserves selected counts and the outcome.
+    let essential = result_of(
         &mut service,
         &ToolRequest::Analyze {
             selection: FindingSelection {
                 rule: Some("repeated-value".to_string()),
                 ..FindingSelection::default()
             },
-            brief: true,
+            all: false,
         },
     );
-    assert_eq!(brief["result"]["counts"]["risks"]["total"], 9);
+    assert_eq!(essential["result"]["counts"]["risks"]["total"], 9);
     assert_eq!(
-        brief["result"]["selection"],
+        essential["result"]["selection"],
         serde_json::json!({"total": 10, "withheld": 0})
     );
 
@@ -511,10 +508,13 @@ fn cost_estimate_rejects_a_file_selection_that_cannot_apply() {
     })
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
-    match service.handle(&ToolRequest::CostEstimate(FindingSelection {
-        file: Some("control-flow.ws".to_string()),
-        ..FindingSelection::default()
-    })) {
+    match service.handle(&ToolRequest::CostEstimate {
+        selection: FindingSelection {
+            file: Some("control-flow.ws".to_string()),
+            ..FindingSelection::default()
+        },
+        all: true,
+    }) {
         ToolResponse::Error { error } => {
             assert_eq!(error.code, "invalid-selection");
             assert!(error.message.contains("file"));
@@ -526,10 +526,13 @@ fn cost_estimate_rejects_a_file_selection_that_cannot_apply() {
     // `severity`/`rule`/`max` still apply: findings carry code and severity.
     let cost = result_of(
         &mut service,
-        &ToolRequest::CostEstimate(FindingSelection {
-            severity: Some(Severity::Error),
-            ..FindingSelection::default()
-        }),
+        &ToolRequest::CostEstimate {
+            selection: FindingSelection {
+                severity: Some(Severity::Error),
+                ..FindingSelection::default()
+            },
+            all: true,
+        },
     );
     assert!(
         cost["findings"].as_array().unwrap().is_empty(),
@@ -588,10 +591,10 @@ fn an_empty_selection_serializes_identically_to_no_selection() {
     );
 }
 
-// ── Brief results (#532) ──────────────────────────────────────────────────────
+// Essential presentation
 
 #[test]
-fn brief_forms_bound_and_describe_lint_analyze_and_inspect() {
+fn essential_forms_report_actions_without_fact_dumps() {
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(workshop_path()),
         kind: SourceKind::Workshop,
@@ -600,43 +603,41 @@ fn brief_forms_bound_and_describe_lint_analyze_and_inspect() {
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
 
-    // Every brief result shares the same shape: counts, top items, and an
-    // expansion hint.
+    // Presentation exposes actionable summaries and detail commands.
     let lint = result_of(
         &mut service,
         &ToolRequest::Lint {
             selection: FindingSelection::default(),
-            brief: true,
+            all: false,
         },
     );
-    assert_eq!(lint["brief"], true);
     assert_eq!(lint["counts"]["findings"]["total"], 1);
-    assert!(lint["counts"]["rules"].as_u64().unwrap() > 0);
-    assert!(lint["items"].as_array().unwrap().len() <= 5);
-    assert!(lint["expand"].as_str().unwrap().contains("brief"));
-    assert!(lint["findings"].is_null(), "full payload withheld: {lint}");
+    assert!(lint["findings"].as_array().unwrap().len() <= 5);
+    assert!(lint["expand"].as_str().unwrap().contains("all"));
+    assert!(
+        lint.get("config").is_none(),
+        "configuration is served by lintRules"
+    );
 
     let analyze = result_of(
         &mut service,
         &ToolRequest::Analyze {
             selection: Default::default(),
-            brief: true,
+            all: false,
         },
     );
     let analyze = &analyze["result"];
-    assert_eq!(analyze["brief"], true);
-    assert_eq!(analyze["counts"]["rules"], 2);
+    assert_eq!(analyze["program"]["rules"], 2);
     assert_eq!(analyze["counts"]["risks"]["total"], 1);
-    assert!(analyze["items"].as_array().unwrap().len() <= 5);
+    assert!(analyze["hotspots"].as_array().unwrap().len() <= 5);
     assert!(analyze["expand"].is_string());
     assert!(
         analyze["facts"].is_null(),
         "full payload withheld: {analyze}"
     );
 
-    let inspect = result_of(&mut service, &ToolRequest::Inspect { brief: true });
+    let inspect = result_of(&mut service, &ToolRequest::Inspect { all: false });
     let inspect = &inspect["result"];
-    assert_eq!(inspect["brief"], true);
     assert_eq!(inspect["counts"]["rules"], 2);
     assert_eq!(inspect["counts"]["references"], 8);
     assert!(inspect["expand"].is_string());
@@ -647,9 +648,8 @@ fn brief_forms_bound_and_describe_lint_analyze_and_inspect() {
 }
 
 #[test]
-fn brief_lint_applies_selection_before_summarizing() {
-    // #532: `brief` composes with finding selection — the counts and items
-    // describe the selected set, and the selection summary survives.
+fn essential_lint_applies_selection_before_summarizing() {
+    // The selected set and selection summary survive presentation.
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(workshop_path()),
         kind: SourceKind::Workshop,
@@ -666,16 +666,15 @@ fn brief_lint_applies_selection_before_summarizing() {
                 max: Some(2),
                 ..FindingSelection::default()
             },
-            brief: true,
+            all: false,
         },
     );
-    assert_eq!(lint["brief"], true);
     assert_eq!(
         lint["selection"],
         serde_json::json!({"total": 1, "withheld": 0})
     );
     assert_eq!(lint["counts"]["findings"]["total"], 1);
-    assert_eq!(lint["items"].as_array().unwrap().len(), 1);
+    assert_eq!(lint["findings"].as_array().unwrap().len(), 1);
 }
 
 #[test]
@@ -739,6 +738,7 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
     );
     let symbol_id = |name: &str| {
@@ -758,6 +758,7 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
             max: None,
             rule: None,
             content: false,
+            all: true,
         },
     );
     let rule_index = |name: &str| {
@@ -779,6 +780,7 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
                 rule: None,
                 file: None,
                 max: None,
+                all: true,
             },
             ToolRequest::References {
                 symbol: symbol_id("score").into(),
@@ -786,6 +788,7 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
                 rule: None,
                 file: None,
                 max: None,
+                all: true,
             },
         ),
         (
@@ -801,11 +804,13 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
                 rule: "player starts".into(),
                 kind: None,
                 max: None,
+                all: true,
             },
             ToolRequest::Cfg {
                 rule: rule_index("player starts").into(),
                 kind: None,
                 max: None,
+                all: true,
             },
         ),
     ] {
@@ -835,6 +840,8 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
         rule: 4.into(),
         kind: None,
         max: None,
+
+        all: true,
     }) {
         ToolResponse::Error { error } => assert_eq!(error.code, "invalid-id"),
         ToolResponse::Ok { result } => panic!("rule index 4 must not exist: {result}"),
@@ -849,9 +856,10 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
             rule: None,
             file: None,
             max: None,
+            all: true,
         },
     );
-    for reference in references.as_array().unwrap() {
+    for reference in references["references"].as_array().unwrap() {
         assert_eq!(
             reference["span"]["path"].as_str().unwrap(),
             "declarations-rules.ws",
@@ -913,6 +921,7 @@ rule ("dup") {
                 rule: None,
                 file: None,
                 max: None,
+                all: true,
             },
             "unknown-symbol",
         ),
@@ -927,6 +936,7 @@ rule ("dup") {
                 rule: "nope".into(),
                 kind: None,
                 max: None,
+                all: true,
             },
             "unknown-rule",
         ),
@@ -937,6 +947,7 @@ rule ("dup") {
                 rule: None,
                 file: None,
                 max: None,
+                all: true,
             },
             "ambiguous-symbol",
         ),
@@ -945,6 +956,7 @@ rule ("dup") {
                 rule: "dup".into(),
                 kind: None,
                 max: None,
+                all: true,
             },
             "ambiguous-rule",
         ),
@@ -974,6 +986,7 @@ rule ("dup") {
                 rule: "Dup".into(),
                 kind: None,
                 max: None,
+                all: true,
             },
             "unknown rule 'Dup'; nearest declared: 'dup'",
         ),
@@ -988,6 +1001,7 @@ rule ("dup") {
                 rule: "nope".into(),
                 kind: None,
                 max: None,
+                all: true,
             },
             "the 'rules' operation lists them",
         ),
@@ -1028,6 +1042,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
     );
     assert!(all.is_array());
@@ -1041,6 +1056,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             kind: Some("rule".to_string()),
             file: None,
             max: None,
+            all: true,
         },
     );
     assert!(rules_only.is_array(), "kind alone keeps the bare array");
@@ -1055,6 +1071,8 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             kind: Some("rule".to_string()),
             file: None,
             max: Some(1),
+
+            all: true,
         },
     );
     assert_eq!(bounded_rules["symbols"].as_array().unwrap().len(), 1);
@@ -1066,6 +1084,8 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             kind: None,
             file: None,
             max: Some(1),
+
+            all: true,
         },
     );
     assert_eq!(bounded["symbols"].as_array().unwrap().len(), 1);
@@ -1078,6 +1098,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             kind: None,
             file: Some("declarations-rules.ws".to_string()),
             max: None,
+            all: true,
         },
     );
     assert_eq!(in_file["symbols"].as_array().unwrap().len(), total);
@@ -1087,6 +1108,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             kind: None,
             file: Some("elsewhere.ws".to_string()),
             max: None,
+            all: true,
         },
     );
     assert!(elsewhere["symbols"].as_array().unwrap().is_empty());
@@ -1103,6 +1125,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             max: None,
             rule: None,
             content: false,
+            all: true,
         },
     );
     assert!(rules.is_array());
@@ -1123,6 +1146,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             max: None,
             rule: None,
             content: false,
+            all: true,
         },
     );
     let kept = named["rules"].as_array().unwrap();
@@ -1138,6 +1162,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             max: Some(1),
             rule: None,
             content: false,
+            all: true,
         },
     );
     assert_eq!(bounded_rules["rules"].as_array().unwrap().len(), 1);
@@ -1155,9 +1180,10 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             rule: None,
             file: None,
             max: None,
+            all: true,
         },
     );
-    assert!(references.is_array());
+    assert!(references["references"].is_array());
     let writes = result_of(
         &mut service,
         &ToolRequest::References {
@@ -1166,6 +1192,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             rule: None,
             file: None,
             max: None,
+            all: true,
         },
     );
     let kept = writes["references"].as_array().unwrap();
@@ -1173,7 +1200,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
     assert!(kept.iter().all(|reference| reference["kind"] == "write"));
     assert_eq!(
         writes["selection"]["total"],
-        references.as_array().unwrap().len()
+        references["references"].as_array().unwrap().len()
     );
     let inside = result_of(
         &mut service,
@@ -1183,6 +1210,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             rule: Some("Subroutine showStatus".into()),
             file: None,
             max: None,
+            all: true,
         },
     );
     let kept = inside["references"].as_array().unwrap();
@@ -1196,12 +1224,13 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             rule: Some(1_u32.into()),
             file: None,
             max: None,
+            all: true,
         },
     );
     assert!(outside["references"].as_array().unwrap().is_empty());
     assert_eq!(
         outside["selection"]["total"],
-        references.as_array().unwrap().len()
+        references["references"].as_array().unwrap().len()
     );
 
     // `cfg`: `kind`/`max` bound `blocks`; entry/exit and the original block
@@ -1212,6 +1241,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             rule: "player starts".into(),
             kind: None,
             max: None,
+            all: true,
         },
     );
     assert!(cfg["selection"].is_null());
@@ -1222,6 +1252,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             rule: "player starts".into(),
             kind: Some("entry".to_string()),
             max: None,
+            all: true,
         },
     );
     let kept = entries["blocks"].as_array().unwrap();
@@ -1235,6 +1266,8 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             rule: "player starts".into(),
             kind: None,
             max: Some(1),
+
+            all: true,
         },
     );
     assert_eq!(bounded_cfg["blocks"].as_array().unwrap().len(), 1);
@@ -1247,6 +1280,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             caller: None,
             callee: None,
             max: None,
+            all: true,
         },
     );
     assert!(graph.is_array());
@@ -1257,6 +1291,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             caller: Some("player starts".to_string()),
             callee: None,
             max: None,
+            all: true,
         },
     );
     assert_eq!(
@@ -1269,6 +1304,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             caller: Some("Subroutine showStatus".to_string()),
             callee: None,
             max: None,
+            all: true,
         },
     );
     assert!(quiet_rule["edges"].as_array().unwrap().is_empty());
@@ -1279,6 +1315,8 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             caller: None,
             callee: Some("showStatus".to_string()),
             max: Some(0),
+
+            all: true,
         },
     );
     assert!(to_sub["edges"].as_array().unwrap().is_empty());
@@ -1337,12 +1375,17 @@ disabled rule ("disabled caller") {
         caller: None,
         callee: None,
         max: None,
+
+        all: true,
     });
     assert_eq!(graph.as_array().unwrap(), &Vec::<serde_json::Value>::new());
 
     // `programActions` and `waitActions` agree: both count zero for a
     // program whose only wait and call are disabled.
-    let cost = result_of(ToolRequest::CostEstimate(FindingSelection::default()));
+    let cost = result_of(ToolRequest::CostEstimate {
+        selection: FindingSelection::default(),
+        all: true,
+    });
     assert_eq!(
         cost["exact"],
         serde_json::json!({
@@ -1356,10 +1399,10 @@ disabled rule ("disabled caller") {
     // `analyze` reports the same counts through `facts.cost.counts`.
     let analyze = result_of(ToolRequest::Analyze {
         selection: FindingSelection::default(),
-        brief: false,
+        all: true,
     });
     assert_eq!(
-        analyze["result"]["facts"]["cost"]["counts"],
+        analyze["result"]["cost"]["counts"],
         serde_json::json!({
             "rules": 1,
             "conditions": 0,
@@ -1377,6 +1420,8 @@ disabled rule ("disabled caller") {
         rule: None,
         file: None,
         max: None,
+
+        all: true,
     });
     assert_eq!(references["references"].as_array().unwrap().len(), 2);
 }
@@ -1414,6 +1459,8 @@ rule ("caller") {
         caller: None,
         callee: None,
         max: None,
+
+        all: true,
     }) {
         ToolResponse::Ok { result } => result,
         ToolResponse::Error { error } => panic!("{error:?}"),
@@ -1444,11 +1491,13 @@ fn semantic_query_selection_refuses_unknown_filter_values() {
             max: None,
             rule: None,
             content: false,
+            all: true,
         },
         ToolRequest::Symbols {
             kind: Some("nope".to_string()),
             file: None,
             max: None,
+            all: true,
         },
         ToolRequest::References {
             symbol: "score".into(),
@@ -1456,6 +1505,7 @@ fn semantic_query_selection_refuses_unknown_filter_values() {
             rule: None,
             file: None,
             max: None,
+            all: true,
         },
         ToolRequest::References {
             symbol: "score".into(),
@@ -1463,6 +1513,7 @@ fn semantic_query_selection_refuses_unknown_filter_values() {
             rule: Some("nope".into()),
             file: None,
             max: None,
+            all: true,
         },
         ToolRequest::References {
             symbol: "score".into(),
@@ -1470,21 +1521,25 @@ fn semantic_query_selection_refuses_unknown_filter_values() {
             rule: Some(99_u32.into()),
             file: None,
             max: None,
+            all: true,
         },
         ToolRequest::Cfg {
             rule: "player starts".into(),
             kind: Some("nope".to_string()),
             max: None,
+            all: true,
         },
         ToolRequest::CallGraph {
             caller: Some("nope".to_string()),
             callee: None,
             max: None,
+            all: true,
         },
         ToolRequest::CallGraph {
             caller: None,
             callee: Some("nope".to_string()),
             max: None,
+            all: true,
         },
     ] {
         assert_eq!(
@@ -1502,6 +1557,7 @@ fn semantic_query_selection_refuses_unknown_filter_values() {
                 kind: Some("nope".to_string()),
                 file: None,
                 max: None,
+                all: true,
             },
             "globalVariable, playerVariable, subroutine, rule",
         ),
@@ -1512,6 +1568,7 @@ fn semantic_query_selection_refuses_unknown_filter_values() {
                 rule: None,
                 file: None,
                 max: None,
+                all: true,
             },
             "declaration, definition, read, write, call",
         ),
@@ -1520,6 +1577,7 @@ fn semantic_query_selection_refuses_unknown_filter_values() {
                 rule: "player starts".into(),
                 kind: Some("nope".to_string()),
                 max: None,
+                all: true,
             },
             "entry, exit, block, if, while, for",
         ),
@@ -1553,6 +1611,7 @@ fn session_query_workflows_return_the_agent_operation_payloads() {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
     );
     let agent_references = result_of(
@@ -1563,6 +1622,7 @@ fn session_query_workflows_return_the_agent_operation_payloads() {
             rule: None,
             file: None,
             max: None,
+            all: true,
         },
     );
     let agent_usage = result_of(
@@ -1577,6 +1637,7 @@ fn session_query_workflows_return_the_agent_operation_payloads() {
             rule: "player starts".into(),
             kind: None,
             max: None,
+            all: true,
         },
     );
     let agent_callgraph = result_of(
@@ -1585,11 +1646,15 @@ fn session_query_workflows_return_the_agent_operation_payloads() {
             caller: None,
             callee: None,
             max: None,
+            all: true,
         },
     );
     let agent_cost = result_of(
         &mut service,
-        &ToolRequest::CostEstimate(FindingSelection::default()),
+        &ToolRequest::CostEstimate {
+            selection: FindingSelection::default(),
+            all: true,
+        },
     );
     drop(service);
 
@@ -1601,9 +1666,10 @@ fn session_query_workflows_return_the_agent_operation_payloads() {
 
     // `refs` is the usage payload plus the references list under `references`.
     let refs = serde_json::to_value(cli.refs("score", None, None, None, None).result).unwrap();
-    let mut expected_refs = agent_usage.as_object().unwrap().clone();
-    expected_refs.insert("references".to_string(), agent_references);
-    assert_eq!(refs, serde_json::Value::Object(expected_refs));
+    assert_eq!(refs, agent_references);
+    for (key, value) in agent_usage.as_object().unwrap() {
+        assert_eq!(&refs[key], value);
+    }
 
     assert_eq!(
         serde_json::to_value(cli.cfg("player starts", None, None).result).unwrap(),
@@ -1899,6 +1965,7 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
     ));
     assert_eq!(before, ["score", "setup"]);
@@ -1910,13 +1977,17 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
             rule: None,
             file: None,
             max: None,
+            all: true,
         },
-        ToolRequest::Findings(FindingSelection::default()),
+        ToolRequest::Findings {
+            selection: FindingSelection::default(),
+            all: true,
+        },
         ToolRequest::LintRules,
-        ToolRequest::Inspect { brief: false },
+        ToolRequest::Inspect { all: true },
         ToolRequest::Analyze {
             selection: Default::default(),
-            brief: false,
+            all: true,
         },
     ] {
         let before = serde_json::to_string(&service.handle(&request)).unwrap();
@@ -1926,12 +1997,16 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
         );
     }
     assert_eq!(
-        serde_json::to_value(service.analyze()).unwrap(),
+        {
+            let mut expected = serde_json::to_value(service.analyze()).unwrap();
+            expected["result"] = wright_driver::essential::analyze(&expected["result"], true);
+            expected
+        },
         result_of(
             &mut service,
             &ToolRequest::Analyze {
                 selection: Default::default(),
-                brief: false,
+                all: true,
             }
         )
     );
@@ -1944,6 +2019,7 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
     ));
     assert_eq!(after, ["points", "setup", "extra"]);
@@ -1953,7 +2029,7 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
     assert_eq!(project["rules"], 2);
     assert_eq!(project["symbols"], 3);
 
-    let check = result_of(&mut service, &ToolRequest::Check);
+    let check = result_of(&mut service, &ToolRequest::Check { all: true });
     assert_eq!(check["ok"], false);
     assert!(
         check["diagnostics"]
@@ -1967,7 +2043,7 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
         &mut service,
         &ToolRequest::Lint {
             selection: FindingSelection::default(),
-            brief: false,
+            all: true,
         },
     );
     assert!(
@@ -1989,6 +2065,7 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
             max: None,
             rule: None,
             content: false,
+            all: true,
         },
     );
     assert_eq!(service.reload_count(), 1);
@@ -2016,13 +2093,18 @@ fn an_unchanged_input_is_never_reloaded() {
             max: None,
             rule: None,
             content: false,
+            all: true,
         },
         ToolRequest::Symbols {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
-        ToolRequest::Findings(FindingSelection::default()),
+        ToolRequest::Findings {
+            selection: FindingSelection::default(),
+            all: true,
+        },
     ] {
         result_of(&mut service, &request);
     }
@@ -2036,6 +2118,7 @@ fn an_unchanged_input_is_never_reloaded() {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
     );
     assert_eq!(service.reload_count(), 0);
@@ -2047,6 +2130,7 @@ fn an_unchanged_input_is_never_reloaded() {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
     );
     assert_eq!(service.reload_count(), 1);
@@ -2059,6 +2143,7 @@ fn an_unchanged_input_is_never_reloaded() {
             max: None,
             rule: None,
             content: false,
+            all: true,
         },
     );
     assert_eq!(service.reload_count(), 1);
@@ -2086,6 +2171,8 @@ fn directory_inputs_observe_added_and_removed_sources() {
                 max: None,
                 rule: None,
                 content: false,
+
+                all: true,
             },
         )
         .as_array()
@@ -2111,6 +2198,8 @@ fn directory_inputs_observe_added_and_removed_sources() {
                 max: None,
                 rule: None,
                 content: false,
+
+                all: true,
             }
         ),
         "input-kind-ambiguous"
@@ -2133,6 +2222,7 @@ fn directory_inputs_observe_added_and_removed_sources() {
                 rule: 0.into(),
                 kind: None,
                 max: None,
+                all: true,
             }
         ),
         "stale-id"
@@ -2145,6 +2235,7 @@ fn directory_inputs_observe_added_and_removed_sources() {
             rule: 0.into(),
             kind: None,
             max: None,
+            all: true,
         },
     );
 
@@ -2185,6 +2276,7 @@ fn a_failed_reload_refuses_requests_until_the_input_heals() {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
         ToolRequest::Rules {
             name: None,
@@ -2192,6 +2284,7 @@ fn a_failed_reload_refuses_requests_until_the_input_heals() {
             max: None,
             rule: None,
             content: false,
+            all: true,
         },
         ToolRequest::Project,
     ] {
@@ -2200,7 +2293,7 @@ fn a_failed_reload_refuses_requests_until_the_input_heals() {
     }
     // `check` is a workflow (#591): its own load surfaces the same
     // `parse-error` inside the envelope, not as a `ToolResponse` refusal.
-    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check) else {
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check { all: true }) else {
         panic!("check returns the workflow envelope")
     };
     assert_eq!(result["ok"], false, "{result}");
@@ -2217,6 +2310,7 @@ fn a_failed_reload_refuses_requests_until_the_input_heals() {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
     );
     assert!(
@@ -2258,6 +2352,7 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
             rule: None,
             file: None,
             max: None,
+            all: true,
         },
     );
     result_of(
@@ -2266,6 +2361,7 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
             rule: 0.into(),
             kind: None,
             max: None,
+            all: true,
         },
     );
 
@@ -2281,6 +2377,7 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
             rule: None,
             file: None,
             max: None,
+            all: true,
         },
         ToolRequest::Usage { symbol: 0.into() },
         ToolRequest::SemanticRename {
@@ -2297,6 +2394,7 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
             rule: 0.into(),
             kind: None,
             max: None,
+            all: true,
         },
     ] {
         assert_eq!(
@@ -2313,15 +2411,20 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
             rule: None,
             file: None,
             max: None,
+            all: true,
         },
     );
-    assert!(references.as_array().unwrap().len() >= 2, "{references}");
+    assert!(
+        references["references"].as_array().unwrap().len() >= 2,
+        "{references}"
+    );
     result_of(
         &mut service,
         &ToolRequest::Cfg {
             rule: "extra".into(),
             kind: None,
             max: None,
+            all: true,
         },
     );
 
@@ -2332,6 +2435,7 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
     );
     let usage = result_of(&mut service, &ToolRequest::Usage { symbol: 0.into() });
@@ -2344,6 +2448,7 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
                 rule: 1.into(),
                 kind: None,
                 max: None,
+                all: true,
             }
         ),
         "stale-id"
@@ -2356,6 +2461,7 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
             max: None,
             rule: None,
             content: false,
+            all: true,
         },
     );
     result_of(
@@ -2364,6 +2470,7 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
             rule: 1.into(),
             kind: None,
             max: None,
+            all: true,
         },
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -2445,6 +2552,7 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
                 rule: Some(0.into()),
                 file: None,
                 max: None,
+                all: true,
             }
         ),
         "stale-id",
@@ -2462,6 +2570,7 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
             rule: Some("first".into()),
             file: None,
             max: None,
+            all: true,
         },
     );
     assert_eq!(
@@ -2482,6 +2591,7 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
             rule: None,
             file: None,
             max: None,
+            all: true,
         },
         ToolRequest::References {
             symbol: 0.into(),
@@ -2489,6 +2599,7 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
             rule: Some(0.into()),
             file: None,
             max: None,
+            all: true,
         },
         ToolRequest::Rules {
             name: None,
@@ -2496,6 +2607,8 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
             file: None,
             max: None,
             content: true,
+
+            all: true,
         },
     ] {
         assert_eq!(
@@ -2512,6 +2625,7 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
     );
     assert_eq!(
@@ -2523,6 +2637,7 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
                 rule: Some(0.into()),
                 file: None,
                 max: None,
+                all: true,
             }
         ),
         "stale-id"
@@ -2537,6 +2652,7 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
             max: None,
             rule: None,
             content: false,
+            all: true,
         },
     );
     let filtered = result_of(
@@ -2547,6 +2663,7 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
             rule: Some(0.into()),
             file: None,
             max: None,
+            all: true,
         },
     );
     let references = filtered["references"]
@@ -2579,6 +2696,7 @@ fn ambiguous_refusals_re_establish_the_current_id_space() {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
     );
 
@@ -2595,6 +2713,7 @@ fn ambiguous_refusals_re_establish_the_current_id_space() {
                 rule: None,
                 file: None,
                 max: None,
+                all: true,
             }
         ),
         "ambiguous-symbol"
@@ -2607,6 +2726,7 @@ fn ambiguous_refusals_re_establish_the_current_id_space() {
                 rule: 0.into(),
                 kind: None,
                 max: None,
+                all: true,
             }
         ),
         "stale-id",
@@ -2619,6 +2739,7 @@ fn ambiguous_refusals_re_establish_the_current_id_space() {
                 rule: "dup".into(),
                 kind: None,
                 max: None,
+                all: true,
             }
         ),
         "ambiguous-rule"
@@ -2629,6 +2750,7 @@ fn ambiguous_refusals_re_establish_the_current_id_space() {
             rule: 0.into(),
             kind: None,
             max: None,
+            all: true,
         },
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -2661,12 +2783,14 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
             rule: None,
             file: None,
             max: None,
+            all: true,
         },
         ToolRequest::Usage { symbol: 0.into() },
         ToolRequest::Cfg {
             rule: 0.into(),
             kind: None,
             max: None,
+            all: true,
         },
     ] {
         assert_eq!(
@@ -2682,15 +2806,15 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
     result_of(&mut service, &ToolRequest::TargetMetadata);
     for (request, command) in [
         (ToolRequest::Compile, "compile"),
-        (ToolRequest::Check, "check"),
+        (ToolRequest::Check { all: true }, "check"),
         (
             ToolRequest::Analyze {
                 selection: Default::default(),
-                brief: false,
+                all: true,
             },
             "analyze",
         ),
-        (ToolRequest::Inspect { brief: false }, "inspect"),
+        (ToolRequest::Inspect { all: true }, "inspect"),
     ] {
         assert_eq!(result_of(&mut service, &request)["command"], command);
     }
@@ -2703,6 +2827,7 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
     );
     assert!(
@@ -2732,6 +2857,8 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
                 max: None,
                 rule: None,
                 content: false,
+
+                all: true,
             }
         )
         .as_array()
@@ -2747,12 +2874,13 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
             rule: None,
             file: None,
             max: None,
+            all: true,
         },
     );
     // Rule-internal references carry the new program's rule indexes; the
     // declaration itself is rule-less (`rule: null`).
     assert!(
-        references
+        references["references"]
             .as_array()
             .unwrap()
             .iter()
@@ -2761,7 +2889,10 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
     );
     let findings = result_of(
         &mut service,
-        &ToolRequest::Findings(FindingSelection::default()),
+        &ToolRequest::Findings {
+            selection: FindingSelection::default(),
+            all: true,
+        },
     );
     assert!(
         findings
@@ -2774,39 +2905,43 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
         &mut service,
         &ToolRequest::Lint {
             selection: FindingSelection::default(),
-            brief: false,
+            all: true,
         },
     );
     result_of(&mut service, &ToolRequest::LintRules);
-    result_of(&mut service, &ToolRequest::PersistentObjects);
+    result_of(&mut service, &ToolRequest::PersistentObjects { all: true });
     result_of(
         &mut service,
         &ToolRequest::CallGraph {
             caller: None,
             callee: None,
             max: None,
+            all: true,
         },
     );
     let cost = result_of(
         &mut service,
-        &ToolRequest::CostEstimate(FindingSelection::default()),
+        &ToolRequest::CostEstimate {
+            selection: FindingSelection::default(),
+            all: true,
+        },
     );
     assert_eq!(cost["exact"]["programRules"], 2);
-    let inspect = result_of(&mut service, &ToolRequest::Inspect { brief: false });
+    let inspect = result_of(&mut service, &ToolRequest::Inspect { all: true });
     assert_eq!(inspect["result"]["rules"].as_array().unwrap().len(), 2);
     let analyze = result_of(
         &mut service,
         &ToolRequest::Analyze {
             selection: Default::default(),
-            brief: false,
+            all: true,
         },
     );
     assert!(
-        analyze["result"]["facts"]["symbols"]
+        analyze["result"]["variables"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|symbol| symbol["name"] == "points" && symbol["id"].is_number())
+            .any(|symbol| symbol["name"] == "points")
     );
 
     // The edit surfaces serve the caller's sources against the reloaded
@@ -2917,11 +3052,13 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
             max: None,
             rule: None,
             content: false,
+            all: true,
         },
         ToolRequest::Symbols {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
         ToolRequest::References {
             symbol: 0.into(),
@@ -2929,6 +3066,7 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
             rule: None,
             file: None,
             max: None,
+            all: true,
         },
     ] {
         assert_eq!(
@@ -2941,7 +3079,7 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
     // `check`/`compile` are workflows (#591): the same loader diagnostic
     // rides the `wright-result/v1` envelope instead of a `ToolResponse`
     // refusal, matching the embedding `check`/`compile` methods exactly.
-    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check) else {
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check { all: true }) else {
         panic!("check returns the workflow envelope")
     };
     assert_eq!(result["ok"], false, "{result}");
@@ -2997,6 +3135,7 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
     );
     assert!(
@@ -3019,6 +3158,7 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
     ] {
         assert_eq!(
@@ -3059,6 +3199,7 @@ fn a_malformed_input_defers_the_load_and_recovers_in_place() {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
     ] {
         assert_eq!(
@@ -3103,6 +3244,7 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
     );
     result_of(
@@ -3113,6 +3255,7 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
             max: None,
             rule: None,
             content: false,
+            all: true,
         },
     );
     result_of(
@@ -3123,6 +3266,7 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
             rule: None,
             file: None,
             max: None,
+            all: true,
         },
     );
 
@@ -3148,6 +3292,7 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
                 rule: None,
                 file: None,
                 max: None,
+                all: true,
             }
         ),
         "stale-id"
@@ -3159,6 +3304,7 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
                 rule: 1.into(),
                 kind: None,
                 max: None,
+                all: true,
             }
         ),
         "stale-id"
@@ -3169,6 +3315,7 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
     );
     let usage = result_of(&mut service, &ToolRequest::Usage { symbol: 0.into() });
@@ -3181,6 +3328,7 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
             max: None,
             rule: None,
             content: false,
+            all: true,
         },
     );
     result_of(
@@ -3189,6 +3337,7 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
             rule: 1.into(),
             kind: None,
             max: None,
+            all: true,
         },
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -3217,6 +3366,7 @@ fn a_failed_refresh_invalidates_the_snapshot_even_when_bytes_return() {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
     );
     result_of(
@@ -3227,6 +3377,7 @@ fn a_failed_refresh_invalidates_the_snapshot_even_when_bytes_return() {
             rule: None,
             file: None,
             max: None,
+            all: true,
         },
     );
     let builds = service.semantic_build_count();
@@ -3263,6 +3414,7 @@ fn a_failed_refresh_invalidates_the_snapshot_even_when_bytes_return() {
                 rule: None,
                 file: None,
                 max: None,
+                all: true,
             }
         ),
         "stale-id"
@@ -3273,6 +3425,7 @@ fn a_failed_refresh_invalidates_the_snapshot_even_when_bytes_return() {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
     );
     result_of(
@@ -3283,6 +3436,7 @@ fn a_failed_refresh_invalidates_the_snapshot_even_when_bytes_return() {
             rule: None,
             file: None,
             max: None,
+            all: true,
         },
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -3637,7 +3791,7 @@ fn repeated_analyze_requests_do_not_rebuild_semantic_state() {
             &mut service,
             &ToolRequest::Analyze {
                 selection: Default::default(),
-                brief: false,
+                all: true,
             },
         );
         assert_eq!(analyze["command"], "analyze");
@@ -3751,7 +3905,7 @@ fn a_reload_rebuilds_the_semantic_service_once() {
         &mut service,
         &ToolRequest::Analyze {
             selection: Default::default(),
-            brief: false,
+            all: true,
         },
     );
     assert_eq!(service.semantic_build_count(), 1);
@@ -3761,11 +3915,11 @@ fn a_reload_rebuilds_the_semantic_service_once() {
         &mut service,
         &ToolRequest::Analyze {
             selection: Default::default(),
-            brief: false,
+            all: true,
         },
     );
     assert!(
-        analyze["result"]["facts"]["symbols"]
+        analyze["result"]["variables"]
             .as_array()
             .unwrap()
             .iter()
@@ -3779,10 +3933,10 @@ fn a_reload_rebuilds_the_semantic_service_once() {
         &mut service,
         &ToolRequest::Analyze {
             selection: Default::default(),
-            brief: false,
+            all: true,
         },
     );
-    result_of(&mut service, &ToolRequest::Inspect { brief: false });
+    result_of(&mut service, &ToolRequest::Inspect { all: true });
     assert_eq!(service.semantic_build_count(), 2);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -3802,6 +3956,8 @@ fn rules_content_serves_bounded_canonical_call_trees() {
         file: None,
         max,
         content: true,
+
+        all: true,
     };
 
     // Without `max` the selection shape is still returned, and every rule
@@ -3886,6 +4042,7 @@ fn rules_content_serves_bounded_canonical_call_trees() {
             file: None,
             max: None,
             content: false,
+            all: true,
         },
     );
     assert!(plain.is_array());
@@ -3924,9 +4081,23 @@ fn rules_content_defaults_to_twenty_rules_and_names_ambiguity() {
         file: None,
         max,
         content: true,
+
+        all: false,
     };
 
     let bounded = result_of(&mut service, &request(None, None));
+    let mut full_request = request(None, None);
+    if let ToolRequest::Rules { all, .. } = &mut full_request {
+        *all = true;
+    }
+    assert_eq!(
+        result_of(&mut service, &full_request)["rules"]
+            .as_array()
+            .unwrap()
+            .len(),
+        25
+    );
+
     assert_eq!(bounded["rules"].as_array().unwrap().len(), 20);
     assert_eq!(
         bounded["selection"],
@@ -4005,6 +4176,7 @@ fn short_circuit_folds_preserve_occurrences_for_references_and_rename() {
                 rule: None,
                 file: None,
                 max: None,
+                all: true,
             },
         );
         let rename = result_of(
@@ -4034,7 +4206,7 @@ fn short_circuit_folds_preserve_occurrences_for_references_and_rename() {
         "semanticRename resolves the same occurrences under both profiles"
     );
     assert!(
-        off_references
+        off_references["references"]
             .as_array()
             .expect("reference list")
             .iter()

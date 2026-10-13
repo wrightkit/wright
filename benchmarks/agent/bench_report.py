@@ -463,7 +463,7 @@ def render(results: list[dict], regrade: list[str] | None = None, references: li
     if tok:
         out += ["", "## Tool output size per command (estimated tokens per run that used it)", "", "| command | runs | mean | max |", "| --- | --- | --- | --- |"]
         out += [f"| {cmd} | {len(v['tokens'])} | {mean(v['tokens']):.0f} | {max(v['tokens'])} |" for cmd, v in sorted(tok.items())]
-    # #532: how often runs adopt a bounded form — `--brief` or the
+    # #672: how often runs use a bounded form — default capped forms or the
     # selection flags/fields — as a share of wright uses per condition.
     bounded: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     for r in runs:
@@ -475,7 +475,7 @@ def render(results: list[dict], regrade: list[str] | None = None, references: li
             cell: {"boundedUses": b, "invocations": n, "share": round(b / n, 4) if n else None}
             for cell, (b, n) in sorted(bounded.items())
         }
-        out += ["", "## Bounded output adoption (`--brief` or selection fields; #532)", "",
+        out += ["", "## Bounded output adoption (default capped forms or selection fields; #672)", "",
                 "| condition | bounded uses | wright uses | share |", "| --- | --- | --- | --- |"]
         out += [f"| {cell} | {b} | {n} | {f'{b / n:.1%}' if n else 'n/a'} |" for cell, (b, n) in sorted(bounded.items())]
     notes = diagnostics(runs, invalid) + ([] if has_private else (regrade or []))

@@ -52,10 +52,7 @@
       "type": "object",
       "required": ["code", "message"],
       "properties": {
-        "code": {
-          "type": "string",
-          "description": "Machine-readable refusal code. `stale-id` reports a numeric symbol id or rule index issued by an earlier program: after the loaded project changed on disk, the id must be re-read from a fresh `symbols`/`rules` listing or replaced by the declared name."
-        },
+        "code": { "type": "string", "description": "Machine-readable refusal code. `stale-id` reports a numeric symbol id or rule index issued by an earlier program: after the loaded project changed on disk, the id must be re-read from a fresh `symbols`/`rules` listing or replaced by the declared name." },
         "message": { "type": "string" }
       },
       "additionalProperties": true
@@ -191,10 +188,7 @@
       "properties": {
         "id": { "type": "integer", "minimum": 0 },
         "name": { "type": "string" },
-        "event": {
-          "type": "string",
-          "description": "The rule's event binding: a canonical event id, or `subroutine:<name>` for a subroutine rule."
-        },
+        "event": { "type": "string", "description": "The rule's event binding: a canonical event id, or `subroutine:<name>` for a subroutine rule." },
         "span": { "$ref": "#/$defs/Span" },
         "content": {
           "type": "object",
@@ -233,6 +227,19 @@
         "value": { "type": ["integer", "null"], "minimum": 0 }
       },
       "additionalProperties": true
+    },
+    "ActionableFinding": {
+      "type": "object",
+      "required": ["code", "severity", "message", "evidence"],
+      "properties": {
+        "code": { "type": "string" },
+        "severity": { "enum": ["error", "warning", "info"] },
+        "message": { "type": "string" },
+        "location": { "type": "string", "description": "Source path and 1-based line/column; full spans are available through findings." },
+        "evidence": { "type": "string" },
+        "boundedness": { "type": "string" }
+      },
+      "additionalProperties": false
     },
     "Finding": {
       "type": "object",
@@ -356,13 +363,25 @@
     "AnalyzeResult": {
       "allOf": [
         { "$ref": "#/$defs/WorkflowEnvelope" },
-        { "type": "object", "properties": { "command": { "const": "analyze" }, "result": { "anyOf": [{ "$ref": "#/$defs/AnalyzePayload" }, { "$ref": "#/$defs/BriefResult" }] } } }
+        {
+          "type": "object",
+          "properties": {
+            "command": { "const": "analyze" },
+            "result": { "$ref": "#/$defs/AnalyzePayload" }
+          }
+        }
       ]
     },
     "InspectResult": {
       "allOf": [
         { "$ref": "#/$defs/WorkflowEnvelope" },
-        { "type": "object", "properties": { "command": { "const": "inspect" }, "result": { "anyOf": [{ "$ref": "#/$defs/InspectPayload" }, { "$ref": "#/$defs/BriefResult" }] } } }
+        {
+          "type": "object",
+          "properties": {
+            "command": { "const": "inspect" },
+            "result": { "$ref": "#/$defs/InspectPayload" }
+          }
+        }
       ]
     },
     "ProjectResult": {
@@ -383,8 +402,12 @@
     },
     "RulesResult": {
       "anyOf": [
-        { "type": "array", "items": { "$ref": "#/$defs/RuleSummary" } },
-        { "$ref": "#/$defs/RulesSelectionResult" }
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/RuleSummary" }
+        },
+        { "$ref": "#/$defs/RulesSelectionResult" },
+        { "$ref": "#/$defs/CappedListResult" }
       ]
     },
     "RulesSelectionResult": {
@@ -393,17 +416,18 @@
       "properties": {
         "rules": { "type": "array", "items": { "$ref": "#/$defs/RuleSummary" } },
         "selection": { "$ref": "#/$defs/SelectionSummary" },
-        "unavailable": {
-          "type": "object",
-          "description": "ADR-0024: result members the result should carry but cannot for this input. `names` names the owner that must serve target-language spellings (today `opy-rs` for an OverPy input, until its provider capability exists); raw Workshop results carry no `unavailable`."
-        }
+        "unavailable": { "type": "object", "description": "ADR-0024: result members the result should carry but cannot for this input. `names` names the owner that must serve target-language spellings (today `opy-rs` for an OverPy input, until its provider capability exists); raw Workshop results carry no `unavailable`." }
       },
       "additionalProperties": true
     },
     "SymbolsResult": {
       "anyOf": [
-        { "type": "array", "items": { "$ref": "#/$defs/Symbol" } },
-        { "$ref": "#/$defs/SymbolsSelectionResult" }
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Symbol" }
+        },
+        { "$ref": "#/$defs/SymbolsSelectionResult" },
+        { "$ref": "#/$defs/CappedListResult" }
       ]
     },
     "SymbolsSelectionResult": {
@@ -416,9 +440,19 @@
       "additionalProperties": true
     },
     "ReferencesResult": {
+      "allOf": [
+        { "$ref": "#/$defs/UsageResult" },
+        { "type": "object", "required": ["references"], "properties": { "references": { "$ref": "#/$defs/ReferencesListResult" } } }
+      ]
+    },
+    "ReferencesListResult": {
       "anyOf": [
-        { "type": "array", "items": { "$ref": "#/$defs/Reference" } },
-        { "$ref": "#/$defs/ReferencesSelectionResult" }
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Reference" }
+        },
+        { "$ref": "#/$defs/ReferencesSelectionResult" },
+        { "$ref": "#/$defs/CappedListResult" }
       ]
     },
     "ReferencesSelectionResult": {
@@ -489,8 +523,12 @@
     },
     "FindingsResult": {
       "anyOf": [
-        { "type": "array", "items": { "$ref": "#/$defs/Finding" } },
-        { "$ref": "#/$defs/FindingsSelectionResult" }
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Finding" }
+        },
+        { "$ref": "#/$defs/FindingsSelectionResult" },
+        { "$ref": "#/$defs/CappedListResult" }
       ]
     },
     "FindingsSelectionResult": {
@@ -503,55 +541,109 @@
       "additionalProperties": true
     },
     "PersistentObjectsResult": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["kind", "rule", "action", "executionScope", "visibility", "reevaluation", "identityRetained", "sameKindCleanupInRule", "span"],
-        "properties": {
-          "kind": { "type": "string" },
-          "rule": { "type": "integer", "minimum": 0 },
-          "action": { "type": "integer", "minimum": 0 },
-          "executionScope": { "type": "string" },
-          "visibility": { "type": "string" },
-          "reevaluation": { "anyOf": [{ "type": "null" }, { "type": "object", "required": ["domain", "mode"], "properties": { "domain": { "type": "string" }, "mode": { "type": "string" } }, "additionalProperties": true }] },
-          "identityRetained": { "type": "boolean" },
-          "sameKindCleanupInRule": { "type": "boolean" },
-          "span": { "$ref": "#/$defs/Span" }
-        },
-        "additionalProperties": true
-      }
-    },
-    "LintResult": {
       "anyOf": [
-        { "$ref": "#/$defs/LintPayload" },
-        { "$ref": "#/$defs/BriefResult" }
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "kind",
+              "rule",
+              "action",
+              "executionScope",
+              "visibility",
+              "reevaluation",
+              "identityRetained",
+              "sameKindCleanupInRule",
+              "span"
+            ],
+            "properties": {
+              "kind": { "type": "string" },
+              "rule": { "type": "integer", "minimum": 0 },
+              "action": { "type": "integer", "minimum": 0 },
+              "executionScope": { "type": "string" },
+              "visibility": { "type": "string" },
+              "reevaluation": {
+                "anyOf": [
+                  { "type": "null" },
+                  {
+                    "type": "object",
+                    "required": [
+                      "domain",
+                      "mode"
+                    ],
+                    "properties": {
+                      "domain": { "type": "string" },
+                      "mode": { "type": "string" }
+                    },
+                    "additionalProperties": true
+                  }
+                ]
+              },
+              "identityRetained": { "type": "boolean" },
+              "sameKindCleanupInRule": { "type": "boolean" },
+              "span": { "$ref": "#/$defs/Span" }
+            },
+            "additionalProperties": true
+          }
+        },
+        { "$ref": "#/$defs/CappedListResult" }
       ]
     },
+    "LintResult": { "$ref": "#/$defs/LintPayload" },
     "LintPayload": {
       "type": "object",
-      "required": ["inputIdentity", "rules", "config", "findings", "skipped"],
+      "required": [
+        "counts",
+        "findings",
+        "expand"
+      ],
       "properties": {
-        "inputIdentity": { "type": "string", "description": "The loaded input's primary entry source digest — same semantics as `project.inputIdentity`; member-file edits in a provider project do not change it." },
-        "rules": { "type": "array", "items": { "$ref": "#/$defs/LintRuleSummary" } },
-        "config": { "$ref": "#/$defs/LintConfiguration" },
-        "findings": { "type": "array", "items": { "$ref": "#/$defs/Finding" } },
-        "skipped": { "type": "array", "items": { "$ref": "#/$defs/SkippedRule" } },
-        "selection": { "$ref": "#/$defs/SelectionSummary" }
-      },
-      "additionalProperties": true
-    },
-    "BriefResult": {
-      "type": "object",
-      "required": ["brief", "counts", "items", "expand"],
-      "properties": {
-        "brief": { "const": true },
-        "program": { "type": "object", "additionalProperties": true },
-        "counts": { "type": "object", "additionalProperties": true },
-        "items": { "type": "array" },
+        "ok": { "type": "boolean" },
+        "exit": { "type": "integer", "minimum": 0 },
+        "inputIdentity": { "type": "string" },
+        "fixes": { "type": "array" },
+        "counts": { "type": "object" },
+        "findings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ActionableFinding" }
+        },
         "expand": { "type": "string" },
+        "truncation": { "$ref": "#/$defs/Truncation" },
         "selection": { "$ref": "#/$defs/SelectionSummary" }
       },
-      "additionalProperties": true
+      "additionalProperties": false
+    },
+    "Truncation": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "total",
+          "shown",
+          "truncated",
+          "expand"
+        ],
+        "properties": {
+          "total": { "type": "integer", "minimum": 0 },
+          "shown": { "type": "integer", "minimum": 0 },
+          "truncated": { "type": "integer", "minimum": 0 },
+          "expand": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "CappedListResult": {
+      "type": "object",
+      "required": [
+        "items",
+        "truncation"
+      ],
+      "properties": {
+        "items": { "type": "array" },
+        "truncation": { "$ref": "#/$defs/Truncation" }
+      },
+      "additionalProperties": false
     },
     "LintRulesResult": {
       "type": "object",
@@ -571,8 +663,12 @@
     },
     "CallGraphResult": {
       "anyOf": [
-        { "type": "array", "items": { "$ref": "#/$defs/CallGraphEdge" } },
-        { "$ref": "#/$defs/CallGraphSelectionResult" }
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/CallGraphEdge" }
+        },
+        { "$ref": "#/$defs/CallGraphSelectionResult" },
+        { "$ref": "#/$defs/CappedListResult" }
       ]
     },
     "CallGraphSelectionResult": {
@@ -682,69 +778,67 @@
     "CheckPayload": { "type": "object", "additionalProperties": true },
     "AnalyzePayload": {
       "type": "object",
-      "required": ["program", "facts"],
+      "required": [
+        "program",
+        "cost",
+        "complexity",
+        "hotspots",
+        "conditionTrees",
+        "risks",
+        "variables",
+        "persistentObjects",
+        "counts",
+        "expand"
+      ],
       "properties": {
         "program": { "$ref": "#/$defs/AnalyzedProgramSummary" },
-        "facts": {
-          "type": "object",
-          "required": ["symbols", "rules", "persistentObjects"],
-          "properties": {
-            "symbols": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "required": ["id", "kind", "name", "span", "usage"],
-                "properties": {
-                  "id": { "type": "integer", "minimum": 0 },
-                  "kind": { "type": "string" },
-                  "name": { "type": "string" },
-                  "span": { "$ref": "#/$defs/Span" },
-                  "usage": { "$ref": "#/$defs/UsageResult" }
-                },
-                "additionalProperties": true
-              }
-            },
-            "rules": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "required": ["id", "name", "span", "controlFlow"],
-                "properties": {
-                  "id": { "type": "integer", "minimum": 0 },
-                  "name": { "type": "string" },
-                  "span": { "$ref": "#/$defs/Span" },
-                  "controlFlow": {
-                    "type": "object",
-                    "required": ["blocks", "edges", "loopBlocks", "waitBlocks"],
-                    "properties": {
-                      "blocks": { "type": "integer", "minimum": 0 },
-                      "edges": { "type": "integer", "minimum": 0 },
-                      "loopBlocks": { "type": "integer", "minimum": 0 },
-                      "waitBlocks": { "type": "integer", "minimum": 0 }
-                    },
-                    "additionalProperties": true
-                  }
-                },
-                "additionalProperties": true
-              }
-            },
-            "persistentObjects": { "$ref": "#/$defs/PersistentObjectsResult" }
-          },
-          "additionalProperties": true
-        }
+        "cost": { "type": "object" },
+        "complexity": { "type": "object" },
+        "hotspots": { "type": "array" },
+        "conditionTrees": { "type": "array" },
+        "risks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ActionableFinding" }
+        },
+        "variables": { "type": "array" },
+        "persistentObjects": { "type": "object" },
+        "counts": { "type": "object" },
+        "expand": { "type": "string" },
+        "truncation": { "$ref": "#/$defs/Truncation" },
+        "selection": { "$ref": "#/$defs/SelectionSummary" }
       },
-      "additionalProperties": true
+      "additionalProperties": false
     },
     "InspectPayload": {
       "type": "object",
-      "required": ["program", "rules", "symbols", "references"],
+      "required": [
+        "program",
+        "counts",
+        "rules",
+        "expand"
+      ],
       "properties": {
         "program": { "$ref": "#/$defs/ProgramSummary" },
-        "rules": { "$ref": "#/$defs/RulesResult" },
-        "symbols": { "$ref": "#/$defs/SymbolsResult" },
-        "references": { "type": "array", "items": { "type": "array", "items": { "$ref": "#/$defs/Reference" } } }
+        "counts": { "type": "object" },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "name"
+            ],
+            "properties": {
+              "id": { "type": "integer" },
+              "name": { "type": "string" }
+            }
+          }
+        },
+        "expand": { "type": "string" },
+        "truncation": { "$ref": "#/$defs/Truncation" },
+        "selection": { "$ref": "#/$defs/SelectionSummary" }
       },
-      "additionalProperties": true
+      "additionalProperties": false
     },
     "Capabilities": {
       "type": "object",
@@ -810,12 +904,7 @@
       "type": "object",
       "required": ["to"],
       "properties": {
-        "symbol": {
-          "type": ["integer", "string"],
-          "minimum": 0,
-          "maximum": 4294967295,
-          "description": "Symbol addressing (#434): the numeric symbol id or the declared name, exactly as `references`/`usage` address symbols. When present, `source`/`line`/`col` are ignored. A numeric id issued before a disk reload is refused `stale-id` until a `symbols` listing re-establishes the space."
-        },
+        "symbol": { "type": ["integer", "string"], "minimum": 0, "maximum": 4294967295, "description": "Symbol addressing (#434): the numeric symbol id or the declared name, exactly as `references`/`usage` address symbols. When present, `source`/`line`/`col` are ignored. A numeric id issued before a disk reload is refused `stale-id` until a `symbols` listing re-establishes the space." },
         "source": { "type": "string", "description": "Position addressing: the source file the position is interpreted in; requires `line` and `col`." },
         "line": { "type": "integer", "minimum": 0, "maximum": 4294967295, "description": "Position addressing: the 1-based line of a character inside one identifier occurrence." },
         "col": { "type": "integer", "minimum": 0, "maximum": 4294967295, "description": "Position addressing: the 1-based column of a character inside one identifier occurrence." },
@@ -851,44 +940,93 @@
     },
     "CapabilitiesRequest": { "type": "object", "properties": { "op": { "const": "capabilities" } }, "required": ["op"], "additionalProperties": false },
     "CompileRequest": { "type": "object", "properties": { "op": { "const": "compile" } }, "required": ["op"], "additionalProperties": false },
-    "CheckRequest": { "type": "object", "properties": { "op": { "const": "check" } }, "required": ["op"], "additionalProperties": false },
+    "CheckRequest": {
+      "type": "object",
+      "properties": {
+        "op": { "const": "check" },
+        "all": { "type": "boolean", "default": false, "description": "Return every list item instead of the default cap; explicit filters and max still apply." }
+      },
+      "required": [
+        "op"
+      ],
+      "additionalProperties": false
+    },
     "AnalyzeRequest": {
       "type": "object",
       "properties": {
         "op": { "const": "analyze" },
-        "severity": { "enum": ["error", "warning", "info"] },
+        "severity": {
+          "enum": [
+            "error",
+            "warning",
+            "info"
+          ]
+        },
         "rule": { "type": "string" },
         "file": { "type": "string" },
         "max": { "type": "integer", "minimum": 0 },
-        "brief": { "type": "boolean", "default": false }
+        "all": { "type": "boolean", "default": false, "description": "Return every list item instead of the default cap; explicit filters and max still apply." }
       },
-      "required": ["op"],
+      "required": [
+        "op"
+      ],
       "additionalProperties": false
     },
-    "InspectRequest": { "type": "object", "properties": { "op": { "const": "inspect" }, "brief": { "type": "boolean", "default": false } }, "required": ["op"], "additionalProperties": false },
+    "InspectRequest": {
+      "type": "object",
+      "properties": {
+        "op": { "const": "inspect" },
+        "all": { "type": "boolean", "default": false, "description": "Return every list item instead of the default cap; explicit filters and max still apply." }
+      },
+      "required": [
+        "op"
+      ],
+      "additionalProperties": false
+    },
     "ProjectRequest": { "type": "object", "properties": { "op": { "const": "project" } }, "required": ["op"], "additionalProperties": false },
     "RulesRequest": {
       "type": "object",
       "properties": {
         "op": { "const": "rules" },
         "name": { "type": "string", "description": "Selection (#531): only the rule with this declared name." },
-        "rule": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "string" }], "description": "Selection (ADR-0024): exactly this rule, addressed by id or declared name." },
+        "rule": {
+          "oneOf": [
+            { "type": "integer", "minimum": 0 },
+            { "type": "string" }
+          ],
+          "description": "Selection (ADR-0024): exactly this rule, addressed by id or declared name."
+        },
         "file": { "type": "string", "description": "Selection (#531): only rules located in this source file; any spelling that resolves to the same file selects it." },
         "max": { "type": "integer", "minimum": 0, "description": "Selection (#531): report at most this many rules; the response's `selection.withheld` counts what the bound dropped." },
-        "content": { "type": "boolean", "description": "ADR-0024: add each returned rule's canonical content (`workshop-rs/rule-content-v1`). Without `max`, at most 20 rules are returned; the selection-wrapped result is always used." }
+        "content": { "type": "boolean", "description": "ADR-0024: add each returned rule's canonical content (`workshop-rs/rule-content-v1`). Without `max`, at most 20 rules are returned; the selection-wrapped result is always used." },
+        "all": { "type": "boolean", "default": false, "description": "Return every list item instead of the default cap; explicit filters and max still apply." }
       },
-      "required": ["op"],
+      "required": [
+        "op"
+      ],
       "additionalProperties": false
     },
     "SymbolsRequest": {
       "type": "object",
       "properties": {
         "op": { "const": "symbols" },
-        "kind": { "enum": ["globalVariable", "playerVariable", "subroutine", "rule", null], "description": "Selection (#531): only symbols of this kind." },
+        "kind": {
+          "enum": [
+            "globalVariable",
+            "playerVariable",
+            "subroutine",
+            "rule",
+            null
+          ],
+          "description": "Selection (#531): only symbols of this kind."
+        },
         "file": { "type": "string", "description": "Selection (#531): only symbols located in this source file; any spelling that resolves to the same file selects it." },
-        "max": { "type": "integer", "minimum": 0, "description": "Selection (#531): report at most this many symbols; the response's `selection.withheld` counts what the bound dropped." }
+        "max": { "type": "integer", "minimum": 0, "description": "Selection (#531): report at most this many symbols; the response's `selection.withheld` counts what the bound dropped." },
+        "all": { "type": "boolean", "default": false, "description": "Return every list item instead of the default cap; explicit filters and max still apply." }
       },
-      "required": ["op"],
+      "required": [
+        "op"
+      ],
       "additionalProperties": false
     },
     "ReferencesRequest": {
@@ -896,34 +1034,48 @@
       "properties": {
         "op": { "const": "references" },
         "symbol": {
-          "type": ["integer", "string"],
+          "type": [
+            "integer",
+            "string"
+          ],
           "minimum": 0,
           "maximum": 4294967295,
           "description": "Symbol id or declared name. A numeric id captured before the project changed on disk is refused `stale-id` until a `symbols` listing re-establishes the space; names are always current."
         },
-        "kind": { "enum": ["declaration", "definition", "read", "write", "call"], "description": "Selection (#531): only references of this kind." },
+        "kind": {
+          "enum": [
+            "declaration",
+            "definition",
+            "read",
+            "write",
+            "call"
+          ],
+          "description": "Selection (#531): only references of this kind."
+        },
         "rule": {
-          "type": ["integer", "string"],
+          "type": [
+            "integer",
+            "string"
+          ],
           "minimum": 0,
           "maximum": 4294967295,
           "description": "Selection (#531): only references inside this rule, addressed by index or declared name."
         },
         "file": { "type": "string", "description": "Selection (#531): only references located in this source file; any spelling that resolves to the same file selects it." },
-        "max": { "type": "integer", "minimum": 0, "description": "Selection (#531): report at most this many references; the response's `selection.withheld` counts what the bound dropped." }
+        "max": { "type": "integer", "minimum": 0, "description": "Selection (#531): report at most this many references; the response's `selection.withheld` counts what the bound dropped." },
+        "all": { "type": "boolean", "default": false, "description": "Return every list item instead of the default cap; explicit filters and max still apply." }
       },
-      "required": ["op", "symbol"],
+      "required": [
+        "op",
+        "symbol"
+      ],
       "additionalProperties": false
     },
     "UsageRequest": {
       "type": "object",
       "properties": {
         "op": { "const": "usage" },
-        "symbol": {
-          "type": ["integer", "string"],
-          "minimum": 0,
-          "maximum": 4294967295,
-          "description": "Symbol id or declared name. A numeric id captured before the project changed on disk is refused `stale-id` until a `symbols` listing re-establishes the space; names are always current."
-        }
+        "symbol": { "type": ["integer", "string"], "minimum": 0, "maximum": 4294967295, "description": "Symbol id or declared name. A numeric id captured before the project changed on disk is refused `stale-id` until a `symbols` listing re-establishes the space; names are always current." }
       },
       "required": ["op", "symbol"],
       "additionalProperties": false
@@ -933,41 +1085,85 @@
       "properties": {
         "op": { "const": "cfg" },
         "rule": {
-          "type": ["integer", "string"],
+          "type": [
+            "integer",
+            "string"
+          ],
           "minimum": 0,
           "maximum": 4294967295,
           "description": "Rule index or declared name. A numeric index captured before the project changed on disk is refused `stale-id` until a `rules` listing re-establishes the space; names are always current."
         },
-        "kind": { "enum": ["entry", "exit", "block", "if", "while", "for"], "description": "Selection (#531): only blocks of this kind." },
-        "max": { "type": "integer", "minimum": 0, "description": "Selection (#531): report at most this many blocks; the response's `selection.withheld` counts what the bound dropped." }
+        "kind": {
+          "enum": [
+            "entry",
+            "exit",
+            "block",
+            "if",
+            "while",
+            "for"
+          ],
+          "description": "Selection (#531): only blocks of this kind."
+        },
+        "max": { "type": "integer", "minimum": 0, "description": "Selection (#531): report at most this many blocks; the response's `selection.withheld` counts what the bound dropped." },
+        "all": { "type": "boolean", "default": false, "description": "Return every list item instead of the default cap; explicit filters and max still apply." }
       },
-      "required": ["op", "rule"],
+      "required": [
+        "op",
+        "rule"
+      ],
       "additionalProperties": false
     },
     "FindingsRequest": {
       "type": "object",
       "properties": {
         "op": { "const": "findings" },
-        "severity": { "enum": ["error", "warning", "info"] },
+        "severity": {
+          "enum": [
+            "error",
+            "warning",
+            "info"
+          ]
+        },
         "rule": { "type": "string" },
         "file": { "type": "string" },
-        "max": { "type": "integer", "minimum": 0 }
+        "max": { "type": "integer", "minimum": 0 },
+        "all": { "type": "boolean", "default": false, "description": "Return every list item instead of the default cap; explicit filters and max still apply." }
       },
-      "required": ["op"],
+      "required": [
+        "op"
+      ],
       "additionalProperties": false
     },
-    "PersistentObjectsRequest": { "type": "object", "properties": { "op": { "const": "persistentObjects" } }, "required": ["op"], "additionalProperties": false },
+    "PersistentObjectsRequest": {
+      "type": "object",
+      "properties": {
+        "op": { "const": "persistentObjects" },
+        "all": { "type": "boolean", "default": false, "description": "Return every list item instead of the default cap; explicit filters and max still apply." }
+      },
+      "required": [
+        "op"
+      ],
+      "additionalProperties": false
+    },
     "LintRequest": {
       "type": "object",
       "properties": {
         "op": { "const": "lint" },
-        "severity": { "enum": ["error", "warning", "info"] },
+        "severity": {
+          "enum": [
+            "error",
+            "warning",
+            "info"
+          ]
+        },
         "rule": { "type": "string" },
         "file": { "type": "string" },
         "max": { "type": "integer", "minimum": 0 },
-        "brief": { "type": "boolean", "default": false, "description": "Brief result form (#532): finding counts by severity, the highest-severity findings, and how to expand — the full result stays one option away." }
+        "all": { "type": "boolean", "default": false, "description": "Return every list item instead of the default cap; explicit filters and max still apply." }
       },
-      "required": ["op"],
+      "required": [
+        "op"
+      ],
       "additionalProperties": false
     },
     "LintRulesRequest": { "type": "object", "properties": { "op": { "const": "lintRules" } }, "required": ["op"], "additionalProperties": false },
@@ -977,21 +1173,33 @@
         "op": { "const": "callGraph" },
         "caller": { "type": "string", "description": "Selection (#531): only edges out of this declared rule name." },
         "callee": { "type": "string", "description": "Selection (#531): only edges into this declared subroutine name." },
-        "max": { "type": "integer", "minimum": 0, "description": "Selection (#531): report at most this many edges; the response's `selection.withheld` counts what the bound dropped." }
+        "max": { "type": "integer", "minimum": 0, "description": "Selection (#531): report at most this many edges; the response's `selection.withheld` counts what the bound dropped." },
+        "all": { "type": "boolean", "default": false, "description": "Return every list item instead of the default cap; explicit filters and max still apply." }
       },
-      "required": ["op"],
+      "required": [
+        "op"
+      ],
       "additionalProperties": false
     },
     "CostEstimateRequest": {
       "type": "object",
       "properties": {
         "op": { "const": "costEstimate" },
-        "severity": { "enum": ["error", "warning", "info"] },
+        "severity": {
+          "enum": [
+            "error",
+            "warning",
+            "info"
+          ]
+        },
         "rule": { "type": "string" },
         "file": { "type": "string" },
-        "max": { "type": "integer", "minimum": 0 }
+        "max": { "type": "integer", "minimum": 0 },
+        "all": { "type": "boolean", "default": false, "description": "Return every list item instead of the default cap; explicit filters and max still apply." }
       },
-      "required": ["op"],
+      "required": [
+        "op"
+      ],
       "additionalProperties": false
     },
     "TargetMetadataRequest": { "type": "object", "properties": { "op": { "const": "targetMetadata" } }, "required": ["op"], "additionalProperties": false },

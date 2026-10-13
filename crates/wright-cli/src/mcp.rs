@@ -249,13 +249,13 @@ mod tests {
         assert!(input["properties"].get("op").is_none());
         assert!(input["properties"].get("within").is_some());
 
-        // #532: the brief tools expose `brief` in their generated schemas.
+        // Bounded report tools expose the expansion field in their schemas.
         for op in ["analyze", "inspect", "lint"] {
             let spec = TOOL_SPECS.iter().find(|spec| spec.op == op).unwrap();
             let input = input_schema(&defs, spec, &[]);
             assert_eq!(
-                input["properties"]["brief"]["type"], "boolean",
-                "{op} input schema has no brief field"
+                input["properties"]["all"]["type"], "boolean",
+                "{op} input schema has no all field"
             );
         }
     }

@@ -285,6 +285,7 @@ fn semantic_query_trial(
                 name: None,
                 file: None,
                 max: None,
+                all: true,
                 rule: None,
                 content: false,
             },
@@ -292,6 +293,7 @@ fn semantic_query_trial(
                 kind: None,
                 file: None,
                 max: None,
+                all: true,
             },
             ToolRequest::References {
                 symbol: 0.into(),
@@ -299,18 +301,23 @@ fn semantic_query_trial(
                 rule: None,
                 file: None,
                 max: None,
+                all: true,
             },
             ToolRequest::Usage { symbol: 0.into() },
             ToolRequest::Cfg {
                 rule: 0.into(),
                 kind: None,
                 max: None,
+                all: true,
             },
-            ToolRequest::Findings(FindingSelection::default()),
-            ToolRequest::PersistentObjects,
+            ToolRequest::Findings {
+                selection: FindingSelection::default(),
+                all: true,
+            },
+            ToolRequest::PersistentObjects { all: true },
             ToolRequest::Lint {
                 selection: FindingSelection::default(),
-                brief: false,
+                all: true,
             },
             ToolRequest::LintRules,
         ];

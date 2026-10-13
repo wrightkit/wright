@@ -298,7 +298,7 @@ fn workshop_lookup_answers_without_a_loadable_project() {
 
     // The request path stays project-free even after a program-reading
     // failure invalidated the service.
-    let _ = service.handle(&ToolRequest::Check);
+    let _ = service.handle(&ToolRequest::Check { all: true });
     let entries = entries_of(service.handle(&lookup_request("workshop", Some("Wait"))));
     assert!(!entries.is_empty());
 

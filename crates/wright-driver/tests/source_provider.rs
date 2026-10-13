@@ -1192,7 +1192,7 @@ fn service_check_and_compile_run_without_a_prewarmed_snapshot() {
     // `check` executes the provider's check operation, then asks for the
     // canonical artifact (#617); the provider's compile refusal keeps it on
     // the check-only path.
-    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check) else {
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check { all: true }) else {
         panic!("check must return the workflow envelope")
     };
     assert_eq!(result["command"], "check");
@@ -1215,6 +1215,7 @@ fn service_check_and_compile_run_without_a_prewarmed_snapshot() {
             kind: None,
             file: None,
             max: None,
+            all: true,
         },
         ToolRequest::LintRules,
     ] {
@@ -1285,7 +1286,7 @@ fn service_compile_establishes_the_snapshot_and_recovers_after_reload() {
     // A disk change under the session invalidates the snapshot; `compile`
     // re-resolves through the provider's own operation and re-establishes it.
     std::fs::write(&entry, "// edited project source").expect("edit entry");
-    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check) else {
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check { all: true }) else {
         panic!("check must return the workflow envelope")
     };
     assert_eq!(result["ok"], true, "{result}");
@@ -1334,7 +1335,8 @@ fn service_check_and_compile_match_the_direct_workflow_methods() {
         let mut service = ToolService::new(&mut session).expect("service constructs");
 
         let check = if via_request {
-            let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check) else {
+            let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check { all: true })
+            else {
                 panic!("check must return the workflow envelope")
             };
             result
@@ -2033,6 +2035,8 @@ fn opy_rules_content_reports_names_unavailable() {
         file: None,
         max: None,
         content: true,
+
+        all: true,
     }) else {
         panic!("rules with content failed");
     };

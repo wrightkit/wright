@@ -94,23 +94,29 @@ fn lint_findings_carry_fix_transactions_on_session_and_service() {
         "both duplicated occurrences wrap"
     );
 
-    // The agent surfaces return the same fix payloads as the session.
+    // Detailed findings preserve source-edit transactions; lint reports actionable summaries.
     let mut service = ToolService::new(&mut session).unwrap();
     let lint = match service.handle(&ToolRequest::Lint {
         selection: FindingSelection::default(),
-        brief: false,
+        all: true,
     }) {
         ToolResponse::Ok { result } => result,
         ToolResponse::Error { error } => panic!("lint op: {error:?}"),
     };
-    let findings = match service.handle(&ToolRequest::Findings(FindingSelection::default())) {
+    let findings = match service.handle(&ToolRequest::Findings {
+        selection: FindingSelection::default(),
+        all: true,
+    }) {
         ToolResponse::Ok { result } => result,
         ToolResponse::Error { error } => panic!("findings op: {error:?}"),
     };
-    assert_eq!(
-        fixed(&lint["findings"], "duplicate-condition"),
-        duplicate,
-        "the lint operation returns the session's fix"
+    assert!(
+        lint["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["code"] == "duplicate-condition"
+                && finding["message"].is_string())
     );
     assert_eq!(
         fixed(&findings, "duplicate-condition"),
