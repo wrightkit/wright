@@ -6,9 +6,9 @@
 
 | Code | Meaning | Examples |
 | --- | --- | --- |
-| 0 | success | clean check, compiled artifact produced, reconstructed source produced |
+| 0 | success | clean check, compiled program written, reconstructed source produced |
 | 1 | source/user error | parse error, validation error, ambiguous input, unknown input kind, unreadable input, refused downgrade, non-Workshop `convert` input, a deliberate LPP provider refusal (`provider-refusal-<refusalCode>`), an owner-side project load failure (`project-load-failed`) |
-| 2 | usage error | unknown command/flag, missing option value, missing/unknown `convert --target` |
+| 2 | usage error | unknown command/flag, missing option value, missing/unknown `convert --target`, `compile -o -` with `--format json`, and the `compile` output refusals `output-exists` (existing file without a terminal or `--force`), `output-is-input`, and `output-unnamed` (carried in the envelope) |
 | 3 | recognized but unsupported | `.opy` stdin via the explicit adapter fallback (default path is native), package-manager-managed installation for `update self`, unsupported platform for `update self`, a `convert` reconstruction rejection (a construct outside the declared OPY/OSTW reconstruction surface), an LPP capability the provider did not negotiate (`capability-unavailable`) |
 | 4 | internal/environment failure | catalog corruption, adapter bridge missing, I/O failure writing output, `update` network/checksum/extraction failure, provider transport/process failures (`provider-spawn`, `provider-io`, `provider-timeout`, `provider-exited`, `provider-malformed`, `jsonrpc-error`), provider resolution failures (`provider-missing`, `provider-offline`, `provider-download`, `provider-integrity`, `provider-install`, `provider-unsupported-platform`) |
 
@@ -22,9 +22,11 @@ infer them from process state alone.
 * JSON mode: exactly one envelope goes to stdout; stderr stays empty on
   success. Usage errors are the only case that writes to stderr without an
   envelope (exit 2).
-* `wright compile` without `-o` writes the raw artifact to stdout in text
-  mode; in JSON mode the artifact is the `result.output.text` field of the
-  envelope.
+* `wright compile` writes the program to a file (ADR-0025) and never to the
+  result: text and JSON carry the verdict, diagnostics, and
+  `result.output.{written_to, sha256, locale, input_identity}`, with no
+  program text. Only `wright compile -o -` writes the program to stdout, and
+  then nothing else (text mode only).
 
 ## `wright-result/v1` envelope
 
@@ -67,7 +69,7 @@ Diagnostic codes are stable per stage: `parse-error`, `unknown-*`,
 `unsupported-construct`, `settings-invalid`, `settings-placement` (frontend),
 `settings-unknown-key`, `settings-unknown-value` (validation), `convert-error`/
 `lower-error` (lowering), `validation-error` (validation), `input-*`/
-`stdin-*` (discovery), `output-io` and the compile-time client-import
+`stdin-*` (discovery), `output-exists` / `output-is-input` / `output-declined` / `output-unnamed` (discovery, compile destination), `output-io` and the compile-time client-import
 diagnostics `target-element-limit` / `element-count-unavailable` (emission),
 analysis findings reuse the
 analyzer's codes — including the name-addressing refusals `unknown-symbol`,

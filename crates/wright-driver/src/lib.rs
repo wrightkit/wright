@@ -11,6 +11,7 @@ pub mod fix;
 pub mod input;
 pub(crate) mod lookup;
 pub mod opy_provider;
+pub mod output;
 pub mod progress;
 pub mod provider;
 pub mod provider_edit;
@@ -28,6 +29,7 @@ pub use input::{InputTarget, ResolvedInput, sha256_hex};
 pub use opy_provider::{
     OpyProviderConfig, OpyProviderError, OpyProviderResolver, ResolvedOpyProvider,
 };
+pub use output::{CompileWrite, OutputDest, Overwrite};
 pub use progress::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit};
 pub use result::{
     AnalyzeResult, BriefResult, CheckResult, CompileResult, CompiledOutput, ConvertResult,

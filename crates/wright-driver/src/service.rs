@@ -107,8 +107,16 @@ impl From<&str> for Address {
 pub enum ToolRequest {
     /// Service identity, contract, and supported operations.
     Capabilities,
-    /// Compile the loaded project.
-    Compile,
+    /// Compile the loaded project and write the program to a file
+    /// (ADR-0025): `output` or `<entry stem>.ow` in the working directory.
+    /// An existing file is replaced only with `force`; the input is never
+    /// overwritten.
+    Compile {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output: Option<std::path::PathBuf>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        force: bool,
+    },
     /// Check the loaded project.
     Check,
     /// Analyze the loaded project; optionally narrowed by an inline
@@ -511,7 +519,7 @@ impl<'a> ToolService<'a> {
     /// check-only path.
     pub fn handle(&mut self, request: &ToolRequest) -> ToolResponse {
         match request {
-            ToolRequest::Check | ToolRequest::Compile => self.refresh_workflow(),
+            ToolRequest::Check | ToolRequest::Compile { .. } => self.refresh_workflow(),
             _ if Self::reads_program(request) => {
                 if let Err(error) = self.refresh() {
                     return ToolResponse::Error { error };
@@ -539,7 +547,7 @@ impl<'a> ToolService<'a> {
         !matches!(
             request,
             ToolRequest::Check
-                | ToolRequest::Compile
+                | ToolRequest::Compile { .. }
                 | ToolRequest::Capabilities
                 | ToolRequest::TargetMetadata
                 | ToolRequest::ProviderSemanticRename {
@@ -775,9 +783,18 @@ impl<'a> ToolService<'a> {
             ToolRequest::Capabilities => ToolResponse::Ok {
                 result: serde_json::to_value(self.capabilities()).expect("capabilities serialize"),
             },
-            ToolRequest::Compile => {
-                let result = serde_json::to_value(self.session.compile())
-                    .expect("compile result serializes");
+            ToolRequest::Compile { output, force } => {
+                let envelope = self.session.compile_to(crate::CompileWrite {
+                    dest: output
+                        .clone()
+                        .map_or(crate::OutputDest::Default, crate::OutputDest::Path),
+                    overwrite: if *force {
+                        crate::Overwrite::Force
+                    } else {
+                        crate::Overwrite::Refuse
+                    },
+                });
+                let result = serde_json::to_value(envelope).expect("compile result serializes");
                 ToolResponse::Ok { result }
             }
             ToolRequest::Check => {
@@ -1656,7 +1673,7 @@ fn json_span_path(item: &serde_json::Value) -> Option<&str> {
 fn request_label(request: &ToolRequest) -> &'static str {
     match request {
         ToolRequest::Capabilities => "req::capabilities",
-        ToolRequest::Compile => "req::compile",
+        ToolRequest::Compile { .. } => "req::compile",
         ToolRequest::Check => "req::check",
         ToolRequest::Analyze { .. } => "req::analyze",
         ToolRequest::Inspect { .. } => "req::inspect",

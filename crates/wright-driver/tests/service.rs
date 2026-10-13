@@ -134,6 +134,15 @@ fn tool_service_lint_queries_keep_the_session_configuration() {
     assert_eq!(default_finding["severity"], "warning");
 }
 
+/// A compile request whose program lands in the cargo-owned test directory,
+/// so no test writes into the crate or the working directory.
+fn compile_request(name: &str) -> ToolRequest {
+    ToolRequest::Compile {
+        output: Some(std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name)),
+        force: true,
+    }
+}
+
 #[test]
 fn tool_service_routes_workflows_through_the_agent_request_contract() {
     let mut session = CompilerSession::new(SessionConfig {
@@ -147,7 +156,7 @@ fn tool_service_routes_workflows_through_the_agent_request_contract() {
     let capabilities = service.capabilities();
     assert_eq!(capabilities.agent_contract, "wright-agent/v1");
     for (request, command) in [
-        (ToolRequest::Compile, "compile"),
+        (compile_request("routes.ow"), "compile"),
         (ToolRequest::Check, "check"),
         (
             ToolRequest::Analyze {
@@ -2681,7 +2690,7 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
     result_of(&mut service, &ToolRequest::Capabilities);
     result_of(&mut service, &ToolRequest::TargetMetadata);
     for (request, command) in [
-        (ToolRequest::Compile, "compile"),
+        (compile_request("stale.ow"), "compile"),
         (ToolRequest::Check, "check"),
         (
             ToolRequest::Analyze {
@@ -3068,7 +3077,10 @@ fn a_malformed_input_defers_the_load_and_recovers_in_place() {
         );
     }
     // `compile` reports the same diagnostic inside its envelope (#591).
-    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile) else {
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile {
+        output: None,
+        force: false,
+    }) else {
         panic!("compile returns the workflow envelope")
     };
     assert_eq!(result["ok"], false, "{result}");
@@ -4047,4 +4059,40 @@ fn short_circuit_folds_preserve_occurrences_for_references_and_rename() {
         "rename validates: {off_rename:?}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// ADR-0025: the agent `compile` operation writes the program to a file and
+/// answers with status, path and digest only; an existing file needs `force`.
+#[test]
+fn agent_compile_writes_a_file_and_returns_no_program_text() {
+    let out = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("agent-compile.ow");
+    let _ = std::fs::remove_file(&out);
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(workshop_path()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+    let request = |force| ToolRequest::Compile {
+        output: Some(out.clone()),
+        force,
+    };
+
+    let first = result_of(&mut service, &request(false));
+    assert_eq!(first["ok"], true, "{first}");
+    let output = &first["result"]["output"];
+    assert_eq!(output["written_to"], out.to_str().unwrap());
+    assert!(output.get("text").is_none(), "{output}");
+    let written = std::fs::read_to_string(&out).unwrap();
+    assert_eq!(
+        output["sha256"],
+        wright_driver::sha256_hex(written.as_bytes())
+    );
+
+    let again = result_of(&mut service, &request(false));
+    assert_eq!(again["exit"], 2, "{again}");
+    assert_eq!(again["diagnostics"][0]["code"], "output-exists");
+    assert!(result_of(&mut service, &request(true))["ok"] == true);
+    let _ = std::fs::remove_file(&out);
 }

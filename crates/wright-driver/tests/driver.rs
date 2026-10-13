@@ -754,3 +754,60 @@ fn workshop_text_input_replaces_the_disk_read() {
         anonymous_check.diagnostics
     );
 }
+
+/// ADR-0025: an existing output file is replaced only when the caller's
+/// prompt says yes; declining keeps it, and the input is never replaced.
+#[test]
+fn compile_to_asks_before_replacing_and_never_replaces_the_input() {
+    use wright_driver::{CompileWrite, OutputDest, Overwrite};
+
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("compile-to-ask");
+    std::fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("mode.ws");
+    let source = std::fs::read_to_string(workshop_fixture("synthetic/basic-rule")).unwrap();
+    std::fs::write(&input, &source).unwrap();
+    let out = dir.join("mode.ow");
+    let config = || SessionConfig {
+        input: InputSpec::Path(input.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    };
+
+    std::fs::write(&out, "old").unwrap();
+    let mut asked = Vec::new();
+    let mut decline = |path: &Path| {
+        asked.push(path.to_path_buf());
+        false
+    };
+    let declined = CompilerSession::new(config())
+        .unwrap()
+        .compile_to(CompileWrite {
+            dest: OutputDest::Path(out.clone()),
+            overwrite: Overwrite::Ask(&mut decline),
+        });
+    assert_eq!(asked, vec![out.clone()]);
+    assert_eq!(declined.exit, 1);
+    assert!(declined.result.output.is_none());
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), "old");
+
+    let mut accept = |_: &Path| true;
+    let accepted = CompilerSession::new(config())
+        .unwrap()
+        .compile_to(CompileWrite {
+            dest: OutputDest::Path(out.clone()),
+            overwrite: Overwrite::Ask(&mut accept),
+        });
+    assert!(accepted.ok, "{:?}", accepted.diagnostics);
+    assert_ne!(std::fs::read_to_string(&out).unwrap(), "old");
+
+    let mut never = |_: &Path| panic!("the input is refused before any prompt");
+    let refused = CompilerSession::new(config())
+        .unwrap()
+        .compile_to(CompileWrite {
+            dest: OutputDest::Path(input.clone()),
+            overwrite: Overwrite::Ask(&mut never),
+        });
+    assert_eq!(refused.exit, 2);
+    assert_eq!(std::fs::read_to_string(&input).unwrap(), source);
+    let _ = std::fs::remove_dir_all(&dir);
+}

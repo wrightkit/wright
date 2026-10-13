@@ -317,7 +317,7 @@ jobs:
       - name: Compile OPY via provider
         run: >-
           target/debug/wright compile tests/fixtures/opy/basic-rule.opy
-          --profile compat
+          --profile compat -o "$RUNNER_TEMP/basic-rule.ow"
 
   # -------------------------------------------------------------------------
   # [3] LPP INTEGRATION  (Wright's Language Provider Protocol client contract)

@@ -175,7 +175,7 @@ the successful `result` payload.
 | Operation | Request fields | Successful `result` |
 | --- | --- | --- |
 | `capabilities` | none | Service name/version, `wright-agent/v1`, result contract, operation names, `result_schemas` (operation → committed-schema definition), languages, and profiles |
-| `compile` | none | `wright-result/v1` compile envelope |
+| `compile` | optional `output` (file path), optional `force` | `wright-result/v1` compile envelope: verdict, diagnostics, `output.written_to` and `output.sha256`; the program text is written to the file and never returned. See [Compile output](#compile-output-adr-0025) |
 | `check` | none | `wright-result/v1` check envelope |
 | `analyze` | optional `brief` | `wright-result/v1` analysis envelope; the brief form when `brief` is true |
 | `inspect` | optional `brief` | `wright-result/v1` inspection envelope; the brief form when `brief` is true |
@@ -197,6 +197,23 @@ the successful `result` payload.
 | `providerSemanticRename` | `language_id`, `position_document_uri`, `position`, `new_name`, optional `documents`, `sources`, `project_root` | Provider-resolved rename transaction or structured refusal |
 | `providerValidateEdit` | `language_id`, `transaction`, optional `documents`, `sources`, `project_root` | Provider-validated transaction or structured refusal |
 | `lookup` | required `language`; optional `query`, `kind`, `within`, `locale`, `limit` | Owner vocabulary entries with accepted spellings and rendered signatures, or an explicit `unavailable` payload naming the owner |
+
+### Compile output (ADR-0025)
+
+`compile` writes the program to a file and answers with the same content as
+`wright compile --format json`: the verdict, diagnostics, `output.written_to`
+and `output.sha256`, without the program text.
+
+- `output` names the file; without it the program goes to `<entry stem>.ow`
+  in the service process's working directory. Unlike the CLI, `-` is not
+  special: the service never streams the program.
+- An existing file is replaced only when the request sets `force: true`;
+  otherwise the envelope carries `output-exists` with exit 2. The agent has
+  no terminal, so the service never prompts.
+- The input source file is never overwritten, even with `force`
+  (`output-is-input`, exit 2).
+- A failed compile writes no file. The JSON-RPC `compile` method is the same
+  request with neither field.
 
 ### Freshness and id validity (#471, #512)
 

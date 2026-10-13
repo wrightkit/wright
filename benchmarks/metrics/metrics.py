@@ -43,6 +43,7 @@ import shutil
 import statistics
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -358,10 +359,6 @@ def cli_counts(command: str, envelope: dict) -> dict:
                 "program.",
             )
         )
-    elif command == "compile":
-        text = (result.get("output") or {}).get("text")
-        if isinstance(text, str):
-            counts["emittedBytes"] = len(text)
     return counts
 
 
@@ -383,8 +380,13 @@ def run_agent_ops(
     wright: str, entry: Path, kind: str, project_dir: Path, repeats: int
 ) -> dict:
     metrics: dict[str, dict] = {}
-    targets: dict[str, dict] = {}
-    with ServeSession(wright, entry, kind, project_dir) as session:
+    scratch = tempfile.TemporaryDirectory(prefix="wright-metrics-")
+    # `compile` writes the program to a file (ADR-0025); keep it out of the
+    # measured project and replace it on every repeat.
+    targets: dict[str, dict] = {
+        "compile": {"output": str(Path(scratch.name) / "compiled.ow"), "force": True}
+    }
+    with scratch, ServeSession(wright, entry, kind, project_dir) as session:
         # Warm the session once before measuring: the first envelope
         # response drains diagnostics produced while loading (e.g. the
         # source-map audit warning), so a repeats=1 run would otherwise
@@ -498,6 +500,7 @@ def run_cli_commands(
     command's pipeline, so its latency is not measured: it runs once for
     size and shape only."""
     metrics: dict[str, dict] = {}
+    scratch = tempfile.TemporaryDirectory(prefix="wright-metrics-")
     for command in CLI_COMMANDS + [f"{command}?brief" for command in BRIEF_OPS]:
         outputs_bytes: list[int] = []
         latencies: list[float] = []
@@ -507,6 +510,8 @@ def run_cli_commands(
         argv = [wright, name, str(entry), "--kind", kind, "-f", "json"]
         if form == "brief":
             argv.append("--brief")
+        if name == "compile":
+            argv += ["-o", str(Path(scratch.name) / "compiled.ow"), "--force"]
         runs = 1 if form else repeats
         for _ in range(runs):
             start = time.monotonic()
@@ -531,6 +536,7 @@ def run_cli_commands(
         metrics[f"cli:{command}"] = metric_record(
             outputs_bytes, None if form else latencies, counts
         )
+    scratch.cleanup()
     return metrics
 
 

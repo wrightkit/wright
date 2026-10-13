@@ -155,7 +155,7 @@ wright analyze [INPUT]      # cost, hotspots, and risk indicators
 wright inspect [INPUT]      # semantic summary
 wright inspect rules|symbols|refs|cfg|callgraph|cost
 wright rename OLD NEW [INPUT]   # previews a diff; --write applies it
-wright compile [INPUT]      # emit Workshop text
+wright compile [INPUT]      # write <input>.ow; report status and problems
 wright convert [INPUT] --target opy
 wright serve [INPUT]        # wright-agent/v1 over stdio, JSON-RPC 2.0, or MCP
 wright update | completion

@@ -305,7 +305,7 @@ fn render_text<T: serde::Serialize + ResultPresentation>(
         source_base,
         subject,
     };
-    if !matches!(envelope.command.as_str(), "compile" | "convert") {
+    if !envelope.result.is_artifact_stream() {
         render_verdict(envelope, pres.color);
     }
     let mut ordered: Vec<&wright_driver::Diagnostic> = envelope.diagnostics.iter().collect();
@@ -467,10 +467,15 @@ fn render_github<T: serde::Serialize + ResultPresentation>(
         "::group::{}",
         escape_workflow_data(&format!("wright {}", envelope.command))
     );
-    if matches!(envelope.command.as_str(), "compile" | "convert") {
+    if envelope.result.is_artifact_stream() {
         envelope.result.render_body(&github_context(subject));
     } else {
         eprintln!("{} {}", summary_status(envelope), envelope.command);
+        if envelope.command == "compile" {
+            if let Some(metadata) = envelope.result.metadata() {
+                eprintln!("  {metadata}");
+            }
+        }
     }
     eprintln!("::endgroup::");
     emit_summary(envelope);
@@ -626,17 +631,37 @@ pub(crate) trait ResultPresentation {
         None
     }
     fn render_body(&self, ctx: &RenderContext<'_>);
+    /// Whether the body is the command's source artifact, printed instead of
+    /// a verdict (`convert`, `compile -o -`).
+    fn is_artifact_stream(&self) -> bool {
+        false
+    }
     fn render_github_findings(&self) {}
     fn update_summary_status(&self, _status: &mut SummaryStatus) {}
 }
 
 impl ResultPresentation for CompileResult {
+    fn metadata(&self) -> Option<String> {
+        let output = self.output.as_ref().filter(|o| o.written_to != "stdout")?;
+        Some(format!(
+            "wrote {} (sha256 {})",
+            output.written_to, output.sha256
+        ))
+    }
+    fn is_artifact_stream(&self) -> bool {
+        self.output
+            .as_ref()
+            .is_some_and(|o| o.written_to == "stdout")
+    }
     fn render_body(&self, _ctx: &RenderContext<'_>) {
         render_compile(self);
     }
 }
 
 impl ResultPresentation for ConvertResult {
+    fn is_artifact_stream(&self) -> bool {
+        true
+    }
     fn render_body(&self, _ctx: &RenderContext<'_>) {
         render_convert(self);
     }

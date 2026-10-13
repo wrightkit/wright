@@ -29,9 +29,10 @@ rename Workshop symbols, resolve owner names and signatures (`lookup`), or
 reconstruct source through the typed wright-driver result envelope.
 `inspect`
 prints the semantic summary, and its query subcommands (symbols, refs, cfg,
-callgraph, cost) expose each detail area. `compile` and `convert`
-keep their source artifact stdout contracts; JSON mode prints only one
-wright-result/v1 envelope to stdout. `serve` exposes the versioned
+callgraph, cost) expose each detail area. `compile` writes the program to
+`<input stem>.ow` and reports only status and problems; `-o -` prints the
+program to stdout. `convert` keeps its source artifact stdout contract; JSON
+mode prints only one wright-result/v1 envelope to stdout. `serve` exposes the versioned
 wright-agent/v1 session contract over stdio, JSON-RPC 2.0, or MCP.
 `agent install` writes the canonical Wright agent guide into a project's
 agent skills directory.
@@ -50,7 +51,9 @@ WORKFLOW OPTIONS:
     --root <DIR>         Include/project root for source inputs
     --opy-provider <PATH> Explicit local first-party OPY provider executable
     --profile <PROFILE>  WIR transformation policy: off|compat|aggressive
-    -o, --output <PATH>  Write compiled output to PATH (compile only)
+    -o, --output <PATH>  Write the program to PATH, or `-` for stdout (compile only)
+    --force              Replace an existing compile output file without asking
+    --copy               Also copy the compiled program to the clipboard
     -f, --format <FMT>   Output format: text|json
     --renderer <MODE>    Presentation: auto|terminal|plain|github-actions
     --color <POLICY>     ANSI color: auto|always|never
@@ -119,9 +122,16 @@ pub(crate) enum Command {
 pub(crate) struct CompileArgs {
     #[command(flatten)]
     pub(crate) common: CommonArgs,
-    /// Write compiled output to PATH instead of stdout.
+    /// Write the program to PATH instead of `<input stem>.ow`; `-` prints the
+    /// program to stdout and nothing else.
     #[arg(short = 'o', long, value_name = "PATH")]
     pub(crate) output: Option<PathBuf>,
+    /// Replace an existing output file without asking (never the input).
+    #[arg(long)]
+    pub(crate) force: bool,
+    /// Also copy the program to the system clipboard.
+    #[arg(long)]
+    pub(crate) copy: bool,
 }
 
 #[derive(Debug, Args)]
