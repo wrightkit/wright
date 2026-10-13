@@ -22,7 +22,7 @@ mod exit {
 
 const SKILL_NAME: &str = "wright";
 const INSTALLED_BY: &str = "wright agent install";
-const UPSTREAM: &str = "wrightkit/skills@b46e5a3";
+const UPSTREAM: &str = "wrightkit/skills@11e5c9c";
 const DEFAULT_DEST: &str = ".agents/skills";
 
 /// The guide files `install` writes, as `(relative path, content)`.
