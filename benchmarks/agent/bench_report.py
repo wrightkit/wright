@@ -307,6 +307,17 @@ def regrade_notes(runs: list[dict], wright: str, load_scenario) -> list[str]:
     return [f"GRADER: unstable verdict on {len(unstable)} workspace(s): {unstable}"] if unstable else ["GRADER: consistent on every regraded workspace."]
 
 
+def provider_records(results: list[dict]) -> dict[str, dict[str, str]]:
+    """Distinct provider toolchain identities per language across the runs, mapped recorded JSON to display label."""
+    from bench_score import provider_label
+    seen: dict[str, dict[str, str]] = {}
+    for result in results:
+        for language, record in ((result.get("environment") or {}).get("providers") or {}).items():
+            if record:
+                seen.setdefault(language, {})[json.dumps(record, sort_keys=True)] = provider_label(language, record)
+    return seen
+
+
 def setup_rows(runs: list[dict]) -> list[str]:
     """What each agent was actually given: CLI version, model, tools, and loaded skills, as the adapters observed them."""
     out = ["", "## Agent setup", "", "What the adapters observed, not what was requested. `not recorded` means the CLI does not expose it.", "",
@@ -352,7 +363,12 @@ def render(results: list[dict], regrade: list[str] | None = None, references: li
     infrastructure = [r for r in results if r["status"] == "provider-interrupted"]
     runs = [r for r in results if r["status"] not in ("invalid", "provider-interrupted")]
     out = [f"# Agent benchmark report ({mode})", "", f"{len(runs)} valid run(s), {len(invalid)} invalid, {len(infrastructure)} infrastructure failures excluded.", ""]
-    summary: dict = {"mode": mode, "suites": list({json.dumps(s, sort_keys=True): s for s in suites}.values()), "cells": {}, "infrastructureFailures": len(infrastructure)}
+    wrights = sorted({(r.get("environment") or {}).get("wright") for r in results if (r.get("environment") or {}).get("wright")})
+    providers = provider_records(results)
+    out += [f"Wright: {'; '.join(wrights) or 'not recorded'}",
+            f"Providers: {', '.join(label for language in sorted(providers) for label in providers[language].values()) or 'none recorded'}", ""]
+    summary: dict = {"mode": mode, "suites": list({json.dumps(s, sort_keys=True): s for s in suites}.values()), "cells": {}, "infrastructureFailures": len(infrastructure),
+                     "providers": {language: [json.loads(record) for record in sorted(labels)] for language, labels in sorted(providers.items())}}
     out += ["## Outcome by agent and condition", "", "| agent | condition | runs | usable | passed | used a tool | tokens/run | tokens per usable | peak context | s/run | corr |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for agent in sorted({r["agent"]["id"] for r in runs}):
         for cell in sorted({label(r) for r in runs}):
@@ -463,6 +479,8 @@ def render(results: list[dict], regrade: list[str] | None = None, references: li
                 "| condition | bounded uses | wright uses | share |", "| --- | --- | --- | --- |"]
         out += [f"| {cell} | {b} | {n} | {f'{b / n:.1%}' if n else 'n/a'} |" for cell, (b, n) in sorted(bounded.items())]
     notes = diagnostics(runs, invalid) + ([] if has_private else (regrade or []))
+    for language, labels in sorted((lang, labels) for lang, labels in providers.items() if len(labels) > 1):
+        notes.append(f"PROVIDERS: runs recorded different {language} toolchains ({', '.join(sorted(labels.values()))}); outcomes across them are not directly comparable.")
     if infrastructure:
         notes.append(f"INFRASTRUCTURE: {len(infrastructure)} provider/infrastructure failures (exit 75) excluded from outcome metrics.")
         out += ["", "## Provider/infrastructure failures", "", "| agent | scenario | condition | artifact |", "| --- | --- | --- | --- |"]

@@ -36,6 +36,7 @@ def environment(card: dict) -> dict:
     protocol = ident.get("protocol") or {}
     return {
         "wright": ident["wright"], "wrightSha256": ident["wrightSha256"],
+        "providers": ident.get("providers") or {},
         "skills": [{"name": name, "sha256": sha} for name, sha in sorted(ident["skills"].items())],
         "suite": {key: suite[key] for key in SUITE_KEYS},
         "protocol": {key: protocol[key] for key in ("timeoutSeconds", "infraRetries")},

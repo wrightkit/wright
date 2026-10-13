@@ -571,6 +571,107 @@ def file_sha256(path: str | Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def _opy_provider_store() -> Path:
+    """Where wright resolves the installed first-party OPY provider: a read-only mirror of
+    wright-driver's `default_store_dir`/`providers/opy`, including its `WRIGHT_PROVIDER_DATA_DIR` override."""
+    override = os.environ.get("WRIGHT_PROVIDER_DATA_DIR")
+    if override:
+        return Path(override) / "providers" / "opy"
+    if sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    elif sys.platform.startswith("win"):
+        base = Path(os.environ.get("APPDATA", "."))
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local"))
+    return base / "wright" / "providers" / "opy"
+
+
+def _lpp_initialize(executable: Path, protocol_version: str) -> dict:
+    """One `lpp/initialize` exchange against a provider executable; the reply, or an empty dict when it cannot answer."""
+    request = {"jsonrpc": "2.0", "id": 1, "method": "lpp/initialize",
+               "params": {"protocolVersion": protocol_version, "clientInfo": {"name": "wright-agent-bench", "version": bench_grade.SUITE_VERSION}}}
+    try:
+        proc = subprocess.run([str(executable)], input=json.dumps(request) + "\n", capture_output=True, text=True, timeout=10)
+        stdout = proc.stdout
+    except subprocess.TimeoutExpired as e:  # a provider that answered but keeps the session open still gave its reply
+        stdout = e.stdout.decode(errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    for line in stdout.splitlines():
+        try:
+            reply = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if reply.get("id") == 1:
+            return reply
+    return {}
+
+
+def _host_provider_target() -> str | None:
+    """The target triple wright-driver's `target_for` resolves for this host."""
+    arch = {"x86_64": "x86_64", "amd64": "x86_64", "arm64": "aarch64", "aarch64": "aarch64"}.get(platform.machine().lower())
+    if sys.platform == "linux" and arch == "x86_64":
+        return "x86_64-unknown-linux-gnu"
+    if sys.platform == "darwin" and arch in ("x86_64", "aarch64"):
+        return f"{arch}-apple-darwin"
+    if sys.platform.startswith("win") and arch == "x86_64":
+        return "x86_64-pc-windows-msvc"
+    return None
+
+
+def _normalize_provider_version(version: str) -> str | None:
+    """`normalize_version`: the `active` pointer may carry a `v`-prefixed release tag; anything not X.Y.Z resolves to no provider."""
+    core = version.lstrip("v")
+    parts = core.split(".")
+    return core if len(parts) == 3 and all(p.isdigit() for p in parts) else None
+
+
+def _protocol_tuple(version: str) -> tuple[int, ...]:
+    return tuple(int(p) for p in re.findall(r"\d+", version))
+
+
+# The client's side of the highest-mutual-version computation LPP §19.2 requires: a read-only
+# mirror of wright-lpp's `LPP_SUPPORTED_PROTOCOL_VERSIONS`, and of the file-target negotiation
+# floor (`LPP_PROJECT_LOADING_PROTOCOL_VERSION`) `mutual_protocol_version` applies (#638).
+_CLIENT_PROTOCOL_VERSIONS = ("1.0", "1.1", "1.2", "1.3", "1.4", "1.5")
+_PROTOCOL_FLOOR = (1, 1)
+
+
+def provider_server_info(executable: Path) -> dict:
+    """The `serverInfo` a provider self-reports on `lpp/initialize`; after a `protocolVersionMismatch`
+    the protocol requires a new process initialized at the highest version both sides speak (LPP §19.2)."""
+    reply = _lpp_initialize(executable, "1.4")  # the version wright opens a file-target session with
+    lpp = (((reply.get("error") or {}).get("data") or {}).get("lpp") or {})
+    if lpp.get("kind") == "protocolVersionMismatch":
+        supported = (lpp.get("details") or {}).get("supportedProtocolVersions") or []
+        mutual = [v for v in map(str, supported)
+                  if v in _CLIENT_PROTOCOL_VERSIONS and _protocol_tuple(v) >= _PROTOCOL_FLOOR]
+        if mutual:
+            reply = _lpp_initialize(executable, max(mutual, key=_protocol_tuple))
+    return (reply.get("result") or {}).get("serverInfo") or {}
+
+
+def provider_identities(scenario: dict) -> dict:
+    """The language toolchain a scenario's grading depends on, keyed by language: an OPY scenario is
+    checked and compiled through the installed provider — name and version as the provider reports
+    them — and compared against the pinned upstream oracle. Workshop scenarios grade entirely
+    in-process. The store's `active` version fills in a provider that cannot be asked."""
+    if scenario["language"] != "opy":
+        return {}
+    store = _opy_provider_store()
+    try:
+        installed = _normalize_provider_version((store / "active").read_text().strip())
+    except OSError:
+        installed = None
+    target = _host_provider_target()
+    executable = (store / installed / target / ("opy-provider.exe" if target == "x86_64-pc-windows-msvc" else "opy-provider")
+                  if installed and target else None)
+    reported = provider_server_info(executable) if executable and executable.is_file() else {}
+    return {"opy": {"name": reported.get("name") or ("opy-provider" if installed else None),
+                    "version": reported.get("version") or installed or None,
+                    "oracle": bench_grade.oracle_version()}}
+
+
 def base_result(scenario: dict, cell: dict, args: argparse.Namespace, out: Path, seconds: float, agent_exit: int | None) -> dict:
     return {
         "contract": RESULT_CONTRACT,
@@ -591,6 +692,7 @@ def base_result(scenario: dict, cell: dict, args: argparse.Namespace, out: Path,
             "suite": suite_identity(getattr(args, "private_suite", None)),  # recomputed per trial: the suite may change during a days-long run
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "skills": {name: skill_identity(name, Path(args.skill_dirs[name])) for name in cell["skills"]},
+            "providers": provider_identities(scenario),
             **({"wiki": bench_wiki.identity(Path(args.wiki_dir))} if cell["knowledge"] == "wiki" else {}),
         },
     }
@@ -1119,6 +1221,7 @@ def build_parser() -> argparse.ArgumentParser:
     regrade_cmd.add_argument("dirs", nargs="+", type=Path)
     regrade_cmd.add_argument("--wright", default=str(ROOT / "target/debug/wright"))
     regrade_cmd.add_argument("--out", type=Path, required=True, help="new directory holding the re-graded copies; input directories are never modified")
+    regrade_cmd.add_argument("--allow-provider-mismatch", action="store_true", help="merge run directories whose recorded provider versions differ anyway")
     report.add_argument("--reference", action="append", help="condition label a paired comparison is made against; repeatable for lift against several references (default: none/none/off)")
     compare = sub.add_parser("compare", help="one table from the score.json of several evaluation runs, warning when they are not comparable")
     compare.add_argument("dirs", nargs="+", type=Path)
@@ -1163,7 +1266,7 @@ def main() -> int:
     if args.command == "report":
         return bench_report.main(args.dirs, args.wright, args.regrade, lambda s: load_scenario(s, args.private_suite), references_of(args), args.out_dir)
     if args.command == "regrade":
-        return bench_regrade.main(args.dirs, args.wright, lambda s: load_scenario(s, args.private_suite), args.out)
+        return bench_regrade.main(args.dirs, args.wright, lambda s: load_scenario(s, args.private_suite), args.out, args.allow_provider_mismatch)
     if args.command == "publish":
         try:
             return bench_publish.main(args.dirs, args.out, args.dry_run, args.endpoint)

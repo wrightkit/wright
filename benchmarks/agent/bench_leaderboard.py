@@ -77,7 +77,7 @@ def load_entries(dirs: list[Path]) -> list[dict]:
             "harness": info.get("agent") or ident["agent"], "harnessVersion": info.get("version"),
             "model": info.get("model") or ident.get("model"), "effort": info.get("effort") or ident.get("effort"),
             "tracks": {lang: {"score": c["score"], "ci": c["ci95"], "trials": c["trialsPerScenario"], "scenarios": c["scenarios"], "passPowK": c["passPowK"], "provisional": c["provisional"], "exclusions": c["exclusions"]} for lang, c in cards.items()},
-            "environment": {"wrightSha256": ident["wrightSha256"], "wright": ident["wright"], "skills": ident["skills"], "suite": bench_score.suite_identity(first["suite"])},
+            "environment": {"wrightSha256": ident["wrightSha256"], "wright": ident["wright"], "providers": ident.get("providers") or {}, "skills": ident["skills"], "suite": bench_score.suite_identity(first["suite"])},
             "network": first["networkEnforcement"], "harnessCommit": first["harness"],
         })
     return entries
@@ -113,7 +113,7 @@ def build(dirs: list[Path]) -> dict:
     ranked = sorted([e for e in covered if key(e) == main_key], key=mean_score, reverse=True)
     for entry in ranked:
         entry["standing"] = standing(entry, ranked[0])
-    other = rejected + [{"run": e["run"], "reason": "made against a different Wright binary, skills, or task suite"} for e in covered if key(e) != main_key]
+    other = rejected + [{"run": e["run"], "reason": "made against a different Wright binary, provider versions, skills, or task suite"} for e in covered if key(e) != main_key]
     other += [{"run": e["run"], "reason": f"covers {len(e['tracks'])} of {coverage} language tracks"} for e in partial]
     return {"entries": ranked, "excluded": other, "environment": ranked[0]["environment"], "mode": ranked[0]["environment"]["suite"]["mode"], "date": date.today().isoformat()}
 
@@ -145,8 +145,9 @@ def markdown(data: dict) -> str:
     if any(t["provisional"] for e in data["entries"] for t in e["tracks"].values()):
         lines.append("- ⚠️ marks a score that is provisional because the run did not cover every task or had unequal trials.")
     skills = ", ".join(f"{k} `{v[:8]}`" for k, v in (env["skills"] or {}).items()) or "none"
+    providers = ", ".join(bench_score.provider_label(lang, p) for lang, p in sorted((env.get("providers") or {}).items())) or "none recorded"
     commits = ", ".join(f"`{c[:8]}`" for c in sorted({c for e in data["entries"] for c in e["harnessCommit"]})) or "not recorded"
-    lines += ["", "## What was run", "", f"- Wright: {env['wright'] or 'not recorded'} (sha256 `{(env['wrightSha256'] or 'not recorded')[:12]}`)", f"- Skills: {skills}", f"- Task suite: {env['suite'].get('version') or 'not recorded'} `{(env['suite'].get('hash') or 'not recorded')[:12]}`",
+    lines += ["", "## What was run", "", f"- Wright: {env['wright'] or 'not recorded'} (sha256 `{(env['wrightSha256'] or 'not recorded')[:12]}`)", f"- Providers: {providers}", f"- Skills: {skills}", f"- Task suite: {env['suite'].get('version') or 'not recorded'} `{(env['suite'].get('hash') or 'not recorded')[:12]}`",
               f"- Public hash: `{env['suite'].get('publicHash') or 'not recorded'}`; private hash: `{env['suite'].get('privateHash') or 'none'}`",
               f"- Harness commit: {commits}", "- Scores come from the benchmark in `benchmarks/agent`; raw private run directories must not be published."]
     if data["excluded"]:
@@ -170,6 +171,7 @@ def page(data: dict) -> str:
         rows.append(f'<tr class="{esc(e["standing"].split()[0])}"><td>{rank}</td><td><b>{esc(label(e))}</b></td><td>{esc(str(e["model"] or "not recorded"))}</td><td>{esc(e["effort"] or "default")}</td>{"".join(cells)}<td>{esc(e["standing"])}</td></tr>')
     env = data["environment"] or {}
     skills = ", ".join(f"{k} {v[:8]}" for k, v in (env.get("skills") or {}).items()) or "none"
+    providers = ", ".join(bench_score.provider_label(lang, p) for lang, p in sorted((env.get("providers") or {}).items())) or "none recorded"
     head = "".join(f"<th>{n} score</th>" for _, n in TRACKS)
     body = (f"<table><thead><tr><th>#</th><th>Agent</th><th>Model</th><th>Effort</th>{head}<th>Against the top</th></tr></thead><tbody>{''.join(rows)}</tbody></table>"
             if rows else "<p>No results yet.</p>")
@@ -192,7 +194,7 @@ tr.top td:first-child{{font-weight:700}}small,.muted{{color:var(--muted)}}sectio
 <h1>Wright Agent Score ({esc(data["mode"])})</h1><p class="sub">How well coding agents work on real Overwatch Workshop projects with Wright. Results of {esc(data.get("date", ""))}.</p>
 {body}
 {prose}{excluded}
-<section><h2>What was run</h2><p class="muted">Wright {esc(str(env.get("wright") or "not recorded"))} · sha256 <code>{sha12(env.get("wrightSha256"))}</code> · skills {esc(skills)} · task suite {esc(str((env.get("suite") or {}).get("version") or "not recorded"))} <code>{sha12((env.get("suite") or {}).get("hash"))}</code> · public hash <code>{sha12((env.get("suite") or {}).get("publicHash"))}</code> · private hash <code>{sha12((env.get("suite") or {}).get("privateHash"))}</code></p></section>
+<section><h2>What was run</h2><p class="muted">Wright {esc(str(env.get("wright") or "not recorded"))} · sha256 <code>{sha12(env.get("wrightSha256"))}</code> · providers {esc(providers)} · skills {esc(skills)} · task suite {esc(str((env.get("suite") or {}).get("version") or "not recorded"))} <code>{sha12((env.get("suite") or {}).get("hash"))}</code> · public hash <code>{sha12((env.get("suite") or {}).get("publicHash"))}</code> · private hash <code>{sha12((env.get("suite") or {}).get("privateHash"))}</code></p></section>
 </main></body></html>
 """
 

@@ -119,7 +119,10 @@ Every completed trial — one carrying a parseable contract `result.json` — is
 copied under `--out` (a trial dir without one was never finished and is
 skipped); the input run directories are never written, and only the trials
 whose recorded grader hash differs are graded again with the current
-scenario and `--wright` binary. A re-graded
+scenario and `--wright` binary. Runs recorded under different provider
+versions are not merged into one result set, because they can grade
+differently; pass `--allow-provider-mismatch` when the comparison is
+intended. A re-graded
 `result.json` keeps everything the agent produced (transcript, trace, usage)
 and records the earlier hash as `grader.regradedFrom`. Point `report`,
 `score`, `leaderboard`, `compare`, or `publish` at `--out` exactly as at a run
