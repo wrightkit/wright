@@ -26,7 +26,7 @@ wright-driver.workspace = true
 
 [dev-dependencies]
 insta = { version = "1", features = ["json"] }
-jsonschema = "0.18"
+jsonschema = "0.58"
 sha2.workspace = true
 wright-analyzer.workspace = true
 workshop-rs.workspace = true
