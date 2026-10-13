@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.19.0](https://github.com/wrightkit/wright/compare/v0.18.0...v0.19.0) (2026-10-13)
+
+
+### Features
+
+* **bench:** record language-provider identities in the run identity ([#661](https://github.com/wrightkit/wright/issues/661)) ([4f72644](https://github.com/wrightkit/wright/commit/4f726443cb31ed5791ea4929926689a14d694056))
+
+
+### Bug Fixes
+
+* **bench:** re-record OPY cli:inspect baselines after provider inspect fix ([#662](https://github.com/wrightkit/wright/issues/662)) ([2903b87](https://github.com/wrightkit/wright/commit/2903b8776d65fd7f882ff9bac1ee4e08566915ac))
+* **driver:** load provider-backed inspect through the compile operation ([#659](https://github.com/wrightkit/wright/issues/659)) ([7b7c3f7](https://github.com/wrightkit/wright/commit/7b7c3f77811112e5819657878e992787569443ea)), closes [#655](https://github.com/wrightkit/wright/issues/655)
+
 ## [0.18.0](https://github.com/wrightkit/wright/compare/v0.17.1...v0.18.0) (2026-10-13)
 
 
