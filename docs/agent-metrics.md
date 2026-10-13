@@ -81,7 +81,9 @@ file so old bands stay auditable.
 
 The `Metrics drift` job runs `check --skip-latency`: each metric runs
 once and only tokens, bytes, and counts are compared. It fails only on the
-blocking changes above; drift appears in the job log and does not fail the PR. Wall time on shared
+blocking changes above; drift appears in the job log and does not fail the PR.
+A failing `Metrics drift` job fails the required `CI result` check and blocks
+merging. Wall time on shared
 hosted runners varies by about a factor of two between runs, and the machine
 factor cannot cancel a shift that differs by operation (small agent
 operations and CLI commands moved in opposite directions on the same run), so
