@@ -852,7 +852,19 @@
     "CapabilitiesRequest": { "type": "object", "properties": { "op": { "const": "capabilities" } }, "required": ["op"], "additionalProperties": false },
     "CompileRequest": { "type": "object", "properties": { "op": { "const": "compile" } }, "required": ["op"], "additionalProperties": false },
     "CheckRequest": { "type": "object", "properties": { "op": { "const": "check" } }, "required": ["op"], "additionalProperties": false },
-    "AnalyzeRequest": { "type": "object", "properties": { "op": { "const": "analyze" }, "brief": { "type": "boolean", "default": false } }, "required": ["op"], "additionalProperties": false },
+    "AnalyzeRequest": {
+      "type": "object",
+      "properties": {
+        "op": { "const": "analyze" },
+        "severity": { "enum": ["error", "warning", "info"] },
+        "rule": { "type": "string" },
+        "file": { "type": "string" },
+        "max": { "type": "integer", "minimum": 0 },
+        "brief": { "type": "boolean", "default": false }
+      },
+      "required": ["op"],
+      "additionalProperties": false
+    },
     "InspectRequest": { "type": "object", "properties": { "op": { "const": "inspect" }, "brief": { "type": "boolean", "default": false } }, "required": ["op"], "additionalProperties": false },
     "ProjectRequest": { "type": "object", "properties": { "op": { "const": "project" } }, "required": ["op"], "additionalProperties": false },
     "RulesRequest": {

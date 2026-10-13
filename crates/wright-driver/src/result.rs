@@ -100,7 +100,13 @@ pub struct CheckResult {}
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct AnalyzeResult {
     pub program: serde_json::Value,
+    /// The fact layers; `facts.risks` carries the risk findings after
+    /// selection. The verdict reports the true set via `selection`, not
+    /// this array's length.
     pub facts: serde_json::Value,
+    /// Present when a finding selection was applied to `facts.risks` (#430).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection: Option<crate::select::SelectionOutcome>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -144,18 +150,46 @@ pub struct CfgResult(pub serde_json::Value);
 pub struct CallGraphResult(pub serde_json::Value);
 
 /// `cost` result (#429): the `costEstimate` operation's payload verbatim —
-/// exact generated-resource counts plus static findings.
-#[derive(Debug, Clone, Default, Serialize)]
-#[serde(transparent)]
-pub struct CostResult(pub serde_json::Value);
+/// exact generated-resource counts plus static findings, serialized as
+/// `result`. `selection` stays in-process: its serializable members already
+/// ride in `result.selection`, and the full set's highest severity must
+/// survive for the verdict (#430).
+#[derive(Debug, Clone, Default)]
+pub struct CostResult {
+    /// The `costEstimate` payload verbatim, including its `selection`
+    /// member when the request selected.
+    pub result: serde_json::Value,
+    /// The applied finding selection's outcome; never serialized — the wire
+    /// member lives in `result.selection`.
+    pub selection: Option<crate::select::SelectionOutcome>,
+}
+
+impl Serialize for CostResult {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.result.serialize(serializer)
+    }
+}
 
 /// The `brief` form of `analyze`/`inspect`/`lint` (#532): a small
 /// `{brief, program?, counts, items, expand}` payload — counts, the
 /// highest-priority items, and how to expand. The full result stays one
 /// option away; `crate::brief` builds the payload from the full result.
-#[derive(Debug, Clone, Default, Serialize)]
-#[serde(transparent)]
-pub struct BriefResult(pub serde_json::Value);
+/// `selection` is the in-process outcome like [`CostResult`]'s, so a brief
+/// verdict reflects the full finding set rather than the selected counts.
+#[derive(Debug, Clone, Default)]
+pub struct BriefResult {
+    /// The brief payload verbatim.
+    pub result: serde_json::Value,
+    /// The finding-selection outcome the underlying result reported; never
+    /// serialized — the wire member lives in `result.selection`.
+    pub selection: Option<crate::select::SelectionOutcome>,
+}
+
+impl Serialize for BriefResult {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.result.serialize(serializer)
+    }
+}
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct LintResult {

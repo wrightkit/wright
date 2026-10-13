@@ -613,7 +613,10 @@ fn cli_and_agent_selections_return_the_same_set() {
             false,
         ),
         (
-            ToolRequest::Analyze { brief: true },
+            ToolRequest::Analyze {
+                selection: Default::default(),
+                brief: true,
+            },
             vec!["analyze", "--brief"],
             true,
         ),

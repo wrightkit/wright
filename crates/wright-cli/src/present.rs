@@ -595,6 +595,32 @@ impl SummaryStatus {
     }
 }
 
+/// Selection-aware finding accounting for a result's verdict (#430): under
+/// a selection the outcome's recorded full-set maximum governs — the
+/// reported remainder can never understate the result; otherwise the
+/// reported findings' severities do.
+fn findings_summary_status(
+    findings: &serde_json::Value,
+    selection: &Option<wright_driver::SelectionOutcome>,
+    status: &mut SummaryStatus,
+) {
+    match selection {
+        Some(selection) => {
+            if let Some(severity) = selection.max_severity {
+                *status = (*status).max(SummaryStatus::from_finding_severity(severity.as_str()));
+            }
+        }
+        None => {
+            for finding in findings.as_array().map_or(&[][..], Vec::as_slice) {
+                if let Some(severity) = finding.get("severity").and_then(serde_json::Value::as_str)
+                {
+                    *status = (*status).max(SummaryStatus::from_finding_severity(severity));
+                }
+            }
+        }
+    }
+}
+
 pub(crate) trait ResultPresentation {
     fn metadata(&self) -> Option<String> {
         None
@@ -649,6 +675,18 @@ impl ResultPresentation for AnalyzeResult {
     }
     fn render_body(&self, _ctx: &RenderContext<'_>) {
         render_analyze(self);
+    }
+    /// Risk findings carry severities, so `analyze` judges them like lint
+    /// findings (#635).
+    fn render_github_findings(&self) {
+        if let Some(risks) = self.facts["risks"].as_array() {
+            for risk in risks {
+                emit_finding_annotation(risk);
+            }
+        }
+    }
+    fn update_summary_status(&self, status: &mut SummaryStatus) {
+        findings_summary_status(&self.facts["risks"], &self.selection, status);
     }
 }
 
@@ -725,27 +763,9 @@ impl ResultPresentation for LintResult {
         }
     }
     fn update_summary_status(&self, status: &mut SummaryStatus) {
-        match &self.selection {
-            // Selection narrows the reported list only; the verdict keeps the
-            // full set's highest severity (#430).
-            Some(selection) => {
-                if let Some(severity) = selection.max_severity {
-                    *status =
-                        (*status).max(SummaryStatus::from_finding_severity(severity.as_str()));
-                }
-            }
-            None => {
-                if let Some(findings) = self.findings.as_array() {
-                    for finding in findings {
-                        if let Some(sev) =
-                            finding.get("severity").and_then(serde_json::Value::as_str)
-                        {
-                            *status = (*status).max(SummaryStatus::from_finding_severity(sev));
-                        }
-                    }
-                }
-            }
-        }
+        // Selection narrows the reported list only; the verdict keeps the
+        // full set's highest severity (#430).
+        findings_summary_status(&self.findings, &self.selection, status);
     }
 }
 
@@ -796,16 +816,24 @@ fn brief_metadata(value: &serde_json::Value) -> String {
 
 impl ResultPresentation for BriefResult {
     fn metadata(&self) -> Option<String> {
-        Some(format!("{}; brief", brief_metadata(&self.0)))
+        Some(format!("{}; brief", brief_metadata(&self.result)))
     }
     fn render_body(&self, ctx: &RenderContext<'_>) {
         render_brief(self, ctx);
     }
     /// The brief's counts carry the reported severities, so the verdict
-    /// color still reflects the highest-severity finding of the full set.
+    /// color still reflects the highest-severity finding of the full set —
+    /// under a selection the counts describe the selected remainder, so the
+    /// outcome's recorded full-set maximum governs instead (#635).
     fn update_summary_status(&self, status: &mut SummaryStatus) {
+        if let Some(selection) = &self.selection {
+            if let Some(severity) = selection.max_severity {
+                *status = (*status).max(SummaryStatus::from_finding_severity(severity.as_str()));
+            }
+            return;
+        }
         for key in ["findings", "risks"] {
-            let Some(group) = self.0["counts"].get(key) else {
+            let Some(group) = self.result["counts"].get(key) else {
                 continue;
             };
             for severity in ["error", "warning", "info"] {
@@ -1216,7 +1244,7 @@ impl ResultPresentation for CallGraphResult {
 
 impl ResultPresentation for CostResult {
     fn metadata(&self) -> Option<String> {
-        let exact = &self.0["exact"];
+        let exact = &self.result["exact"];
         Some(format!(
             "{} emitted byte(s), {} action(s), {} rule(s), {} wait(s)",
             count(exact, "emittedBytes"),
@@ -1228,14 +1256,17 @@ impl ResultPresentation for CostResult {
     /// Totals lead; findings — the cost-relevant units — sort by severity and
     /// collapse identical repeats, bounded like the other query lists (#446).
     fn render_body(&self, _ctx: &RenderContext<'_>) {
-        let exact = &self.0["exact"];
+        let exact = &self.result["exact"];
         println!("\nGenerated resources (exact)");
         println!("  emitted bytes: {}", count(exact, "emittedBytes"));
         println!("  actions: {}", count(exact, "programActions"));
         println!("  rules: {}", count(exact, "programRules"));
         println!("  waits: {}", count(exact, "waitActions"));
 
-        let mut findings = self.0["findings"].as_array().cloned().unwrap_or_default();
+        let mut findings = self.result["findings"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
         findings.sort_by_key(|finding| match finding["severity"].as_str() {
             Some("error") => 0u8,
             Some("warning") => 1,
@@ -1271,12 +1302,17 @@ impl ResultPresentation for CostResult {
             index = end;
         }
         print_more("  ", findings.len() - index, "finding(s)");
-        if let Some(withheld) = self.0["selection"]["withheld"]
+        if let Some(withheld) = self.result["selection"]["withheld"]
             .as_u64()
             .filter(|withheld| *withheld > 0)
         {
             println!("  ... {withheld} finding(s) withheld (--max)");
         }
+    }
+    /// Static findings carry severities, so `cost` judges them like lint
+    /// findings (#635).
+    fn update_summary_status(&self, status: &mut SummaryStatus) {
+        findings_summary_status(&self.result["findings"], &self.selection, status);
     }
 }
 
@@ -1677,6 +1713,15 @@ fn render_analyze(result: &AnalyzeResult) {
         );
         any_risk = true;
     }
+    if let Some(withheld) = result
+        .selection
+        .as_ref()
+        .map(|selection| selection.withheld)
+        .filter(|withheld| *withheld > 0)
+    {
+        println!("  ... {withheld} finding(s) withheld (--max)");
+        any_risk = true;
+    }
     if !objects.is_empty() {
         any_risk = true;
         println!("  {}", persistent_object_summary(objects));
@@ -1905,7 +1950,9 @@ fn render_lint(result: &LintResult, ctx: &RenderContext<'_>) {
 /// the expansion hint. Finding items render through the lint finding
 /// style; rule/fact items render as `name — N element(s) --> location`.
 fn render_brief(result: &BriefResult, ctx: &RenderContext<'_>) {
-    let items = result.0["items"].as_array().map_or(&[][..], Vec::as_slice);
+    let items = result.result["items"]
+        .as_array()
+        .map_or(&[][..], Vec::as_slice);
     let heading = if items.iter().any(|item| item["severity"].is_string()) {
         "Top findings"
     } else {
@@ -1932,7 +1979,7 @@ fn render_brief(result: &BriefResult, ctx: &RenderContext<'_>) {
             None => println!("  {name}{elements}"),
         }
     }
-    if let Some(expand) = result.0["expand"].as_str() {
+    if let Some(expand) = result.result["expand"].as_str() {
         println!("  {}", dim(expand, ctx.presentation.color));
     }
 }
