@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.1](https://github.com/wrightkit/wright/compare/v0.20.0...v0.20.1) (2026-10-13)
+
+
+### Code Refactoring
+
+* **bench:** move the agent benchmark harness to benchmark-suite ([#682](https://github.com/wrightkit/wright/issues/682)) ([8c5fbdc](https://github.com/wrightkit/wright/commit/8c5fbdc2a0c2d061004a2fbd4f1d025c21674af4)), closes [#670](https://github.com/wrightkit/wright/issues/670)
+
 ## [0.20.0](https://github.com/wrightkit/wright/compare/v0.19.0...v0.20.0) (2026-10-13)
 
 
