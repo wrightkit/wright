@@ -22,8 +22,8 @@ agent-facing cost, not behavior.
 
 `corpus.json` versions the project set. Entries are:
 
-- vendored small projects under `benchmarks/metrics/corpus/` plus the
-  non-empty benchmark scenario seeds — always available, no network;
+- vendored small projects under `benchmarks/metrics/corpus/`, including the
+  `seed-*` projects — always available, no network;
 - pinned external repositories (`repository` + `commit`), fetched shallow into
   `benchmarks/metrics/.cache/` by `metrics.py fetch` or on first `run`. Their
   source is never vendored into this repository; only derived metrics are

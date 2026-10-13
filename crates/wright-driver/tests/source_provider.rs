@@ -2007,7 +2007,8 @@ fn opy_rules_content_reports_names_unavailable() {
         check_compilation: None,
         compilation: Some(SourceCompilation::success(
             std::fs::read_to_string(
-                workspace_root().join("benchmarks/agent/fixtures/program-calls/repel.en-US.ow"),
+                workspace_root()
+                    .join("tests/fixtures/workshop/synthetic/program-calls-repel.en-US.ow"),
             )
             .expect("repel fixture"),
         )),
