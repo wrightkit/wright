@@ -4,7 +4,7 @@
 /.github/workflows/ @Teakowa
 /benchmarks/metrics/baseline-*.json @Teakowa
 /benchmarks/metrics/corpus.json @Teakowa
-# BRIEF_TOKEN_BUDGET and BLOCKING_CHANGES
+# Token budgets and blocking-change rules are defined here
 /benchmarks/metrics/metrics.py @Teakowa
 # Committed expectation of the `wright check --json` contract
 /crates/wright-cli/tests/snapshots/*.snap @Teakowa

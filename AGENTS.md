@@ -153,7 +153,7 @@ support claims require real-project validation in addition to focused tests.
 - Merges are squash-only through the merge queue, so each PR is one commit on
   `main`. CI runs on `merge_group` as well as pull requests and pushes to `main`.
 - `.github/CODEOWNERS` lists the gate definitions (workflows, metrics baselines
-  and corpus, brief token budgets, committed contract snapshots); code-owner
+  and corpus, metrics token budgets, committed contract snapshots); code-owner
   review is required for them. Do not change a gate definition in the same PR as
   the code it judges unless the owner reviews that change.
 - Do not use repository changes or commits for GitHub metadata-only operations.
