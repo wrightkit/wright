@@ -44,4 +44,6 @@ its audit date.
 * [ADR-0022: One shared surface for the semantic queries](0022-shared-surface-for-semantic-queries.md)
 * [ADR-0023: LSP scope for 1.0](0023-lsp-scope-for-1-0.md)
 * [ADR-0024: Structured rule content for agents and graders](0024-structured-rule-content.md)
+* [ADR-0025: Essential default output and the agent-facing token standard](0025-essential-default-output.md)
+* [ADR-0026: The agent benchmark lives with the benchmark suite](0026-agent-benchmark-ownership.md)
 * [Post-ADR-0010 decision inventory](post-0010-inventory.md)

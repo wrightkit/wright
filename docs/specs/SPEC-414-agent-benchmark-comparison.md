@@ -211,8 +211,8 @@ Pilot observations that shaped this spec (Sonnet only, 2 scenarios, 18 runs; not
 - Q-001 [product]: which models, reasoning settings, and total budget the first full run uses; owner PM.
 - Q-002 [product]: is Tier 2 required for acceptance, or only Tier 1; owner PM.
 - Q-003 [verification]: rubric-based judgment (REQ-011) in scope for the first version, or deferred; owner QA.
-- Q-004 [architecture]: the harness now lives in `benchmarks/agent` as small modules beside
-  `agent_bench.py` (grading, trace, report, adapters); confirm or redirect; owner Architect.
+- Q-004 [architecture]: resolved — redirected. The harness moves to `wrightkit/benchmark-suite`
+  ([ADR-0026](../adr/0026-agent-benchmark-ownership.md)); until then it lives in `benchmarks/agent`.
 - Q-005 [verification]: wiki snapshots use the mirror's category pages and verified per-article content hashes;
   derived skills also verify their content hash. Both remain local under the source terms. Any distribution
   needs explicit source permission and an Architect ownership decision; it is outside this benchmark batch.
