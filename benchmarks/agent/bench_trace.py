@@ -35,7 +35,7 @@ def envelope_summary(envelope: dict) -> dict:
         "ok": envelope.get("ok"),
         "exit": envelope.get("exit"),
         "codes": [d.get("code") for d in envelope.get("diagnostics", [])],
-        "inputIdentity": result.get("input_identity") or output.get("input_identity"),
+        "inputIdentity": result.get("inputIdentity") or result.get("input_identity") or output.get("input_identity"),
         "selection": result.get("selection") or envelope.get("selection"),
     }
 
@@ -453,30 +453,31 @@ def summarize_trace(events: list[dict]) -> dict:
     return {tool: summarize_tool(tool_events(events, tool)) for tool in sorted({e["tool"] for e in events if "tool" in e})}
 
 
-BOUNDED_CLI_FLAGS = {"--brief", "--severity", "--rule-id", "--file", "--max", "--only", "--caller", "--callee"}
-# Request fields that narrow a result (#430, #531) or select the brief form
-# (#532). `rule` is a selection field on the finding/reference operations and
+BOUNDED_CLI_FLAGS = {"--severity", "--rule-id", "--file", "--max", "--only", "--caller", "--callee"}
+# Request fields that narrow a result (#430, #531). `rule` is a selection field on the finding/reference operations and
 # the required address on cfg, so it counts only on the ops where it selects.
 BOUNDED_FIELDS = {"severity", "kind", "file", "max", "caller", "callee", "name"}
 RULE_SELECT_OPS = {"lint", "findings", "costEstimate", "references"}
 
 
 def bounded_cli(argv: list[str]) -> bool:
-    """A CLI call adopted a bounded form (#532): `--brief`, or a selection
-    flag (`--max`, `--only`, ...). `--rule` selects only under `inspect` —
-    on `lint` it loads a rule file."""
+    """Default decision and inspect forms are bounded; --all expands them."""
+    if "--all" not in argv and command_of(argv) in DECISION_COMMANDS:
+        return True
     if any(a in BOUNDED_CLI_FLAGS for a in argv):
         return True
     return command_of(argv) == "inspect" and "--rule" in argv
 
 
 def bounded_request(request: dict) -> bool:
-    """A serve request adopted a bounded form: a truthy `brief`, a selection
-    field, or `rule` on an operation where it selects rather than addresses."""
+    """Default capped operations or an explicit selection bound the result."""
     args = request["args"]
     if not isinstance(args, dict):
         return False
-    if args.get("brief"):
+    if not args.get("all") and request["op"] in {
+        "check", "lint", "analyze", "inspect", "symbols", "references", "rules",
+        "cfg", "callGraph", "costEstimate", "findings", "persistentObjects",
+    }:
         return True
     return bool(set(args) & BOUNDED_FIELDS) or ("rule" in args and request["op"] in RULE_SELECT_OPS)
 

@@ -66,16 +66,23 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
             name: None,
             file: None,
             max: None,
+            all: true,
             rule: None,
             content: false,
         },
-        ToolRequest::Findings(FindingSelection::default()),
+        ToolRequest::Findings {
+            selection: FindingSelection::default(),
+            all: true,
+        },
         ToolRequest::Lint {
             selection: FindingSelection::default(),
-            brief: false,
+            all: true,
         },
         ToolRequest::LintRules,
-        ToolRequest::CostEstimate(FindingSelection::default()),
+        ToolRequest::CostEstimate {
+            selection: FindingSelection::default(),
+            all: true,
+        },
         ToolRequest::TargetMetadata,
     ] {
         match service.handle(&request) {
@@ -103,6 +110,7 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
             kind: Some("globalVariable".to_string()),
             file: None,
             max: None,
+            all: true,
         }) {
             wright_driver::service::ToolResponse::Ok { result } => result
                 .as_array()

@@ -154,6 +154,7 @@ fn service_responses() -> Vec<(String, Value)> {
         max: None,
         rule: None,
         content: false,
+        all: false,
     }) {
         ToolResponse::Ok { result } => result[0]["id"].as_u64().unwrap(),
         ToolResponse::Error { error } => panic!("rules failed: {error:?}"),
@@ -162,6 +163,7 @@ fn service_responses() -> Vec<(String, Value)> {
         kind: None,
         file: None,
         max: None,
+        all: false,
     }) {
         ToolResponse::Ok { result } => result[0]["id"].as_u64().unwrap(),
         ToolResponse::Error { error } => panic!("symbols failed: {error:?}"),
@@ -416,13 +418,13 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
         );
     }
 
-    // #532: `brief` validates and deserializes on analyze/inspect/lint, and a
-    // brief result validates against the same operation result schema.
+    // #532: `all` validates and deserializes on analyze/inspect/lint, and a
+    // all result validates against the same operation result schema.
     for request in [
-        json!({"op":"analyze","brief":true}),
-        json!({"op":"inspect","brief":true}),
-        json!({"op":"lint","brief":true}),
-        json!({"op":"lint","brief":false,"severity":"warning","max":3}),
+        json!({"op":"analyze","all":true}),
+        json!({"op":"inspect","all":true}),
+        json!({"op":"lint","all":true}),
+        json!({"op":"lint","all":false,"severity":"warning","max":3}),
     ] {
         assert!(
             request_schema.is_valid(&request),
@@ -431,7 +433,7 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
         let parsed =
             serde_json::from_value::<ToolRequest>(request.clone()).expect("request deserializes");
         let ToolResponse::Ok { result } = service_response(&parsed) else {
-            panic!("brief request failed: {request}");
+            panic!("all request failed: {request}");
         };
         let reference = result_schemas[request["op"].as_str().unwrap()]
             .as_str()
@@ -442,12 +444,12 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
             JSONSchema::compile(&operation_document).expect("operation result schema compiles");
         assert!(
             operation_schema.is_valid(&result),
-            "{} brief result does not match {reference}: {result}",
+            "{} all result does not match {reference}: {result}",
             request["op"]
         );
     }
-    assert!(!request_schema.is_valid(&json!({"op":"lint","brief":"yes"})));
-    assert!(!request_schema.is_valid(&json!({"op":"check","brief":true})));
+    assert!(!request_schema.is_valid(&json!({"op":"lint","all":"yes"})));
+    assert!(request_schema.is_valid(&json!({"op":"check","all":true})));
 
     let valid_range = json!({"start_line":1,"start_col":1,"end_line":1,"end_col":1});
     assert!(edit_range_schema.is_valid(&valid_range));
@@ -479,7 +481,7 @@ fn cli_and_agent_selections_return_the_same_set() {
             max: Some(2),
             ..FindingSelection::default()
         },
-        brief: false,
+        all: false,
     }) {
         ToolResponse::Ok { result } => result,
         ToolResponse::Error { error } => panic!("lint selection failed: {error:?}"),
@@ -515,6 +517,7 @@ fn cli_and_agent_selections_return_the_same_set() {
         kind: Some("rule".to_string()),
         file: None,
         max: Some(2),
+        all: false,
     }) {
         ToolResponse::Ok { result } => result,
         ToolResponse::Error { error } => panic!("symbols selection failed: {error:?}"),
@@ -565,6 +568,7 @@ fn cli_and_agent_selections_return_the_same_set() {
                 file: None,
                 max: Some(1),
                 content: true,
+                all: false,
             },
             vec!["--content", "--max", "1"],
         ),
@@ -575,6 +579,7 @@ fn cli_and_agent_selections_return_the_same_set() {
                 file: None,
                 max: None,
                 content: true,
+                all: false,
             },
             vec!["--content", "--rule", "player starts"],
         ),
@@ -600,34 +605,34 @@ fn cli_and_agent_selections_return_the_same_set() {
         assert_eq!(cli, agent, "{request:?} differs between CLI and service");
     }
 
-    // #532: `--brief` and the `brief` request field produce the same brief
+    // #532: `--all` and the `all` request field produce the same all
     // payload for the same input — the agent and CLI surfaces share one
     // driver-side form.
     for (request, args, envelope) in [
         (
             ToolRequest::Lint {
                 selection: FindingSelection::default(),
-                brief: true,
+                all: false,
             },
-            vec!["lint", "--brief"],
+            vec!["lint"],
             false,
         ),
         (
             ToolRequest::Analyze {
                 selection: Default::default(),
-                brief: true,
+                all: false,
             },
-            vec!["analyze", "--brief"],
+            vec!["analyze"],
             true,
         ),
-        (
-            ToolRequest::Inspect { brief: true },
-            vec!["inspect", "--brief"],
-            true,
-        ),
+        (ToolRequest::Inspect { all: false }, vec!["inspect"], true),
     ] {
         let agent = match service.handle(&request) {
-            ToolResponse::Ok { result } => {
+            ToolResponse::Ok { mut result } => {
+                if !envelope {
+                    result.as_object_mut().unwrap().remove("ok");
+                    result.as_object_mut().unwrap().remove("exit");
+                }
                 if envelope {
                     result["result"].clone()
                 } else {
@@ -642,7 +647,7 @@ fn cli_and_agent_selections_return_the_same_set() {
             .args(["-f", "json"])
             .stdin(Stdio::null())
             .output()
-            .expect("brief command runs");
+            .expect("all command runs");
         assert!(
             output.status.success(),
             "{}",
@@ -669,6 +674,7 @@ fn rule_content_conforms_to_the_owner_schema() {
         file: None,
         max: None,
         content: true,
+        all: false,
     }) else {
         panic!("rules with content failed");
     };
@@ -695,3 +701,305 @@ fn rule_content_conforms_to_the_owner_schema() {
         assert!(owner.is_valid(&content), "{content}");
     }
 }
+
+fn assert_default_surface_parity(operation: &str, args: &[&str], request: Value) {
+    let fixture = if matches!(operation, "lint" | "analyze" | "costEstimate") {
+        "control-flow"
+    } else {
+        "declarations-rules"
+    };
+    let input = workspace_root().join(format!("tests/fixtures/workshop/synthetic/{fixture}.ws"));
+    assert_default_surface_parity_on_input(
+        operation,
+        args,
+        request.clone(),
+        input,
+        SourceKind::Workshop,
+        None,
+    );
+    let seed =
+        workspace_root().join("benchmarks/agent/scenarios/understand-score-flow/seed/mode.ws");
+    assert_default_surface_parity_on_input(
+        operation,
+        args,
+        request.clone(),
+        seed,
+        SourceKind::Workshop,
+        None,
+    );
+    let provider = std::env::var_os("WRIGHT_OPY_PROVIDER")
+        .map(PathBuf::from)
+        .or_else(|| {
+            wright_driver::OpyProviderConfig::default()
+                .installed()
+                .expect("local provider inventory")
+                .map(|p| p.executable)
+        });
+    if let Some(provider) = provider {
+        let seed = workspace_root()
+            .join("benchmarks/agent/scenarios/understand-opy-project/seed/mode.opy");
+        assert_default_surface_parity_on_input(
+            operation,
+            args,
+            request,
+            seed,
+            SourceKind::Opy,
+            Some(provider),
+        );
+    } else {
+        eprintln!("SKIPPED OPY seed parity: no locally installed provider or WRIGHT_OPY_PROVIDER");
+    }
+}
+
+fn assert_default_surface_parity_on_input(
+    operation: &str,
+    args: &[&str],
+    mut request: Value,
+    input: PathBuf,
+    kind: SourceKind,
+    provider: Option<PathBuf>,
+) {
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(input.clone()),
+        kind,
+        source_backend: wright_driver::SourceBackend::Auto,
+        opy_provider: provider
+            .clone()
+            .map(wright_driver::OpyProviderConfig::with_executable)
+            .unwrap_or_default(),
+        ..Default::default()
+    })
+    .unwrap();
+    let mut target = None;
+    if operation == "cfg" || operation == "references" {
+        let values = if operation == "cfg" {
+            session.rules(None, None, None, None, false).result.0
+        } else {
+            session.symbols(None, None, None).result.0
+        };
+        let items = values
+            .as_array()
+            .or_else(|| {
+                values
+                    .get(if operation == "cfg" {
+                        "rules"
+                    } else {
+                        "symbols"
+                    })
+                    .and_then(Value::as_array)
+            })
+            .unwrap();
+        target = items
+            .iter()
+            .filter(|item| {
+                operation == "cfg"
+                    || matches!(
+                        item["kind"].as_str(),
+                        Some("globalVariable" | "playerVariable")
+                    )
+            })
+            .filter_map(|item| item["name"].as_str())
+            .find(|name| {
+                !name.is_empty()
+                    && items
+                        .iter()
+                        .filter(|item| item["name"].as_str() == Some(*name))
+                        .count()
+                        == 1
+            })
+            .map(str::to_owned);
+        let name = target
+            .as_ref()
+            .expect("seed has an unambiguous query target");
+        request[if operation == "cfg" { "rule" } else { "symbol" }] = json!(name);
+    }
+    let mut service = ToolService::new(&mut session).unwrap();
+    let response = service.handle(&serde_json::from_value(request).unwrap());
+    let ToolResponse::Ok { mut result } = response else {
+        panic!(
+            "{operation} agent failed on {}: {response:?}",
+            input.display()
+        )
+    };
+    let run = |json: bool| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_wright"));
+        let mut selected_args = args.to_vec();
+        if let Some(target) = &target {
+            selected_args[2] = target;
+        }
+        command
+            .args(selected_args)
+            .arg(&input)
+            .args([
+                "--kind",
+                if kind == SourceKind::Opy {
+                    "opy"
+                } else {
+                    "workshop"
+                },
+                "--renderer",
+                "plain",
+                "--color",
+                "never",
+            ])
+            .stdin(Stdio::null());
+        if let Some(provider) = &provider {
+            command.arg("--opy-provider").arg(provider);
+        }
+        if json {
+            command.args(["--format", "json"]);
+        }
+        command.output().unwrap()
+    };
+    let output = run(true);
+    let cli: Value = serde_json::from_slice(&output.stdout).unwrap();
+    if result.get("result").is_some() && result.get("command").is_some() {
+        assert_eq!(result["ok"], cli["ok"], "{operation} verdict");
+        assert_eq!(result["exit"], cli["exit"], "{operation} exit");
+        result = result["result"].clone();
+    } else if result.get("ok").is_some()
+        && let Some(object) = result.as_object_mut()
+    {
+        if let Some(ok) = object.remove("ok") {
+            assert_eq!(ok, cli["ok"], "{operation} verdict");
+        }
+        if let Some(exit) = object.remove("exit") {
+            assert_eq!(exit, cli["exit"], "{operation} exit");
+        }
+    }
+    assert_eq!(cli["result"], result, "{operation} structured items");
+    assert!(
+        !String::from_utf8_lossy(&output.stdout).contains('\n')
+            || output.stdout.iter().filter(|&&b| b == b'\n').count() == 1,
+        "compact JSON"
+    );
+    assert_eq!(
+        output.stdout,
+        run(true).stdout,
+        "{operation} byte determinism"
+    );
+    let text_output = run(false);
+    assert_eq!(text_output.status.code(), output.status.code());
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&text_output.stdout),
+        String::from_utf8_lossy(&text_output.stderr)
+    );
+    let list = |key: &str| {
+        result
+            .as_array()
+            .or_else(|| result.get(key).and_then(Value::as_array))
+            .or_else(|| result.get("items").and_then(Value::as_array))
+            .map_or(&[][..], Vec::as_slice)
+    };
+    let keys: &[&str] = match operation {
+        "lint" | "costEstimate" => &["findings"],
+        "analyze" => &["hotspots", "risks", "variables"],
+        "inspect" | "rules" => &["rules"],
+        "symbols" => &["symbols"],
+        "references" => &["references"],
+        "cfg" => &["blocks"],
+        "callGraph" => &["edges"],
+        _ => &[],
+    };
+    for key in keys {
+        for item in list(key) {
+            for field in ["name", "message", "caller", "callee"] {
+                if let Some(value) = item[field].as_str().filter(|v| !v.is_empty()) {
+                    assert!(
+                        text.contains(value),
+                        "{operation} text omitted {field}: {value}\n{text}"
+                    );
+                }
+            }
+            if *key == "references" {
+                if let (Some(line), Some(col)) = (
+                    item["span"]["start"]["line"].as_u64(),
+                    item["span"]["start"]["col"].as_u64(),
+                ) {
+                    assert!(
+                        text.contains(&format!(":{line}:{col}")),
+                        "reference location absent: {text}"
+                    );
+                }
+            }
+            if *key == "blocks" {
+                if let Some(id) = item["id"].as_u64() {
+                    assert!(
+                        text.contains(&format!("block {id}")),
+                        "cfg block absent: {text}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+macro_rules! default_surface_test {
+    ($name:ident,$op:literal,$args:expr,$request:expr) => {
+        #[test]
+        fn $name() {
+            assert_default_surface_parity($op, $args, $request);
+        }
+    };
+}
+default_surface_test!(
+    check_default_surfaces_agree,
+    "check",
+    &["check"],
+    json!({"op":"check"})
+);
+default_surface_test!(
+    lint_default_surfaces_agree,
+    "lint",
+    &["lint"],
+    json!({"op":"lint"})
+);
+default_surface_test!(
+    analyze_default_surfaces_agree,
+    "analyze",
+    &["analyze"],
+    json!({"op":"analyze"})
+);
+default_surface_test!(
+    inspect_default_surfaces_agree,
+    "inspect",
+    &["inspect"],
+    json!({"op":"inspect"})
+);
+default_surface_test!(
+    rules_default_surfaces_agree,
+    "rules",
+    &["inspect", "rules"],
+    json!({"op":"rules"})
+);
+default_surface_test!(
+    symbols_default_surfaces_agree,
+    "symbols",
+    &["inspect", "symbols"],
+    json!({"op":"symbols"})
+);
+default_surface_test!(
+    references_default_surfaces_agree,
+    "references",
+    &["inspect", "refs", "score"],
+    json!({"op":"references","symbol":"score"})
+);
+default_surface_test!(
+    cfg_default_surfaces_agree,
+    "cfg",
+    &["inspect", "cfg", "player starts"],
+    json!({"op":"cfg","rule":"player starts"})
+);
+default_surface_test!(
+    callgraph_default_surfaces_agree,
+    "callGraph",
+    &["inspect", "callgraph"],
+    json!({"op":"callGraph"})
+);
+default_surface_test!(
+    cost_default_surfaces_agree,
+    "costEstimate",
+    &["inspect", "cost"],
+    json!({"op":"costEstimate"})
+);

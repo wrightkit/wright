@@ -457,12 +457,13 @@ impl CompilerSession {
         content: bool,
     ) -> Envelope<RulesResult> {
         self.service_query("rules", move |service| {
-            tool_result(service.handle(&ToolRequest::Rules {
+            tool_result(service.handle_full(&ToolRequest::Rules {
                 name,
                 rule: rule.map(Address::Name),
                 file,
                 max,
                 content,
+                all: false,
             }))
             .map(RulesResult)
         })
@@ -477,8 +478,13 @@ impl CompilerSession {
         max: Option<usize>,
     ) -> Envelope<SymbolsResult> {
         self.service_query("symbols", move |service| {
-            tool_result(service.handle(&ToolRequest::Symbols { kind, file, max }))
-                .map(SymbolsResult)
+            tool_result(service.handle_full(&ToolRequest::Symbols {
+                kind,
+                file,
+                max,
+                all: true,
+            }))
+            .map(SymbolsResult)
         })
     }
 
@@ -498,14 +504,15 @@ impl CompilerSession {
         let symbol = Address::Name(name.to_string());
         let rule = rule.map(Address::Name);
         self.service_query("refs", move |service| {
-            let references = tool_result(service.handle(&ToolRequest::References {
+            let references = tool_result(service.handle_full(&ToolRequest::References {
                 symbol: symbol.clone(),
                 kind,
                 rule,
                 file,
                 max,
+                all: true,
             }))?;
-            let usage = tool_result(service.handle(&ToolRequest::Usage { symbol }))?;
+            let usage = tool_result(service.handle_full(&ToolRequest::Usage { symbol }))?;
             let mut result = usage.as_object().cloned().unwrap_or_default();
             match references {
                 serde_json::Value::Object(mut selected) => {
@@ -535,7 +542,13 @@ impl CompilerSession {
     ) -> Envelope<CfgResult> {
         let rule = Address::Name(rule.to_string());
         self.service_query("cfg", move |service| {
-            tool_result(service.handle(&ToolRequest::Cfg { rule, kind, max })).map(CfgResult)
+            tool_result(service.handle_full(&ToolRequest::Cfg {
+                rule,
+                kind,
+                max,
+                all: true,
+            }))
+            .map(CfgResult)
         })
     }
 
@@ -548,10 +561,11 @@ impl CompilerSession {
         max: Option<usize>,
     ) -> Envelope<CallGraphResult> {
         self.service_query("callgraph", move |service| {
-            tool_result(service.handle(&ToolRequest::CallGraph {
+            tool_result(service.handle_full(&ToolRequest::CallGraph {
                 caller,
                 callee,
                 max,
+                all: true,
             }))
             .map(CallGraphResult)
         })

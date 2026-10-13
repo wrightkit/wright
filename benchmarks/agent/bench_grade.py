@@ -109,7 +109,7 @@ def compiled_path(state: dict, source: str) -> Path | None:
 def rule_content(wright: str, program: Path, max_rules: int) -> dict:
     """The program's rules with canonical content (ADR-0024), read from raw Workshop so no `names` are involved."""
     proc = subprocess.run([wright, "serve", "--kind", "workshop", str(program)],
-                          input=json.dumps({"op": "rules", "content": True, "max": max_rules}) + "\n", capture_output=True, text=True)
+                          input=json.dumps({"op": "rules", "content": True, "max": max_rules, "all": True}) + "\n", capture_output=True, text=True)
     try:
         return json.loads(proc.stdout.splitlines()[0])
     except (IndexError, json.JSONDecodeError):
@@ -209,8 +209,9 @@ def run_check(check: dict, workspace: Path, entry: Path, wright: str, state: dic
         findings = [f for f in state["lint"] if f["code"] == check["code"]]
         return check_result(check, len(findings) <= check.get("max", 0), f"{len(findings)} '{check['code']}' finding(s)")
     if kind == "symbols":
-        response = serve_request(wright, entry, {"op": "symbols", "kind": check["symbolKind"]})
-        found = len(response.get("result", []))
+        response = serve_request(wright, entry, {"op": "symbols", "kind": check["symbolKind"], "all": True})
+        result = response.get("result") or []
+        found = len(result if isinstance(result, list) else result.get("items", []))
         return check_result(check, found >= check.get("min", 1), f"{found} '{check['symbolKind']}' symbol(s)")
     if kind in ("contains", "absent"):
         path = workspace / check["file"]
@@ -303,7 +304,7 @@ def grade(scenario: dict, workspace: Path, wright: str, scratch: Path | None = N
     scratch = scratch or workspace.parent / f"{workspace.name}-grading"
     shutil.rmtree(scratch, ignore_errors=True)
     state: dict = {"scratch": scratch, "authorities": authorities(wright, entry, scratch) if entry.is_file() else missing_entry_authorities(entry)}
-    _, lint = wright_json(wright, ["lint", str(entry)])
+    _, lint = wright_json(wright, ["lint", str(entry), "--all"])
     state["lint"] = (lint.get("result") or {}).get("findings") or []
     checks = [run_check(c, workspace, entry, wright, state) for c in scenario["checks"]]
     lint_errors = sum(1 for f in state["lint"] if f.get("severity") == "error")

@@ -416,7 +416,7 @@ context, mean correction rounds per condition, paired comparison against each `-
 lift against several named references; default `none/none/off`) (same scenario, agent, and
 trial; token comparison only where both are usable), per-scenario and per-split
 tables, expectation rates, friction, output size per command, bounded-output
-adoption (the share of Wright uses carrying `--brief` or a selection
+adoption (the share of Wright uses with bounded defaults or a selection
 flag/field, per condition), and diagnostics.
 The report header prints the Wright version next to the language-provider
 name and version each run recorded; a report built from runs with different

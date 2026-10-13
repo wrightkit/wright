@@ -201,7 +201,7 @@ On the CLI, `wright lint --fix` renders each offered fix's validated diff,
 and `wright lint --fix --write` applies fixes one at a time — reloading and
 re-linting after each write so every fix is planned and validated against
 the source version it edits. `--write` requires `--fix` and a path-based
-input, and `--fix` conflicts with `--brief`. When `--fix` runs, the result
+input. When `--fix` runs, the result
 adds a `fixes` list with each offered fix's `status` (`preview`, `applied`,
 or `refused`), its `preview`, and any refusal `diagnostics`.
 

@@ -207,15 +207,15 @@ class BandTest(unittest.TestCase):
             violations,
         )
 
-    def test_brief_budget_is_a_violation_not_a_band(self):
-        # #532: a brief result above the stated token budget fails even when
+    def test_default_budget_is_a_violation_not_a_band(self):
+        # #672: a default result above the stated token budget fails even when
         # the drift band itself would pass.
-        key = "cli:lint?brief"
-        metric = _metric(metrics.BRIEF_TOKEN_BUDGET["cli"] * metrics.TOKEN_BYTES + 400)
+        key = "cli:lint"
+        metric = _metric(metrics.DEFAULT_TOKEN_BUDGET * metrics.TOKEN_BYTES + 400)
         doc = {"p": {"status": "ok", "metrics": {key: metric}}}
         violations, _ = metrics.compare_metrics(_doc(doc), _doc(doc))
         self.assertTrue(
-            any(v["metric"] == key and v["change"] == "exceeds-brief-budget" for v in violations),
+            any(v["metric"] == key and v["change"] == "exceeds-default-budget" for v in violations),
             violations,
         )
         under = _metric(800)
@@ -223,18 +223,22 @@ class BandTest(unittest.TestCase):
         violations, _ = metrics.compare_metrics(_doc(doc), _doc(doc))
         self.assertEqual(violations, [])
 
-    def test_brief_counts_unwraps_envelopes(self):
-        brief = {
-            "brief": True,
-            "counts": {"findings": {"total": 9, "error": 1}, "rules": 6},
-            "items": [{}, {}],
-            "expand": "...",
-        }
-        expected = {"items": 2, "counts.findings.total": 9, "counts.rules": 6}
-        self.assertEqual(metrics.brief_counts(brief), expected)
-        self.assertEqual(metrics.brief_counts({"result": brief}), expected)
-        self.assertEqual(metrics.brief_counts({"result": {"result": brief}}), expected)
-        self.assertEqual(metrics.brief_counts({"result": {"findings": []}}), {})
+    def test_cli_address_discovery_avoids_duplicate_rule_names(self):
+        self.assertEqual(metrics.unique_name([{"name": "duplicate"}, {"name": "unique"}, {"name": "duplicate"}]), "unique")
+        self.assertIsNone(metrics.unique_name([{"name": "same"}, {"name": "same"}]))
+
+    def test_default_counts_retains_complete_totals(self):
+        result = {"counts": {"findings": {"total": 90, "error": 1}}, "findings": [{}, {}]}
+        expected = {"counts.findings.total": 90, "counts.findings.error": 1, "findings": 2}
+        self.assertEqual(metrics.default_counts(result), expected)
+        self.assertEqual(metrics.default_counts({"result": result}), expected)
+
+    def test_new_default_metric_is_budgeted_without_a_baseline(self):
+        for key in ("cli:inspect symbols?text", "cli:inspect rules", "cli:inspect rules?text", "agent:rules"):
+            with self.subTest(metric=key):
+                run = _doc({"p": {"status": "ok", "metrics": {key: _metric(6400)}}})
+                violations, _ = metrics.compare_metrics(_doc({}), run)
+                self.assertTrue(any(v["change"] == "exceeds-default-budget" for v in violations))
 
 
 class RunTest(unittest.TestCase):
@@ -264,16 +268,17 @@ class RunTest(unittest.TestCase):
             keys,
             {f"agent:{op}" for op in metrics.AGENT_OPS}
             | {f"cli:{cmd}" for cmd in metrics.CLI_COMMANDS}
-            | {f"agent:{op}?brief" for op in metrics.BRIEF_OPS}
-            | {f"cli:{cmd}?brief" for cmd in metrics.BRIEF_OPS},
+            | {f"cli:inspect {cmd}" for cmd in metrics.INSPECT_COMMANDS}
+            | {f"cli:{cmd}?text" for cmd in metrics.CLI_COMMANDS if cmd != "compile"}
+            | {f"cli:inspect {cmd}?text" for cmd in metrics.INSPECT_COMMANDS},
         )
-        self.assertEqual(result["briefTokenBudget"], metrics.BRIEF_TOKEN_BUDGET)
+        self.assertEqual(result["defaultTokenBudget"], metrics.DEFAULT_TOKEN_BUDGET)
         for key, record in project["metrics"].items():
             if "skipped" in record:
                 continue
             self.assertIn("bytes", record, key)
             self.assertIn("tokens", record, key)
-            if key.startswith("cli:") and key.endswith("?brief"):
+            if key.startswith("cli:") and key.endswith("?text"):
                 self.assertNotIn("latencyMs", record, key)
             else:
                 self.assertIn("latencyMs", record, key)
@@ -315,6 +320,7 @@ class RunTest(unittest.TestCase):
     def test_refusal_envelope_is_an_error_not_a_measurement(self):
         refusal = {"ok": False, "diagnostics": [{"code": "source-provider-unsupported"}]}
         self.assertEqual(metrics.envelope_failure(refusal), "source-provider-unsupported")
+        self.assertIsNone(metrics.envelope_failure({"ok": False, "exit": 1, "result": {"findings": []}}))
         self.assertEqual(metrics.envelope_failure({"ok": False, "diagnostics": []}), "not-ok")
         self.assertIsNone(metrics.envelope_failure({"ok": True, "diagnostics": [{"code": "w"}]}))
 

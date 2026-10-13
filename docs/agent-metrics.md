@@ -12,9 +12,7 @@ corpus project, it records output size in bytes and estimated tokens
 (`bytes / 4`), median latency over repeated runs, and result-shape counts
 (items, per-kind breakdowns, findings per rule code). Agent operations repeat
 `--repeats` times (default 5) and CLI commands `--cli-repeats` times
-(default 3), since each CLI run is a full pipeline. The CLI `--brief` forms
-share their plain command's pipeline, so they run once and record size and
-shape but no latency. Correctness stays
+(default 3), since each CLI run is a full pipeline. CLI text forms are recorded alongside compact JSON defaults; text measurements record size and shape without latency. Correctness stays
 assertion-based in the owning test suites — these metrics watch drift in the
 agent-facing cost, not behavior.
 
@@ -50,10 +48,12 @@ Blocking (independent of any recorded number):
   envelope with `ok: false` — a refusal is not a result, so it is never
   recorded as a measurement) unless the baseline recorded the identical marker;
 - a metric or project that vanished from the run;
-- **brief budget**: every `*?brief` metric — the `brief` request form and the
-  CLI `--brief` form (#532) for `lint`, `analyze`, and `inspect` — must stay
-  within `briefTokenBudget` (600 estimated tokens on the agent surface, 1000
-  in the CLI envelope; recorded in each run and baseline).
+- **default output budget**: default `check`, `lint`, `analyze`, `inspect`,
+  and `inspect` query results must stay within `defaultTokenBudget` (1500
+  estimated tokens) in text, compact CLI JSON, and the corresponding agent
+  results on every corpus project. Static catalogs and `compile` are excluded.
+  This replaces the removed `*?brief` measurements; `--all` is an explicit
+  expansion and is not the default budget target.
 
 Drift (reported, not blocking):
 

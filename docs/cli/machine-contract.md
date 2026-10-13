@@ -39,26 +39,27 @@ infer them from process state alone.
   "diagnostics": [],
   "result": {
     "program": { "origin": { "kind": "workshop", "locale": "en-us" }, "rules": 2 },
-    "facts": {
-      "symbols": [{ "id": 0, "kind": "globalVariable", "name": "counter", "usage": { "reads": 1, "writes": 1, "calls": 0, "rules": 1 } }],
-      "rules": [{ "id": 0, "name": "loop", "controlFlow": { "blocks": 4, "edges": 4, "loopBlocks": 1, "waitBlocks": 1 }, "elements": 21, "conditionElements": 0, "conditions": [] }],
-      "cost": { "elementCount": 21, "counts": { "rules": 1, "conditions": 0, "actions": 7, "waits": 1 } },
-      "risks": [{ "code": "min-wait-loop", "severity": "warning", "evidence": "static-indicator", "message": "...", "span": { "file": 0, "path": "program.ws", "start": { "line": 11, "col": 9 }, "end": { "line": 11, "col": 20 } } }],
-      "persistentObjects": []
-    }
+    "counts": { "risks": { "total": 0, "error": 0, "warning": 0, "info": 0 }, "persistentObjects": 0 },
+    "cost": { "elementCount": 21 },
+    "hotspots": [],
+    "complexity": { "blocks": 4, "edges": 4, "loopBlocks": 1, "waitBlocks": 1 },
+    "risks": [],
+    "variables": [],
+    "conditionTrees": [],
+    "persistentObjects": { "total": 0, "byKind": {}, "withoutRetainedIdentity": 0, "visibleToAllPlayers": 0 },
+    "expand": "--all / all: true; inspect symbols, refs, cfg, callgraph, cost for detail"
   }
 }
 ```
 
-`analyze` `facts` layers Workshop cost/size over the semantic queries (#445):
-`cost.elementCount` is the canonical `workshop-rs` element count (an exact
-structural size measurement — `null` with `unavailableReason` when the
-counter does not model a construct), `cost.counts` holds always-computable
-structural counts, each `rules` entry adds the rule's `elements` and its
-`conditions` trees (element count + span per condition), `risks` lists the
-registry findings whose rules carry a `performance` or `stability` tag with
-their evidence class, and `persistentObjects` reports the persistent-object
-facts (#429).
+`check`, `lint`, `analyze`, and `inspect` JSON results carry the same items as
+the default text report. JSON is emitted compact. Long lists are capped at 20
+items with totals and an expansion hint; `--all` lifts the cap, while explicit
+filters and `--max` still apply. The corresponding agent operations accept
+`all: true`. Complete fact dumps are removed from `analyze` and bare `inspect`
+on external surfaces; query specific details through the `inspect` subcommands.
+The Rust `CompilerSession` API still returns complete typed results. Verdicts
+and exit codes are based on the complete input, before selection or capping.
 
 Stable contract fields: `wright.contract`, `command`, `ok`, `exit`,
 `diagnostics[].code/stage/severity/span/source`, and each command's
@@ -112,7 +113,10 @@ The envelope follows the same rule as `wright-agent/v1`: additive optional
 changing a field's type or meaning, or changing the envelope or exit-code
 model requires a new major contract such as `wright-result/v2`.
 
-One recorded exception applies, decided before the 1.0 contract freeze (#134):
+Recorded exceptions apply before the 1.0 contract freeze (#134).
+[ADR-0025](../adr/0025-essential-default-output.md) replaces full external
+results with essential defaults, removes `brief`, adds `all`, and makes JSON
+compact without bumping the contract id. The earlier exception remains:
 the `lint` result's `rules` member lists only each rule's `id` and
 `effectiveSeverity` (#431). Full rule metadata — summary, rationale,
 documentation, known limits, evidence, tags — is served once by the

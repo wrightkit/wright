@@ -9,8 +9,7 @@ in a fixed corpus (``corpus.json``). Recorded per metric:
 - ``tokens``: ``bytes / 4`` (the benchmark's estimate);
 - ``latencyMs``: median wall time over ``--repeats`` runs (agent operations)
   or ``--cli-repeats`` runs (CLI commands; each run is a full pipeline). The
-  CLI ``--brief`` forms run the same pipeline as their plain command, so they
-  run once and record no latency;
+  Text forms run once for size; JSON forms also measure latency;
 - ``counts``: result-shape counts (items, per-kind, per-finding-code).
 
 Commands:
@@ -36,6 +35,7 @@ source is never vendored. Derived metrics are the only stored artifact.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import json
 import os
 import queue
@@ -96,26 +96,13 @@ AGENT_OPS = [
 
 CLI_COMMANDS = ["check", "lint", "analyze", "inspect", "compile"]
 
-# #532: the brief result form is the recommended agent-facing shape; both
-# surfaces are measured on it. `briefTokenBudget` bounds the JSON output of
-# any brief metric per surface — the `brief` request payload at 600
-# estimated tokens, the CLI `--brief` envelope (which adds pretty-printing
-# and diagnostics framing) at 1000. Exceeding the budget is a drift
-# violation, not a band check. The budgets moved from 500/800 to 600/900
-# when lint findings started carrying `span` on provider-backed projects:
-# a located top-5 needs roughly 15% more envelope (#578). The CLI budget moved
-# to 1000 when provider-backed loads began reporting a retained-source
-# degradation warning — one warning diagnostic costs ~80 envelope tokens
-# (#583).
-BRIEF_OPS = ["lint", "analyze", "inspect"]
-BRIEF_TOKEN_BUDGET = {"agent": 600, "cli": 1000}
+DEFAULT_OPS = {"check", "lint", "analyze", "inspect", "rules", "symbols", "references", "cfg", "callGraph", "costEstimate"}
+INSPECT_COMMANDS = ["rules", "symbols", "refs", "cfg", "callgraph", "cost"]
+DEFAULT_TOKEN_BUDGET = 1500
 
-# `check` separates what blocks from what is reported. Only these changes
-# fail it: a metric that stopped measuring, vanished, or exceeded its brief
-# budget does not depend on any recorded number. Every other change is
-# size/shape drift, which the baseline cannot judge on its own — a fix
-# legitimately moves it — so it is reported for review and never fails.
-BLOCKING_CHANGES = {"removed-from-run", "broken-in-run", "removed", "exceeds-brief-budget"}
+# Verdict/error availability and default output budgets block independently
+# of baseline drift, which is reported for review.
+BLOCKING_CHANGES = {"removed-from-run", "broken-in-run", "removed", "exceeds-default-budget"}
 
 
 class ServeSession:
@@ -275,6 +262,8 @@ def agent_counts(op: str, result) -> dict:
         if op in ("rules", "persistentObjects", "callGraph"):
             return _typed_items(result, "item")
         return {"items": len(result)}
+    if op in DEFAULT_OPS:
+        return default_counts(result)
     if op == "project":
         return _numeric_fields(
             result,
@@ -314,8 +303,10 @@ def agent_counts(op: str, result) -> dict:
 
 def envelope_failure(envelope) -> str | None:
     """Code of the first diagnostic when a CLI result envelope reports
-    ``ok: false`` (a refusal or failure, not a measurable result)."""
+    ``ok: false`` without a result (a refusal, not a completed verdict)."""
     if not isinstance(envelope, dict) or envelope.get("ok") is not False:
+        return None
+    if envelope.get("result") is not None and envelope.get("exit") == 1:
         return None
     for diagnostic in envelope.get("diagnostics") or []:
         if isinstance(diagnostic, dict) and diagnostic.get("code"):
@@ -329,36 +320,12 @@ def cli_counts(command: str, envelope: dict) -> dict:
         return {}
     counts: dict[str, float] = {"diagnostics": len(envelope.get("diagnostics") or [])}
     result = envelope.get("result")
+    if isinstance(result, list):
+        counts["items"] = len(result)
+        return counts
     if not isinstance(result, dict):
         return counts
-    if command == "lint":
-        counts.update(
-            {f"lint.{k}": v for k, v in _finding_counts(result.get("findings") or []).items()}
-        )
-    elif command == "analyze":
-        facts = result.get("facts") or {}
-        for key, value in facts.items():
-            if isinstance(value, list):
-                counts[f"facts.{key}"] = len(value)
-        counts.update(
-            _numeric_fields(
-                result.get("program") or {},
-                ["files", "findings", "globalVariables", "playerVariables", "rules", "subroutines"],
-                "program.",
-            )
-        )
-    elif command == "inspect":
-        for key in ("symbols", "rules", "references"):
-            value = result.get(key)
-            if isinstance(value, list):
-                counts[key] = len(value)
-        counts.update(
-            _numeric_fields(
-                result.get("program") or {},
-                ["files", "findings", "globalVariables", "playerVariables", "rules", "subroutines"],
-                "program.",
-            )
-        )
+    counts.update(default_counts(result))
     return counts
 
 
@@ -439,32 +406,14 @@ def run_agent_ops(
             except (queue.Empty, TimeoutError):
                 metrics[key] = {"error": "timeout"}
                 break
-        for op in BRIEF_OPS:
-            key = f"agent:{op}?brief"
-            try:
-                lines_bytes: list[int] = []
-                latencies: list[float] = []
-                counts: dict = {}
-                for _ in range(repeats):
-                    line, elapsed = session.request_timed(op, brief=True)
-                    lines_bytes.append(len(line.encode("utf-8")))
-                    latencies.append(elapsed)
-                    response = json.loads(line)
-                    if "error" in response:
-                        metrics[key] = {"error": response["error"].get("code", "error")}
-                        break
-                    counts = brief_counts(response.get("result"))
-                else:
-                    metrics[key] = metric_record(lines_bytes, latencies, counts)
-            except (queue.Empty, TimeoutError):
-                metrics[key] = {"error": "timeout"}
-                break
     return metrics
 
 
 def _first_id(items) -> int | None:
     """Numeric id of the first listed item — unambiguous within the session
     where a name may resolve to several rules/symbols (`ambiguous-rule`)."""
+    if isinstance(items, dict):
+        items = items.get("items", [])
     for item in items if isinstance(items, list) else []:
         ident = item.get("id") if isinstance(item, dict) else None
         if isinstance(ident, int):
@@ -472,70 +421,84 @@ def _first_id(items) -> int | None:
     return None
 
 
-def brief_counts(payload) -> dict:
-    """Result-shape counts for a brief result (#532): the bounded item list
-    plus every count the form reports. Callers pass either the brief object
-    itself or one of the envelopes carrying it (`response.result` or the CLI
-    envelope), so unwrap until the `brief` member appears."""
-    result = payload
-    for _ in range(3):
-        if isinstance(result, dict) and result.get("brief"):
-            break
-        result = result.get("result") if isinstance(result, dict) else None
-    if not isinstance(result, dict) or not result.get("brief"):
+def unique_name(items) -> str | None:
+    """Choose an address that stays unambiguous across the complete query."""
+    if isinstance(items, dict):
+        items = items.get("items", [])
+    names = [item.get("name") for item in items if isinstance(item, dict)] if isinstance(items, list) else []
+    counts = Counter(names)
+    return next((name for name in names if isinstance(name, str) and counts[name] == 1), None)
+
+
+def default_counts(payload) -> dict:
+    """Count structured default lists and the complete totals they report."""
+    if isinstance(payload, list):
+        return {"items": len(payload)}
+    if not isinstance(payload, dict):
         return {}
-    counts: dict[str, float] = {"items": len(result.get("items") or [])}
-    for key, value in (result.get("counts") or {}).items():
-        if isinstance(value, dict):
-            counts[f"counts.{key}.total"] = value.get("total", len(value))
-        elif isinstance(value, (int, float)):
-            counts[f"counts.{key}"] = value
+    if "result" in payload:
+        return default_counts(payload["result"])
+    counts = {}
+    for key, value in payload.items():
+        if isinstance(value, list):
+            counts[key] = len(value)
+        elif isinstance(value, dict):
+            counts.update({f"{key}.{k}": v for k, v in default_counts(value).items()})
+        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+            counts[key] = value
     return counts
 
 
 def run_cli_commands(
     wright: str, entry: Path, kind: str, project_dir: Path, repeats: int
 ) -> dict:
-    """Measure each CLI command. The ``--brief`` form shares the plain
-    command's pipeline, so its latency is not measured: it runs once for
-    size and shape only."""
+    """Measure default JSON and text forms; address refs/cfg through queries."""
     metrics: dict[str, dict] = {}
     scratch = tempfile.TemporaryDirectory(prefix="wright-metrics-")
-    for command in CLI_COMMANDS + [f"{command}?brief" for command in BRIEF_OPS]:
-        outputs_bytes: list[int] = []
-        latencies: list[float] = []
-        counts: dict = {}
-        failure: str | None = None
-        name, _, form = command.partition("?")
-        argv = [wright, name, str(entry), "--kind", kind, "-f", "json"]
-        if form == "brief":
-            argv.append("--brief")
-        if name == "compile":
-            argv += ["-o", str(Path(scratch.name) / "compiled.ow"), "--force"]
-        runs = 1 if form else repeats
-        for _ in range(runs):
-            start = time.monotonic()
-            completed = subprocess.run(
-                argv,
-                capture_output=True,
-                cwd=project_dir,
-            )
-            latencies.append((time.monotonic() - start) * 1000.0)
-            outputs_bytes.append(len(completed.stdout))
+    addresses = {}
+    with ServeSession(wright, entry, kind, project_dir) as session:
+        for op, address in (("rules", "cfg"), ("symbols", "refs")):
             try:
-                envelope = json.loads(completed.stdout)
-                failure = envelope_failure(envelope)
-                counts = (
-                    brief_counts(envelope) if form else cli_counts(name, envelope)
-                )
-            except json.JSONDecodeError:
-                counts = {"unparsedStdout": len(completed.stdout)}
-        if failure:
-            metrics[f"cli:{command}"] = {"error": failure}
-            continue
-        metrics[f"cli:{command}"] = metric_record(
-            outputs_bytes, None if form else latencies, counts
-        )
+                name = unique_name(session.request(op, all=True).get("result"))
+                if name is not None:
+                    addresses[address] = name
+            except (queue.Empty, TimeoutError):
+                break
+    for command in CLI_COMMANDS + [f"inspect {sub}" for sub in INSPECT_COMMANDS]:
+        for form in (["json"] if command == "compile" else ["json", "text"]):
+            key = f"cli:{command}" + ("?text" if form == "text" else "")
+            sub = command.split()[-1]
+            if sub in ("refs", "cfg") and sub not in addresses:
+                metrics[key] = {"skipped": "no globally unique declared name"}
+                continue
+            argv = [wright, *command.split()]
+            if sub in addresses:
+                argv.append(addresses[sub])
+            argv += [str(entry), "--kind", kind, "-f", form]
+            if command == "compile":
+                argv += ["-o", str(Path(scratch.name) / "compiled.ow"), "--force"]
+            outputs_bytes = []
+            latencies = []
+            counts = {}
+            failure = None
+            for _ in range(repeats if form == "json" else 1):
+                start = time.monotonic()
+                completed = subprocess.run(argv, capture_output=True, cwd=project_dir)
+                latencies.append((time.monotonic() - start) * 1000.0)
+                outputs_bytes.append(len(completed.stdout))
+                if form == "text":
+                    if completed.returncode not in (0, 1):
+                        failure = f"exit-{completed.returncode}"
+                    continue
+                try:
+                    envelope = json.loads(completed.stdout)
+                    failure = envelope_failure(envelope)
+                    counts = cli_counts(command, envelope)
+                except (json.JSONDecodeError, TypeError):
+                    failure = "unparsed-stdout"
+            metrics[key] = {"error": failure} if failure else metric_record(
+                outputs_bytes, latencies if form == "json" else None, counts
+            )
     scratch.cleanup()
     return metrics
 
@@ -638,7 +601,7 @@ def run_metrics(
         "corpusVersion": corpus["version"],
         "wright": wright_version(wright),
         "opyProvider": provider_version(),
-        "briefTokenBudget": BRIEF_TOKEN_BUDGET,
+        "defaultTokenBudget": DEFAULT_TOKEN_BUDGET,
         "projects": projects,
     }
 
@@ -703,6 +666,18 @@ def compare_metrics(baseline: dict, current: dict) -> tuple[list[dict], list[str
             "OPY provider differs: "
             f"baseline={baseline.get('opyProvider')} run={current.get('opyProvider')}"
         )
+    for pid, project in (current.get("projects") or {}).items():
+        for key, metric in (project.get("metrics") or {}).items():
+            surface, _, operation = key.partition(":")
+            operation = operation.removesuffix("?text")
+            bounded = (surface == "agent" and operation in DEFAULT_OPS) or (
+                surface == "cli" and (operation in {"check", "lint", "analyze", "inspect"}
+                                      or operation.startswith("inspect ")))
+            tokens = metric.get("tokens")
+            if bounded and isinstance(tokens, (int, float)) and tokens > DEFAULT_TOKEN_BUDGET:
+                violations.append({"project": pid, "metric": key, "field": "tokens",
+                                   "baseline": DEFAULT_TOKEN_BUDGET, "current": tokens,
+                                   "change": "exceeds-default-budget"})
     base_projects = baseline.get("projects") or {}
     run_projects = current.get("projects") or {}
     latency_factor, latency_pairs = _latency_factor(baseline, current)
@@ -776,22 +751,6 @@ def compare_metrics(baseline: dict, current: dict) -> tuple[list[dict], list[str
                 )
                 continue
             violations.extend(_compare_metric(pid, key, base_m, run_m, latency_factor))
-            # #532: brief results carry a stated token budget — exceeding it
-            # is a violation regardless of the drift band.
-            if key.endswith("?brief"):
-                budget = BRIEF_TOKEN_BUDGET[key.split(":", 1)[0]]
-                tokens = run_m.get("tokens")
-                if isinstance(tokens, (int, float)) and tokens > budget:
-                    violations.append(
-                        {
-                            "project": pid,
-                            "metric": key,
-                            "field": "tokens",
-                            "baseline": budget,
-                            "current": tokens,
-                            "change": "exceeds-brief-budget",
-                        }
-                    )
     return violations, warnings
 
 

@@ -126,7 +126,7 @@ fn run_workflow(command: Command) -> ExitCode {
             config.selection = selection_from_args(&args.select);
             run_configured(
                 config,
-                present::Presentation::from_common(&args.common),
+                present::Presentation::from_common(&args.common).with_all(args.all),
                 None,
                 wright_driver::CompilerSession::check,
             )
@@ -135,20 +135,13 @@ fn run_workflow(command: Command) -> ExitCode {
             let mut config = config_from_common(&args.common, true);
             config.selection = selection_from_args(&args.select);
             let presentation = present::Presentation::from_common(&args.common);
-            if args.brief {
-                run_configured(config, presentation, None, |session| {
-                    brief_envelope(session.analyze(), wright_driver::brief::analyze, |result| {
-                        result.selection.clone()
-                    })
-                })
-            } else {
-                run_configured(
-                    config,
-                    presentation,
-                    None,
-                    wright_driver::CompilerSession::analyze,
+            run_configured(config, presentation.with_all(args.all), None, |session| {
+                essential_envelope(
+                    session.analyze(),
+                    |value| wright_driver::essential::analyze(value, args.all),
+                    |result| result.selection.clone(),
                 )
-            }
+            })
         }
         Command::Rename(args) => run_configured(
             config_from_common(&args.common, false),
@@ -164,65 +157,85 @@ fn run_workflow(command: Command) -> ExitCode {
                 return ExitCode::from(exit::USAGE);
             }
             let presentation = present::Presentation::from_common(&args.common);
-            if args.brief {
-                return run_configured(config, presentation, None, |session| {
-                    brief_envelope(session.lint(), wright_driver::brief::lint, |result| {
-                        result.selection.clone()
-                    })
-                });
-            }
             if args.fix {
                 return run_configured(config, presentation, None, move |session| {
                     session.lint_fix(args.write)
                 });
             }
-            run_configured(
-                config,
-                presentation,
-                None,
-                wright_driver::CompilerSession::lint,
-            )
+            run_configured(config, presentation.with_all(args.all), None, |session| {
+                essential_envelope(
+                    session.lint(),
+                    |value| wright_driver::essential::lint(value, args.all),
+                    |result| result.selection.clone(),
+                )
+            })
         }
         Command::Inspect(args) => match args.query {
-            None if args.brief => run_configured(
-                config_from_common(&args.common, false),
-                present::Presentation::from_common(&args.common),
-                None,
-                |session| {
-                    brief_envelope(session.inspect(), wright_driver::brief::inspect, |_| None)
-                },
-            ),
             None => run_configured(
                 config_from_common(&args.common, false),
-                present::Presentation::from_common(&args.common),
+                present::Presentation::from_common(&args.common).with_all(args.all),
                 None,
-                wright_driver::CompilerSession::inspect,
+                |session| {
+                    essential_envelope(
+                        session.inspect(),
+                        |value| wright_driver::essential::inspect(value, args.all),
+                        |_| None,
+                    )
+                },
             ),
             Some(cli::InspectQuery::Rules(query)) => run_configured(
                 config_from_common(&query.common, false),
-                present::Presentation::from_common(&query.common),
+                present::Presentation::from_common(&query.common).with_all(query.all),
                 None,
                 move |session| {
-                    session.rules(query.name, query.rule, query.file, query.max, query.content)
+                    session
+                        .rules(
+                            query.name,
+                            query.rule,
+                            query.file,
+                            query
+                                .max
+                                .or_else(|| (query.all && query.content).then_some(usize::MAX)),
+                            query.content,
+                        )
+                        .map_result(|result| {
+                            wright_driver::result::RulesResult(wright_driver::essential::query(
+                                &result.0, query.all,
+                            ))
+                        })
                 },
             ),
             Some(cli::InspectQuery::Symbols(query)) => {
                 let kind = query.only.map(|kind| kind.as_str().to_string());
                 run_configured(
                     config_from_common(&query.common, false),
-                    present::Presentation::from_common(&query.common),
+                    present::Presentation::from_common(&query.common).with_all(query.all),
                     None,
-                    move |session| session.symbols(kind, query.file, query.max),
+                    move |session| {
+                        session
+                            .symbols(kind, query.file, query.max)
+                            .map_result(|result| {
+                                wright_driver::result::SymbolsResult(
+                                    wright_driver::essential::query(&result.0, query.all),
+                                )
+                            })
+                    },
                 )
             }
             Some(cli::InspectQuery::Refs(query)) => {
                 let kind = query.only.map(|kind| kind.as_str().to_string());
                 run_configured(
                     config_from_common(&query.common, false),
-                    present::Presentation::from_common(&query.common),
+                    present::Presentation::from_common(&query.common).with_all(query.all),
                     None,
                     move |session| {
-                        session.refs(&query.name, kind, query.rule, query.file, query.max)
+                        session
+                            .refs(&query.name, kind, query.rule, query.file, query.max)
+                            .map_result(|result| {
+                                wright_driver::result::RefsResult(wright_driver::essential::query(
+                                    &result.0, query.all,
+                                ))
+                            })
                     },
                 )
             }
@@ -233,16 +246,32 @@ fn run_workflow(command: Command) -> ExitCode {
                 let kind = query.only.map(|kind| kind.as_str().to_string());
                 run_configured(
                     config_from_common(&query.common, false),
-                    present::Presentation::from_common(&query.common),
+                    present::Presentation::from_common(&query.common).with_all(query.all),
                     Some(subject.as_str()),
-                    move |session| session.cfg(&query.rule, kind, query.max),
+                    move |session| {
+                        session
+                            .cfg(&query.rule, kind, query.max)
+                            .map_result(|result| {
+                                wright_driver::result::CfgResult(wright_driver::essential::query(
+                                    &result.0, query.all,
+                                ))
+                            })
+                    },
                 )
             }
             Some(cli::InspectQuery::Callgraph(query)) => run_configured(
                 config_from_common(&query.common, false),
-                present::Presentation::from_common(&query.common),
+                present::Presentation::from_common(&query.common).with_all(query.all),
                 None,
-                move |session| session.callgraph(query.caller, query.callee, query.max),
+                move |session| {
+                    session
+                        .callgraph(query.caller, query.callee, query.max)
+                        .map_result(|result| {
+                            wright_driver::result::CallGraphResult(wright_driver::essential::query(
+                                &result.0, query.all,
+                            ))
+                        })
+                },
             ),
             Some(cli::InspectQuery::Cost(query)) => {
                 // Cost findings carry no source location, so `file` can
@@ -258,9 +287,15 @@ fn run_workflow(command: Command) -> ExitCode {
                 config.selection = selection_from_args(&query.select);
                 run_configured(
                     config,
-                    present::Presentation::from_common(&query.common),
+                    present::Presentation::from_common(&query.common).with_all(query.all),
                     None,
-                    wright_driver::CompilerSession::cost,
+                    |session| {
+                        session.cost().map_result(|mut result| {
+                            result.result =
+                                wright_driver::essential::query(&result.result, query.all);
+                            result
+                        })
+                    },
                 )
             }
         },
@@ -275,17 +310,13 @@ fn run_workflow(command: Command) -> ExitCode {
     }
 }
 
-/// The `--brief` result form of a workflow envelope (#532): the driver's
-/// brief transform builds the same payload the `serve`/`MCP` `brief`
-/// request fields return, so every surface reports the same summary.
-/// `outcome` lifts the result's finding-selection record into the brief so
-/// the verdict reflects the full set, matching the unbriefed result (#635).
-fn brief_envelope<T: serde::Serialize>(
+/// Apply the same essential result projection as the agent service.
+fn essential_envelope<T: serde::Serialize>(
     envelope: wright_driver::Envelope<T>,
     form: impl FnOnce(&serde_json::Value) -> serde_json::Value,
     outcome: impl FnOnce(&T) -> Option<wright_driver::SelectionOutcome>,
-) -> wright_driver::Envelope<wright_driver::BriefResult> {
-    envelope.map_result(|result| wright_driver::BriefResult {
+) -> wright_driver::Envelope<wright_driver::EssentialResult> {
+    envelope.map_result(|result| wright_driver::EssentialResult {
         result: form(&serde_json::to_value(&result).expect("result serializes")),
         selection: outcome(&result),
     })
@@ -434,7 +465,7 @@ fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
             match args.format {
                 OutputFormatArg::Json => println!(
                     "{}",
-                    serde_json::to_string_pretty(&result).expect("result serializes")
+                    serde_json::to_string(&result).expect("result serializes")
                 ),
                 OutputFormatArg::Text => print_lookup_text(&result),
             }
@@ -451,7 +482,7 @@ fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
             match args.format {
                 OutputFormatArg::Json => println!(
                     "{}",
-                    serde_json::to_string_pretty(&serde_json::json!({ "error": error }))
+                    serde_json::to_string(&serde_json::json!({ "error": error }))
                         .expect("error serializes")
                 ),
                 OutputFormatArg::Text => {
@@ -528,7 +559,7 @@ fn run_semantic_compare(args: cli::SemanticCompareArgs) -> ExitCode {
     let comparison = wright_driver::compare_workshop_texts(&expected, &actual);
     println!(
         "{}",
-        serde_json::to_string_pretty(&comparison).expect("semantic comparison serializes")
+        serde_json::to_string(&comparison).expect("semantic comparison serializes")
     );
     if comparison.equivalent {
         ExitCode::SUCCESS

@@ -3,10 +3,10 @@
 // add an allocation per error without a measured benefit.
 #![allow(clippy::result_large_err)]
 
-pub mod brief;
 pub mod config;
 pub mod diag;
 pub mod edit;
+pub mod essential;
 pub mod fix;
 pub mod input;
 pub(crate) mod lookup;
@@ -32,8 +32,8 @@ pub use opy_provider::{
 pub use output::{CompileWrite, OutputDest, Overwrite};
 pub use progress::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit};
 pub use result::{
-    AnalyzeResult, BriefResult, CheckResult, CompileResult, CompiledOutput, ConvertResult,
-    ConvertTarget, Envelope, InspectResult, LintResult, RESULT_CONTRACT,
+    AnalyzeResult, CheckResult, CompileResult, CompiledOutput, ConvertResult, ConvertTarget,
+    Envelope, EssentialResult, InspectResult, LintResult, RESULT_CONTRACT,
 };
 pub use select::{FindingSelection, SelectionOutcome};
 pub use session::{CompilerSession, Loaded, Provenance};

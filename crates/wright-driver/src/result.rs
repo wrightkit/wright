@@ -38,7 +38,7 @@ pub struct Envelope<T: Serialize> {
 impl<T: Serialize> Envelope<T> {
     /// Rebuild this envelope around a transformed result: verdict, exit
     /// code, diagnostics, and any finding selection carry over unchanged
-    /// (the `brief` result forms, #532).
+    /// when selecting the essential presentation.
     pub fn map_result<U: Serialize>(self, f: impl FnOnce(T) -> U) -> Envelope<U> {
         Envelope {
             wright: self.wright,
@@ -179,22 +179,13 @@ impl Serialize for CostResult {
     }
 }
 
-/// The `brief` form of `analyze`/`inspect`/`lint` (#532): a small
-/// `{brief, program?, counts, items, expand}` payload — counts, the
-/// highest-priority items, and how to expand. The full result stays one
-/// option away; `crate::brief` builds the payload from the full result.
-/// `selection` is the in-process outcome like [`CostResult`]'s, so a brief
-/// verdict reflects the full finding set rather than the selected counts.
+/// The essential presentation payload and complete-set selection outcome.
 #[derive(Debug, Clone, Default)]
-pub struct BriefResult {
-    /// The brief payload verbatim.
+pub struct EssentialResult {
     pub result: serde_json::Value,
-    /// The finding-selection outcome the underlying result reported; never
-    /// serialized — the wire member lives in `result.selection`.
     pub selection: Option<crate::select::SelectionOutcome>,
 }
-
-impl Serialize for BriefResult {
+impl Serialize for EssentialResult {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         self.result.serialize(serializer)
     }

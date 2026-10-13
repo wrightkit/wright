@@ -1011,12 +1011,12 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
             "{name} omits documents and sources"
         );
     }
-    // #532: the report tools expose `brief` in their derived input schemas.
+    // #532: the report tools expose `all` in their derived input schemas.
     for name in ["wright_analyze", "wright_inspect", "wright_lint"] {
         let tool = tools.iter().find(|t| t["name"] == name).unwrap();
         assert_eq!(
-            tool["inputSchema"]["properties"]["brief"]["type"], "boolean",
-            "{name} has no brief field"
+            tool["inputSchema"]["properties"]["all"]["type"], "boolean",
+            "{name} has no all field"
         );
     }
     // #529: `wright_lookup`'s schema derives from `LookupRequest` — `op` is
@@ -1044,12 +1044,12 @@ fn mcp_transport_results_match_the_service_contract() {
         ("wright_usage", serde_json::json!({"symbol": "index"})),
         ("wright_call_graph", serde_json::json!({})),
         ("wright_check", serde_json::json!({})),
-        // #532: the report tools carry `brief` through to the same service
+        // #532: the report tools carry `all` through to the same service
         // result the stdio transport reports.
-        ("wright_analyze", serde_json::json!({"brief": true})),
-        ("wright_inspect", serde_json::json!({"brief": true})),
+        ("wright_analyze", serde_json::json!({"all": true})),
+        ("wright_inspect", serde_json::json!({"all": true})),
         ("wright_lint", serde_json::json!({"severity": "info"})),
-        ("wright_lint", serde_json::json!({"brief": true})),
+        ("wright_lint", serde_json::json!({"all": true})),
         ("wright_cost_estimate", serde_json::json!({})),
         // #472: the edit tools run without `sources` — the service reads the
         // on-disk text.

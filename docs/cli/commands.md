@@ -33,9 +33,9 @@ result.
 | `wright compile [INPUT]` | Parse, lower, validate, emit Workshop text; warn on known client import limits | verdict, diagnostics, the written path, and the output SHA-256; the program goes to `<input stem>.ow` (or `-o PATH`; `-o -` prints only the program) |
 | `wright convert [INPUT] --target opy\|ostw` | Reconstruct validated Workshop input as canonical OPY or OSTW source | the reconstructed source |
 | `wright check [INPUT]` | Parse, lower, validate, and report correctness diagnostics | verdict and validation diagnostics |
-| `wright analyze [INPUT] [--brief]` | Summarize Workshop cost, ranked complexity hotspots, performance/stability risk indicators, and cross-cutting state | bounded semantic report with exact/static/heuristic evidence labels; `--brief` prints the counts-and-costliest-rules form |
-| `wright lint [INPUT] [--brief] [--fix [--write]]` | Parse, lower, lint; report findings | findings, rule id/severity summary, and effective configuration; `--brief` prints the counts-and-top-findings form; `--fix` previews each offered fix's validated diff, `--write` applies them |
-| `wright inspect [INPUT] [--brief]` | Parse, lower, and inspect exhaustive semantic facts | rules, symbols, references summary, and the detail command per area; `--brief` prints the counts-and-leading-rules form |
+| `wright analyze [INPUT] [--all]` | Summarize Workshop cost, ranked complexity hotspots, performance/stability risk indicators, and cross-cutting state | overview, cost, top hotspots, complexity, risks, and top variables with exact/static/heuristic evidence labels; `--all` lifts list caps |
+| `wright lint [INPUT] [--all] [--fix [--write]]` | Parse, lower, lint; report findings | finding counts by severity and actionable findings; `--all` lifts list caps; `--fix` previews each offered fix's validated diff, `--write` applies them |
+| `wright inspect [INPUT] [--all]` | Parse, lower, and inspect the program overview | overview, rule names, and the detail commands; `--all` lifts the rule-list cap |
 | `wright inspect rules [INPUT] [--content] [--rule RULE] [--only NAME] [--file PATH] [--max N]` | List rules; `--content` adds each selected rule's conditions and actions as canonical call trees (ADR-0024) | the rule list, with content when requested |
 | `wright inspect symbols [INPUT] [--only KIND] [--file PATH] [--max N]` | List semantic symbols, optionally narrowed to one kind | the symbol list with resolved locations |
 | `wright inspect refs <NAME> [INPUT] [--only KIND] [--rule RULE] [--file PATH] [--max N]` | References and usage counts for one symbol, addressed by name | usage-count header plus the reference list |
@@ -193,14 +193,18 @@ share the finding-selection options `--severity`, `--rule-id`, `--file`, and
 or exit codes; see [lint configuration and findings](lint.md) and
 [presentation](presentation.md).
 
-`lint`, `analyze`, and bare `inspect` also accept `--brief` (#532): the
-result shrinks to `{"brief": true, "counts", "items", "expand"}` — the same
-counts the summary line reports, at most five highest-priority items, and a
-hint naming the way back to the full result, which stays the default. The
-form composes with selection (`lint --severity error --brief` summarizes the
-selected set) and is identical on `serve` and MCP via the `brief` request
-field; the `inspect` query subcommands keep their own selection options and
-do not take `--brief`.
+`check`, `lint`, `analyze`, `inspect`, and the `inspect` subcommands report
+verdicts and actionable content by default. Text and compact JSON carry the
+same items; JSON is for programs processing results. Long lists show at most
+20 items, their total, and an expansion hint. Lint may show fewer items to keep its compact result within 5500 bytes before the envelope; `--all` also lifts this length bound. The ranked analyze report preserves its top-five hotspots, risks, and variables and top-three condition trees. `--all` (agent field `all: true`)
+lifts the default cap; filters and an explicit `--max` still select results.
+Verdicts and exit codes use the complete set, even when an error is withheld.
+
+The former `--brief` flag and `brief` request field are removed. Bare `inspect`
+and `analyze` no longer expose complete fact dumps: use the `inspect`
+subcommands to obtain a specific detail. The in-process `CompilerSession`
+API retains complete typed results. This pre-1.0 shape change is recorded in
+[ADR-0025](../adr/0025-essential-default-output.md).
 
 ## Semantic query commands (#429)
 
@@ -231,10 +235,9 @@ resolution never guesses.
 * `inspect symbols --only <KIND>` narrows the list to `globalVariable`,
   `playerVariable`, `subroutine`, or `rule` (kebab-case aliases work). It is
   spelled `--only` because `--kind` already selects the input frontend.
-  `--only` predates the selection contract, so used alone it keeps the
-  previous bare list; `--file`/`--max` opt into the selection wrapper.
+  The result reports the selected list and its selection total on every surface.
 * The query subcommands accept the same selection fields the agent
-  operations take (#531): `inspect rules` adds `--rule`, `--only` (a declared rule name), `--file`, `--max`, and `--content` (without `--max`, `--content` returns at most 20 rules), `inspect symbols` adds `--file`/`--max`,
+  operations take (#531): `inspect rules` adds `--rule`, `--only` (a declared rule name), `--file`, `--max`, and `--content` (without `--max`, `--content` returns at most 20 rules unless `--all` is set), `inspect symbols` adds `--file`/`--max`,
   `inspect refs` adds `--only` (a reference kind), `--rule`, `--file`, and
   `--max`, `inspect cfg` adds `--only` (a block kind) and `--max`, and
   `inspect callgraph` adds `--caller`, `--callee`, and `--max`. With any
@@ -243,8 +246,8 @@ resolution never guesses.
   `invalid-selection` diagnostic.
 * `inspect cost` accepts the finding-selection options, applied to its
   findings list exactly as on `costEstimate`.
-* `persistentObjects` has no standalone command; `analyze` reports the same
-  facts under `result.facts.persistentObjects`.
+* `persistentObjects` has no standalone command; `analyze` reports aggregate
+  counts under `result.persistentObjects`; use the agent operation for details.
 
 Text output follows the human-first presentation described in
 [presentation](presentation.md): each query leads with the target identity and
@@ -253,8 +256,8 @@ its summary — the program inventory and a bounded rule preview for bare
 usage counts before the reference list for `refs`, the graph shape before
 block detail for `cfg`, fan-in/fan-out highlights before the edge list for
 `callgraph`, and exact totals before findings for `cost`. Long lists show a
-first page of ten entries followed by the withheld count; `--format json`
-always prints the complete result.
+first page of 20 entries followed by the total and an expansion hint; `--format json`
+reports the essential result in structured form, with the same list cap as text.
 
 ## `wright rename` — semantic rename for raw Workshop (#434)
 
