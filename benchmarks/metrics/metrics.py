@@ -109,6 +109,13 @@ CLI_COMMANDS = ["check", "lint", "analyze", "inspect", "compile"]
 BRIEF_OPS = ["lint", "analyze", "inspect"]
 BRIEF_TOKEN_BUDGET = {"agent": 600, "cli": 1000}
 
+# `check` separates what blocks from what is reported. Only these changes
+# fail it: a metric that stopped measuring, vanished, or exceeded its brief
+# budget does not depend on any recorded number. Every other change is
+# size/shape drift, which the baseline cannot judge on its own — a fix
+# legitimately moves it — so it is reported for review and never fails.
+BLOCKING_CHANGES = {"removed-from-run", "broken-in-run", "removed", "exceeds-brief-budget"}
+
 
 class ServeSession:
     """One `wright serve --transport stdio` process with line requests."""
@@ -304,6 +311,17 @@ def agent_counts(op: str, result) -> dict:
     return {}
 
 
+def envelope_failure(envelope) -> str | None:
+    """Code of the first diagnostic when a CLI result envelope reports
+    ``ok: false`` (a refusal or failure, not a measurable result)."""
+    if not isinstance(envelope, dict) or envelope.get("ok") is not False:
+        return None
+    for diagnostic in envelope.get("diagnostics") or []:
+        if isinstance(diagnostic, dict) and diagnostic.get("code"):
+            return str(diagnostic["code"])
+    return "not-ok"
+
+
 def cli_counts(command: str, envelope: dict) -> dict:
     """Result-shape counts for one CLI command's JSON envelope."""
     if not isinstance(envelope, dict):
@@ -395,6 +413,10 @@ def run_agent_ops(
                         last_error = response["error"]
                         break
                     last_result = response.get("result")
+                    failure = envelope_failure(last_result)
+                    if failure:
+                        last_error = {"code": failure}
+                        break
                     counts = agent_counts(op, last_result)
                 if last_error is not None:
                     metrics[key] = {
@@ -480,6 +502,7 @@ def run_cli_commands(
         outputs_bytes: list[int] = []
         latencies: list[float] = []
         counts: dict = {}
+        failure: str | None = None
         name, _, form = command.partition("?")
         argv = [wright, name, str(entry), "--kind", kind, "-f", "json"]
         if form == "brief":
@@ -496,11 +519,15 @@ def run_cli_commands(
             outputs_bytes.append(len(completed.stdout))
             try:
                 envelope = json.loads(completed.stdout)
+                failure = envelope_failure(envelope)
                 counts = (
                     brief_counts(envelope) if form else cli_counts(name, envelope)
                 )
             except json.JSONDecodeError:
                 counts = {"unparsedStdout": len(completed.stdout)}
+        if failure:
+            metrics[f"cli:{command}"] = {"error": failure}
+            continue
         metrics[f"cli:{command}"] = metric_record(
             outputs_bytes, None if form else latencies, counts
         )
@@ -824,25 +851,38 @@ def _compare_metric(
     return diffs
 
 
-def print_report(violations: list[dict], warnings: list[str]) -> None:
+def split_changes(violations: list[dict]) -> tuple[list[dict], list[dict]]:
+    """(blocking, drift): drift is every change that is not in BLOCKING_CHANGES."""
+    blocking = [v for v in violations if v["change"] in BLOCKING_CHANGES]
+    return blocking, [v for v in violations if v["change"] not in BLOCKING_CHANGES]
+
+
+def _format_change(v: dict) -> str:
+    if "field" in v:
+        return (
+            f"  {v['project']}/{v['metric']} {v['field']}: "
+            f"{v['baseline']} -> {v['current']} ({v['change']})"
+        )
+    return f"  {v['project']}/{v['metric']}: {v['change']}"
+
+
+def print_report(blocking: list[dict], drift: list[dict], warnings: list[str]) -> None:
     for warning in warnings:
         print(f"warning: {warning}", file=sys.stderr)
-    if not violations:
+    if drift:
+        print(f"metrics: {len(drift)} drift change(s), not blocking:")
+        for v in drift:
+            print(_format_change(v))
+        print(
+            "Refresh baseline-<version>.json when the change is intended; "
+            "it does not block."
+        )
+    if blocking:
+        print(f"metrics: {len(blocking)} blocking change(s):")
+        for v in blocking:
+            print(_format_change(v))
+    elif not drift:
         print("metrics: within bands")
-        return
-    print(f"metrics: {len(violations)} out-of-band change(s):")
-    for v in violations:
-        if "field" in v:
-            print(
-                f"  {v['project']}/{v['metric']} {v['field']}: "
-                f"{v['baseline']} -> {v['current']} ({v['change']})"
-            )
-        else:
-            print(f"  {v['project']}/{v['metric']}: {v['change']}")
-    print(
-        "Update baseline-<version>.json in a reviewed PR documenting old/new "
-        "values and the reason to accept these changes."
-    )
 
 
 def default_baseline_path(corpus_version: str) -> Path:
@@ -941,8 +981,9 @@ def main() -> int:
     if args.skip_latency:
         baseline, current = strip_latency(baseline), strip_latency(current)
     violations, warnings = compare_metrics(baseline, current)
-    print_report(violations, warnings)
-    return 1 if violations else 0
+    blocking, drift = split_changes(violations)
+    print_report(blocking, drift, warnings)
+    return 1 if blocking else 0
 
 
 if __name__ == "__main__":

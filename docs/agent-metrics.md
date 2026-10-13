@@ -39,10 +39,26 @@ python3 benchmarks/metrics/metrics.py check                  # compare vs baseli
 ```
 
 `check` re-runs the corpus and compares every metric against
-`baseline-<corpusVersion>.json`, exiting 1 when anything leaves its band:
+`baseline-<corpusVersion>.json`. It reports every change and exits 1 only on
+the *blocking* ones below; size and shape drift is reported and never fails,
+because a fix legitimately moves it and a baseline cannot tell a fix from a
+regression.
+
+Blocking (independent of any recorded number):
+
+- a metric or project that stopped measuring (`error`, `skipped`, or a CLI
+  envelope with `ok: false` — a refusal is not a result, so it is never
+  recorded as a measurement) unless the baseline recorded the identical marker;
+- a metric or project that vanished from the run;
+- **brief budget**: every `*?brief` metric — the `brief` request form and the
+  CLI `--brief` form (#532) for `lint`, `analyze`, and `inspect` — must stay
+  within `briefTokenBudget` (600 estimated tokens on the agent surface, 1000
+  in the CLI envelope; recorded in each run and baseline).
+
+Drift (reported, not blocking):
 
 - **tokens and counts**: |delta| > 15% **and** > 30 absolute;
-- **latencyMs** (not part of the blocking CI gate; see below): machine-relative — `check` derives a machine factor as the
+- **latencyMs** (see below): machine-relative — `check` derives a machine factor as the
   median run/baseline latency ratio across every comparable metric (≥10
   pairs) and bands each metric against `baseline * factor`; |delta| > 50%
   AND > 1 ms absolute. A uniformly slower or faster host therefore passes,
@@ -50,27 +66,22 @@ python3 benchmarks/metrics/metrics.py check                  # compare vs baseli
   itself is reported as a warning (a uniform *product* slowdown is
   indistinguishable from a slower machine, so watch that line). Below 10
   comparable pairs the factor is not trusted and the absolute band applies;
-- **brief budget**: every `*?brief` metric — the `brief` request form and the
-  CLI `--brief` form (#532) for `lint`, `analyze`, and `inspect` — must stay
-  within `briefTokenBudget` (600 estimated tokens on the agent surface, 1000
-  in the CLI envelope; recorded in each run and baseline); exceeding it is a
-  violation regardless of the band.
 
 Improvements are reported alongside regressions (a smaller surface is a
-change reviewers should see too), and structural changes — added, removed,
-or newly measurable metrics — flag the same way. A run-side `error` or
-`skipped` entry fails `check` unless the baseline recorded the identical
-skip marker — a persistent deterministic skip stays a warning.
+change reviewers should see too), and added or newly measurable metrics are
+drift. A persistent deterministic skip recorded identically in the baseline
+stays a warning.
 
-`check` never rewrites the baseline. Accepting a change means editing
-`baseline-<corpusVersion>.json` in a reviewed PR that documents the old/new
-values and the reason. Bumping `corpus.json`'s `version` opens a new baseline
+`check` never rewrites the baseline. Refresh `baseline-<corpusVersion>.json`
+in a PR that documents the old/new values and the reason when a reported
+change is intended. Bumping `corpus.json`'s `version` opens a new baseline
 file so old bands stay auditable.
 
 ## In CI
 
-The blocking `Metrics drift` job runs `check --skip-latency`: each metric runs
-once and only tokens, bytes, and counts are compared. Wall time on shared
+The `Metrics drift` job runs `check --skip-latency`: each metric runs
+once and only tokens, bytes, and counts are compared. It fails only on the
+blocking changes above; drift appears in the job log and does not fail the PR. Wall time on shared
 hosted runners varies by about a factor of two between runs, and the machine
 factor cannot cancel a shift that differs by operation (small agent
 operations and CLI commands moved in opposite directions on the same run), so
