@@ -12,7 +12,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${1:-0.1.0}"
+VERSION="${1:-$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' "$ROOT/Cargo.toml" | head -n1)}"
+[[ -n "$VERSION" ]] || { echo "release version undetermined: pass it explicitly" >&2; exit 1; }
 STAMP_DIR="$ROOT/target/release-stamp"
 ARTIFACT_DIR="$ROOT/target/release-package"
 
@@ -43,7 +44,7 @@ echo "==> benchmarks"
 
 echo "==> standalone proof (Node/OverPy absent from PATH)"
 SANDBOX="$(mktemp -d)"
-mkdir -p "$SANDBOX"
+trap 'rm -rf "$SANDBOX"' EXIT
 cp "$BIN" "$SANDBOX/wright"
 cp "$LSP_BIN" "$SANDBOX/wright-lsp"
 (

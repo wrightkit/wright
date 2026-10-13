@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -36,6 +37,17 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, default=Path("dist"))
     args = parser.parse_args()
     version = args.version.removeprefix("v")
+    # Both names are interpolated into the payload path before it is deleted
+    # and recreated — reject anything that is not a single safe path
+    # component so a malformed argument cannot retarget the rmtree.
+    if not re.fullmatch(
+        r"[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?", version
+    ):
+        parser.error(
+            f"--version must be MAJOR.MINOR.PATCH(-prerelease)(+build), got {args.version!r}"
+        )
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", args.target) or ".." in args.target:
+        parser.error(f"--target must be a platform triple name, got {args.target!r}")
 
     output_dir = args.output_dir if args.output_dir.is_absolute() else ROOT / args.output_dir
     payload_name = f"wright-{version}-{args.target}"

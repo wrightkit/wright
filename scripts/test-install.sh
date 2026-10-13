@@ -15,7 +15,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALLER="$ROOT/install.sh"
 VERSION="9.9.9"
 WORK="$(mktemp -d)"
-PORT=18765
+free_port() {
+  python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()'
+}
+PORT="$(free_port)"
+BROKEN_PORT="$(free_port)"
+while [[ "$BROKEN_PORT" == "$PORT" ]]; do
+  BROKEN_PORT="$(free_port)"
+done
 PASS=0
 FAIL=0
 INSTALL_OUTPUT="$WORK/wright-install.out"
@@ -221,9 +228,9 @@ tar -czf "$release/wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz" -C "$release
 (cd "$release" && shasum -a 256 "wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz" \
   > "wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz.sha256")
 rm -rf "$dir"
-python3 -m http.server $((PORT + 1)) --directory "$WORK/mock-broken" >/dev/null 2>&1 &
+python3 -m http.server "$BROKEN_PORT" --directory "$WORK/mock-broken" >/dev/null 2>&1 &
 BROKEN_PID=$!
-BROKEN_BASE_URL="http://127.0.0.1:$((PORT + 1))"
+BROKEN_BASE_URL="http://127.0.0.1:$BROKEN_PORT"
 wait_for_server "$BROKEN_BASE_URL"
 if WRIGHT_INSTALL_OS=linux WRIGHT_INSTALL_ARCH=x86_64 \
    WRIGHT_INSTALL_BASE_URL="$BROKEN_BASE_URL/wright" \
