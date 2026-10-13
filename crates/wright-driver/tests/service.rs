@@ -3541,3 +3541,102 @@ fn rules_content_defaults_to_twenty_rules_and_names_ambiguity() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// #639: a fold that would produce a non-finite number must not turn a
+/// valid program invalid — `Divide(1, 0)` keeps the same pass/fail result
+/// under `compat` as under `off`.
+#[test]
+fn a_fold_that_would_be_non_finite_keeps_the_off_profile_verdict() {
+    let path = temp_workshop(
+        "divide-by-zero.ws",
+        "rule (\"r\")\n{\n    actions\n    {\n        Set Global Variable(A, Divide(1, 0));\n    }\n}\n",
+    );
+    let verdict = |profile: wright_driver::Profile| {
+        let mut session = CompilerSession::new(SessionConfig {
+            input: InputSpec::Path(path.clone()),
+            kind: SourceKind::Workshop,
+            profile,
+            ..SessionConfig::default()
+        })
+        .expect("session creates");
+        session.check().ok
+    };
+    let off = verdict(wright_driver::Profile::Off);
+    let compat = verdict(wright_driver::Profile::Compat);
+    assert!(off, "the input is valid without transforms");
+    assert_eq!(
+        off, compat,
+        "compat must not turn a valid program into an invalid one"
+    );
+}
+
+/// #639: the `Or(True, X)`/`And(False, X)` short-circuit folds discard X —
+/// an identifier-bearing operand must survive, so `references` and
+/// `semanticRename` for `g` return the same result under `compat` as under
+/// `off`.
+#[test]
+fn short_circuit_folds_preserve_occurrences_for_references_and_rename() {
+    let path = temp_workshop(
+        "or-fold.ws",
+        "variables\n{\n    global:\n        0: g\n}\n\nrule (\"r\")\n{\n    conditions\n    {\n        Or(True, Global.g) == True;\n    }\n    actions\n    {\n        Wait(1, Abort When False);\n    }\n}\n",
+    );
+    let query = |profile: wright_driver::Profile| {
+        let mut session = CompilerSession::new(SessionConfig {
+            input: InputSpec::Path(path.clone()),
+            kind: SourceKind::Workshop,
+            profile,
+            ..SessionConfig::default()
+        })
+        .expect("session creates");
+        let mut service = ToolService::new(&mut session).expect("service");
+        let references = result_of(
+            &mut service,
+            &ToolRequest::References {
+                symbol: "g".into(),
+                kind: None,
+                rule: None,
+                file: None,
+                max: None,
+            },
+        );
+        let rename = result_of(
+            &mut service,
+            &ToolRequest::SemanticRename {
+                sources: None,
+                target: RenameTarget {
+                    symbol: Some(Address::Name("g".to_string())),
+                    source: None,
+                    line: None,
+                    col: None,
+                    to: "renamed".to_string(),
+                },
+            },
+        );
+        (references, rename)
+    };
+
+    let (off_references, off_rename) = query(wright_driver::Profile::Off);
+    let (compat_references, compat_rename) = query(wright_driver::Profile::Compat);
+    assert_eq!(
+        compat_references, off_references,
+        "references see the same occurrences under both profiles"
+    );
+    assert_eq!(
+        compat_rename, off_rename,
+        "semanticRename resolves the same occurrences under both profiles"
+    );
+    assert!(
+        off_references
+            .as_array()
+            .expect("reference list")
+            .iter()
+            .any(|reference| reference["kind"] == "read"),
+        "the Or-folded operand keeps its authored read: {off_references:?}"
+    );
+    assert_eq!(
+        off_rename["ok"],
+        serde_json::Value::Bool(true),
+        "rename validates: {off_rename:?}"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
