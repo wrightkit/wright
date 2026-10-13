@@ -305,22 +305,46 @@ impl Capability {
     }
 }
 
+/// A provider MAY advertise any subset of the capability ids; an absent id
+/// means not offered, so every field defaults rather than failing
+/// `provider-malformed` (#638). Ids newer than this client knows are
+/// retained in `other` instead of being silently dropped.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Capabilities {
+    #[serde(default)]
     pub check: bool,
+    #[serde(default)]
     pub compile: bool,
     #[serde(rename = "projectLoading", default)]
     pub project_loading: bool,
+    #[serde(default)]
     pub reconstruct: bool,
+    #[serde(default)]
     pub symbols: bool,
+    #[serde(default)]
     pub definition: bool,
+    #[serde(default)]
     pub references: bool,
+    #[serde(default)]
     pub rename: bool,
-    #[serde(rename = "editValidation")]
+    #[serde(rename = "editValidation", default)]
     pub edit_validation: bool,
+    /// `sourceIdentity` compile results (LPP 1.3). Absent in pre-1.3
+    /// sessions.
+    #[serde(rename = "sourceIdentity", default)]
+    pub source_identity: bool,
     /// `lpp/lookup` (LPP 1.5). Absent in pre-1.5 sessions.
     #[serde(default)]
     pub lookup: bool,
+    /// `lpp/resolveIds` canonical id resolution (LPP 1.6). Absent in
+    /// pre-1.6 sessions.
+    #[serde(rename = "resolveIds", default)]
+    pub resolve_ids: bool,
+    /// Capability ids this client does not model — retained rather than
+    /// silently dropped so negotiation diagnostics can see what the
+    /// provider offered.
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 impl Capabilities {

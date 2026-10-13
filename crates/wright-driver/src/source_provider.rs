@@ -387,11 +387,28 @@ fn provider_diagnostics(
     documents: Vec<wright_lpp::DocumentDiagnostics>,
     locale: Option<&str>,
 ) -> Vec<Diagnostic> {
+    // `span.file` is the document's rank in the sorted arena of resolved
+    // paths — the deterministic order `span.path` reports — not the
+    // response array position, which is provider-chosen and misattributes
+    // diagnostics whenever it differs (#638).
+    let mut arena: Vec<String> = documents
+        .iter()
+        .map(|doc| provider_uri_path(&doc.uri))
+        .collect();
+    arena.sort();
+    arena.dedup();
     documents
         .into_iter()
-        .enumerate()
-        .flat_map(|(file, doc)| {
+        .flat_map(|doc| {
             let path = provider_uri_path(&doc.uri);
+            let file = arena.iter().position(|entry| *entry == path).unwrap_or(0);
+            // LPP `character` is a UTF-16 code-unit offset; the authored
+            // line converts it to a character column so positions after
+            // astral characters stay correct. A document Wright cannot
+            // read back keeps the raw offset as its column (#638).
+            let lines: Vec<String> = std::fs::read_to_string(&path)
+                .map(|text| text.split('\n').map(str::to_owned).collect())
+                .unwrap_or_default();
             doc.diagnostics.into_iter().map(move |d| {
                 let severity = match d.severity {
                     wright_lpp::DiagnosticSeverity::Error => Severity::Error,
@@ -407,8 +424,8 @@ fn provider_diagnostics(
                     span: Some(SourceSpan {
                         file,
                         path: path.clone(),
-                        start: provider_position(d.range.start),
-                        end: provider_position(d.range.end),
+                        start: provider_position(d.range.start, &lines),
+                        end: provider_position(d.range.end, &lines),
                     }),
                     source: Some(Origin {
                         kind: SourceLanguage::Opy.as_str().to_string(),
@@ -563,10 +580,14 @@ fn windows_drive_member(member: &str) -> Option<(String, std::path::PathBuf)> {
     Some((url.to_string(), path))
 }
 
-fn provider_position(pos: wright_lpp::Position) -> Position {
+fn provider_position(pos: wright_lpp::Position, lines: &[String]) -> Position {
+    let col = lines
+        .get(pos.line as usize)
+        .and_then(|line| crate::provider_edit::utf16_to_char_column(line, pos.character))
+        .unwrap_or_else(|| pos.character.saturating_add(1));
     Position {
         line: pos.line.saturating_add(1),
-        col: pos.character.saturating_add(1),
+        col,
     }
 }
 
@@ -648,6 +669,98 @@ mod tests {
         assert_eq!(diagnostic.code, "provider-exited");
         assert_eq!(diagnostic.stage, Stage::Internal);
         assert!(diagnostic.span.is_none());
+    }
+
+    /// #638: `span.file` is each document's rank in the URI-sorted response
+    /// arena — the deterministic ordering the LPP document contract defines —
+    /// not the provider's response order.
+    #[test]
+    fn provider_diagnostics_index_the_sorted_document_arena() {
+        let doc = |uri: &str| wright_lpp::DocumentDiagnostics {
+            uri: uri.to_string(),
+            version: 0,
+            diagnostics: vec![wright_lpp::Diagnostic {
+                range: wright_lpp::Range {
+                    start: wright_lpp::Position {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: wright_lpp::Position {
+                        line: 0,
+                        character: 1,
+                    },
+                },
+                severity: wright_lpp::DiagnosticSeverity::Warning,
+                code: Some(format!("d-{uri}")),
+                source: None,
+                message: "diag".to_string(),
+            }],
+        };
+        // The provider returns `b` before `a`: array order must not decide
+        // which file index a diagnostic lands on.
+        let diagnostics = provider_diagnostics(
+            vec![doc("file:///project/b.opy"), doc("file:///project/a.opy")],
+            None,
+        );
+        assert_eq!(diagnostics.len(), 2);
+        for (span, code) in diagnostics
+            .iter()
+            .map(|d| (d.span.as_ref().expect("span"), &d.code))
+        {
+            match code.as_str() {
+                "d-file:///project/a.opy" => {
+                    assert_eq!(span.file, 0);
+                    assert!(span.path.ends_with("a.opy"));
+                }
+                "d-file:///project/b.opy" => {
+                    assert_eq!(span.file, 1);
+                    assert!(span.path.ends_with("b.opy"));
+                }
+                other => panic!("unexpected diagnostic code {other}"),
+            }
+        }
+    }
+
+    /// #638: an LPP `character` is a UTF-16 code-unit offset; a diagnostic
+    /// after an astral character maps to the character column, and a document
+    /// Wright cannot read back keeps the raw offset.
+    #[test]
+    fn provider_diagnostics_convert_utf16_columns() {
+        let dir =
+            std::env::temp_dir().join(format!("wright-lpp-utf16-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp directory");
+        // "😀ab": the emoji is one char but two UTF-16 code units, so the
+        // UTF-16 offset of `b` (4) maps to character column 4, not 5.
+        let file = dir.join("astral.opy");
+        std::fs::write(&file, "\u{1F600}ab\n").expect("source");
+        let uri = url::Url::from_file_path(&file)
+            .expect("file URI")
+            .to_string();
+        let doc = |uri: String, character: u32| wright_lpp::DocumentDiagnostics {
+            uri,
+            version: 0,
+            diagnostics: vec![wright_lpp::Diagnostic {
+                range: wright_lpp::Range {
+                    start: wright_lpp::Position { line: 0, character },
+                    end: wright_lpp::Position { line: 0, character },
+                },
+                severity: wright_lpp::DiagnosticSeverity::Error,
+                code: None,
+                source: None,
+                message: "diag".to_string(),
+            }],
+        };
+
+        let diagnostics = provider_diagnostics(
+            vec![
+                doc(uri, 4), // `b`, past the surrogate pair
+                doc("file:///definitely/not/on-disk.opy".to_string(), 4),
+            ],
+            None,
+        );
+        assert_eq!(diagnostics[0].span.as_ref().expect("span").start.col, 4);
+        assert_eq!(diagnostics[1].span.as_ref().expect("span").start.col, 5);
+        std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 
     /// #569: each typed `ProviderError` keeps a machine-usable
