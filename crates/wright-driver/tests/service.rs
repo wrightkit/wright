@@ -2992,6 +2992,55 @@ fn edit_operations_default_sources_to_the_on_disk_text() {
 }
 
 #[test]
+fn rename_accepts_percent_encoded_file_uri_sources() {
+    // #636: a `sources` key spelled `file:///…/my%20dir/main.ws` binds the
+    // member whose path contains a space — the rename succeeds exactly as
+    // with the plain spelling.
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "wright-driver-636-uri-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::SeqCst)
+    ));
+    let member = dir.join("my dir");
+    std::fs::create_dir_all(&member).unwrap();
+    let path = member.join("main.ws");
+    std::fs::write(&path, RENAMEABLE).unwrap();
+    let on_disk = std::fs::read_to_string(&path).unwrap();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(path.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+
+    let uri = format!("file://{}", path.display().to_string().replace(' ', "%20"));
+    let encoded = result_of(
+        &mut service,
+        &ToolRequest::SemanticRename {
+            sources: Some(BTreeMap::from([(uri, on_disk.clone())])),
+            target: rename_target(),
+        },
+    );
+    assert_eq!(encoded["ok"], true, "{encoded:?}");
+    let plain = result_of(
+        &mut service,
+        &ToolRequest::SemanticRename {
+            sources: Some(BTreeMap::from([(
+                path.to_string_lossy().into_owned(),
+                on_disk,
+            )])),
+            target: rename_target(),
+        },
+    );
+    assert_eq!(plain["ok"], true, "{plain:?}");
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn edit_operations_keep_supplied_source_and_project_boundaries() {
     let path = temp_workshop("score.ws", RENAMEABLE);
     let key = path.to_string_lossy().into_owned();
