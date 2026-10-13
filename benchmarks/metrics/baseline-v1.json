@@ -279,22 +279,31 @@
           "tokens": 110391.0
         },
         "cli:inspect": {
-          "bytes": 535,
+          "bytes": 1156320,
           "counts": {
-            "diagnostics": 1
+            "diagnostics": 0,
+            "program.files": 197,
+            "program.findings": 19,
+            "program.globalVariables": 72,
+            "program.playerVariables": 99,
+            "program.rules": 307,
+            "program.subroutines": 25,
+            "references": 503,
+            "rules": 307,
+            "symbols": 503
           },
-          "latencyMs": 251.4,
-          "tokens": 133.8
+          "latencyMs": 2227.6,
+          "tokens": 289080.0
         },
         "cli:inspect?brief": {
-          "bytes": 738,
+          "bytes": 2411,
           "counts": {
-            "counts.references": 0,
-            "counts.rules": 0,
-            "counts.symbols": 0,
-            "items": 0
+            "counts.references": 4117,
+            "counts.rules": 307,
+            "counts.symbols": 503,
+            "items": 5
           },
-          "tokens": 184.5
+          "tokens": 602.8
         },
         "cli:lint": {
           "bytes": 13543,
@@ -592,22 +601,31 @@
           "tokens": 91490.0
         },
         "cli:inspect": {
-          "bytes": 535,
+          "bytes": 867942,
           "counts": {
-            "diagnostics": 1
+            "diagnostics": 0,
+            "program.files": 313,
+            "program.findings": 58,
+            "program.globalVariables": 65,
+            "program.playerVariables": 72,
+            "program.rules": 369,
+            "program.subroutines": 70,
+            "references": 576,
+            "rules": 369,
+            "symbols": 576
           },
-          "latencyMs": 251.9,
-          "tokens": 133.8
+          "latencyMs": 8889.3,
+          "tokens": 216985.5
         },
         "cli:inspect?brief": {
-          "bytes": 738,
+          "bytes": 2585,
           "counts": {
-            "counts.references": 0,
-            "counts.rules": 0,
-            "counts.symbols": 0,
-            "items": 0
+            "counts.references": 2024,
+            "counts.rules": 369,
+            "counts.symbols": 576,
+            "items": 5
           },
-          "tokens": 184.5
+          "tokens": 646.2
         },
         "cli:lint": {
           "bytes": 40156,
@@ -897,22 +915,31 @@
           "tokens": 526.2
         },
         "cli:inspect": {
-          "bytes": 535,
+          "bytes": 9419,
           "counts": {
-            "diagnostics": 1
+            "diagnostics": 0,
+            "program.files": 1,
+            "program.findings": 0,
+            "program.globalVariables": 1,
+            "program.playerVariables": 2,
+            "program.rules": 5,
+            "program.subroutines": 0,
+            "references": 8,
+            "rules": 5,
+            "symbols": 8
           },
-          "latencyMs": 250.1,
-          "tokens": 133.8
+          "latencyMs": 418.4,
+          "tokens": 2354.8
         },
         "cli:inspect?brief": {
-          "bytes": 738,
+          "bytes": 2375,
           "counts": {
-            "counts.references": 0,
-            "counts.rules": 0,
-            "counts.symbols": 0,
-            "items": 0
+            "counts.references": 18,
+            "counts.rules": 5,
+            "counts.symbols": 8,
+            "items": 5
           },
-          "tokens": 184.5
+          "tokens": 593.8
         },
         "cli:lint": {
           "bytes": 1908,
@@ -1509,22 +1536,31 @@
           "tokens": 331.0
         },
         "cli:inspect": {
-          "bytes": 535,
+          "bytes": 5940,
           "counts": {
-            "diagnostics": 1
+            "diagnostics": 0,
+            "program.files": 1,
+            "program.findings": 1,
+            "program.globalVariables": 2,
+            "program.playerVariables": 0,
+            "program.rules": 3,
+            "program.subroutines": 0,
+            "references": 5,
+            "rules": 3,
+            "symbols": 5
           },
-          "latencyMs": 248.4,
-          "tokens": 133.8
+          "latencyMs": 417.4,
+          "tokens": 1485.0
         },
         "cli:inspect?brief": {
-          "bytes": 738,
+          "bytes": 1666,
           "counts": {
-            "counts.references": 0,
-            "counts.rules": 0,
-            "counts.symbols": 0,
-            "items": 0
+            "counts.references": 11,
+            "counts.rules": 3,
+            "counts.symbols": 5,
+            "items": 3
           },
-          "tokens": 184.5
+          "tokens": 416.5
         },
         "cli:lint": {
           "bytes": 2647,
@@ -2123,22 +2159,31 @@
           "tokens": 576.0
         },
         "cli:inspect": {
-          "bytes": 535,
+          "bytes": 12417,
           "counts": {
-            "diagnostics": 1
+            "diagnostics": 0,
+            "program.files": 2,
+            "program.findings": 0,
+            "program.globalVariables": 1,
+            "program.playerVariables": 3,
+            "program.rules": 6,
+            "program.subroutines": 1,
+            "references": 11,
+            "rules": 6,
+            "symbols": 11
           },
-          "latencyMs": 251.3,
-          "tokens": 133.8
+          "latencyMs": 419.1,
+          "tokens": 3104.2
         },
         "cli:inspect?brief": {
-          "bytes": 738,
+          "bytes": 2401,
           "counts": {
-            "counts.references": 0,
-            "counts.rules": 0,
-            "counts.symbols": 0,
-            "items": 0
+            "counts.references": 24,
+            "counts.rules": 6,
+            "counts.symbols": 11,
+            "items": 5
           },
-          "tokens": 184.5
+          "tokens": 600.2
         },
         "cli:lint": {
           "bytes": 1908,
