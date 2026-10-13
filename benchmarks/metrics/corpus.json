@@ -11,37 +11,37 @@
     {
       "id": "seed-modify-target-score",
       "kind": "workshop",
-      "path": "../agent/scenarios/modify-target-score/seed",
+      "path": "corpus/seed-modify-target-score",
       "entry": "mode.ws"
     },
     {
       "id": "seed-repair-runaway-loop",
       "kind": "workshop",
-      "path": "../agent/scenarios/repair-runaway-loop/seed",
+      "path": "corpus/seed-repair-runaway-loop",
       "entry": "mode.ws"
     },
     {
       "id": "seed-understand-score-flow",
       "kind": "workshop",
-      "path": "../agent/scenarios/understand-score-flow/seed",
+      "path": "corpus/seed-understand-score-flow",
       "entry": "mode.ws"
     },
     {
       "id": "seed-modify-opy-project",
       "kind": "opy",
-      "path": "../agent/scenarios/modify-opy-project/seed",
+      "path": "corpus/seed-modify-opy-project",
       "entry": "mode.opy"
     },
     {
       "id": "seed-repair-opy-runaway-loop",
       "kind": "opy",
-      "path": "../agent/scenarios/repair-opy-runaway-loop/seed",
+      "path": "corpus/seed-repair-opy-runaway-loop",
       "entry": "mode.opy"
     },
     {
       "id": "seed-understand-opy-project",
       "kind": "opy",
-      "path": "../agent/scenarios/understand-opy-project/seed",
+      "path": "corpus/seed-understand-opy-project",
       "entry": "mode.opy"
     },
     {
