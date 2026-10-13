@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.18.0](https://github.com/wrightkit/wright/compare/v0.17.1...v0.18.0) (2026-10-13)
+
+
+### Features
+
+* **benchmark:** support alternative program calls ([#631](https://github.com/wrightkit/wright/issues/631)) ([2bc6055](https://github.com/wrightkit/wright/commit/2bc60559969d0bfaed0b22474fa3ca7736b65a49))
+
+
+### Bug Fixes
+
+* **analyzer:** resolve callees as calls, not by subroutine name ([#645](https://github.com/wrightkit/wright/issues/645)) ([224cb82](https://github.com/wrightkit/wright/commit/224cb828c21c57f0c3dbeaab4a4e54800ae6c23d))
+* **analyzer:** treat disabled statements as not live across analyses ([#644](https://github.com/wrightkit/wright/issues/644)) ([5376f8b](https://github.com/wrightkit/wright/commit/5376f8b65d76ecee63cbf8c2ec8e211f58169b58)), closes [#633](https://github.com/wrightkit/wright/issues/633)
+* **cli:** correct wright update exit codes, provenance, and flags ([#652](https://github.com/wrightkit/wright/issues/652)) ([615dd59](https://github.com/wrightkit/wright/commit/615dd59e78bd3af7757530331e2f02d5e69de9bb)), closes [#641](https://github.com/wrightkit/wright/issues/641)
+* **cli:** surface invalid UTF-8 and id-less requests on serve transports ([#653](https://github.com/wrightkit/wright/issues/653)) ([85d874a](https://github.com/wrightkit/wright/commit/85d874ace9a6574bafdb62123325bec7aa0b2483)), closes [#642](https://github.com/wrightkit/wright/issues/642)
+* **driver:** judge analyze and inspect results on the full finding set ([#646](https://github.com/wrightkit/wright/issues/646)) ([712a752](https://github.com/wrightkit/wright/commit/712a752f1e4502da2233193324ae378be11c0a4b))
+* **driver:** reject unknown rule ids in the lint policy ([#651](https://github.com/wrightkit/wright/issues/651)) ([e96526c](https://github.com/wrightkit/wright/commit/e96526c819c4ba43979105b323b3e8ee66fa1aaa)), closes [#640](https://github.com/wrightkit/wright/issues/640)
+* **driver:** unify source input handling across discovery and fingerprint ([#647](https://github.com/wrightkit/wright/issues/647)) ([8dde23b](https://github.com/wrightkit/wright/commit/8dde23b793a1911fddd907c30d0114e500451a4d)), closes [#636](https://github.com/wrightkit/wright/issues/636)
+* **lpp:** accept capability subsets and retry at the highest mutual version ([#649](https://github.com/wrightkit/wright/issues/649)) ([0509989](https://github.com/wrightkit/wright/commit/050998988f0c2edba210e5ac470c232815dce3eb)), closes [#638](https://github.com/wrightkit/wright/issues/638)
+* **lsp:** enforce framing limits and the LSP lifecycle ([#648](https://github.com/wrightkit/wright/issues/648)) ([9331c82](https://github.com/wrightkit/wright/commit/9331c82dce63dcc67f0a7ee65eb012edc7f74e08)), closes [#637](https://github.com/wrightkit/wright/issues/637)
+* **release:** align release tooling, CI filters, and metrics check with shipped behavior ([#654](https://github.com/wrightkit/wright/issues/654)) ([0d399fb](https://github.com/wrightkit/wright/commit/0d399fbe83321f6879bf925926f5aa8ec794c088)), closes [#643](https://github.com/wrightkit/wright/issues/643)
+* **transform:** keep fold-constants validity- and occurrence-preserving ([#650](https://github.com/wrightkit/wright/issues/650)) ([c0c94c7](https://github.com/wrightkit/wright/commit/c0c94c74ae331b767885e0bff9b4ada856e4d76c)), closes [#639](https://github.com/wrightkit/wright/issues/639)
+
 ## [0.17.1](https://github.com/wrightkit/wright/compare/v0.17.0...v0.17.1) (2026-10-11)
 
 
