@@ -18,7 +18,7 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 struct LspClient {
     child: Child,
-    stdin: ChildStdin,
+    stdin: Option<ChildStdin>,
     stdout: BufReader<ChildStdout>,
 }
 
@@ -38,15 +38,33 @@ impl LspClient {
         let stdout = BufReader::new(child.stdout.take().unwrap());
         Self {
             child,
-            stdin,
+            stdin: Some(stdin),
             stdout,
         }
     }
 
     fn send(&mut self, message: serde_json::Value) {
         let body = serde_json::to_string(&message).unwrap();
-        write!(self.stdin, "Content-Length: {}\r\n\r\n{}", body.len(), body).unwrap();
-        self.stdin.flush().unwrap();
+        let stdin = self.stdin.as_mut().unwrap();
+        write!(stdin, "Content-Length: {}\r\n\r\n{}", body.len(), body).unwrap();
+        stdin.flush().unwrap();
+    }
+
+    /// Raw bytes on the wire, for frames a conforming `send` cannot
+    /// produce (#637).
+    fn send_raw(&mut self, frame: &[u8]) {
+        let stdin = self.stdin.as_mut().unwrap();
+        stdin.write_all(frame).unwrap();
+        stdin.flush().unwrap();
+    }
+
+    /// Dropping the pipe delivers EOF to the server.
+    fn close_stdin(&mut self) {
+        self.stdin.take();
+    }
+
+    fn wait_status(&mut self) -> Option<i32> {
+        self.child.wait().unwrap().code()
     }
 
     fn read_message(&mut self) -> serde_json::Value {
@@ -239,6 +257,24 @@ const WORKSHOP_SOURCE: &str = concat!(
     "}\n",
 );
 
+/// A buffer `wright check` rejects: a truncated call inside the rule's
+/// actions. `didOpen`/`didChange` tests share it as the broken document.
+const BROKEN_SOURCE: &str = concat!(
+    "variables {\n",
+    "    global:\n",
+    "        0: score\n",
+    "}\n",
+    "\n",
+    "rule (\"x\") {\n",
+    "    event {\n",
+    "        Ongoing - Global\n",
+    "    }\n",
+    "    actions {\n",
+    "        Set Global Variable(score\n",
+    "    }\n",
+    "}\n",
+);
+
 fn position_request(uri: &str, line: u32, character: u32) -> serde_json::Value {
     serde_json::json!({
         "textDocument": { "uri": uri },
@@ -355,22 +391,7 @@ fn workshop_diagnostics_track_the_current_buffer() {
 
     // A buffer `wright check` rejects: the published code and span are the
     // check diagnostic's, at the buffer version.
-    let broken = concat!(
-        "variables {\n",
-        "    global:\n",
-        "        0: score\n",
-        "}\n",
-        "\n",
-        "rule (\"x\") {\n",
-        "    event {\n",
-        "        Ongoing - Global\n",
-        "    }\n",
-        "    actions {\n",
-        "        Set Global Variable(score\n",
-        "    }\n",
-        "}\n",
-    );
-    open_document(&mut client, uri, "workshop", broken);
+    open_document(&mut client, uri, "workshop", BROKEN_SOURCE);
     let published = client.read_notification("textDocument/publishDiagnostics");
     assert_eq!(published["params"]["version"], 1);
     let diagnostics = published["params"]["diagnostics"].as_array().unwrap();
@@ -589,4 +610,387 @@ fn rename_is_only_negotiated_for_versioned_workspace_edits() {
     );
 
     client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
+fn malformed_frames_answer_parse_errors_and_the_server_keeps_serving() {
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+
+    // Garbage where a JSON body belongs is a Parse error, not a dead
+    // server — the declared body was consumed, so the stream stays
+    // aligned for the next frame.
+    client.send_raw(b"Content-Length: 5\r\n\r\nxxxxx");
+    let error = client.read_message();
+    assert_eq!(error["error"]["code"], -32700, "{error}");
+    assert!(error["id"].is_null());
+
+    // A non-UTF-8 body is malformed for the same reason.
+    client.send_raw(b"Content-Length: 2\r\n\r\n\xff\xfe");
+    let error = client.read_message();
+    assert_eq!(error["error"]["code"], -32700, "{error}");
+
+    // The session still serves normally after both malformed frames.
+    let init = initialize(&mut client);
+    assert_eq!(init["result"]["serverInfo"]["name"], "wright-lsp");
+    client.notify("initialized", serde_json::json!({}));
+    let shutdown = client.request(2, "shutdown", serde_json::json!(null));
+    assert!(shutdown["result"].is_null());
+    client.notify("exit", serde_json::json!({}));
+    assert_eq!(client.wait_status(), Some(0));
+}
+
+#[test]
+fn oversized_content_length_is_refused_without_allocating_it() {
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+
+    // A 64 GiB declaration is refused outright — answering at all proves
+    // no buffer of that size was ever allocated.
+    client.send_raw(b"Content-Length: 68719476736\r\n\r\n{}");
+    let error = client.read_message();
+    assert_eq!(error["error"]["code"], -32600, "{error}");
+
+    // The declared body consumes the rest of the stream, so the session
+    // ends when the client gives up rather than hanging or falling over.
+    client.close_stdin();
+    assert_eq!(client.wait_status(), Some(0));
+}
+
+#[test]
+fn a_frame_without_content_length_is_malformed() {
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+
+    // A header section without Content-Length cannot be framed; the
+    // server reports it instead of waiting forever.
+    client.send_raw(b"Content-Type: application/vscode-jsonrpc\r\n\r\n");
+    let error = client.read_message();
+    assert_eq!(error["error"]["code"], -32600, "{error}");
+
+    client.close_stdin();
+    assert_eq!(client.wait_status(), Some(0));
+}
+
+#[test]
+fn an_overlong_header_line_is_reported_and_the_stream_resynchronizes() {
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+
+    // A header line past the bound is framing garbage. The frame's own
+    // bounded body is still consumed, so the next well-formed frame
+    // parses normally.
+    let body = serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "shutdown"}).to_string();
+    let mut frame = format!(
+        "X-Pad: {}\r\nContent-Length: {}\r\n\r\n",
+        "a".repeat(9 * 1024),
+        body.len()
+    )
+    .into_bytes();
+    frame.extend_from_slice(body.as_bytes());
+    client.send_raw(&frame);
+    let error = client.read_message();
+    assert_eq!(error["error"]["code"], -32600, "{error}");
+
+    let init = initialize(&mut client);
+    assert_eq!(init["result"]["serverInfo"]["name"], "wright-lsp");
+    client.notify("initialized", serde_json::json!({}));
+    let shutdown = client.request(2, "shutdown", serde_json::json!(null));
+    assert!(shutdown["result"].is_null());
+    client.notify("exit", serde_json::json!({}));
+    assert_eq!(client.wait_status(), Some(0));
+}
+
+#[test]
+fn malformed_initialize_params_are_invalid_params() {
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+
+    for message in [
+        serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": "bogus"}),
+        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "initialize"}),
+    ] {
+        let id = message["id"].clone();
+        client.send(message);
+        let error = client.read_message();
+        assert_eq!(error["id"], id);
+        assert_eq!(
+            error["error"]["code"], -32602,
+            "missing or malformed initialize params are Invalid params: {error}"
+        );
+    }
+
+    // The server stayed in the pre-initialize state and still accepts a
+    // conforming initialize.
+    let init = initialize(&mut client);
+    assert_eq!(init["result"]["serverInfo"]["name"], "wright-lsp");
+    let shutdown = client.request(3, "shutdown", serde_json::json!(null));
+    assert!(shutdown["result"].is_null());
+    client.notify("exit", serde_json::json!({}));
+    assert_eq!(client.wait_status(), Some(0));
+}
+
+#[test]
+fn requests_outside_the_running_state_are_refused() {
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+    let uri = "file:///workspace/main.ws";
+
+    // A request before initialize is refused ServerNotInitialized.
+    client.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "textDocument/hover",
+        "params": position_request(uri, 0, 0),
+    }));
+    let refused = client.read_message();
+    assert_eq!(refused["id"], 1);
+    assert_eq!(refused["error"]["code"], -32002, "{refused}");
+
+    // A notification before initialize is dropped without a response —
+    // the document it carried is never registered.
+    open_document(&mut client, uri, "workshop", WORKSHOP_SOURCE);
+
+    // Shutdown before initialize is refused too.
+    client.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "shutdown",
+    }));
+    let refused = client.read_message();
+    assert_eq!(refused["id"], 2);
+    assert_eq!(refused["error"]["code"], -32002, "{refused}");
+
+    let init = initialize(&mut client);
+    assert_eq!(init["result"]["serverInfo"]["name"], "wright-lsp");
+    client.notify("initialized", serde_json::json!({}));
+
+    // The pre-initialize didOpen was dropped: hover on that URI sees no
+    // buffer and answers null.
+    let hover = client.request(3, "textDocument/hover", position_request(uri, 19, 9));
+    assert!(
+        hover["result"].is_null() && hover.get("error").is_none(),
+        "a document opened before initialize must not exist: {hover}"
+    );
+
+    // A second initialize is InvalidRequest and does not reset state.
+    client.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "initialize",
+        "params": { "capabilities": {} },
+    }));
+    let refused = client.read_message();
+    assert_eq!(refused["error"]["code"], -32600, "{refused}");
+
+    let shutdown = client.request(5, "shutdown", serde_json::json!(null));
+    assert!(shutdown["result"].is_null());
+
+    // Requests after shutdown are refused InvalidRequest; the session
+    // is over.
+    client.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 6,
+        "method": "textDocument/hover",
+        "params": position_request(uri, 0, 0),
+    }));
+    let refused = client.read_message();
+    assert_eq!(refused["error"]["code"], -32600, "{refused}");
+
+    client.notify("exit", serde_json::json!({}));
+    assert_eq!(client.wait_status(), Some(0));
+}
+
+#[test]
+fn exit_before_shutdown_exits_with_status_1() {
+    let root = workspace_root();
+
+    // Never initialized.
+    let mut client = LspClient::spawn(&root);
+    client.notify("exit", serde_json::json!({}));
+    assert_eq!(client.wait_status(), Some(1));
+
+    // Initialized but not shut down.
+    let mut client = LspClient::spawn(&root);
+    initialize(&mut client);
+    client.notify("exit", serde_json::json!({}));
+    assert_eq!(client.wait_status(), Some(1));
+}
+
+#[test]
+fn client_responses_and_methodless_messages_are_never_answered() {
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+    initialize(&mut client);
+    client.notify("initialized", serde_json::json!({}));
+
+    // Client → server response messages carry an id and a result but no
+    // method; answering them would be a protocol violation. Bare or
+    // id-only objects get no response either.
+    client.send(serde_json::json!({"jsonrpc": "2.0", "id": 90, "result": {"x": 1}}));
+    client.send(serde_json::json!({"jsonrpc": "2.0", "id": 91}));
+    client.send(serde_json::json!({"jsonrpc": "2.0"}));
+
+    // The next wire message must be the answer to this request — any
+    // spurious response to the noise above would arrive first with a
+    // wrong id.
+    let hover = client.request(
+        2,
+        "textDocument/hover",
+        position_request("file:///workspace/main.ws", 0, 0),
+    );
+    assert_eq!(hover["id"], 2, "{hover}");
+
+    let shutdown = client.request(3, "shutdown", serde_json::json!(null));
+    assert!(shutdown["result"].is_null());
+    client.notify("exit", serde_json::json!({}));
+    assert_eq!(client.wait_status(), Some(0));
+}
+
+#[test]
+fn stale_or_ranged_didchange_neither_republishes_nor_corrupts() {
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+    initialize(&mut client);
+    client.notify("initialized", serde_json::json!({}));
+    let uri = "file:///workspace/main.ws";
+
+    open_document(&mut client, uri, "workshop", BROKEN_SOURCE);
+    let published = client.read_notification("textDocument/publishDiagnostics");
+    assert_eq!(published["params"]["version"], 1);
+    assert_eq!(
+        published["params"]["diagnostics"].as_array().unwrap().len(),
+        1,
+        "the broken v1 buffer publishes its parse error"
+    );
+
+    // A stale version is rejected by the store — and must not republish
+    // the old diagnostics.
+    client.notify(
+        "textDocument/didChange",
+        serde_json::json!({
+            "textDocument": { "uri": uri, "version": 1 },
+            "contentChanges": [{ "text": WORKSHOP_SOURCE }],
+        }),
+    );
+    // A ranged change is not a full-document replacement under the
+    // negotiated Full sync; applying it as one would corrupt the buffer,
+    // so it is dropped like the stale one.
+    client.notify(
+        "textDocument/didChange",
+        serde_json::json!({
+            "textDocument": { "uri": uri, "version": 2 },
+            "contentChanges": [{
+                "range": lsp_range((0, 0), (0, 9)).clone(),
+                "text": "vars",
+            }],
+        }),
+    );
+    // The next conforming full change applies and republishes.
+    client.notify(
+        "textDocument/didChange",
+        serde_json::json!({
+            "textDocument": { "uri": uri, "version": 3 },
+            "contentChanges": [{ "text": WORKSHOP_SOURCE }],
+        }),
+    );
+    let republished = client.read_notification("textDocument/publishDiagnostics");
+    assert_eq!(
+        republished["params"]["version"], 3,
+        "the first republish must be the conforming v3 change — a stale or \
+         ranged change that republished would arrive first: {republished}"
+    );
+    assert!(
+        republished["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "the clean v3 buffer clears diagnostics: {republished}"
+    );
+
+    // The stored buffer is the v3 replacement — hover still resolves the
+    // rule name at its span.
+    let hover = client.request(4, "textDocument/hover", position_request(uri, 19, 9));
+    assert_eq!(
+        hover["result"]["contents"]["value"], "`rule main`",
+        "the v3 buffer is intact: {hover}"
+    );
+
+    let shutdown = client.request(5, "shutdown", serde_json::json!(null));
+    assert!(shutdown["result"].is_null());
+    client.notify("exit", serde_json::json!({}));
+    assert_eq!(client.wait_status(), Some(0));
+}
+
+#[test]
+fn diagnostics_publish_under_the_clients_raw_document_uri() {
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+    initialize(&mut client);
+    client.notify("initialized", serde_json::json!({}));
+
+    // The store is keyed by the URI string the client sent; publishing a
+    // normalized respelling would leave diagnostics attached to a
+    // document the client never opened (#637).
+    let uri = "file://localhost/workspace/main.ws";
+    open_document(&mut client, uri, "workshop", BROKEN_SOURCE);
+    let published = client.read_notification("textDocument/publishDiagnostics");
+    assert_eq!(
+        published["params"]["uri"], uri,
+        "diagnostics publish under the client's raw URI: {published}"
+    );
+    assert_eq!(published["params"]["version"], 1);
+    assert_eq!(
+        published["params"]["diagnostics"].as_array().unwrap().len(),
+        1
+    );
+
+    let shutdown = client.request(2, "shutdown", serde_json::json!(null));
+    assert!(shutdown["result"].is_null());
+    client.notify("exit", serde_json::json!({}));
+    assert_eq!(client.wait_status(), Some(0));
+}
+
+#[test]
+fn a_notification_method_carrying_an_id_is_answered() {
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+    initialize(&mut client);
+
+    // `initialized` is notification-only in LSP, but a message carrying
+    // an `id` is a JSON-RPC request and must get a response (#637).
+    client.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "initialized",
+        "params": {},
+    }));
+    let response = client.read_message();
+    assert_eq!(response["id"], 2);
+    assert!(response["result"].is_null() && response.get("error").is_none());
+
+    // The same holds for a document notification sent as a request: the
+    // open applies, its diagnostics publish, and the request answers.
+    client.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "textDocument/didOpen",
+        "params": {
+            "textDocument": {
+                "uri": "file:///workspace/main.ws",
+                "languageId": "workshop",
+                "version": 1,
+                "text": BROKEN_SOURCE,
+            }
+        },
+    }));
+    client.read_notification("textDocument/publishDiagnostics");
+    let response = client.read_message();
+    assert_eq!(response["id"], 3);
+    assert!(response["result"].is_null() && response.get("error").is_none());
+
+    let response = client.request(4, "shutdown", serde_json::json!(null));
+    assert_eq!(response["id"], 4);
+    client.notify("exit", serde_json::json!({}));
+    assert_eq!(client.wait_status(), Some(0));
 }

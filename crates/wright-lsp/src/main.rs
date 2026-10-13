@@ -1,7 +1,7 @@
 //! A thin LSP protocol adapter over [`wright_language::LanguageService`].
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{BufRead, Write};
+use std::io::{BufRead, Read, Write};
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -44,13 +44,29 @@ fn main() {
             _ => {}
         }
     }
-    if let Err(message) = run(opy_provider) {
-        eprintln!("wright-lsp: {message}");
-        std::process::exit(1);
+    match run(opy_provider) {
+        Ok(code) => std::process::exit(i32::from(code)),
+        Err(message) => {
+            eprintln!("wright-lsp: {message}");
+            std::process::exit(1);
+        }
     }
 }
 
-fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
+/// The LSP lifecycle phase (#637): `initialize` is served only from
+/// `Waiting`, ordinary requests only from `Running`, and `exit` reports
+/// the negotiated `shutdown` through the process exit code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Lifecycle {
+    /// Before `initialize`: requests are refused `-32002`.
+    Waiting,
+    /// Between `initialize` and `shutdown`: the full surface is served.
+    Running,
+    /// After `shutdown`: requests are refused `-32600`; `exit` ends 0.
+    Shutdown,
+}
+
+fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
     let mut reader = std::io::stdin().lock();
     let mut writer = std::io::stdout().lock();
 
@@ -64,14 +80,28 @@ fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
     let mut root = std::env::current_dir().map_err(|e| e.to_string())?;
     let mut service = LanguageService::with_config(root.clone(), config.clone());
     let mut ownership: PublicationOwnership = BTreeMap::new();
+    let mut lifecycle = Lifecycle::Waiting;
     // Whether the client negotiated versioned workspace edits
     // (`workspace.workspaceEdit.documentChanges`). Renames are only served
     // when they can carry the validated document version.
     let mut versioned_workspace_edits = false;
 
     loop {
-        let message = read_message(&mut reader)?;
-        let value: Value = serde_json::from_str(&message).map_err(|e| e.to_string())?;
+        let message = match read_message(&mut reader)? {
+            Frame::Message(message) => message,
+            Frame::Closed => return Ok(0),
+            Frame::Malformed(code, reason) => {
+                write_error(&mut writer, None, code, reason, "malformed-frame")?;
+                continue;
+            }
+        };
+        let value: Value = match serde_json::from_str(&message) {
+            Ok(value) => value,
+            Err(error) => {
+                write_error(&mut writer, None, -32700, &error.to_string(), "parse-error")?;
+                continue;
+            }
+        };
         let method = value
             .get("method")
             .and_then(Value::as_str)
@@ -80,37 +110,98 @@ fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
         let id = value.get("id").cloned();
         let params = value.get("params").cloned();
 
+        // A message with an `id` but no `method` is a client response —
+        // it is never answered (#637); neither is anything else without
+        // a method.
+        if method.is_empty() {
+            continue;
+        }
+        // Lifecycle messages always dispatch; every other message
+        // requires `Running` (#637): requests get the protocol refusal,
+        // notifications are dropped.
+        if !matches!(method.as_str(), "initialize" | "shutdown" | "exit")
+            && lifecycle != Lifecycle::Running
+        {
+            if id.is_some() {
+                let (code, reason, refusal) = match lifecycle {
+                    Lifecycle::Waiting => {
+                        (-32002, "the server is not initialized", "not-initialized")
+                    }
+                    Lifecycle::Shutdown => (-32600, "the server is shut down", "invalid-request"),
+                    Lifecycle::Running => unreachable!("checked above"),
+                };
+                write_error(&mut writer, id, code, reason, refusal)?;
+            }
+            continue;
+        }
+
         match method.as_str() {
             "initialize" => {
-                let init = params
-                    .and_then(|params| serde_json::from_value::<InitializeParams>(params).ok());
-                versioned_workspace_edits = init
-                    .as_ref()
-                    .and_then(|init| {
-                        init.capabilities
-                            .workspace
-                            .as_ref()?
-                            .workspace_edit
-                            .as_ref()?
-                            .document_changes
-                    })
-                    .unwrap_or(false);
-                if let Some(init) = init {
-                    if let Some(resolved) = initialize_root(&init) {
-                        root = resolved;
-                        service = LanguageService::with_config(root.clone(), config.clone());
-                        ownership.clear();
+                if lifecycle != Lifecycle::Waiting {
+                    if id.is_some() {
+                        write_error(
+                            &mut writer,
+                            id,
+                            -32600,
+                            "the server is already initialized",
+                            "already-initialized",
+                        )?;
                     }
+                    continue;
                 }
-                write_response(
-                    &mut writer,
-                    id,
-                    serde_json::to_value(initialize_result(versioned_workspace_edits)).unwrap(),
-                )?;
+                let Some(init) = read_params::<InitializeParams>(&mut writer, &id, params)? else {
+                    continue;
+                };
+                versioned_workspace_edits = init
+                    .capabilities
+                    .workspace
+                    .as_ref()
+                    .and_then(|workspace| workspace.workspace_edit.as_ref())
+                    .and_then(|edit| edit.document_changes)
+                    .unwrap_or(false);
+                if let Some(resolved) = initialize_root(&init) {
+                    root = resolved;
+                    service = LanguageService::with_config(root.clone(), config.clone());
+                    ownership.clear();
+                }
+                lifecycle = Lifecycle::Running;
+                if id.is_some() {
+                    write_response(
+                        &mut writer,
+                        id,
+                        serde_json::to_value(initialize_result(versioned_workspace_edits)).unwrap(),
+                    )?;
+                }
             }
-            "initialized" => {}
-            "shutdown" => write_response(&mut writer, id, Value::Null)?,
-            "exit" => break,
+            "initialized" => {
+                // A notification-only method carrying an `id` is a
+                // request by JSON-RPC and must be answered (#637).
+                if id.is_some() {
+                    write_response(&mut writer, id, Value::Null)?;
+                }
+            }
+            "shutdown" => {
+                match lifecycle {
+                    Lifecycle::Running => lifecycle = Lifecycle::Shutdown,
+                    Lifecycle::Waiting => {
+                        if id.is_some() {
+                            write_error(
+                                &mut writer,
+                                id,
+                                -32002,
+                                "the server is not initialized",
+                                "not-initialized",
+                            )?;
+                        }
+                        continue;
+                    }
+                    Lifecycle::Shutdown => {}
+                }
+                if id.is_some() {
+                    write_response(&mut writer, id, Value::Null)?;
+                }
+            }
+            "exit" => return Ok(u8::from(lifecycle != Lifecycle::Shutdown)),
             "textDocument/didOpen" => {
                 let Some(params) =
                     read_params::<DidOpenTextDocumentParams>(&mut writer, &id, params)?
@@ -127,6 +218,9 @@ fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
                 .with_language_id(params.text_document.language_id);
                 service.store.open(document);
                 publish_affected_diagnostics(&mut writer, &service, &mut ownership, &uri)?;
+                if id.is_some() {
+                    write_response(&mut writer, id, Value::Null)?;
+                }
             }
             "textDocument/didChange" => {
                 let Some(params) =
@@ -135,12 +229,27 @@ fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
                     continue;
                 };
                 let uri = params.text_document.uri.to_string();
-                if let Some(change) = params.content_changes.last() {
-                    service
-                        .store
-                        .change(&uri, &change.text, params.text_document.version);
+                // Full sync replaces the document with the last rangeless
+                // change; a change carrying `range` is not a full
+                // replacement under the negotiated sync kind and applying
+                // it as one would corrupt the buffer. A version the store
+                // drops as stale must not republish the old state (#637).
+                let applied = params
+                    .content_changes
+                    .iter()
+                    .rev()
+                    .find(|change| change.range.is_none())
+                    .is_some_and(|change| {
+                        service
+                            .store
+                            .change(&uri, &change.text, params.text_document.version)
+                    });
+                if applied {
+                    publish_affected_diagnostics(&mut writer, &service, &mut ownership, &uri)?;
                 }
-                publish_affected_diagnostics(&mut writer, &service, &mut ownership, &uri)?;
+                if id.is_some() {
+                    write_response(&mut writer, id, Value::Null)?;
+                }
             }
             "textDocument/didClose" => {
                 let Some(params) =
@@ -162,8 +271,15 @@ fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
                     }
                 }
                 publish_affected_diagnostics(&mut writer, &service, &mut ownership, &uri)?;
+                if id.is_some() {
+                    write_response(&mut writer, id, Value::Null)?;
+                }
             }
-            "textDocument/didSave" => {}
+            "textDocument/didSave" => {
+                if id.is_some() {
+                    write_response(&mut writer, id, Value::Null)?;
+                }
+            }
             "textDocument/hover" => {
                 let Some(params) = read_params::<HoverParams>(&mut writer, &id, params)? else {
                     continue;
@@ -299,7 +415,6 @@ fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
             }
         }
     }
-    Ok(())
 }
 
 /// `documentChanges` carries the validated document version per file so the
@@ -366,25 +481,113 @@ fn initialize_result(versioned_workspace_edits: bool) -> InitializeResult {
     }
 }
 
-fn read_message(reader: &mut impl BufRead) -> Result<String, String> {
+/// One frame off the wire (#637). Malformed framing — missing, invalid,
+/// or oversized `Content-Length`, an overlong header line or section, or
+/// a non-UTF-8 body — is consumed so the stream stays aligned and the
+/// server answers the protocol error instead of exiting mid-session.
+enum Frame {
+    /// A complete, decodable frame body.
+    Message(String),
+    /// The stream hit EOF before a header line — the client is gone.
+    Closed,
+    /// The frame was structurally invalid; carries the JSON-RPC error code
+    /// and message to answer with.
+    Malformed(i64, &'static str),
+}
+
+/// A single header line may not exceed this many bytes.
+const MAX_HEADER_LINE: usize = 8 * 1024;
+/// The whole header section may not exceed this many bytes.
+const MAX_HEADER_BYTES: usize = 64 * 1024;
+/// A frame body may not exceed this many bytes — the declared
+/// `Content-Length` is never trusted enough to allocate it unchecked.
+const MAX_CONTENT_LENGTH: u64 = 32 * 1024 * 1024;
+
+fn read_message(reader: &mut impl BufRead) -> Result<Frame, String> {
     let mut content_length = None;
+    let mut invalid: Option<&'static str> = None;
+    let mut header_bytes = 0usize;
     loop {
-        let mut header = String::new();
-        if reader.read_line(&mut header).map_err(|e| e.to_string())? == 0 {
-            return Err("stdin closed".to_string());
+        let mut raw = Vec::new();
+        let mut read = read_bounded(reader, &mut raw)?;
+        if read == 0 {
+            return Ok(Frame::Closed);
         }
+        header_bytes += read;
+        // A header line that does not fit the bound is framing garbage:
+        // drain its remainder so the next read starts at a line boundary,
+        // then mark the frame malformed — the stream still resyncs at the
+        // next frame.
+        while !raw.ends_with(b"\n") {
+            raw.clear();
+            read = read_bounded(reader, &mut raw)?;
+            if read == 0 {
+                return Ok(Frame::Closed);
+            }
+            header_bytes += read;
+            invalid.get_or_insert("oversized header line");
+        }
+        if header_bytes > MAX_HEADER_BYTES {
+            invalid.get_or_insert("oversized header section");
+        }
+        let Ok(header) = std::str::from_utf8(&raw) else {
+            invalid.get_or_insert("non-UTF-8 header line");
+            continue;
+        };
         let header = header.trim_end();
         if header.is_empty() {
             break;
         }
         if let Some(value) = header.strip_prefix("Content-Length:") {
-            content_length = value.trim().parse::<usize>().ok();
+            content_length = value.trim().parse::<u64>().ok();
+            if content_length.is_none() {
+                invalid.get_or_insert("invalid Content-Length");
+            }
         }
     }
-    let length = content_length.ok_or_else(|| "missing Content-Length header".to_string())?;
-    let mut body = vec![0u8; length];
+    let Some(length) = content_length else {
+        return Ok(Frame::Malformed(
+            -32600,
+            invalid.unwrap_or("missing Content-Length header"),
+        ));
+    };
+    let malformed =
+        invalid.or((length > MAX_CONTENT_LENGTH).then_some("Content-Length exceeds limit"));
+    if let Some(reason) = malformed {
+        // Refuse without honoring the declared body. When the declared
+        // boundary is known and bounded, consume it so the next frame
+        // starts clean; an oversized body is left for the next read to
+        // consume as bounded header lines until the stream resynchronizes.
+        if length <= MAX_CONTENT_LENGTH {
+            discard_bytes(reader, length)?;
+        }
+        return Ok(Frame::Malformed(-32600, reason));
+    }
+    let mut body = vec![0u8; length as usize];
     reader.read_exact(&mut body).map_err(|e| e.to_string())?;
-    String::from_utf8(body).map_err(|e| e.to_string())
+    match String::from_utf8(body) {
+        Ok(text) => Ok(Frame::Message(text)),
+        Err(_) => Ok(Frame::Malformed(-32700, "frame body is not UTF-8")),
+    }
+}
+
+/// One header line, bounded so an unbounded line is detected by a missing
+/// newline rather than by the allocation it caused (#637).
+fn read_bounded(reader: &mut impl BufRead, buf: &mut Vec<u8>) -> Result<usize, String> {
+    reader
+        .by_ref()
+        .take((MAX_HEADER_LINE + 1) as u64)
+        .read_until(b'\n', buf)
+        .map_err(|e| e.to_string())
+}
+
+/// Consume `length` bytes without honoring the declared allocation — a
+/// malformed frame's bounded body still has to leave the stream before
+/// the next frame can be read.
+fn discard_bytes(reader: &mut impl BufRead, length: u64) -> Result<(), String> {
+    std::io::copy(&mut reader.by_ref().take(length), &mut std::io::sink())
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 fn write_msg(writer: &mut impl Write, val: Value) -> Result<(), String> {
@@ -467,12 +670,18 @@ fn refresh_root(
     let diagnostics = service.diagnostics(root_uri);
     let mut by_source: BTreeMap<String, Vec<LspDiagnostic>> = BTreeMap::new();
     for diagnostic in diagnostics {
-        by_source
-            .entry(publication_uri(&diagnostic.source))
-            .or_default()
-            .push(convert_diagnostic(diagnostic));
+        // A source with no URI to publish under is dropped rather than
+        // attributed to a fabricated `file:///unknown` (#637).
+        if let Some(uri) = publication_uri(service, &diagnostic.source) {
+            by_source
+                .entry(uri)
+                .or_default()
+                .push(convert_diagnostic(diagnostic));
+        }
     }
-    by_source.entry(publication_uri(root_uri)).or_default();
+    if let Some(uri) = publication_uri(service, root_uri) {
+        by_source.entry(uri).or_default();
+    }
 
     let previous = ownership.remove(root_uri).unwrap_or_default();
     let current: BTreeSet<String> = by_source.keys().cloned().collect();
@@ -499,8 +708,24 @@ fn other_roots_own(ownership: &PublicationOwnership, source: &str) -> bool {
     ownership.values().any(|owned| owned.contains(source))
 }
 
-fn publication_uri(source: &str) -> String {
-    wright_language::document::source_to_uri(source).unwrap_or_else(|| fallback_uri().to_string())
+/// The URI a diagnostic is published under (#637): the store's own
+/// spelling for an open document — the client's raw URI, e.g.
+/// `file://localhost/x` — before any normalization, since the client
+/// associates diagnostics with the URI it sent; then a normalized file
+/// URI for anything else that resolves to one. Sources with no file URI
+/// yield `None` rather than a fabricated `file:///unknown`.
+fn publication_uri(service: &LanguageService, source: &str) -> Option<String> {
+    if let Some(document) = service.store.document(source) {
+        return Some(document.uri.clone());
+    }
+    // A path or normalized-URI spelling of an open document still
+    // publishes under the URI the client opened.
+    let path =
+        wright_language::document::uri_to_path(source).unwrap_or_else(|| PathBuf::from(source));
+    if let Some(uri) = service.store.uri_for_path(&path) {
+        return Some(uri);
+    }
+    wright_language::document::source_to_uri(source)
 }
 
 fn convert_diagnostic(diagnostic: wright_language::SourceDiagnostic) -> LspDiagnostic {
@@ -519,12 +744,18 @@ fn convert_diagnostic(diagnostic: wright_language::SourceDiagnostic) -> LspDiagn
 
 fn publish_to(
     writer: &mut impl Write,
-    source: &str,
+    uri: &str,
     version: Option<i32>,
     diagnostics: Vec<LspDiagnostic>,
 ) -> Result<(), String> {
+    let Ok(uri) = Uri::from_str(uri) else {
+        // An identity with no URI spelling gets no publication — a
+        // fabricated `file:///unknown` would orphan the diagnostics
+        // (#637).
+        return Ok(());
+    };
     let params = PublishDiagnosticsParams {
-        uri: source_to_uri(source),
+        uri,
         diagnostics,
         version,
     };
@@ -569,10 +800,6 @@ fn uri_to_path(uri: &str) -> Option<PathBuf> {
         return None;
     }
     Some(path)
-}
-
-fn source_to_uri(source: &str) -> Uri {
-    Uri::from_str(&publication_uri(source)).unwrap_or_else(|_| fallback_uri())
 }
 
 fn fallback_uri() -> Uri {
