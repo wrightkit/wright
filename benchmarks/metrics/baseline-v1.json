@@ -195,7 +195,12 @@
         },
         "agent:rules": {
           "bytes": 3546,
-          "counts": {},
+          "counts": {
+            "items": 20,
+            "truncation.items.shown": 20,
+            "truncation.items.total": 307,
+            "truncation.items.truncated": 287
+          },
           "latencyMs": 36.2,
           "tokens": 886.5
         },
@@ -277,9 +282,9 @@
           "tokens": 1151.2
         },
         "cli:analyze?text": {
-          "bytes": 3179,
+          "bytes": 3267,
           "counts": {},
-          "tokens": 794.8
+          "tokens": 816.8
         },
         "cli:check": {
           "bytes": 149,
@@ -336,9 +341,9 @@
           "tokens": 498.0
         },
         "cli:inspect callgraph?text": {
-          "bytes": 2244,
+          "bytes": 2232,
           "counts": {},
-          "tokens": 561.0
+          "tokens": 558.0
         },
         "cli:inspect cfg": {
           "bytes": 339,
@@ -392,9 +397,9 @@
           "tokens": 423.0
         },
         "cli:inspect refs?text": {
-          "bytes": 756,
+          "bytes": 744,
           "counts": {},
-          "tokens": 189.0
+          "tokens": 186.0
         },
         "cli:inspect rules": {
           "bytes": 3661,
@@ -409,9 +414,9 @@
           "tokens": 915.2
         },
         "cli:inspect rules?text": {
-          "bytes": 1625,
+          "bytes": 1613,
           "counts": {},
-          "tokens": 406.2
+          "tokens": 403.2
         },
         "cli:inspect symbols": {
           "bytes": 3281,
@@ -426,14 +431,14 @@
           "tokens": 820.2
         },
         "cli:inspect symbols?text": {
-          "bytes": 932,
+          "bytes": 920,
           "counts": {},
-          "tokens": 233.0
+          "tokens": 230.0
         },
         "cli:inspect?text": {
-          "bytes": 1249,
+          "bytes": 1231,
           "counts": {},
-          "tokens": 312.2
+          "tokens": 307.8
         },
         "cli:lint": {
           "bytes": 5132,
@@ -449,9 +454,9 @@
           "tokens": 1283.0
         },
         "cli:lint?text": {
-          "bytes": 4162,
+          "bytes": 4150,
           "counts": {},
-          "tokens": 1040.5
+          "tokens": 1037.5
         }
       },
       "status": "ok"
@@ -653,7 +658,12 @@
         },
         "agent:rules": {
           "bytes": 4075,
-          "counts": {},
+          "counts": {
+            "items": 20,
+            "truncation.items.shown": 20,
+            "truncation.items.total": 369,
+            "truncation.items.truncated": 349
+          },
           "latencyMs": 42.4,
           "tokens": 1018.8
         },
@@ -734,9 +744,9 @@
           "tokens": 1328.8
         },
         "cli:analyze?text": {
-          "bytes": 3879,
+          "bytes": 3968,
           "counts": {},
-          "tokens": 969.8
+          "tokens": 992.0
         },
         "cli:check": {
           "bytes": 149,
@@ -793,9 +803,9 @@
           "tokens": 425.2
         },
         "cli:inspect callgraph?text": {
-          "bytes": 1705,
+          "bytes": 1693,
           "counts": {},
-          "tokens": 426.2
+          "tokens": 423.2
         },
         "cli:inspect cfg": {
           "bytes": 344,
@@ -830,9 +840,9 @@
           "tokens": 1297.2
         },
         "cli:inspect cost?text": {
-          "bytes": 3022,
+          "bytes": 3010,
           "counts": {},
-          "tokens": 755.5
+          "tokens": 752.5
         },
         "cli:inspect refs": {
           "bytes": 631,
@@ -866,9 +876,9 @@
           "tokens": 1047.5
         },
         "cli:inspect rules?text": {
-          "bytes": 2096,
+          "bytes": 2084,
           "counts": {},
-          "tokens": 524.0
+          "tokens": 521.0
         },
         "cli:inspect symbols": {
           "bytes": 3658,
@@ -883,14 +893,14 @@
           "tokens": 914.5
         },
         "cli:inspect symbols?text": {
-          "bytes": 1327,
+          "bytes": 1315,
           "counts": {},
-          "tokens": 331.8
+          "tokens": 328.8
         },
         "cli:inspect?text": {
-          "bytes": 1256,
+          "bytes": 1238,
           "counts": {},
-          "tokens": 314.0
+          "tokens": 309.5
         },
         "cli:lint": {
           "bytes": 5333,
@@ -909,9 +919,9 @@
           "tokens": 1333.2
         },
         "cli:lint?text": {
-          "bytes": 4253,
+          "bytes": 4229,
           "counts": {},
-          "tokens": 1063.2
+          "tokens": 1057.2
         }
       },
       "status": "ok"
@@ -1157,9 +1167,9 @@
           "tokens": 671.8
         },
         "cli:analyze?text": {
-          "bytes": 1676,
+          "bytes": 1816,
           "counts": {},
-          "tokens": 419.0
+          "tokens": 454.0
         },
         "cli:check": {
           "bytes": 149,
@@ -1296,9 +1306,9 @@
           "tokens": 95.2
         },
         "cli:inspect?text": {
-          "bytes": 487,
+          "bytes": 481,
           "counts": {},
-          "tokens": 121.8
+          "tokens": 120.2
         },
         "cli:lint": {
           "bytes": 379,
@@ -1314,9 +1324,9 @@
           "tokens": 94.8
         },
         "cli:lint?text": {
-          "bytes": 129,
+          "bytes": 117,
           "counts": {},
-          "tokens": 32.2
+          "tokens": 29.2
         }
       },
       "status": "ok"
@@ -1571,9 +1581,9 @@
           "tokens": 786.0
         },
         "cli:analyze?text": {
-          "bytes": 1896,
+          "bytes": 2012,
           "counts": {},
-          "tokens": 474.0
+          "tokens": 503.0
         },
         "cli:check": {
           "bytes": 149,
@@ -1710,9 +1720,9 @@
           "tokens": 120.0
         },
         "cli:inspect?text": {
-          "bytes": 511,
+          "bytes": 505,
           "counts": {},
-          "tokens": 127.8
+          "tokens": 126.2
         },
         "cli:lint": {
           "bytes": 379,
@@ -1728,9 +1738,9 @@
           "tokens": 94.8
         },
         "cli:lint?text": {
-          "bytes": 129,
+          "bytes": 117,
           "counts": {},
-          "tokens": 32.2
+          "tokens": 29.2
         }
       },
       "status": "ok"
@@ -1972,9 +1982,9 @@
           "tokens": 514.8
         },
         "cli:analyze?text": {
-          "bytes": 1490,
+          "bytes": 1560,
           "counts": {},
-          "tokens": 372.5
+          "tokens": 390.0
         },
         "cli:check": {
           "bytes": 149,
@@ -2111,9 +2121,9 @@
           "tokens": 59.8
         },
         "cli:inspect?text": {
-          "bytes": 439,
+          "bytes": 433,
           "counts": {},
-          "tokens": 109.8
+          "tokens": 108.2
         },
         "cli:lint": {
           "bytes": 777,
@@ -2129,9 +2139,9 @@
           "tokens": 194.2
         },
         "cli:lint?text": {
-          "bytes": 552,
+          "bytes": 540,
           "counts": {},
-          "tokens": 138.0
+          "tokens": 135.0
         }
       },
       "status": "ok"
@@ -2373,9 +2383,9 @@
           "tokens": 548.2
         },
         "cli:analyze?text": {
-          "bytes": 1544,
+          "bytes": 1665,
           "counts": {},
-          "tokens": 386.0
+          "tokens": 416.2
         },
         "cli:check": {
           "bytes": 149,
@@ -2512,9 +2522,9 @@
           "tokens": 58.5
         },
         "cli:inspect?text": {
-          "bytes": 439,
+          "bytes": 433,
           "counts": {},
-          "tokens": 109.8
+          "tokens": 108.2
         },
         "cli:lint": {
           "bytes": 776,
@@ -2530,9 +2540,9 @@
           "tokens": 194.0
         },
         "cli:lint?text": {
-          "bytes": 560,
+          "bytes": 548,
           "counts": {},
-          "tokens": 140.0
+          "tokens": 137.0
         }
       },
       "status": "ok"
@@ -2785,9 +2795,9 @@
           "tokens": 696.8
         },
         "cli:analyze?text": {
-          "bytes": 1753,
+          "bytes": 1880,
           "counts": {},
-          "tokens": 438.2
+          "tokens": 470.0
         },
         "cli:check": {
           "bytes": 149,
@@ -2924,9 +2934,9 @@
           "tokens": 129.5
         },
         "cli:inspect?text": {
-          "bytes": 517,
+          "bytes": 511,
           "counts": {},
-          "tokens": 129.2
+          "tokens": 127.8
         },
         "cli:lint": {
           "bytes": 379,
@@ -2942,9 +2952,9 @@
           "tokens": 94.8
         },
         "cli:lint?text": {
-          "bytes": 129,
+          "bytes": 117,
           "counts": {},
-          "tokens": 32.2
+          "tokens": 29.2
         }
       },
       "status": "ok"
@@ -3199,9 +3209,9 @@
           "tokens": 786.0
         },
         "cli:analyze?text": {
-          "bytes": 1896,
+          "bytes": 2012,
           "counts": {},
-          "tokens": 474.0
+          "tokens": 503.0
         },
         "cli:check": {
           "bytes": 149,
@@ -3338,9 +3348,9 @@
           "tokens": 120.0
         },
         "cli:inspect?text": {
-          "bytes": 511,
+          "bytes": 505,
           "counts": {},
-          "tokens": 127.8
+          "tokens": 126.2
         },
         "cli:lint": {
           "bytes": 379,
@@ -3356,9 +3366,9 @@
           "tokens": 94.8
         },
         "cli:lint?text": {
-          "bytes": 129,
+          "bytes": 117,
           "counts": {},
-          "tokens": 32.2
+          "tokens": 29.2
         }
       },
       "status": "ok"
@@ -3614,9 +3624,9 @@
           "tokens": 847.0
         },
         "cli:analyze?text": {
-          "bytes": 2136,
+          "bytes": 2252,
           "counts": {},
-          "tokens": 534.0
+          "tokens": 563.0
         },
         "cli:check": {
           "bytes": 149,
@@ -3753,9 +3763,9 @@
           "tokens": 135.2
         },
         "cli:inspect?text": {
-          "bytes": 531,
+          "bytes": 525,
           "counts": {},
-          "tokens": 132.8
+          "tokens": 131.2
         },
         "cli:lint": {
           "bytes": 776,
@@ -3771,9 +3781,9 @@
           "tokens": 194.0
         },
         "cli:lint?text": {
-          "bytes": 560,
+          "bytes": 548,
           "counts": {},
-          "tokens": 140.0
+          "tokens": 137.0
         }
       },
       "status": "ok"

@@ -828,16 +828,16 @@ fn essential_metadata(value: &serde_json::Value) -> String {
             });
         }
     }
-    for key in [
-        "rules",
-        "symbols",
-        "references",
-        "elements",
-        "persistentObjects",
-        "skipped",
+    for (key, label) in [
+        ("rules", "rule(s)"),
+        ("symbols", "symbol(s)"),
+        ("references", "reference(s)"),
+        ("elements", "element(s)"),
+        ("persistentObjects", "persistent object(s)"),
+        ("skipped", "skipped"),
     ] {
         if let Some(total) = counts.get(key).and_then(serde_json::Value::as_u64) {
-            parts.push(format!("{total} {key}"));
+            parts.push(format!("{total} {label}"));
         }
     }
     parts.join(", ")
@@ -1727,7 +1727,10 @@ fn render_essential(result: &EssentialResult, ctx: &RenderContext<'_>) {
     }
     print_truncation(value);
     if let Some(expand) = value["expand"].as_str() {
-        println!("  {}", dim(expand, ctx.presentation.color));
+        println!(
+            "  {}",
+            dim(&expand.replace(" / all: true", ""), ctx.presentation.color)
+        );
     }
 }
 
@@ -1745,10 +1748,8 @@ fn finding_location_span(finding: &serde_json::Value) -> Option<serde_json::Valu
 fn print_truncation(value: &serde_json::Value) {
     for (key, note) in value["truncation"].as_object().into_iter().flatten() {
         println!(
-            "  {key}: showing {} of {}; {} to see every item",
-            note["shown"],
-            note["total"],
-            note["expand"].as_str().unwrap_or("--all")
+            "  {key}: showing {} of {}; --all to see every item",
+            note["shown"], note["total"]
         );
     }
 }
@@ -1764,6 +1765,7 @@ fn render_essential_analyze(value: &serde_json::Value) {
         count(p, "subroutines"),
         count(&value["counts"], "persistentObjects")
     );
+    println!("  evidence: [static] parsed program inventory");
     let cost = &value["cost"];
     println!("\nWorkshop cost");
     if let Some(elements) = cost["elementCount"].as_u64() {
@@ -1784,20 +1786,36 @@ fn render_essential_analyze(value: &serde_json::Value) {
         count(&cost["counts"], "conditions"),
         count(&cost["counts"], "waits")
     );
+    let element_total = cost["elementCount"].as_u64();
     println!(
-        "\nHotspots\n  ranked by Workshop element count or control-flow size [heuristic ranking]"
+        "\nHotspots\n  {}",
+        if element_total.is_some() {
+            "ranked by Workshop element count [exact counts; the ranking itself is a heuristic]"
+        } else {
+            "ranked by control-flow size [heuristic: blocks + edges]"
+        }
     );
     for rule in value["hotspots"].as_array().into_iter().flatten() {
         let flow = &rule["controlFlow"];
-        println!(
-            "    \"{}\": {} element(s), {} block(s), {} edge(s), {} risk(s){}",
-            rule_name(rule),
-            rule["elements"],
-            count(flow, "blocks"),
-            count(flow, "edges"),
-            count(rule, "risks"),
-            location_suffix(rule.get("span"))
-        );
+        let (blocks, edges) = (count(flow, "blocks"), count(flow, "edges"));
+        let risks = count(rule, "risks");
+        let location = location_suffix(rule.get("span"));
+        match rule["elements"].as_u64() {
+            Some(elements) => {
+                let share = element_total
+                    .filter(|total| *total > 0)
+                    .map(|total| format!(" ({:.1}%)", elements as f64 * 100.0 / total as f64))
+                    .unwrap_or_default();
+                println!(
+                    "    \"{}\": {elements} element(s){share}, {blocks} block(s), {edges} edge(s), {risks} risk(s){location}",
+                    rule_name(rule),
+                );
+            }
+            None => println!(
+                "    \"{}\": {blocks} block(s), {edges} edge(s), {risks} risk(s){location}",
+                rule_name(rule),
+            ),
+        }
     }
     let c = &value["complexity"];
     println!(
@@ -1807,10 +1825,19 @@ fn render_essential_analyze(value: &serde_json::Value) {
         count(c, "loopBlocks"),
         count(c, "waitBlocks")
     );
+    if value["conditionTrees"]
+        .as_array()
+        .is_some_and(|trees| !trees.is_empty())
+    {
+        println!("  top condition tree(s) by element count [exact]");
+    }
     for tree in value["conditionTrees"].as_array().into_iter().flatten() {
         println!(
-            "    {} condition {}: {} element(s){}",
-            tree["rule"].as_str().unwrap_or("<unnamed>"),
+            "    \"{}\" condition {}: {} element(s){}",
+            match tree["rule"].as_str() {
+                Some("") | None => "<unnamed>",
+                Some(name) => name,
+            },
             count(tree, "index") + 1,
             count(tree, "elements"),
             location_suffix(tree.get("span"))
