@@ -37,9 +37,19 @@ fn run_lines_with(
     input: &Path,
     lines: &[&str],
 ) -> Vec<serde_json::Value> {
+    // `compile` writes `<entry stem>.ow` in the working directory, so every
+    // service process gets its own.
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let cwd = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "serve-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    ));
+    std::fs::create_dir_all(&cwd).unwrap();
     let mut child = Command::new(executable)
         .args(args)
         .arg(input)
+        .current_dir(&cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -51,6 +61,7 @@ fn run_lines_with(
     }
     drop(stdin);
     let output = child.wait_with_output().unwrap();
+    let _ = std::fs::remove_dir_all(&cwd);
     assert!(
         output.status.success(),
         "wright-serve failed: {}",

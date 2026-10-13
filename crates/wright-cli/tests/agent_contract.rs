@@ -63,7 +63,7 @@ fn capabilities() -> Value {
 fn requests() -> Vec<Value> {
     vec![
         json!({"op":"capabilities"}),
-        json!({"op":"compile"}),
+        json!({"op":"compile","output":concat!(env!("CARGO_TARGET_TMPDIR"), "/agent-contract.ow"),"force":true}),
         json!({"op":"check"}),
         json!({"op":"analyze"}),
         json!({"op":"inspect"}),

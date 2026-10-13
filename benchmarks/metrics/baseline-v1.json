@@ -89,13 +89,12 @@
           "tokens": 34.5
         },
         "agent:compile": {
-          "bytes": 441480,
+          "bytes": 427,
           "counts": {
-            "diagnostics": 0,
-            "emittedBytes": 418239
+            "diagnostics": 0
           },
-          "latencyMs": 240.9,
-          "tokens": 110370.0
+          "latencyMs": 218.4,
+          "tokens": 106.8
         },
         "agent:costEstimate": {
           "bytes": 3919,
@@ -296,13 +295,12 @@
           "tokens": 7.2
         },
         "cli:compile": {
-          "bytes": 441470,
+          "bytes": 503,
           "counts": {
-            "diagnostics": 0,
-            "emittedBytes": 418239
+            "diagnostics": 0
           },
-          "latencyMs": 2050.8,
-          "tokens": 110367.5
+          "latencyMs": 1901.2,
+          "tokens": 125.8
         },
         "cli:inspect": {
           "bytes": 1642,
@@ -542,13 +540,12 @@
           "tokens": 34.5
         },
         "agent:compile": {
-          "bytes": 365807,
+          "bytes": 427,
           "counts": {
-            "diagnostics": 0,
-            "emittedBytes": 341344
+            "diagnostics": 0
           },
-          "latencyMs": 573.6,
-          "tokens": 91451.8
+          "latencyMs": 525.6,
+          "tokens": 106.8
         },
         "agent:costEstimate": {
           "bytes": 5075,
@@ -755,13 +752,12 @@
           "tokens": 7.2
         },
         "cli:compile": {
-          "bytes": 365797,
+          "bytes": 503,
           "counts": {
-            "diagnostics": 0,
-            "emittedBytes": 341344
+            "diagnostics": 0
           },
-          "latencyMs": 9248.1,
-          "tokens": 91449.2
+          "latencyMs": 6134.3,
+          "tokens": 125.8
         },
         "cli:inspect": {
           "bytes": 1649,
@@ -988,13 +984,12 @@
           "tokens": 34.5
         },
         "agent:compile": {
-          "bytes": 2021,
+          "bytes": 427,
           "counts": {
-            "diagnostics": 0,
-            "emittedBytes": 1563
+            "diagnostics": 0
           },
-          "latencyMs": 1.0,
-          "tokens": 505.2
+          "latencyMs": 0.7,
+          "tokens": 106.8
         },
         "agent:costEstimate": {
           "bytes": 293,
@@ -1180,13 +1175,12 @@
           "tokens": 7.2
         },
         "cli:compile": {
-          "bytes": 2011,
+          "bytes": 503,
           "counts": {
-            "diagnostics": 0,
-            "emittedBytes": 1563
+            "diagnostics": 0
           },
-          "latencyMs": 499.7,
-          "tokens": 502.8
+          "latencyMs": 500.9,
+          "tokens": 125.8
         },
         "cli:inspect": {
           "bytes": 600,
@@ -1400,13 +1394,12 @@
           "tokens": 34.5
         },
         "agent:compile": {
-          "bytes": 2041,
+          "bytes": 427,
           "counts": {
-            "diagnostics": 0,
-            "emittedBytes": 1583
+            "diagnostics": 0
           },
-          "latencyMs": 0.5,
-          "tokens": 510.2
+          "latencyMs": 0.7,
+          "tokens": 106.8
         },
         "agent:costEstimate": {
           "bytes": 293,
@@ -1596,13 +1589,12 @@
           "tokens": 7.2
         },
         "cli:compile": {
-          "bytes": 2031,
+          "bytes": 503,
           "counts": {
-            "diagnostics": 0,
-            "emittedBytes": 1583
+            "diagnostics": 0
           },
-          "latencyMs": 273.0,
-          "tokens": 507.8
+          "latencyMs": 268.8,
+          "tokens": 125.8
         },
         "cli:inspect": {
           "bytes": 645,
@@ -1810,13 +1802,12 @@
           "tokens": 34.5
         },
         "agent:compile": {
-          "bytes": 1240,
+          "bytes": 427,
           "counts": {
-            "diagnostics": 0,
-            "emittedBytes": 822
+            "diagnostics": 0
           },
-          "latencyMs": 2.3,
-          "tokens": 310.0
+          "latencyMs": 0.4,
+          "tokens": 106.8
         },
         "agent:costEstimate": {
           "bytes": 597,
@@ -1999,13 +1990,12 @@
           "tokens": 7.2
         },
         "cli:compile": {
-          "bytes": 1230,
+          "bytes": 503,
           "counts": {
-            "diagnostics": 0,
-            "emittedBytes": 822
+            "diagnostics": 0
           },
-          "latencyMs": 413.5,
-          "tokens": 307.5
+          "latencyMs": 486.7,
+          "tokens": 125.8
         },
         "cli:inspect": {
           "bytes": 520,
@@ -2213,13 +2203,12 @@
           "tokens": 34.5
         },
         "agent:compile": {
-          "bytes": 1055,
+          "bytes": 427,
           "counts": {
-            "diagnostics": 0,
-            "emittedBytes": 650
+            "diagnostics": 0
           },
           "latencyMs": 0.3,
-          "tokens": 263.8
+          "tokens": 106.8
         },
         "agent:costEstimate": {
           "bytes": 597,
@@ -2402,13 +2391,12 @@
           "tokens": 7.2
         },
         "cli:compile": {
-          "bytes": 1045,
+          "bytes": 503,
           "counts": {
-            "diagnostics": 0,
-            "emittedBytes": 650
+            "diagnostics": 0
           },
-          "latencyMs": 268.5,
-          "tokens": 261.2
+          "latencyMs": 269.2,
+          "tokens": 125.8
         },
         "cli:inspect": {
           "bytes": 525,
@@ -2620,13 +2608,12 @@
           "tokens": 34.5
         },
         "agent:compile": {
-          "bytes": 2220,
+          "bytes": 427,
           "counts": {
-            "diagnostics": 0,
-            "emittedBytes": 1746
+            "diagnostics": 0
           },
-          "latencyMs": 0.6,
-          "tokens": 555.0
+          "latencyMs": 0.7,
+          "tokens": 106.8
         },
         "agent:costEstimate": {
           "bytes": 293,
@@ -2816,13 +2803,12 @@
           "tokens": 7.2
         },
         "cli:compile": {
-          "bytes": 2210,
+          "bytes": 503,
           "counts": {
-            "diagnostics": 0,
-            "emittedBytes": 1746
+            "diagnostics": 0
           },
-          "latencyMs": 416.2,
-          "tokens": 552.5
+          "latencyMs": 400.0,
+          "tokens": 125.8
         },
         "cli:inspect": {
           "bytes": 646,
@@ -3036,13 +3022,12 @@
           "tokens": 34.5
         },
         "agent:compile": {
-          "bytes": 2041,
+          "bytes": 427,
           "counts": {
-            "diagnostics": 0,
-            "emittedBytes": 1583
+            "diagnostics": 0
           },
-          "latencyMs": 0.6,
-          "tokens": 510.2
+          "latencyMs": 0.5,
+          "tokens": 106.8
         },
         "agent:costEstimate": {
           "bytes": 293,
@@ -3232,13 +3217,12 @@
           "tokens": 7.2
         },
         "cli:compile": {
-          "bytes": 2031,
+          "bytes": 503,
           "counts": {
-            "diagnostics": 0,
-            "emittedBytes": 1583
+            "diagnostics": 0
           },
-          "latencyMs": 313.4,
-          "tokens": 507.8
+          "latencyMs": 266.8,
+          "tokens": 125.8
         },
         "cli:inspect": {
           "bytes": 645,
@@ -3452,13 +3436,12 @@
           "tokens": 34.5
         },
         "agent:compile": {
-          "bytes": 2341,
+          "bytes": 427,
           "counts": {
-            "diagnostics": 0,
-            "emittedBytes": 1862
+            "diagnostics": 0
           },
           "latencyMs": 0.6,
-          "tokens": 585.2
+          "tokens": 106.8
         },
         "agent:costEstimate": {
           "bytes": 599,
@@ -3649,13 +3632,12 @@
           "tokens": 7.2
         },
         "cli:compile": {
-          "bytes": 2331,
+          "bytes": 503,
           "counts": {
-            "diagnostics": 0,
-            "emittedBytes": 1862
+            "diagnostics": 0
           },
-          "latencyMs": 275.0,
-          "tokens": 582.8
+          "latencyMs": 270.3,
+          "tokens": 125.8
         },
         "cli:inspect": {
           "bytes": 681,

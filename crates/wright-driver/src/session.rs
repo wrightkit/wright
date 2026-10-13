@@ -22,6 +22,7 @@ use crate::diag::{
 use crate::input::{self, InputTarget, ResolvedInput};
 use crate::input_identity;
 use crate::opy_provider;
+use crate::output::{CompileWrite, OutputDest, Overwrite};
 use crate::progress::{ProgressEvent, ProgressObserver, ProgressPhase};
 use crate::result::{
     CheckResult, CompileResult, CompiledOutput, ConvertResult, ConvertTarget, Envelope,
@@ -869,42 +870,74 @@ impl CompilerSession {
         Ok((program, locale.to_string()))
     }
 
+    /// Compile without delivering the program: it stays in the in-process
+    /// result's `output.text` (never serialized) and `written_to` is
+    /// `stdout`. Use [`Self::compile_to`] to write a file.
     #[hotpath::measure]
     pub fn compile(&mut self) -> Envelope<CompileResult> {
+        self.compile_to(CompileWrite {
+            dest: OutputDest::Stdout,
+            overwrite: Overwrite::Refuse,
+        })
+    }
+
+    /// Compile and deliver the program as `write` directs (ADR-0025). A
+    /// failed compile or a refused destination writes nothing.
+    pub fn compile_to(&mut self, write: CompileWrite<'_>) -> Envelope<CompileResult> {
         let mut result = CompileResult::default();
-        let output = match self.compile_output() {
-            Ok(output) => output,
+        let (output, entry) = match self.compile_output() {
+            Ok(compiled) => compiled,
             Err(diagnostic) => {
                 self.diagnostics.push(diagnostic);
                 return self.finish("compile", result);
             }
         };
-        match &self.config.output {
-            Some(path) => {
-                if let Err(error) = std::fs::write(path, &output.text) {
-                    self.diagnostics.push(Diagnostic::error(
-                        "output-io",
-                        Stage::Emission,
-                        format!("cannot write output '{}': {error}", path.display()),
-                    ));
-                    return self.finish("compile", result);
+        if self
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == crate::diag::Severity::Error)
+        {
+            return self.finish("compile", result);
+        }
+        let written = {
+            let this = &*self;
+            let CompileWrite { dest, overwrite } = write;
+            let text = output.text.as_str();
+            match overwrite {
+                Overwrite::Ask(ask) => {
+                    let mut confirm = |path: &Path| {
+                        this.progress(ProgressEvent::new(ProgressPhase::Confirmation));
+                        ask(path)
+                    };
+                    crate::output::write_program(
+                        text,
+                        entry.as_deref(),
+                        CompileWrite {
+                            dest,
+                            overwrite: Overwrite::Ask(&mut confirm),
+                        },
+                    )
                 }
+                overwrite => crate::output::write_program(
+                    text,
+                    entry.as_deref(),
+                    CompileWrite { dest, overwrite },
+                ),
+            }
+        };
+        match written {
+            Ok(written_to) => {
                 result.output = Some(CompiledOutput {
-                    written_to: crate::input::display_path(path),
+                    written_to,
                     ..output
                 });
             }
-            None => {
-                result.output = Some(CompiledOutput {
-                    written_to: "stdout".to_string(),
-                    ..output
-                });
-            }
+            Err(diagnostic) => self.diagnostics.push(diagnostic),
         }
         self.finish("compile", result)
     }
 
-    fn compile_output(&mut self) -> Result<CompiledOutput, Diagnostic> {
+    fn compile_output(&mut self) -> Result<(CompiledOutput, Option<PathBuf>), Diagnostic> {
         let loaded = self.load_with_operation(ProviderOperation::Compile)?;
         let locale = Self::locale_for(&loaded);
         self.progress(ProgressEvent::new(ProgressPhase::Emission));
@@ -914,13 +947,14 @@ impl CompilerSession {
         .map_err(|error| workshop_diag(error, &loaded.input))?;
         self.attach_target_limits(&loaded);
         let sha256 = hotpath::measure_block!("compile::sha256", input_identity(&text));
-        Ok(CompiledOutput {
+        let compiled = CompiledOutput {
             text,
             sha256,
             locale: locale.to_string(),
             written_to: String::new(),
             input_identity: loaded.input.identity.clone(),
-        })
+        };
+        Ok((compiled, loaded.input.path.clone()))
     }
 
     #[hotpath::measure]

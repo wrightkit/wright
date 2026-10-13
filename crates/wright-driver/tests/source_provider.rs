@@ -1232,7 +1232,10 @@ fn service_check_and_compile_run_without_a_prewarmed_snapshot() {
 
     // `compile` is the provider's own refusal, in the envelope — not the
     // service's snapshot precondition.
-    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile) else {
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile {
+        output: None,
+        force: false,
+    }) else {
         panic!("compile must return the workflow envelope")
     };
     assert_eq!(result["ok"], false, "{result}");
@@ -1270,7 +1273,10 @@ fn service_compile_establishes_the_snapshot_and_recovers_after_reload() {
     // A fresh service holds no snapshot until a workflow establishes one.
     assert!(service.loaded().is_none());
 
-    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile) else {
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile {
+        output: Some(dir.join("program.ow")),
+        force: true,
+    }) else {
         panic!("compile must return the workflow envelope")
     };
     assert_eq!(result["ok"], true, "{result}");
@@ -1299,7 +1305,10 @@ fn service_compile_establishes_the_snapshot_and_recovers_after_reload() {
         service.loaded().is_some(),
         "a compile-capable provider check supplies the canonical snapshot (#617)"
     );
-    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile) else {
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile {
+        output: Some(dir.join("program.ow")),
+        force: true,
+    }) else {
         panic!("compile must return the workflow envelope")
     };
     assert_eq!(result["ok"], true, "{result}");
@@ -1350,7 +1359,10 @@ fn service_check_and_compile_match_the_direct_workflow_methods() {
         assert_eq!(*operations.lock().expect("ops"), vec!["check", "compile"]);
 
         let compile = if via_request {
-            let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile) else {
+            let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile {
+                output: Some(dir.join("program.ow")),
+                force: true,
+            }) else {
                 panic!("compile must return the workflow envelope")
             };
             result
@@ -2009,7 +2021,8 @@ fn opy_rules_content_reports_names_unavailable() {
         check_compilation: None,
         compilation: Some(SourceCompilation::success(
             std::fs::read_to_string(
-                workspace_root().join("benchmarks/agent/fixtures/program-calls/repel.en-US.ow"),
+                workspace_root()
+                    .join("tests/fixtures/workshop/synthetic/program-calls-repel.en-US.ow"),
             )
             .expect("repel fixture"),
         )),

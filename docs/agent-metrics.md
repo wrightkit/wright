@@ -20,8 +20,8 @@ agent-facing cost, not behavior.
 
 `corpus.json` versions the project set. Entries are:
 
-- vendored small projects under `benchmarks/metrics/corpus/` plus the
-  non-empty benchmark scenario seeds — always available, no network;
+- vendored small projects under `benchmarks/metrics/corpus/`, including the
+  `seed-*` projects — always available, no network;
 - pinned external repositories (`repository` + `commit`), fetched shallow into
   `benchmarks/metrics/.cache/` by `metrics.py fetch` or on first `run`. Their
   source is never vendored into this repository; only derived metrics are
@@ -81,7 +81,9 @@ file so old bands stay auditable.
 
 The `Metrics drift` job runs `check --skip-latency`: each metric runs
 once and only tokens, bytes, and counts are compared. It fails only on the
-blocking changes above; drift appears in the job log and does not fail the PR. Wall time on shared
+blocking changes above; drift appears in the job log and does not fail the PR.
+A failing `Metrics drift` job fails the required `CI result` check and blocks
+merging. Wall time on shared
 hosted runners varies by about a factor of two between runs, and the machine
 factor cannot cancel a shift that differs by operation (small agent
 operations and CLI commands moved in opposite directions on the same run), so

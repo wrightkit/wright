@@ -259,7 +259,13 @@ fn jsonrpc_dispatch_request(service: &mut ToolService<'_>, value: Value) -> Opti
             };
             operation_result(service, request)
         }
-        "compile" => operation_result(service, ToolRequest::Compile),
+        "compile" => operation_result(
+            service,
+            ToolRequest::Compile {
+                output: None,
+                force: false,
+            },
+        ),
         "check" => operation_result(service, ToolRequest::Check { all: false }),
         "analyze" => operation_result(
             service,

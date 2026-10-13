@@ -30,7 +30,7 @@ result.
 
 | Command | Purpose | Text-mode stdout |
 | --- | --- | --- |
-| `wright compile [INPUT]` | Parse, lower, validate, emit Workshop text; warn on known client import limits | the emitted artifact (or nothing with `-o`) |
+| `wright compile [INPUT]` | Parse, lower, validate, emit Workshop text; warn on known client import limits | verdict, diagnostics, the written path, and the output SHA-256; the program goes to `<input stem>.ow` (or `-o PATH`; `-o -` prints only the program) |
 | `wright convert [INPUT] --target opy\|ostw` | Reconstruct validated Workshop input as canonical OPY or OSTW source | the reconstructed source |
 | `wright check [INPUT]` | Parse, lower, validate, and report correctness diagnostics | verdict and validation diagnostics |
 | `wright analyze [INPUT] [--all]` | Summarize Workshop cost, ranked complexity hotspots, performance/stability risk indicators, and cross-cutting state | overview, cost, top hotspots, complexity, risks, and top variables with exact/static/heuristic evidence labels; `--all` lifts list caps |
@@ -66,13 +66,37 @@ ambiguity guidance. Stdin content is auto-detected (protocol JSON starts with
 `{`, otherwise Workshop text). Detection can be overridden with
 `--kind auto|opy|ostw|workshop|protocol`. `--locale`
 overrides Workshop client-locale detection; `--root` sets the include/project
-root; `-o/--output` writes compiled output to a file. `.ostw`/`.del` inputs
+root; `-o/--output` chooses the `compile` output file. `.ostw`/`.del` inputs
 remain recognized source kinds for a future provider, but Wright does not ship
 a static DEL/OSTW adapter. Every DEL/OSTW workflow fails with the structured
 `source-provider-unavailable` diagnostic (exit 4), without partial output or
 an upstream/static fallback. DEL/OSTW provider support is not currently
 shipped with Wright and is outside this contract. OPY, Workshop, and protocol
 inputs continue through their existing owner-backed paths.
+
+### `wright compile` output (ADR-0025)
+
+`wright compile` writes the program to a file and reports only status and
+problems: the verdict, diagnostics (including the client import-limit
+warnings below), the written path, and the SHA-256 of the written program.
+Text and JSON report the same content and neither carries the program text. A
+failed compile writes no file.
+
+- The default file is `<input stem>.ow` in the current directory (the
+  directory name for a directory project). `-o PATH` chooses another file.
+  `-o -` prints the program to stdout and nothing else; it cannot be combined
+  with `--format json`.
+- An existing output file is replaced only after an interactive
+  `Overwrite <path>? [y/N]` confirmation (default No; No exits 1 and writes
+  nothing). Without a terminal the command refuses with exit 2 and a
+  diagnostic naming `--force`, leaving the file unchanged. `--force`
+  replaces it without asking.
+- The input source file is never overwritten, with or without `--force`;
+  paths are compared after resolution.
+- `--copy` also copies the program to the system clipboard. A clipboard
+  failure is reported as a `clipboard-failed` warning and keeps the written
+  file. On Linux the clipboard is served by the process through X11, so the
+  contents persist after exit only with a clipboard manager running.
 
 `wright compile` also surfaces known exact Workshop client import
 constraints as warnings without failing compilation (#488): a program whose

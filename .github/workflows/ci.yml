@@ -8,22 +8,17 @@ name: CI
 # PR: capability checks are selected by changed paths.  Broad/core changes
 # (Cargo workspace, scripts, test inputs, CI itself) expand to the
 # full check set; narrow path changes run only the relevant capability.
-# Docs-only changes skip CI entirely.
+# Docs-only changes match no path filter, so only `paths` and `CI result` run.
+# Merge queue (`merge_group`): the queued commit is validated against the
+# current `main`. `dorny/paths-filter` diffs the merge group's base_sha against
+# its head_sha, so path selection works as on PRs.
+# The workflow itself is never skipped, so `CI result` always reports.
 
 on:
   push:
     branches: ["main"]
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
-      - "!benchmarks/**/*.md"
-      - "!agent-guide/**/*.md"
   pull_request:
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
-      - "!benchmarks/**/*.md"
-      - "!agent-guide/**/*.md"
+  merge_group:
 
 permissions:
   contents: read
@@ -328,7 +323,7 @@ jobs:
       - name: Compile OPY via provider
         run: >-
           target/debug/wright compile tests/fixtures/opy/basic-rule.opy
-          --profile compat
+          --profile compat -o "$RUNNER_TEMP/basic-rule.ow"
 
   # -------------------------------------------------------------------------
   # [3] LPP INTEGRATION  (Wright's Language Provider Protocol client contract)
@@ -677,3 +672,36 @@ jobs:
       - name: Test WinGet channel
         if: matrix.channel == 'WinGet'
         run: python scripts/test-distribution-winget.py
+
+  # -------------------------------------------------------------------------
+  # [9] CI RESULT  (the single required merge check)
+  # Fails when any gating job failed or was cancelled; skipped jobs (path
+  # filtered or blocked by a failed dependency, which itself fails here) pass.
+  # `benchmark` (Benchmarks) and `metrics-latency` (Metrics latency (trend))
+  # are deliberately NOT in `needs`: they are non-blocking evidence jobs.
+  # Every other job above must be listed here.
+  # -------------------------------------------------------------------------
+  ci-result:
+    name: CI result
+    if: always()
+    needs:
+      - paths
+      - rust-quality
+      - rust-msrv
+      - wright-cli-build
+      - workshop-integration
+      - opy-integration
+      - lpp-integration
+      - cli-behavior
+      - metrics-drift
+      - dist-cli-build
+      - dist-validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail on failed or cancelled jobs
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$NEEDS" | jq -e 'all(.[]; .result != "failure" and .result != "cancelled")' >/dev/null

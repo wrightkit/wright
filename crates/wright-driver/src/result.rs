@@ -58,6 +58,12 @@ pub fn exit_code_from(diagnostics: &[Diagnostic]) -> u8 {
         if d.severity != Severity::Error {
             continue;
         }
+        if matches!(
+            d.code.as_str(),
+            "output-exists" | "output-is-input" | "output-unnamed"
+        ) {
+            return exit::USAGE;
+        }
         if d.stage == crate::diag::Stage::Internal {
             return exit::INTERNAL;
         }
@@ -81,6 +87,9 @@ pub fn exit_code_from(diagnostics: &[Diagnostic]) -> u8 {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CompiledOutput {
+    /// The emitted program. In-process callers read it; it is never
+    /// serialized (ADR-0025): the program is delivered to a file.
+    #[serde(skip)]
     pub text: String,
     pub sha256: String,
     pub locale: String,

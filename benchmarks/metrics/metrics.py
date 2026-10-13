@@ -43,6 +43,7 @@ import shutil
 import statistics
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -324,13 +325,7 @@ def cli_counts(command: str, envelope: dict) -> dict:
         return counts
     if not isinstance(result, dict):
         return counts
-    if command != "compile":
-        counts.update(default_counts(result))
-        return counts
-    if command == "compile":
-        text = (result.get("output") or {}).get("text")
-        if isinstance(text, str):
-            counts["emittedBytes"] = len(text)
+    counts.update(default_counts(result))
     return counts
 
 
@@ -352,8 +347,13 @@ def run_agent_ops(
     wright: str, entry: Path, kind: str, project_dir: Path, repeats: int
 ) -> dict:
     metrics: dict[str, dict] = {}
-    targets: dict[str, dict] = {}
-    with ServeSession(wright, entry, kind, project_dir) as session:
+    scratch = tempfile.TemporaryDirectory(prefix="wright-metrics-")
+    # `compile` writes the program to a file (ADR-0025); keep it out of the
+    # measured project and replace it on every repeat.
+    targets: dict[str, dict] = {
+        "compile": {"output": str(Path(scratch.name) / "compiled.ow"), "force": True}
+    }
+    with scratch, ServeSession(wright, entry, kind, project_dir) as session:
         # Warm the session once before measuring: the first envelope
         # response drains diagnostics produced while loading (e.g. the
         # source-map audit warning), so a repeats=1 run would otherwise
@@ -454,6 +454,7 @@ def run_cli_commands(
 ) -> dict:
     """Measure default JSON and text forms; address refs/cfg through queries."""
     metrics: dict[str, dict] = {}
+    scratch = tempfile.TemporaryDirectory(prefix="wright-metrics-")
     addresses = {}
     with ServeSession(wright, entry, kind, project_dir) as session:
         for op, address in (("rules", "cfg"), ("symbols", "refs")):
@@ -474,6 +475,8 @@ def run_cli_commands(
             if sub in addresses:
                 argv.append(addresses[sub])
             argv += [str(entry), "--kind", kind, "-f", form]
+            if command == "compile":
+                argv += ["-o", str(Path(scratch.name) / "compiled.ow"), "--force"]
             outputs_bytes = []
             latencies = []
             counts = {}
@@ -496,6 +499,7 @@ def run_cli_commands(
             metrics[key] = {"error": failure} if failure else metric_record(
                 outputs_bytes, latencies if form == "json" else None, counts
             )
+    scratch.cleanup()
     return metrics
 
 

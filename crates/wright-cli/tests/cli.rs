@@ -132,7 +132,7 @@ fn command_result(output: &std::process::Output) -> String {
 #[test]
 fn compile_over_workshop_file_emits_correct_text() {
     let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
-    let output = run(&["compile", path.to_str().unwrap()]);
+    let output = run(&["compile", path.to_str().unwrap(), "-o", "-"]);
     assert!(output.status.success());
     assert!(output.stderr.is_empty(), "stderr clean on success");
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -142,7 +142,7 @@ fn compile_over_workshop_file_emits_correct_text() {
 }
 
 /// A program over the Overwatch client element limit (#488) still emits its
-/// artifact on stdout in text mode, with the import-limit warning on stderr;
+/// artifact (stdout with `-o -`), with the import-limit warning on stderr;
 /// in JSON mode the warning rides inside the envelope's diagnostics.
 #[test]
 fn compile_over_element_limit_warns_and_still_emits() {
@@ -152,7 +152,7 @@ fn compile_over_element_limit_warns_and_still_emits() {
     );
     let path = temp_file("over-limit.txt", &source);
 
-    let output = run(&["compile", path.to_str().unwrap()]);
+    let output = run(&["compile", path.to_str().unwrap(), "-o", "-"]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -166,7 +166,15 @@ fn compile_over_element_limit_warns_and_still_emits() {
     );
     assert!(stderr.contains("32768"), "{stderr}");
 
-    let json = run(&["compile", path.to_str().unwrap(), "-f", "json"]);
+    let out_path = path.with_extension("ow");
+    let json = run(&[
+        "compile",
+        path.to_str().unwrap(),
+        "-o",
+        out_path.to_str().unwrap(),
+        "-f",
+        "json",
+    ]);
     assert!(json.status.success(), "{}", command_result(&json));
     assert!(
         json.stderr.is_empty(),
@@ -177,10 +185,10 @@ fn compile_over_element_limit_warns_and_still_emits() {
     assert_eq!(envelope["ok"], true);
     assert_eq!(envelope["exit"], 0);
     assert!(
-        envelope["result"]["output"]["text"]
-            .as_str()
-            .is_some_and(|text| text.contains("Set Global Variable")),
-        "the JSON envelope still carries the artifact"
+        std::fs::read_to_string(&out_path)
+            .unwrap()
+            .contains("Set Global Variable"),
+        "the artifact still reaches the file"
     );
     let warning = envelope["diagnostics"]
         .as_array()
@@ -193,49 +201,159 @@ fn compile_over_element_limit_warns_and_still_emits() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-#[test]
-fn compile_writes_output_file_and_reports_envelope() {
-    let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
-    let out_path = temp_file("emitted.txt", "");
-    let text_output = run(&[
-        "compile",
-        path.to_str().unwrap(),
-        "-o",
-        out_path.to_str().unwrap(),
-    ]);
-    assert!(text_output.status.success());
-    assert!(
-        text_output.stdout.is_empty(),
-        "-o keeps artifacts off stdout"
-    );
-    assert!(text_output.stderr.is_empty());
+fn run_in(dir: &Path, args: &[&str]) -> std::process::Output {
+    Command::new(wright())
+        .args(args)
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .env_remove("CI")
+        .env_remove("GITHUB_ACTIONS")
+        .env_remove("GITHUB_STEP_SUMMARY")
+        .env_remove("NO_COLOR")
+        .env_remove("FORCE_COLOR")
+        .output()
+        .expect("wright runs")
+}
 
-    let output = run(&[
-        "compile",
-        path.to_str().unwrap(),
-        "-o",
-        out_path.to_str().unwrap(),
-        "-f",
-        "json",
-    ]);
+fn sha256_of(path: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(std::fs::read(path).unwrap()))
+}
+
+/// ADR-0025: `compile` writes `<entry stem>.ow` in the current directory and
+/// reports only the verdict, the path and the digest; no surface carries the
+/// program text.
+#[test]
+fn compile_writes_the_default_file_and_reports_status_only() {
+    let dir = temp_dir();
+    std::fs::write(dir.join("mode.ws"), corpus_workshop("synthetic/basic-rule")).unwrap();
+
+    let text = run_in(&dir, &["compile", "mode.ws"]);
+    assert_eq!(text.status.code(), Some(0), "{}", command_result(&text));
+    let written = dir.join("mode.ow");
     assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+        std::fs::read_to_string(&written)
+            .unwrap()
+            .contains("Disable Inspector Recording")
     );
-    assert!(output.stderr.is_empty(), "JSON mode keeps stderr clean");
-    let envelope = parse_json(&output.stdout);
+    let stdout = String::from_utf8_lossy(&text.stdout);
+    assert!(stdout.contains("PASS compile"), "{stdout}");
+    assert!(stdout.contains("wrote mode.ow"), "{stdout}");
+    assert!(stdout.contains(&sha256_of(&written)), "{stdout}");
+    assert!(!stdout.contains("Disable Inspector Recording"), "{stdout}");
+
+    let json = run_in(&dir, &["compile", "mode.ws", "--force", "-f", "json"]);
+    assert_eq!(json.status.code(), Some(0), "{}", command_result(&json));
+    assert!(json.stderr.is_empty(), "JSON mode keeps stderr clean");
+    let envelope = parse_json(&json.stdout);
     assert_eq!(envelope["ok"], true);
-    assert_eq!(envelope["exit"], 0);
-    assert_eq!(envelope["command"], "compile");
     assert_eq!(envelope["wright"]["contract"], "wright-result/v1");
-    assert_eq!(
-        envelope["result"]["output"]["written_to"].as_str().unwrap(),
-        out_path.to_str().unwrap()
+    let output = &envelope["result"]["output"];
+    assert_eq!(output["written_to"], "mode.ow");
+    assert_eq!(output["sha256"], sha256_of(&written));
+    assert!(output.get("text").is_none(), "no program text: {output}");
+    assert!(
+        !String::from_utf8_lossy(&json.stdout).contains("Disable Inspector Recording"),
+        "no program text anywhere in the envelope"
     );
-    let stored = std::fs::read_to_string(&out_path).unwrap();
-    assert!(stored.contains("Disable Inspector Recording"));
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn compile_o_path_writes_there_and_failure_writes_nothing() {
+    let dir = temp_dir();
+    std::fs::write(dir.join("mode.ws"), corpus_workshop("synthetic/basic-rule")).unwrap();
+    let output = run_in(&dir, &["compile", "mode.ws", "-o", "elsewhere.txt"]);
+    assert_eq!(output.status.code(), Some(0), "{}", command_result(&output));
+    assert!(dir.join("elsewhere.txt").exists());
+    assert!(!dir.join("mode.ow").exists());
+
+    std::fs::write(
+        dir.join("broken.ws"),
+        "rule (\"x\") { event { Ongoing - Global; }",
+    )
+    .unwrap();
+    let failed = run_in(&dir, &["compile", "broken.ws"]);
+    assert_eq!(failed.status.code(), Some(1), "{}", command_result(&failed));
+    assert!(
+        !dir.join("broken.ow").exists(),
+        "a failed compile writes no file"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn compile_refuses_an_existing_file_without_a_terminal_and_force_replaces_it() {
+    let dir = temp_dir();
+    std::fs::write(dir.join("mode.ws"), corpus_workshop("synthetic/basic-rule")).unwrap();
+    std::fs::write(dir.join("mode.ow"), "keep me").unwrap();
+
+    let refused = run_in(&dir, &["compile", "mode.ws"]);
+    assert_eq!(
+        refused.status.code(),
+        Some(2),
+        "{}",
+        command_result(&refused)
+    );
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("--force"),
+        "{}",
+        command_result(&refused)
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("mode.ow")).unwrap(),
+        "keep me"
+    );
+
+    let forced = run_in(&dir, &["compile", "mode.ws", "--force"]);
+    assert_eq!(forced.status.code(), Some(0), "{}", command_result(&forced));
+    assert!(
+        std::fs::read_to_string(dir.join("mode.ow"))
+            .unwrap()
+            .contains("Disable Inspector Recording")
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn compile_never_overwrites_its_input() {
+    let dir = temp_dir();
+    let source = corpus_workshop("synthetic/basic-rule");
+    std::fs::write(dir.join("mode.ws"), &source).unwrap();
+    for extra in [&[][..], &["--force"][..]] {
+        for target in [
+            "mode.ws",
+            "./mode.ws",
+            dir.join("mode.ws").to_str().unwrap(),
+        ] {
+            let mut args = vec!["compile", "mode.ws", "-o", target];
+            args.extend_from_slice(extra);
+            let output = run_in(&dir, &args);
+            assert_eq!(output.status.code(), Some(2), "{}", command_result(&output));
+            assert_eq!(
+                std::fs::read_to_string(dir.join("mode.ws")).unwrap(),
+                source
+            );
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn compile_o_dash_prints_only_the_program() {
+    let dir = temp_dir();
+    std::fs::write(dir.join("mode.ws"), corpus_workshop("synthetic/basic-rule")).unwrap();
+    let output = run_in(&dir, &["compile", "mode.ws", "-o", "-"]);
+    assert_eq!(output.status.code(), Some(0), "{}", command_result(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.starts_with("rule ("), "{stdout}");
+    assert!(!stdout.contains("PASS") && !stdout.contains("sha256"));
+    assert!(output.stderr.is_empty());
+    assert!(!dir.join("mode.ow").exists());
+
+    let json = run_in(&dir, &["compile", "mode.ws", "-o", "-", "-f", "json"]);
+    assert_eq!(json.status.code(), Some(2), "{}", command_result(&json));
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -1663,8 +1781,8 @@ fn bom_prefixed_workshop_behaves_like_the_plain_file() {
     assert!(stdout.contains("PASS check"), "{stdout}");
 
     // Compilation emits byte-identical text to the BOM-less spelling.
-    let bommed_out = run(&["compile", bommed.to_str().unwrap()]);
-    let plain_out = run(&["compile", plain.to_str().unwrap()]);
+    let bommed_out = run(&["compile", bommed.to_str().unwrap(), "-o", "-"]);
+    let plain_out = run(&["compile", plain.to_str().unwrap(), "-o", "-"]);
     assert!(bommed_out.status.success() && plain_out.status.success());
     assert_eq!(bommed_out.stdout, plain_out.stdout);
 
@@ -2285,6 +2403,8 @@ fn json_and_source_stdout_stay_pure_in_github_actions() {
         &[
             "compile",
             path.to_str().unwrap(),
+            "-o",
+            "-",
             "--renderer",
             "github-actions",
         ],
@@ -2303,15 +2423,28 @@ fn source_artifacts_are_byte_exact_in_plain_and_github_renderers() {
     let source = corpus_workshop("synthetic/basic-rule");
     let path = temp_file("basic.txt", &source);
 
-    let expected = parse_json(&run(&["compile", path.to_str().unwrap(), "-f", "json"])
-        .stdout)["result"]["output"]["text"]
-        .as_str()
-        .unwrap()
-        .as_bytes()
-        .to_vec();
+    let written = path.with_extension("ow");
+    assert!(
+        run(&[
+            "compile",
+            path.to_str().unwrap(),
+            "-o",
+            written.to_str().unwrap()
+        ])
+        .status
+        .success()
+    );
+    let expected = std::fs::read(&written).unwrap();
     for renderer in ["plain", "github-actions"] {
         let output = run_with_env(
-            &["compile", path.to_str().unwrap(), "--renderer", renderer],
+            &[
+                "compile",
+                path.to_str().unwrap(),
+                "-o",
+                "-",
+                "--renderer",
+                renderer,
+            ],
             &[("GITHUB_ACTIONS", "true")],
         );
         assert!(output.status.success(), "{renderer}");

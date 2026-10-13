@@ -88,9 +88,10 @@ findings, text output states the withheld count and the JSON envelope carries
 `selection.total`/`selection.withheld` beside the filtered array.
 
 JSON output is one `wright-result/v1` envelope on stdout with no ANSI, progress,
-or workflow commands. `compile` and `convert` source artifacts remain the only
-stdout payload in text mode, including when GitHub Actions presentation is
-selected. GitHub Actions diagnostics and findings are emitted as escaped
+or workflow commands. The `convert` source artifact and the `compile -o -`
+program remain the only stdout payloads in text mode, including when GitHub
+Actions presentation is selected; every other `compile` report is a verdict,
+the written path, and the output SHA-256. GitHub Actions diagnostics and findings are emitted as escaped
 workflow annotations; grouping is sent to the workflow command stream and a
 concise PASS/WARN/ERROR line is appended to `GITHUB_STEP_SUMMARY` when the
 runner provides that file. The summary uses the highest structured severity:
