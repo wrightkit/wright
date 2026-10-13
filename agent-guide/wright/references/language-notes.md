@@ -9,7 +9,7 @@ Confirm against `wright --help` and the `capabilities` session operation; suppor
 
 ## OverPy (`.opy`)
 
-- Compiled natively by Wright with the first-party OPY provider (`--opy-provider` overrides it). `check`, `lint`, `analyze`, and `compile` apply. `inspect` does not: on OPY it returns `source-provider-unsupported`, so answer symbol and flow questions from the source and `analyze`, and say what `inspect` would have confirmed.
+- Compiled natively by Wright with the first-party OPY provider (`--opy-provider` overrides it). `check`, `lint`, `analyze`, `inspect`, and `compile` apply; the `inspect` query subcommands read the provider's compiled artifact. A provider without compile capability declines with its own diagnostic.
 - Edits are provider-owned. The raw edit operations refuse OPY input and name the provider operations; use those when the version offers them, otherwise edit the source directly and re-verify.
 - `convert` runs Workshop to OPY only. Output is canonical, without comments, macros, or formatting, and unrepresentable constructs are rejected without partial output.
 

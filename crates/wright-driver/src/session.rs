@@ -264,13 +264,22 @@ impl CompilerSession {
     /// Loading is idempotent: repeated calls return the same program without
     /// re-reading the input. Returns an owned snapshot so callers can hold it
     /// while mutating the session.
+    ///
+    /// On the provider backend this is the canonical-snapshot read, not a
+    /// workflow (#591): it serves the snapshot a compile-producing operation
+    /// already established and refuses when the session holds none — the
+    /// provider declined compile or has not been asked to compile. Workflows
+    /// that may compile (check, compile, lint, analyze, inspect, and the
+    /// `inspect` queries) call [`Self::load_with_operation`] instead, so the
+    /// provider's own compile answer — including a capability decline —
+    /// reaches the caller (#655).
     pub fn load(&mut self) -> Result<Loaded, Diagnostic> {
         self.verify_fixed_config()?;
         if self.config.source_backend == SourceBackend::Provider
             && self.loaded_operation != Some(ProviderOperation::Compile)
         {
             return Err(SourceProviderError::Unsupported {
-                message: "provider-backed load requires a canonical compile result; lint, analyze, inspect, and convert are not available on the check-only provider path".to_string(),
+                message: "the provider session holds no canonical compile result — the provider declined its compile operation or no compile-producing workflow has run".to_string(),
             }
             .diagnostic());
         }

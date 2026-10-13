@@ -428,11 +428,15 @@ impl CompilerSession {
     }
 
     /// `inspect`: load and produce the structural/semantic program model.
+    ///
+    /// Provider-backed input loads through the same compile operation as
+    /// `lint`/`analyze` (#655): a provider that cannot compile declines with
+    /// its own diagnostic rather than a command-level refusal.
     #[hotpath::measure]
     pub fn inspect(&mut self) -> Envelope<InspectResult> {
         self.with_loaded(
             "inspect",
-            |session| session.load(),
+            |session| session.load_with_operation(ProviderOperation::Compile),
             |session, loaded| {
                 let service = session.shared_semantic(&loaded);
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
@@ -584,7 +588,7 @@ impl CompilerSession {
     {
         self.with_loaded(
             command,
-            |session| session.load(),
+            |session| session.load_with_operation(ProviderOperation::Compile),
             |session, _loaded| {
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
                 let mut service = match ToolService::new(session) {

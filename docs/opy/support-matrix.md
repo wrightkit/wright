@@ -11,10 +11,10 @@ Wright consumes those capabilities only through the Language Provider Protocol
 
 | Workflow | Wright behavior |
 | --- | --- |
-| `.opy` check, compile, lint, or analyze | Route to the configured OPY provider; provider failures are explicit and never fall back to a local frontend. |
+| `.opy` check, compile, lint, analyze, or inspect | Route to the configured OPY provider; provider failures are explicit and never fall back to a local frontend. `inspect` and its query subcommands read the provider's canonical compile artifact like `lint`/`analyze`, so a provider without compile capability declines with its own diagnostic. |
 | Workshop input | Parse and analyze canonical Workshop text through `workshop-rs` in-process. |
 | Workshop to OPY conversion | Request the provider's reconstruction capability; refuse explicitly when it is not advertised. |
-| Inspect, editor mutation, or serialized OPY HIR | No local implementation; return a stable provider-unsupported diagnostic. |
+| Editor mutation or serialized OPY HIR | No local implementation; return a stable provider-unsupported diagnostic. |
 
 The authoritative OPY syntax and compatibility matrix is maintained in
 `opy-rs`. Wright evidence is limited to provider integration tests, CLI and

@@ -475,8 +475,8 @@ fn mapped_provider_project_reports_its_source_file_count() {
             }));
     });
 
-    // `inspect` is not available on the injected-provider backend; `analyze`
-    // and `lint` compose the same `program` summary it reports.
+    // `analyze` and `lint` compose the same `program` summary `inspect`
+    // reports.
     let analyze = session.analyze();
     assert!(analyze.ok, "mapped analyze: {:?}", analyze.diagnostics);
     assert_eq!(analyze.result.program["files"], 2);
@@ -1919,22 +1919,78 @@ fn lpp_source_provider_propagates_a_capability_query_failure() {
     cleanup(dir);
 }
 
+/// #655: `inspect` and its query subcommands load provider-backed input
+/// through the provider's compile operation — the same operation-aware load
+/// `lint`/`analyze` run — so a compile-capable provider serves them, and one
+/// provider compile feeds every later query.
 #[test]
-fn provider_backend_inspect_remains_explicitly_unsupported() {
+fn provider_backend_inspect_and_queries_run_the_compile_load() {
     let (dir, entry) = temp_entry();
+    let operations = Arc::new(Mutex::new(Vec::new()));
+    let provider = ReloadableProvider {
+        operations: Arc::clone(&operations),
+        workshop_text: workshop_fixture("synthetic/basic-rule"),
+    };
     let config = SessionConfig {
         input: InputSpec::Path(entry),
         kind: SourceKind::Opy,
-        source_backend: SourceBackend::Provider,
         ..SessionConfig::default()
     };
-    let mut session = CompilerSession::new(config).expect("session");
+    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
+        .expect("provider session");
+
+    let inspect = session.inspect();
+    assert!(inspect.ok, "provider inspect: {:?}", inspect.diagnostics);
+    let rules = inspect.result.rules.as_array().expect("rule list");
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0]["name"], "setup");
+
+    let symbols = session.symbols(None, None, None);
+    assert!(symbols.ok, "provider symbols: {:?}", symbols.diagnostics);
+    let rules = session.rules(None, None, None, None, true);
+    assert!(
+        rules.ok,
+        "provider rules --content: {:?}",
+        rules.diagnostics
+    );
+    // The first compile established the canonical snapshot; every query
+    // after it reads the cache instead of re-compiling.
+    assert_eq!(*operations.lock().expect("ops"), vec!["compile"]);
+    cleanup(dir);
+}
+
+/// #655: a provider that declines its compile operation reports its own
+/// limitation — `inspect` relays that decline rather than refusing at the
+/// command level.
+#[test]
+fn check_only_provider_inspect_reports_the_provider_compile_decline() {
+    let (dir, entry) = temp_entry();
+    let operations = Arc::new(Mutex::new(Vec::new()));
+    let provider = CheckOnlyProvider {
+        operations: Arc::clone(&operations),
+    };
+    let config = SessionConfig {
+        input: InputSpec::Path(entry),
+        kind: SourceKind::Opy,
+        ..SessionConfig::default()
+    };
+    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
+        .expect("provider session");
 
     let result = session.inspect();
     assert!(!result.ok);
     assert_eq!(result.exit, 3);
-    assert_eq!(result.diagnostics[0].code, "source-provider-unsupported");
+    let diagnostic = &result.diagnostics[0];
+    assert_eq!(diagnostic.code, "source-provider-unsupported");
+    assert!(
+        diagnostic
+            .message
+            .contains("no canonical compile capability"),
+        "the provider's own decline message surfaces: {diagnostic:?}"
+    );
     assert!(result.result.program.is_null());
+    // The compile operation was asked once; the refusal is the provider's.
+    assert_eq!(*operations.lock().expect("ops"), vec!["compile"]);
     cleanup(dir);
 }
 
