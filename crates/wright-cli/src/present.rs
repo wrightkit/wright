@@ -61,7 +61,7 @@ impl Activity {
         let output = Arc::new(Mutex::new(()));
         #[cfg(test)]
         let frame = Arc::new(AtomicUsize::new(0));
-        write_activity_line(&output, None, None);
+        write_activity_line(&output, &done, None, None);
         visible.store(true, Ordering::Release);
         let t_done = Arc::clone(&done);
         let t_status = Arc::clone(&status);
@@ -73,7 +73,7 @@ impl Activity {
             let mut f = 0;
             while !t_done.load(Ordering::Acquire) {
                 let event = *t_status.lock().expect("lock");
-                write_activity_line(&t_output, event, Some(SPINNER[f]));
+                write_activity_line(&t_output, &t_done, event, Some(SPINNER[f]));
                 f = (f + 1) % SPINNER.len();
                 #[cfg(test)]
                 t_frame.store(f, Ordering::Release);
@@ -99,13 +99,31 @@ impl ProgressObserver for Activity {
         if self.done.load(Ordering::Acquire) {
             return;
         }
+        if event.phase == ProgressPhase::Confirmation {
+            // Stop drawing and leave the line clean for the prompt.
+            self.done.store(true, Ordering::Release);
+            let _guard = self.output.lock().expect("lock");
+            if self.visible.swap(false, Ordering::AcqRel) {
+                let _ = write!(std::io::stderr(), "\r\x1b[2K\r");
+                let _ = std::io::stderr().flush();
+            }
+            return;
+        }
         *self.status.lock().expect("lock") = Some(event);
-        write_activity_line(&self.output, Some(event), None);
+        write_activity_line(&self.output, &self.done, Some(event), None);
     }
 }
 
-fn write_activity_line(output: &Mutex<()>, event: Option<ProgressEvent>, spinner: Option<char>) {
+fn write_activity_line(
+    output: &Mutex<()>,
+    done: &AtomicBool,
+    event: Option<ProgressEvent>,
+    spinner: Option<char>,
+) {
     let _guard = output.lock().expect("lock");
+    if done.load(Ordering::Acquire) {
+        return;
+    }
     let label = event
         .map(progress_label)
         .unwrap_or_else(|| "Starting workflow".to_string());
@@ -127,6 +145,7 @@ fn progress_label(event: ProgressEvent) -> String {
         ProgressPhase::Linting => "Running lint rules",
         ProgressPhase::Emission => "Emitting Workshop",
         ProgressPhase::Conversion => "Reconstructing source",
+        ProgressPhase::Confirmation => "Waiting for confirmation",
     };
     match (event.count, event.unit) {
         (Some(count), Some(ProgressUnit::Files)) => format!("{label} {count} files"),

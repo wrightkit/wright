@@ -899,7 +899,33 @@ impl CompilerSession {
         {
             return self.finish("compile", result);
         }
-        match crate::output::write_program(&output.text, entry.as_deref(), write) {
+        let written = {
+            let this = &*self;
+            let CompileWrite { dest, overwrite } = write;
+            let text = output.text.as_str();
+            match overwrite {
+                Overwrite::Ask(ask) => {
+                    let mut confirm = |path: &Path| {
+                        this.progress(ProgressEvent::new(ProgressPhase::Confirmation));
+                        ask(path)
+                    };
+                    crate::output::write_program(
+                        text,
+                        entry.as_deref(),
+                        CompileWrite {
+                            dest,
+                            overwrite: Overwrite::Ask(&mut confirm),
+                        },
+                    )
+                }
+                overwrite => crate::output::write_program(
+                    text,
+                    entry.as_deref(),
+                    CompileWrite { dest, overwrite },
+                ),
+            }
+        };
+        match written {
             Ok(written_to) => {
                 result.output = Some(CompiledOutput {
                     written_to,
