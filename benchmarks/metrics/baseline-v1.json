@@ -102,7 +102,7 @@
           "tokens": 1773.5
         },
         "agent:inspect": {
-          "bytes": 442812,
+          "bytes": 511572,
           "counts": {
             "diagnostics": 0,
             "program.files": 197,
@@ -116,10 +116,10 @@
             "symbols": 503
           },
           "latencyMs": 57.8,
-          "tokens": 110703.0
+          "tokens": 127893.0
         },
         "agent:inspect?brief": {
-          "bytes": 1211,
+          "bytes": 1416,
           "counts": {
             "counts.references": 4117,
             "counts.rules": 307,
@@ -127,7 +127,7 @@
             "items": 5
           },
           "latencyMs": 43.2,
-          "tokens": 302.8
+          "tokens": 354.0
         },
         "agent:lint": {
           "bytes": 8006,
@@ -414,7 +414,7 @@
           "tokens": 5853.0
         },
         "agent:inspect": {
-          "bytes": 323908,
+          "bytes": 392303,
           "counts": {
             "diagnostics": 0,
             "program.files": 313,
@@ -428,10 +428,10 @@
             "symbols": 576
           },
           "latencyMs": 53.7,
-          "tokens": 80977.0
+          "tokens": 98075.8
         },
         "agent:inspect?brief": {
-          "bytes": 1226,
+          "bytes": 1455,
           "counts": {
             "counts.references": 2024,
             "counts.rules": 369,
@@ -439,7 +439,7 @@
             "items": 5
           },
           "latencyMs": 42.3,
-          "tokens": 306.5
+          "tokens": 363.8
         },
         "agent:lint": {
           "bytes": 24324,
@@ -737,7 +737,7 @@
           "tokens": 883.5
         },
         "agent:inspect?brief": {
-          "bytes": 1037,
+          "bytes": 1245,
           "counts": {
             "counts.references": 18,
             "counts.rules": 5,
@@ -745,7 +745,7 @@
             "items": 5
           },
           "latencyMs": 0.4,
-          "tokens": 259.2
+          "tokens": 311.2
         },
         "agent:lint": {
           "bytes": 925,
@@ -1022,7 +1022,7 @@
           "tokens": 3.2
         },
         "agent:inspect": {
-          "bytes": 5536,
+          "bytes": 6385,
           "counts": {
             "diagnostics": 0,
             "program.files": 1,
@@ -1036,10 +1036,10 @@
             "symbols": 11
           },
           "latencyMs": 0.6,
-          "tokens": 1384.0
+          "tokens": 1596.2
         },
         "agent:inspect?brief": {
-          "bytes": 1044,
+          "bytes": 1243,
           "counts": {
             "counts.references": 25,
             "counts.rules": 6,
@@ -1047,7 +1047,7 @@
             "items": 5
           },
           "latencyMs": 0.5,
-          "tokens": 261.0
+          "tokens": 310.8
         },
         "agent:lint": {
           "bytes": 925,
@@ -1964,7 +1964,7 @@
           "tokens": 1155.5
         },
         "agent:inspect?brief": {
-          "bytes": 1049,
+          "bytes": 1271,
           "counts": {
             "counts.references": 24,
             "counts.rules": 6,
@@ -1972,7 +1972,7 @@
             "items": 5
           },
           "latencyMs": 0.4,
-          "tokens": 262.2
+          "tokens": 317.8
         },
         "agent:lint": {
           "bytes": 925,
@@ -2248,7 +2248,7 @@
           "tokens": 3.2
         },
         "agent:inspect": {
-          "bytes": 5536,
+          "bytes": 6385,
           "counts": {
             "diagnostics": 0,
             "program.files": 1,
@@ -2262,10 +2262,10 @@
             "symbols": 11
           },
           "latencyMs": 0.6,
-          "tokens": 1384.0
+          "tokens": 1596.2
         },
         "agent:inspect?brief": {
-          "bytes": 1044,
+          "bytes": 1243,
           "counts": {
             "counts.references": 25,
             "counts.rules": 6,
@@ -2273,7 +2273,7 @@
             "items": 5
           },
           "latencyMs": 0.5,
-          "tokens": 261.0
+          "tokens": 310.8
         },
         "agent:lint": {
           "bytes": 925,
@@ -2559,7 +2559,7 @@
           "tokens": 126.8
         },
         "agent:inspect": {
-          "bytes": 6534,
+          "bytes": 7548,
           "counts": {
             "diagnostics": 0,
             "program.files": 1,
@@ -2573,10 +2573,10 @@
             "symbols": 12
           },
           "latencyMs": 0.8,
-          "tokens": 1633.5
+          "tokens": 1887.0
         },
         "agent:inspect?brief": {
-          "bytes": 1036,
+          "bytes": 1235,
           "counts": {
             "counts.references": 31,
             "counts.rules": 7,
@@ -2584,7 +2584,7 @@
             "items": 5
           },
           "latencyMs": 0.6,
-          "tokens": 259.0
+          "tokens": 308.8
         },
         "agent:lint": {
           "bytes": 1419,
@@ -2748,14 +2748,14 @@
           "tokens": 4251.5
         },
         "cli:inspect?brief": {
-          "bytes": 2056,
+          "bytes": 2365,
           "counts": {
             "counts.references": 31,
             "counts.rules": 7,
             "counts.symbols": 12,
             "items": 5
           },
-          "tokens": 514.0
+          "tokens": 591.2
         },
         "cli:lint": {
           "bytes": 2651,
