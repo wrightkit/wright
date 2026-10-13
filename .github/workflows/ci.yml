@@ -89,7 +89,7 @@ jobs:
     name: Rust (stable)
     needs: paths
     if: needs.paths.outputs.rust_core == 'true'
-    uses: wrightkit/.github/.github/workflows/rust-quality.yml@a83d0f1b4cbcb5b81fb0426e3a5aea1db0899fb5
+    uses: wrightkit/.github/.github/workflows/rust-quality.yml@main
     with:
       toolchain: stable
       cache-shared-key: linux-quality-stable-dev-test
@@ -109,22 +109,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install Rust (1.85.0)
-        uses: dtolnay/rust-toolchain@master
+      - name: Set up Rust
+        uses: wrightkit/.github/.github/actions/setup-rust@main
         with:
           toolchain: 1.85.0
           components: rustfmt, clippy
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: linux-quality-1.85.0-dev-test
-          cache-targets: true
-          cache-all-crates: false
-          cache-workspace-crates: false
-          cache-bin: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          cache-on-failure: false
+          cache-shared-key: linux-quality-1.85.0-dev-test
+          cache-save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check formatting
         run: cargo +1.85.0 fmt --all -- --check
@@ -158,21 +149,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+      - name: Set up Rust
+        uses: wrightkit/.github/.github/actions/setup-rust@main
         with:
           toolchain: stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: linux-quality-stable-dev-test
-          cache-targets: true
-          cache-all-crates: false
-          cache-workspace-crates: false
-          cache-bin: false
-          save-if: false
-          cache-on-failure: false
+          cache-shared-key: linux-quality-stable-dev-test
 
       - name: Build CLI
         run: cargo build --locked -p wright-cli
@@ -315,10 +296,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+      - name: Set up Rust
+        uses: wrightkit/.github/.github/actions/setup-rust@main
         with:
           toolchain: stable
+          cache-shared-key: linux-quality-stable-dev-test
       - name: Download CLI artifact
         uses: actions/download-artifact@v8
         with:
@@ -326,17 +308,6 @@ jobs:
           path: target/debug
       - name: Prepare CLI executable
         run: chmod +x target/debug/wright
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: linux-quality-stable-dev-test
-          cache-targets: true
-          cache-all-crates: false
-          cache-workspace-crates: false
-          cache-bin: false
-          save-if: false
-          cache-on-failure: false
-
       - name: Run provider/product tests
         run: >-
           cargo test --locked
@@ -370,20 +341,11 @@ jobs:
       - name: Checkout Wright
         uses: actions/checkout@v7
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+      - name: Set up Rust
+        uses: wrightkit/.github/.github/actions/setup-rust@main
         with:
           toolchain: stable
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: linux-quality-stable-dev-test
-          cache-targets: true
-          cache-all-crates: false
-          cache-workspace-crates: false
-          cache-bin: false
-          save-if: false
-          cache-on-failure: false
+          cache-shared-key: linux-quality-stable-dev-test
 
       # The mock provider is built from the pinned language-provider-protocol
       # commit the integration tests were validated against (merged LPP v1,
@@ -424,8 +386,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+      - name: Set up Rust
+        uses: wrightkit/.github/.github/actions/setup-rust@main
         with:
           toolchain: stable
 
@@ -456,20 +418,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+      - name: Set up Rust
+        uses: wrightkit/.github/.github/actions/setup-rust@main
         with:
           toolchain: stable
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: linux-quality-stable-dev-test
-          cache-targets: true
-          cache-all-crates: false
-          cache-workspace-crates: false
-          cache-bin: false
-          save-if: false
-          cache-on-failure: false
+          cache-shared-key: linux-quality-stable-dev-test
 
       - name: Build benchmarks
         run: cargo build --locked -p wright-bench
@@ -608,21 +561,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+      - name: Set up Rust
+        uses: wrightkit/.github/.github/actions/setup-rust@main
         with:
           toolchain: stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: dist-validation-${{ runner.os }}-stable-dev
+          cache-shared-key: dist-validation-${{ runner.os }}-stable-dev
           cache-targets: false
-          cache-all-crates: false
-          cache-workspace-crates: false
-          cache-bin: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          cache-on-failure: false
+          cache-save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build CLI and LSP
         shell: bash
