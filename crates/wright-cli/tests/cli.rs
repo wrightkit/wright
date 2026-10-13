@@ -2406,6 +2406,121 @@ fn provider_backed_opy_analyze_surfaces_provider_resolution_failures() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
+/// #655: `wright inspect` and every query subcommand load a provider-backed
+/// `.opy` input through the provider's compile operation — the same
+/// operation-aware load `lint`/`analyze` run — instead of refusing on the
+/// check-only path. The provider is a staged LPP script so the test stays
+/// hermetic.
+#[cfg(unix)]
+#[test]
+fn provider_backed_opy_accepts_inspect_and_its_query_subcommands() {
+    use std::os::unix::fs::PermissionsExt;
+
+    const PROVIDER: &str = r#"#!/usr/bin/env python3
+import json, os, sys
+artifact = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifact.ws")).read()
+initialized = False
+def reply(id, result=None, error=None):
+    message = {"jsonrpc": "2.0", "id": id}
+    message.update({"error": error} if error else {"result": result})
+    print(json.dumps(message), flush=True)
+def lpp_error(id, kind, details, text):
+    reply(id, error={"code": -32000, "message": text, "data": {"lpp": {"kind": kind, "details": details}}})
+for line in sys.stdin:
+    request = json.loads(line)
+    id, method = request["id"], request["method"]
+    if method == "lpp/initialize":
+        first = not initialized
+        initialized = True
+        if not first:
+            lpp_error(id, "alreadyInitialized", {}, "already initialized")
+        elif request["params"]["protocolVersion"] != "1.1":
+            lpp_error(id, "protocolVersionMismatch", {"supportedProtocolVersions": ["1.1"]}, "unsupported")
+        else:
+            reply(id, {"protocolVersion": "1.1", "serverInfo": {"name": "fake", "version": "0"},
+                       "languages": [{"id": "opy", "extensions": ["opy"]}],
+                       "capabilities": {"check": True, "compile": True, "reconstruct": False, "symbols": False, "definition": False, "references": False, "rename": False, "editValidation": False, "projectLoading": True}})
+    elif method == "lpp/compile":
+        reply(id, {"diagnostics": [], "artifact": {"format": "workshop-rs/text-v1", "content": artifact}})
+    else:
+        reply(id, {})
+"#;
+
+    let dir = temp_dir();
+    let script = dir.join("fake-provider");
+    std::fs::write(&script, PROVIDER).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(
+        dir.join("artifact.ws"),
+        corpus_workshop("synthetic/basic-rule"),
+    )
+    .unwrap();
+    let opy = std::fs::read_to_string(workspace_root().join("tests/fixtures/opy/basic-rule.opy"))
+        .unwrap();
+    let input = dir.join("main.opy");
+    std::fs::write(&input, &opy).unwrap();
+    let provider = script.to_str().unwrap().to_string();
+    let input = input.to_str().unwrap().to_string();
+    let run_inspect = |args: &[&str]| {
+        let output = run(args);
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            command_result(&output)
+        );
+        parse_json(&output.stdout)
+    };
+
+    // Bare `inspect` reports the provider-compiled program's rule.
+    let envelope = run_inspect(&["inspect", &input, "--opy-provider", &provider, "-f", "json"]);
+    assert_eq!(envelope["command"], "inspect");
+    assert_eq!(envelope["ok"], true);
+    let rules = envelope["result"]["rules"].as_array().unwrap();
+    assert_eq!(rules.len(), 1, "{envelope}");
+    assert_eq!(rules[0]["name"], "setup");
+
+    // `inspect rules --content` serves the canonical call tree.
+    let envelope = run_inspect(&[
+        "inspect",
+        "rules",
+        "--content",
+        &input,
+        "--opy-provider",
+        &provider,
+        "-f",
+        "json",
+    ]);
+    assert_eq!(envelope["command"], "rules");
+    assert_eq!(envelope["ok"], true);
+    let rules = envelope["result"]["rules"].as_array().unwrap();
+    assert_eq!(rules.len(), 1, "{envelope}");
+    assert_eq!(
+        rules[0]["content"]["actions"].as_array().unwrap().len(),
+        1,
+        "{envelope}"
+    );
+
+    // `inspect symbols` lists the provider-compiled program's symbols.
+    let envelope = run_inspect(&[
+        "inspect",
+        "symbols",
+        &input,
+        "--opy-provider",
+        &provider,
+        "-f",
+        "json",
+    ]);
+    assert_eq!(envelope["command"], "symbols");
+    assert_eq!(envelope["ok"], true);
+    let symbols = envelope["result"].as_array().unwrap();
+    assert!(
+        symbols.iter().any(|symbol| symbol["name"] == "setup"),
+        "{envelope}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // ── Convert (#126) ───────────────────────────────────────────────────────────
 
 #[test]
