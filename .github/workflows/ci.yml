@@ -207,7 +207,7 @@ jobs:
   workshop-integration:
     name: Workshop (${{ matrix.project }})
     needs: [paths, wright-cli-build]
-    if: false && needs.paths.outputs.rust_core == 'true'
+    if: needs.paths.outputs.rust_core == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
