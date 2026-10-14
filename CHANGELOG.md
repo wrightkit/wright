@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.21.0](https://github.com/wrightkit/wright/compare/v0.20.2...v0.21.0) (2026-10-14)
+
+
+### Features
+
+* **driver:** report the canonical element count in costEstimate ([#694](https://github.com/wrightkit/wright/issues/694)) ([ccab9e2](https://github.com/wrightkit/wright/commit/ccab9e2718fb175258e74d92dd5dab56b699e57e))
+
+
+### Bug Fixes
+
+* **cli:** point the lookup hint at the OPY vocabulary for OPY-source diagnostics ([#693](https://github.com/wrightkit/wright/issues/693)) ([2f61a73](https://github.com/wrightkit/wright/commit/2f61a7356e003fa1f9fc328cad8b6e87126bf961)), closes [#692](https://github.com/wrightkit/wright/issues/692)
+
 ## [0.20.2](https://github.com/wrightkit/wright/compare/v0.20.1...v0.20.2) (2026-10-14)
 
 
