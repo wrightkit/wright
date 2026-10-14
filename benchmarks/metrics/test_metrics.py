@@ -295,6 +295,20 @@ class RunTest(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertEqual(baseline_path.read_bytes(), before)
 
+    def test_check_from_shards_fails_when_a_project_has_no_shard(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            baseline_path = Path(tmp) / "baseline.json"
+            ok = {"status": "ok", "metrics": {"m": _metric(1000)}}
+            baseline_path.write_text(
+                json.dumps(_doc({"small-workshop": ok, "bastion": ok}))
+            )
+            shard = Path(tmp) / "small-workshop.json"
+            shard.write_text(json.dumps(_doc({"small-workshop": ok})))
+            with mock.patch.object(metrics, "run_metrics") as measure:
+                code = _check_main(baseline_path, "--from", str(shard))
+            self.assertEqual(code, 1)
+            measure.assert_not_called()
+
     def test_size_and_latency_drift_report_without_failing(self):
         # Drift is reviewed, not gated: a fix legitimately moves sizes.
         with tempfile.TemporaryDirectory() as tmp:
@@ -360,6 +374,52 @@ class ScenarioTest(unittest.TestCase):
         ratios = metrics.scenario_ratios(projects, [{"id": "s"}], corpus_projects)
         self.assertEqual(
             ratios["s"], {"largest": "big", "tokens": 1000.0, "vsSeed": {"seed-a": 10.0, "seed-b": 20.0}}
+        )
+
+
+class MergeTest(unittest.TestCase):
+    CORPUS = {
+        "version": "v1",
+        "projects": [
+            {"id": "seed", "scenarios": ["s"]},
+            {"id": "big", "scenarios": ["s"]},
+        ],
+        "scenarios": [{"id": "s"}],
+    }
+
+    def _shard(self, pid, tokens, **overrides):
+        document = _doc({pid: {"status": "ok", "metrics": {"scenario:s": {"tokens": tokens}}}})
+        document["defaultTokenBudget"] = 10
+        document.update(overrides)
+        return document
+
+    def test_merge_equals_the_unpartitioned_run(self):
+        whole = self._shard("seed", 100.0)
+        whole["projects"].update(self._shard("big", 1000.0)["projects"])
+        whole["scenarioRatios"] = metrics.scenario_ratios(
+            whole["projects"], self.CORPUS["scenarios"], self.CORPUS["projects"]
+        )
+        shards = [self._shard("big", 1000.0), self._shard("seed", 100.0)]
+        self.assertEqual(metrics.merge_runs(shards, self.CORPUS), whole)
+
+    def test_shards_that_disagree_on_build_identity_do_not_merge(self):
+        shards = [self._shard("seed", 1.0), self._shard("big", 1.0, opyProvider="0.0.1")]
+        with self.assertRaisesRegex(ValueError, "opyProvider"):
+            metrics.merge_runs(shards, self.CORPUS)
+
+    def test_a_project_in_two_shards_does_not_merge(self):
+        shards = [self._shard("seed", 1.0), self._shard("seed", 2.0)]
+        with self.assertRaisesRegex(ValueError, "more than one shard"):
+            metrics.merge_runs(shards, self.CORPUS)
+
+    def test_a_project_no_shard_covered_blocks(self):
+        base = _doc({p: {"status": "ok", "metrics": {"m": _metric()}} for p in ("seed", "big")})
+        merged = metrics.merge_runs(
+            [_doc({"seed": {"status": "ok", "metrics": {"m": _metric()}}})], self.CORPUS
+        )
+        blocking, _ = metrics.split_changes(metrics.compare_metrics(base, merged)[0])
+        self.assertEqual(
+            [(v["project"], v["change"]) for v in blocking], [("big", "removed-from-run")]
         )
 
 

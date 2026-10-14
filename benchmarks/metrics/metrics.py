@@ -27,6 +27,9 @@ Commands:
   latency is neither measured for nor compared. Wall time on shared CI hosts
   varies by a factor of two between runs, so a blocking gate uses this form.
   ``--out`` also writes the measured run, for trend records.
+  ``--from`` compares the merged ``run --project`` outputs of per-project
+  shards instead of measuring, so a partitioned run reaches the verdict of an
+  unpartitioned one; a project no shard covered fails as ``removed-from-run``.
 
 Repository corpus entries are cloned shallow at their pinned commit; their
 source is never vendored. Derived metrics are the only stored artifact.
@@ -36,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import queue
@@ -465,49 +469,57 @@ def discover_addresses(wright: str, entry: Path, kind: str, project_dir: Path) -
 
 
 def run_cli_commands(
-    wright: str, entry: Path, kind: str, project_dir: Path, repeats: int
+    wright: str, entry: Path, kind: str, project_dir: Path, repeats: int, jobs: int = 1
 ) -> dict:
-    """Measure default JSON and text forms; address refs/cfg through queries."""
-    metrics: dict[str, dict] = {}
+    """Measure default JSON and text forms; address refs/cfg through queries.
+
+    Each command/form is an independent CLI invocation, so ``jobs`` > 1 runs
+    them concurrently; the result order does not depend on ``jobs``."""
     scratch = tempfile.TemporaryDirectory(prefix="wright-metrics-")
     addresses = discover_addresses(wright, entry, kind, project_dir)
-    for command in CLI_COMMANDS + [f"inspect {sub}" for sub in INSPECT_COMMANDS]:
-        for form in (["json"] if command == "compile" else ["json", "text"]):
-            key = f"cli:{command}" + ("?text" if form == "text" else "")
-            sub = command.split()[-1]
-            if sub in ("refs", "cfg") and sub not in addresses:
-                metrics[key] = {"skipped": "no globally unique declared name"}
+
+    def measure(command: str, form: str) -> dict:
+        sub = command.split()[-1]
+        if sub in ("refs", "cfg") and sub not in addresses:
+            return {"skipped": "no globally unique declared name"}
+        argv = [wright, *command.split()]
+        if sub in addresses:
+            argv.append(addresses[sub])
+        argv += [str(entry), "--kind", kind, "-f", form]
+        if command == "compile":
+            argv += ["-o", str(Path(scratch.name) / "compiled.ow"), "--force"]
+        outputs_bytes = []
+        latencies = []
+        counts = {}
+        failure = None
+        for _ in range(repeats if form == "json" else 1):
+            start = time.monotonic()
+            completed = subprocess.run(argv, capture_output=True, cwd=project_dir)
+            latencies.append((time.monotonic() - start) * 1000.0)
+            outputs_bytes.append(len(completed.stdout))
+            if form == "text":
+                if completed.returncode not in (0, 1):
+                    failure = f"exit-{completed.returncode}"
                 continue
-            argv = [wright, *command.split()]
-            if sub in addresses:
-                argv.append(addresses[sub])
-            argv += [str(entry), "--kind", kind, "-f", form]
-            if command == "compile":
-                argv += ["-o", str(Path(scratch.name) / "compiled.ow"), "--force"]
-            outputs_bytes = []
-            latencies = []
-            counts = {}
-            failure = None
-            for _ in range(repeats if form == "json" else 1):
-                start = time.monotonic()
-                completed = subprocess.run(argv, capture_output=True, cwd=project_dir)
-                latencies.append((time.monotonic() - start) * 1000.0)
-                outputs_bytes.append(len(completed.stdout))
-                if form == "text":
-                    if completed.returncode not in (0, 1):
-                        failure = f"exit-{completed.returncode}"
-                    continue
-                try:
-                    envelope = json.loads(completed.stdout)
-                    failure = envelope_failure(envelope)
-                    counts = cli_counts(command, envelope)
-                except (json.JSONDecodeError, TypeError):
-                    failure = "unparsed-stdout"
-            metrics[key] = {"error": failure} if failure else metric_record(
-                outputs_bytes, latencies if form == "json" else None, counts
-            )
+            try:
+                envelope = json.loads(completed.stdout)
+                failure = envelope_failure(envelope)
+                counts = cli_counts(command, envelope)
+            except (json.JSONDecodeError, TypeError):
+                failure = "unparsed-stdout"
+        return {"error": failure} if failure else metric_record(
+            outputs_bytes, latencies if form == "json" else None, counts
+        )
+
+    tasks = [
+        (f"cli:{command}" + ("?text" if form == "text" else ""), command, form)
+        for command in CLI_COMMANDS + [f"inspect {sub}" for sub in INSPECT_COMMANDS]
+        for form in (["json"] if command == "compile" else ["json", "text"])
+    ]
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        records = list(pool.map(lambda task: measure(task[1], task[2]), tasks))
     scratch.cleanup()
-    return metrics
+    return {task[0]: record for task, record in zip(tasks, records)}
 
 
 def accumulate_scenario(steps: list[list[str]], execute) -> dict:
@@ -526,11 +538,10 @@ def accumulate_scenario(steps: list[list[str]], execute) -> dict:
 
 
 def run_scenarios(
-    wright: str, entry: Path, kind: str, project_dir: Path, scenarios: list[dict]
+    wright: str, entry: Path, kind: str, project_dir: Path, scenarios: list[dict], jobs: int = 1
 ) -> dict:
     """`scenario:<id>` metrics: each recommended call sequence in its default
     text form, run as separate CLI invocations."""
-    metrics: dict[str, dict] = {}
     addresses = discover_addresses(wright, entry, kind, project_dir)
     placeholders = {"{symbol}": addresses.get("refs"), "{rule}": addresses.get("cfg")}
 
@@ -549,11 +560,11 @@ def run_scenarios(
             failure = f"exit-{completed.returncode}"
         return len(completed.stdout), failure
 
-    for scenario in scenarios:
-        metrics[f"scenario:{scenario['id']}"] = accumulate_scenario(
-            scenario["steps"], execute
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        records = list(
+            pool.map(lambda scenario: accumulate_scenario(scenario["steps"], execute), scenarios)
         )
-    return metrics
+    return {f"scenario:{scenario['id']}": record for scenario, record in zip(scenarios, records)}
 
 
 def scenario_ratios(projects: dict, scenarios: list[dict], corpus_projects: list[dict]) -> dict:
@@ -639,6 +650,7 @@ def run_metrics(
     repeats: int,
     only: set[str] | None,
     cli_repeats: int | None = None,
+    jobs: int = 1,
 ) -> dict:
     projects: dict[str, dict] = {}
     for project in corpus["projects"]:
@@ -660,20 +672,25 @@ def run_metrics(
                 "reason": f"entry missing: {project['entry']}",
             }
             continue
-        metrics = run_agent_ops(wright, entry, project["kind"], directory, repeats)
-        metrics.update(
-            run_cli_commands(
-                wright,
-                entry,
-                project["kind"],
-                directory,
-                repeats if cli_repeats is None else cli_repeats,
-            )
-        )
         selected = [
             sc for sc in corpus.get("scenarios", []) if sc["id"] in project.get("scenarios", [])
         ]
-        metrics.update(run_scenarios(wright, entry, project["kind"], directory, selected))
+        cli_runs = repeats if cli_repeats is None else cli_repeats
+        # The three surfaces are independent; with jobs > 1 they overlap, which
+        # blurs latency, so only a run that discards latency may ask for it.
+        with ThreadPoolExecutor(max_workers=3 if jobs > 1 else 1) as pool:
+            surfaces = [
+                pool.submit(run_agent_ops, wright, entry, project["kind"], directory, repeats),
+                pool.submit(
+                    run_cli_commands, wright, entry, project["kind"], directory, cli_runs, jobs
+                ),
+                pool.submit(
+                    run_scenarios, wright, entry, project["kind"], directory, selected, jobs
+                ),
+            ]
+            metrics: dict[str, dict] = {}
+            for surface in surfaces:
+                metrics.update(surface.result())
         failed = all("error" in m or "skipped" in m for m in metrics.values())
         projects[pid] = {
             "status": "error" if failed else "ok",
@@ -689,6 +706,45 @@ def run_metrics(
         "wright": wright_version(wright),
         "opyProvider": provider_version(),
         "defaultTokenBudget": DEFAULT_TOKEN_BUDGET,
+        "projects": projects,
+        "scenarioRatios": scenario_ratios(
+            projects, corpus.get("scenarios", []), corpus["projects"]
+        ),
+    }
+
+
+MERGE_IDENTITY_KEYS = (
+    "contract",
+    "corpusVersion",
+    "wright",
+    "opyProvider",
+    "defaultTokenBudget",
+)
+
+
+def merge_runs(documents: list[dict], corpus: dict) -> dict:
+    """One run document from per-project shard runs of the same build.
+
+    Shards must agree on every identity key and must not overlap; scenario
+    ratios are recomputed over the merged projects so they never depend on how
+    the corpus was partitioned.
+    """
+    if not documents:
+        raise ValueError("no shard runs to merge")
+    first = documents[0]
+    projects: dict[str, dict] = {}
+    for document in documents:
+        for key in MERGE_IDENTITY_KEYS:
+            if document.get(key) != first.get(key):
+                raise ValueError(
+                    f"shards disagree on {key}: {first.get(key)!r} vs {document.get(key)!r}"
+                )
+        for pid, project in (document.get("projects") or {}).items():
+            if pid in projects:
+                raise ValueError(f"project {pid} appears in more than one shard")
+            projects[pid] = project
+    return {
+        **{key: first.get(key) for key in MERGE_IDENTITY_KEYS},
         "projects": projects,
         "scenarioRatios": scenario_ratios(
             projects, corpus.get("scenarios", []), corpus["projects"]
@@ -998,10 +1054,30 @@ def main() -> int:
         default=None,
         help="limit to one corpus project id (repeatable)",
     )
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help="`run` only: measure independent invocations concurrently; latency is not "
+        "meaningful with more than one job, so use it with `check --skip-latency` or "
+        "shard runs whose latency is discarded",
+    )
+    parser.add_argument(
+        "--from",
+        dest="shards",
+        type=Path,
+        action="append",
+        default=None,
+        help="`check` only: compare these `run --project` outputs, merged, instead of measuring",
+    )
     args = parser.parse_args()
 
     corpus = load_corpus(args.manifest)
     only = set(args.project) if args.project else None
+    unknown = (only or set()) - {project["id"] for project in corpus["projects"]}
+    if unknown:
+        print(f"unknown corpus project(s): {', '.join(sorted(unknown))}", file=sys.stderr)
+        return 1
     wright = (
         str(Path(args.wright).resolve())
         if os.sep in args.wright
@@ -1017,7 +1093,7 @@ def main() -> int:
         return 0
 
     if args.command == "run":
-        metrics = run_metrics(wright, corpus, args.repeats, only, args.cli_repeats)
+        metrics = run_metrics(wright, corpus, args.repeats, only, args.cli_repeats, args.jobs)
         text = json.dumps(metrics, indent=2, sort_keys=True) + "\n"
         if args.out:
             args.out.write_text(text)
@@ -1038,7 +1114,14 @@ def main() -> int:
         )
         return 1
     repeats, cli_repeats = (1, 1) if args.skip_latency else (args.repeats, args.cli_repeats)
-    current = run_metrics(wright, corpus, repeats, only, cli_repeats)
+    if args.shards:
+        try:
+            current = merge_runs([json.loads(path.read_text()) for path in args.shards], corpus)
+        except (OSError, ValueError) as error:
+            print(f"cannot merge shard runs: {error}", file=sys.stderr)
+            return 1
+    else:
+        current = run_metrics(wright, corpus, repeats, only, cli_repeats)
     if args.out:
         args.out.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n")
     if args.skip_latency:
