@@ -125,8 +125,9 @@ up as file locations; the reported position and the pipeline stage trail each
 diagnostic as secondary metadata instead. A diagnostic whose code carries an
 `unknown-` kind (a rejected Workshop or OverPy name) is followed by a
 one-line `hint: run 'wright lookup' ...` pointer on `check` and `compile`
-(#529, ADR-0021); the hint is text presentation only and never enters the
-envelope. A compact footer closes the report
+(#529, ADR-0021); an OPY-origin diagnostic names its vocabulary —
+`wright lookup --language opy` (#692). The hint is text presentation only
+and never enters the envelope. A compact footer closes the report
 with the count of affected source files and, on an interactive terminal, the
 elapsed workflow time; plain output omits wall-clock values so it stays
 deterministic. Severity ordering, secondary metadata, the lookup hint, and
