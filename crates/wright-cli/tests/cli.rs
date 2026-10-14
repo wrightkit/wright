@@ -553,6 +553,146 @@ fn check_text_leads_with_verdict_and_blocking_count() {
 }
 
 #[test]
+fn terminal_renderer_marks_independent_diagnostics() {
+    // The terminal layout delimits each diagnostic block with a branch or
+    // end connector so independent findings stay visually separable (#703);
+    // the reported set, order, and content are unchanged.
+    let path = temp_file("mixed.txt", MIXED_CHECK_SOURCE);
+    let output = run(&[
+        "check",
+        path.to_str().unwrap(),
+        "--renderer",
+        "terminal",
+        "--color",
+        "never",
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("├─ error["), "{stderr}");
+    assert!(stderr.contains("╰─ warning["), "{stderr}");
+    assert!(
+        stderr.contains("│  --> ") && stderr.contains("   --> "),
+        "continuation rails hang under each diagnostic: {stderr}"
+    );
+    assert!(
+        stderr.contains("│  = ") && stderr.contains("   = "),
+        "secondary metadata stays inside the block: {stderr}"
+    );
+    assert!(
+        stderr.contains("Set Global Variable(B, FutureValueThing(2));"),
+        "the source context renders inside the rail: {stderr}"
+    );
+    // The verdict stream is untouched by the connectors.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.starts_with("ERROR check\n"), "{stdout}");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn plain_renderer_keeps_the_undecorated_diagnostic_layout() {
+    // `plain` is the deterministic, undecorated contract (#703): no box
+    // connectors, same lines as before the terminal refinement.
+    let path = temp_file("mixed.txt", MIXED_CHECK_SOURCE);
+    let output = run(&[
+        "check",
+        path.to_str().unwrap(),
+        "--renderer",
+        "plain",
+        "--color",
+        "never",
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains('├') && !stderr.contains('╰'),
+        "plain stays undecorated: {stderr}"
+    );
+    assert!(stderr.contains("error["), "{stderr}");
+    assert!(stderr.contains("\n  --> "), "{stderr}");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn terminal_renderer_marks_lint_findings_and_keeps_compact_results_flat() {
+    let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
+    let output = run(&[
+        "lint",
+        path.to_str().unwrap(),
+        "--renderer",
+        "terminal",
+        "--color",
+        "never",
+    ]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("  ╰─ warning["),
+        "the finding block is delimited: {stdout}"
+    );
+    assert!(
+        stdout.contains("     --> "),
+        "the location hangs under the finding: {stdout}"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+
+    // A one-finding result still gets its end marker, but a bare verdict
+    // with nothing to group stays flat — no decorative rail is forced onto
+    // compact output.
+    let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
+    let output = run(&[
+        "check",
+        path.to_str().unwrap(),
+        "--renderer",
+        "terminal",
+        "--color",
+        "never",
+    ]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, "PASS check\n  0 diagnostic(s)\n", "{stdout}");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn terminal_renderer_marks_analyze_risks_and_cfg_blocks() {
+    let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
+    let output = run(&[
+        "analyze",
+        path.to_str().unwrap(),
+        "--renderer",
+        "terminal",
+        "--color",
+        "never",
+    ]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("  ╰─ warning[min-wait-loop]"),
+        "the risk item is delimited inside its section: {stdout}"
+    );
+
+    let output = run(&[
+        "inspect",
+        "cfg",
+        "bounded while",
+        path.to_str().unwrap(),
+        "--renderer",
+        "terminal",
+        "--color",
+        "never",
+    ]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("  ├─ block "), "{stdout}");
+    assert!(stdout.contains("  ╰─ block "), "{stdout}");
+    assert!(
+        stdout.contains("  │  -> "),
+        "successors hang under their block: {stdout}"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
 fn check_unmapped_locations_are_not_fabricated() {
     // `<stdin>` is a pseudo-path: the position is honest metadata, never a
     // file-style `-->` location.

@@ -114,6 +114,20 @@ source context enters the driver envelope or JSON. Plain output,
 redirected/piped output, `TERM=dumb`, CI, GitHub Actions, and explicit JSON
 rendering remain static and deterministic.
 
+On the terminal renderer only, independent multi-line items are delimited
+with lightweight connectors (#703): each envelope diagnostic, lint finding
+or fix entry, analyze risk item, `inspect cfg` block, and `inspect rules
+--content` entry opens with a `├─` branch marker — or `╰─` for the last item
+— and its child lines (locations, source frames, secondary notes, successors,
+statements) hang from a `│` continuation rail aligned under the item's text.
+The connectors separate adjacent blocks without extra framing; they draw dim
+when color is on so severity labels and messages keep prominence. One-line
+items and bare verdicts stay flat — a clean `check` remains two undecorated
+lines. The connector set is a terminal detail: `plain`, GitHub Actions, CI,
+and JSON keep their existing undecorated layout byte-for-byte, and the
+reported findings, verdicts, exit codes, caps, and `--all` expansion are
+identical across renderers.
+
 The `check` report follows a human-first hierarchy (#443) on the
 terminal/plain text surface only: the verdict line leads with the blocking
 error count before the non-blocking severities, diagnostics render in action

@@ -336,11 +336,11 @@ fn render_text<T: serde::Serialize + ResultPresentation>(
     ordered.sort_by_key(|diagnostic| severity_rank(diagnostic.severity));
     let diagnostic_total = ordered.len();
     let bounded = !matches!(envelope.command.as_str(), "compile" | "convert" | "rename");
-    for diagnostic in ordered
-        .into_iter()
-        .take(if pres.all || !bounded { usize::MAX } else { 20 })
-    {
-        render_diagnostic(diagnostic, pres.color);
+    let limit = if pres.all || !bounded { usize::MAX } else { 20 };
+    let shown = diagnostic_total.min(limit);
+    for (index, diagnostic) in ordered.into_iter().take(limit).enumerate() {
+        let marks = pres.marks(index + 1 == shown);
+        render_diagnostic(diagnostic, pres.color, &marks);
         // ADR-0021 decision 6: text `check`/`compile` points an agent at
         // `wright lookup` after a rejected-name diagnostic. Owner codes are
         // namespaced (`workshop.unknown-value.futurevaluething`), so any
@@ -368,7 +368,7 @@ fn render_text<T: serde::Serialize + ResultPresentation>(
             } else {
                 "hint: run 'wright lookup' with the rejected name to find its spelling and signature"
             };
-            eprintln!("  {}", dim(hint, pres.color));
+            eprintln!("{}{}", marks.pad, dim(hint, pres.color));
         }
     }
     if bounded && !pres.all && diagnostic_total > 20 {
@@ -490,6 +490,53 @@ fn dim(value: &str, color: bool) -> String {
         format!("\x1b[2m{value}\x1b[0m")
     } else {
         value.to_string()
+    }
+}
+
+/// The connector pair for one item inside a grouped block (#703): `head`
+/// starts the item's first line and `pad` prefixes each of its child lines,
+/// so every item in a list is visually delimited by a branch (`├─`) or end
+/// (`╰─`) marker with a continuation rail. Only the terminal renderer draws
+/// connectors — plain output keeps its flat deterministic contract, so the
+/// parts collapse to the existing indentation there. Connectors dim with
+/// color on so the severity label and message keep prominence.
+struct Marks {
+    head: String,
+    pad: String,
+}
+
+impl Presentation {
+    /// Marks for a block hung directly under the verdict (envelope
+    /// diagnostics).
+    fn marks(&self, last: bool) -> Marks {
+        self.connector(last, "")
+    }
+
+    /// Marks for an item under a section header's two-space indent.
+    fn section_marks(&self, last: bool) -> Marks {
+        self.connector(last, "  ")
+    }
+
+    /// `base` is the item's own indent; its child lines sit two spaces
+    /// deeper. Terminal connectors draw the marker at `base` and run the
+    /// rail through where the child indent would be, so child content stays
+    /// aligned under the item's text.
+    fn connector(&self, last: bool, base: &str) -> Marks {
+        if self.renderer != Renderer::Terminal {
+            return Marks {
+                head: base.to_string(),
+                pad: format!("{base}  "),
+            };
+        }
+        let (branch, rail) = if last {
+            ("╰─ ", "   ")
+        } else {
+            ("├─ ", "│  ")
+        };
+        Marks {
+            head: dim(&format!("{base}{branch}"), self.color),
+            pad: dim(&format!("{base}{rail}"), self.color),
+        }
     }
 }
 
@@ -961,26 +1008,27 @@ impl ResultPresentation for RulesResult {
     }
     /// One entry per rule: identity and location, then — with `--content` —
     /// the conditions and actions, each statement one call-tree line.
-    fn render_body(&self, _ctx: &RenderContext<'_>) {
+    fn render_body(&self, ctx: &RenderContext<'_>) {
         let rules = query_items(&self.0, "rules");
         println!("\nRules");
         if rules.is_empty() {
             println!("  none");
             return;
         }
-        for rule in rules {
+        for (index, rule) in rules.iter().enumerate() {
+            let marks = ctx.presentation.section_marks(index + 1 == rules.len());
             let name = rule["name"].as_str().unwrap_or("<unnamed>");
             let event = rule["event"].as_str().unwrap_or("?");
             match rule.get("span").and_then(inline_location) {
-                Some(location) => println!("  {name} [{event}] --> {location}"),
-                None => println!("  {name} [{event}]"),
+                Some(location) => println!("{}{name} [{event}] --> {location}", marks.head),
+                None => println!("{}{name} [{event}]", marks.head),
             }
             let content = &rule["content"];
             for condition in content["conditions"].as_array().into_iter().flatten() {
-                println!("    if {}", render_node(&condition["value"]));
+                println!("{}if {}", marks.pad, render_node(&condition["value"]));
             }
             for action in content["actions"].as_array().into_iter().flatten() {
-                println!("    {}", render_node(action));
+                println!("{}{}", marks.pad, render_node(action));
             }
         }
         print_query_withheld(&self.0, "rule(s)");
@@ -1162,7 +1210,8 @@ impl ResultPresentation for CfgResult {
             self.0["entry"].as_u64().unwrap_or(0),
             self.0["exit"].as_u64().unwrap_or(0)
         );
-        for block in blocks.iter() {
+        for (index, block) in blocks.iter().enumerate() {
+            let marks = ctx.presentation.section_marks(index + 1 == blocks.len());
             let mut flags = Vec::new();
             if block["waits"].as_bool().unwrap_or(false) {
                 flags.push("waits");
@@ -1180,7 +1229,8 @@ impl ResultPresentation for CfgResult {
                 format!(" [{}]", flags.join(" "))
             };
             println!(
-                "  block {} ({}): {} action(s){}",
+                "{}block {} ({}): {} action(s){}",
+                marks.head,
                 block["id"].as_u64().unwrap_or(0),
                 block["kind"].as_str().unwrap_or("block"),
                 array_len(&block["actions"]),
@@ -1200,7 +1250,7 @@ impl ResultPresentation for CfgResult {
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
-                println!("    -> {successors}");
+                println!("{}-> {successors}", marks.pad);
             }
         }
         print_query_withheld(&self.0, "block(s)");
@@ -1658,22 +1708,30 @@ fn render_lint_fixes(result: &LintResult, ctx: &RenderContext<'_>) {
         println!("  none offered");
         return;
     }
-    for fix in fixes {
+    for (index, fix) in fixes.iter().enumerate() {
+        let marks = ctx.presentation.section_marks(index + 1 == fixes.len());
         let status = match fix.status {
             wright_driver::result::LintFixStatus::Preview => "fix",
             wright_driver::result::LintFixStatus::Applied => "applied",
             wright_driver::result::LintFixStatus::Refused => "refused",
         };
-        println!("  {status}[{}]: {}", fix.code, fix.summary);
+        println!("{}{status}[{}]: {}", marks.head, fix.code, fix.summary);
         if let Some(span) = fix.span.as_ref().filter(|span| span.is_object()) {
-            render_finding_location(span, ctx, "    ", false);
+            render_finding_location(span, ctx, &marks.pad, false);
         }
         for preview in fix.preview.iter().flatten() {
-            println!("    {}", preview.source);
-            render_diff_lines(&preview.original, &preview.new_text, "      ");
+            println!("{}{}", marks.pad, preview.source);
+            render_diff_lines(
+                &preview.original,
+                &preview.new_text,
+                &format!("{}  ", marks.pad),
+            );
         }
         for diagnostic in &fix.diagnostics {
-            println!("    refused — {}: {}", diagnostic.code, diagnostic.message);
+            println!(
+                "{}refused — {}: {}",
+                marks.pad, diagnostic.code, diagnostic.message
+            );
         }
     }
 }
@@ -1698,7 +1756,8 @@ fn render_lint(result: &LintResult, ctx: &RenderContext<'_>) {
         {
             end += 1;
         }
-        render_finding_group(&findings[index..end], ctx);
+        let marks = ctx.presentation.section_marks(end == findings.len());
+        render_finding_group(&findings[index..end], ctx, &marks);
         index = end;
     }
     if let Some(selection) = &result.selection {
@@ -1728,7 +1787,7 @@ fn render_lint(result: &LintResult, ctx: &RenderContext<'_>) {
 fn render_essential(result: &EssentialResult, ctx: &RenderContext<'_>) {
     let value = &result.result;
     if value.get("hotspots").is_some() {
-        render_essential_analyze(value);
+        render_essential_analyze(value, ctx);
     } else if value.get("program").is_some() {
         let p = &value["program"];
         println!(
@@ -1797,7 +1856,7 @@ fn print_truncation(value: &serde_json::Value) {
     }
 }
 
-fn render_essential_analyze(value: &serde_json::Value) {
+fn render_essential_analyze(value: &serde_json::Value, ctx: &RenderContext<'_>) {
     let p = &value["program"];
     println!(
         "\nProgram overview\n  {} file(s), {} rule(s), {} global variable(s), {} player variable(s), {} subroutine(s), {} persistent object(s)",
@@ -1889,16 +1948,19 @@ fn render_essential_analyze(value: &serde_json::Value) {
     println!(
         "\nPerformance and stability risks\n  heuristic/static indicators — not measured runtime cost or behavior"
     );
-    for risk in value["risks"].as_array().into_iter().flatten() {
+    let risks = value["risks"].as_array().map_or(&[][..], Vec::as_slice);
+    for (index, risk) in risks.iter().enumerate() {
+        let marks = ctx.presentation.section_marks(index + 1 == risks.len());
         println!(
-            "  {}[{}] (evidence: {}): {}",
+            "{}{}[{}] (evidence: {}): {}",
+            marks.head,
             risk["severity"].as_str().unwrap_or("info"),
             risk["code"].as_str().unwrap_or("finding"),
             risk["evidence"].as_str().unwrap_or("static"),
             risk["message"].as_str().unwrap_or_default()
         );
         if let Some(span) = finding_location_span(risk) {
-            print_location(&span, "      ");
+            print_location(&span, &format!("{}  ", marks.pad));
         }
     }
     if count(&value["persistentObjects"], "total") > 0 {
@@ -1935,21 +1997,25 @@ fn render_essential_analyze(value: &serde_json::Value) {
 /// source frame follow; evidence metadata trails dimmed so it never
 /// outweighs the message. A repeated group names its finding count — pseudo-path
 /// and spanless members join the group but never render a `-->` line.
-fn render_finding_group(group: &[serde_json::Value], ctx: &RenderContext<'_>) {
+fn render_finding_group(group: &[serde_json::Value], ctx: &RenderContext<'_>, marks: &Marks) {
     let first = &group[0];
     let code = first["code"].as_str().unwrap_or("finding");
     let msg = first["message"].as_str().unwrap_or_default();
     let sev = finding_severity_label(first, ctx.presentation.color);
     if group.len() == 1 {
-        println!("  {sev}[{code}]: {msg}");
+        println!("{}{sev}[{code}]: {msg}", marks.head);
         if let Some(span) = first.get("span").filter(|span| span.is_object()) {
-            render_finding_location(span, ctx, "    ", true);
+            render_finding_location(span, ctx, &marks.pad, true);
         }
     } else {
-        println!("  {sev}[{code}] ({} findings): {msg}", group.len());
+        println!(
+            "{}{sev}[{code}] ({} findings): {msg}",
+            marks.head,
+            group.len()
+        );
         let located = renderable_group_spans(group);
         for span in located.iter() {
-            render_finding_location(span, ctx, "    ", false);
+            render_finding_location(span, ctx, &marks.pad, false);
         }
     }
     // Secondary notes — the evidence class, boundedness evidence, and spans
@@ -1966,7 +2032,8 @@ fn render_finding_group(group: &[serde_json::Value], ctx: &RenderContext<'_>) {
         notes.push(note);
     }
     println!(
-        "    {}",
+        "{}{}",
+        marks.pad,
         dim(&format!("= {}", notes.join(" · ")), ctx.presentation.color)
     );
 }
@@ -2111,7 +2178,7 @@ fn finding_severity_label(finding: &serde_json::Value, color: bool) -> String {
 /// rule preview answer "what is this", and the detail commands route the
 /// reader to the query that owns each full answer — the overview never dumps
 /// the symbol or reference lists those queries serve.
-fn render_diagnostic(diagnostic: &wright_driver::Diagnostic, color: bool) {
+fn render_diagnostic(diagnostic: &wright_driver::Diagnostic, color: bool, marks: &Marks) {
     let sev = diagnostic.severity.as_str();
     let label = if color {
         let code = match diagnostic.severity {
@@ -2123,7 +2190,10 @@ fn render_diagnostic(diagnostic: &wright_driver::Diagnostic, color: bool) {
     } else {
         sev.to_string()
     };
-    eprintln!("{label}[{}]: {}", diagnostic.code, diagnostic.message);
+    eprintln!(
+        "{}{label}[{}]: {}",
+        marks.head, diagnostic.code, diagnostic.message
+    );
     // Secondary notes — locations without a mapped source file, the owning
     // stage, and non-native input origins — render dimmed under the problem
     // line rather than competing with it (#443).
@@ -2131,14 +2201,16 @@ fn render_diagnostic(diagnostic: &wright_driver::Diagnostic, color: bool) {
     if let Some(span) = &diagnostic.span {
         if is_real_source_path(&span.path) {
             eprintln!(
-                "  --> {}:{}:{}",
+                "{}--> {}:{}:{}",
+                marks.pad,
                 display_location_path(&span.path),
                 span.start.line,
                 span.start.col
             );
             // The source frame stays on the diagnostic stream so the context
             // is emitted directly with the diagnostic it explains (#443).
-            if let Some(context) = source_context(&span.path, span.start.line, span.start.col, "  ")
+            if let Some(context) =
+                source_context(&span.path, span.start.line, span.start.col, &marks.pad)
             {
                 eprintln!("{context}");
             }
@@ -2155,7 +2227,11 @@ fn render_diagnostic(diagnostic: &wright_driver::Diagnostic, color: bool) {
             notes.push(format!("{kind} source", kind = source.kind));
         }
     }
-    eprintln!("  {}", dim(&format!("= {}", notes.join(" · ")), color));
+    eprintln!(
+        "{}{}",
+        marks.pad,
+        dim(&format!("= {}", notes.join(" · ")), color)
+    );
 }
 
 /// The user-facing spelling of a reported path: cwd-relative when possible so
