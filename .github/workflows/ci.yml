@@ -33,6 +33,7 @@ jobs:
       lpp: ${{ steps.filter.outputs.rust_core }}
       cli: ${{ steps.filter.outputs.rust_core }}
       dist: ${{ steps.filter.outputs.dist }}
+      agent_guide: ${{ steps.filter.outputs.agent_guide }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -58,6 +59,11 @@ jobs:
               - 'agent-guide/**'
               - 'schemas/**'
               - '.github/workflows/**'
+            agent_guide:
+              - 'agent-guide/**'
+              - 'crates/wright-cli/src/agent.rs'
+              - 'scripts/sync-agent-guide.py'
+              - '.github/workflows/**'
             dist:
               - 'dist/**'
               - 'install.sh'
@@ -72,6 +78,30 @@ jobs:
               - 'tests/fixtures/**'
               - 'scripts/**'
               - '.github/workflows/**'
+  # -------------------------------------------------------------------------
+  # Vendored agent guide: the copy under agent-guide/ must equal the skills
+  # repository at the recorded pin. Needs no build, so it does not wait on Rust.
+  # -------------------------------------------------------------------------
+  agent-guide:
+    name: Agent guide sync
+    needs: paths
+    if: needs.paths.outputs.agent_guide == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Checkout skills
+        uses: actions/checkout@v7
+        with:
+          repository: wrightkit/skills
+          fetch-depth: 0
+          path: skills-src
+
+      - name: Verify the vendored guide matches its pin
+        run: python3 scripts/sync-agent-guide.py --skills-dir skills-src --check
+
   # -------------------------------------------------------------------------
   # [1] RUST QUALITY & TESTS  (fundamental gate)
   # All other Rust-based jobs depend on this.
@@ -675,6 +705,7 @@ jobs:
       - metrics-drift
       - dist-cli-build
       - dist-validation
+      - agent-guide
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
