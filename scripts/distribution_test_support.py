@@ -6,12 +6,12 @@ import hashlib
 import http.server
 import importlib.util
 import shutil
+import socketserver
 import subprocess
 import sys
 import tarfile
 import tempfile
 import threading
-import time
 import zipfile
 from pathlib import Path
 from typing import NoReturn
@@ -30,6 +30,20 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
             super().copyfile(source, outputfile)
         except BrokenPipeError:
             pass
+
+
+class LoopbackHTTPServer(http.server.ThreadingHTTPServer):
+    """ThreadingHTTPServer without the getfqdn() lookup in server_bind.
+
+    HTTPServer.server_bind resolves the bind address through reverse DNS only
+    to fill in server_name; on hosted macOS runners that lookup stalls for
+    tens of seconds.
+    """
+
+    def server_bind(self) -> None:
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = "localhost"
+        self.server_port = self.server_address[1]
 
 
 def fail(channel: str, message: str) -> NoReturn:
@@ -108,15 +122,11 @@ class ReleaseFixture:
     def __enter__(self) -> "ReleaseFixture":
         self._temporary = tempfile.TemporaryDirectory(prefix="wright-distribution-")
         self.work = Path(self._temporary.name)
-        _t0 = time.monotonic()  # TEMP instrumentation for #697
         self.archive = self._stage_artifact()
-        print(f"[instrument] stage_artifact: {time.monotonic() - _t0:.3f}s", file=sys.stderr)
-        _t0 = time.monotonic()
-        self.server = http.server.ThreadingHTTPServer(
+        self.server = LoopbackHTTPServer(
             ("127.0.0.1", 0),
             lambda *args, **kwargs: QuietHandler(*args, directory=str(self.work), **kwargs),
         )
-        print(f"[instrument] server bind: {time.monotonic() - _t0:.3f}s", file=sys.stderr)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.base = f"http://127.0.0.1:{self.server.server_port}/releases/download"
