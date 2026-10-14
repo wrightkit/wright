@@ -11,6 +11,13 @@
 
 set -euo pipefail
 
+# TEMP instrumentation for #697: locate the hosted macOS install.sh stalls.
+stamp() { printf 'STAMP %s %s\n' "$(date +%s)" "$1" >&2; }
+stamp script-start
+python3 -c 'import socket,time
+for host in ("::", "127.0.0.1", ""):
+    t=time.time(); socket.getfqdn(host); print(f"STAMP getfqdn({host!r}) {time.time()-t:.3f}s")' >&2 || true
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALLER="$ROOT/install.sh"
 VERSION="9.9.9"
@@ -75,11 +82,14 @@ for triple in x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin;
 done
 mkdir -p "$WORK/mock/wright/latest"
 printf '%s\n' "$VERSION" > "$WORK/mock/wright/latest/version"
+stamp archives-built
 
 python3 -m http.server "$PORT" --directory "$WORK/mock" >/dev/null 2>&1 &
 SERVER_PID=$!
+stamp server1-spawned
 BASE_URL="http://127.0.0.1:$PORT"
 wait_for_server "$BASE_URL"
+stamp server1-ready
 
 # --- helpers -----------------------------------------------------------------
 
@@ -228,10 +238,13 @@ tar -czf "$release/wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz" -C "$release
 (cd "$release" && shasum -a 256 "wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz" \
   > "wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz.sha256")
 rm -rf "$dir"
+stamp pre-server2
 python3 -m http.server "$BROKEN_PORT" --directory "$WORK/mock-broken" >/dev/null 2>&1 &
 BROKEN_PID=$!
+stamp server2-spawned
 BROKEN_BASE_URL="http://127.0.0.1:$BROKEN_PORT"
 wait_for_server "$BROKEN_BASE_URL"
+stamp server2-ready
 if WRIGHT_INSTALL_OS=linux WRIGHT_INSTALL_ARCH=x86_64 \
    WRIGHT_INSTALL_BASE_URL="$BROKEN_BASE_URL/wright" \
    "$INSTALLER" --dir "$WORK/d9" --version "$VERSION" >"$INSTALL_OUTPUT" 2>&1; then
@@ -252,6 +265,7 @@ else
   report "install.sh runs completion installation" fail
 fi
 
+stamp done
 echo
 echo "installer tests: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]
