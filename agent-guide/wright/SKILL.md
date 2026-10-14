@@ -18,7 +18,7 @@ Wright is the semantic tooling for these projects: it parses, validates, lints, 
 - **Unsure of a name, or a name was rejected?** `wright lookup <query> --language workshop|opy` resolves the owner-accepted spelling and signature; `--within <enum or callable>` lists its members or parameters. Check before writing in a language you do not know, and again when `check` rejects a name.
 - **Need Workshop output, or OPY from raw Workshop?** `compile` writes the program to `<input stem>.ow` (`-o PATH` chooses another file) and reports only the verdict, diagnostics, path, and digest; pass `--force` to replace an existing file, because you cannot answer its overwrite prompt. `convert` reconstructs, it does not recover your source.
 
-Read text output by default. Use `--format json` when a program processes the result; it contains the same information as text, in structured form. Take a baseline before editing and compare after, so you can separate your findings from existing ones.
+Read text output by default and pass `--renderer plain`, so results stay deterministic and undecorated in non-terminal contexts. Use `--format json` when a program processes the result; it contains the same information as text, in structured form. Take a baseline before editing and compare after, so you can separate your findings from existing ones.
 
 ## Judgment that is easy to miss
 
