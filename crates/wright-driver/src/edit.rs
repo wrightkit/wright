@@ -868,7 +868,7 @@ fn temporary_path(path: &Path) -> PathBuf {
     path.with_file_name(name)
 }
 
-pub(crate) fn source_precondition(
+fn source_precondition(
     edit: &SourceEdit,
     sources: &BTreeMap<String, String>,
 ) -> Option<Diagnostic> {

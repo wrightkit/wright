@@ -156,11 +156,6 @@ fn finish_transaction(
     project_root: Option<&str>,
     edit_scope: &BTreeSet<String>,
 ) -> ProviderMutation {
-    for edit in &transaction.edits {
-        if let Some(diagnostic) = crate::edit::source_precondition(edit, sources) {
-            return refusal(vec![diagnostic]);
-        }
-    }
     let previews = match transaction.apply(sources) {
         Ok(previews) => previews,
         Err(diag) => return refusal(vec![diag]),
