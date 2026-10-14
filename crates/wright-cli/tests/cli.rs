@@ -3561,7 +3561,73 @@ fn check_text_points_unknown_names_at_lookup() {
         stderr.contains("hint: run 'wright lookup'"),
         "the unknown-value diagnostic carries the pointer: {stderr}"
     );
+    assert!(
+        !stderr.contains("--language"),
+        "a Workshop source keeps the default-vocabulary hint: {stderr}"
+    );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// #692: `lookup` defaults to the Workshop vocabulary, so an OPY rejected
+/// name must point at `--language opy`. The provider is a staged LPP script
+/// whose `lpp/check` returns the unknown-action diagnostic an OPY check
+/// reports — the driver stamps its `source` origin `opy` (#638), and the
+/// hint selects on that origin.
+#[cfg(unix)]
+#[test]
+fn check_text_points_opy_unknown_names_at_the_opy_vocabulary() {
+    use std::os::unix::fs::PermissionsExt;
+
+    const PROVIDER: &str = r#"#!/usr/bin/env python3
+import json, sys
+def reply(id, result=None, error=None):
+    message = {"jsonrpc": "2.0", "id": id}
+    message.update({"error": error} if error else {"result": result})
+    print(json.dumps(message), flush=True)
+for line in sys.stdin:
+    request = json.loads(line)
+    id, method = request["id"], request["method"]
+    if method == "lpp/initialize":
+        reply(id, {"protocolVersion": request["params"]["protocolVersion"],
+                   "serverInfo": {"name": "fake", "version": "0"},
+                   "languages": [{"id": "opy", "extensions": ["opy"]}],
+                   "capabilities": {"check": True, "compile": False, "reconstruct": False, "symbols": False, "definition": False, "references": False, "rename": False, "editValidation": False, "projectLoading": True}})
+    elif method == "lpp/check":
+        reply(id, {"documents": [{"uri": request["params"]["entry"]["uri"], "version": 1, "diagnostics": [
+            {"range": {"start": {"line": 2, "character": 4}, "end": {"line": 2, "character": 134}},
+             "severity": "error", "code": "unknown-action",
+             "message": "unknown action 'createHudText' (did you mean 'hudText'?)"}]}]})
+    else:
+        reply(id, {})
+"#;
+
+    let dir = temp_dir();
+    let script = dir.join("fake-provider");
+    std::fs::write(&script, PROVIDER).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let input = dir.join("main.opy");
+    std::fs::write(
+        &input,
+        "rule \"t\":\n    @Event global\n    createHudText(getAllPlayers())\n",
+    )
+    .unwrap();
+    let output = run(&[
+        "check",
+        input.to_str().unwrap(),
+        "--opy-provider",
+        script.to_str().unwrap(),
+        "--renderer",
+        "plain",
+        "--color",
+        "never",
+    ]);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("hint: run 'wright lookup --language opy'"),
+        "an OPY rejected name points at the OPY vocabulary: {stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

@@ -356,13 +356,19 @@ fn render_text<T: serde::Serialize + ResultPresentation>(
                 .any(|segment| segment.starts_with("unknown-"))
             && !diagnostic.message.contains("'<none>'")
         {
-            eprintln!(
-                "  {}",
-                dim(
-                    "hint: run 'wright lookup' with the rejected name to find its spelling and signature",
-                    pres.color
-                )
-            );
+            // `lookup` answers in the vocabulary of the rejected name's
+            // source (#692): an OPY diagnostic names `--language opy`,
+            // anything else keeps the Workshop default.
+            let hint = if diagnostic
+                .source
+                .as_ref()
+                .is_some_and(|source| source.kind == "opy")
+            {
+                "hint: run 'wright lookup --language opy' with the rejected name to find its spelling and signature"
+            } else {
+                "hint: run 'wright lookup' with the rejected name to find its spelling and signature"
+            };
+            eprintln!("  {}", dim(hint, pres.color));
         }
     }
     if bounded && !pres.all && diagnostic_total > 20 {
