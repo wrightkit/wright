@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.20.2](https://github.com/wrightkit/wright/compare/v0.20.1...v0.20.2) (2026-10-14)
+
+
+### Dependencies
+
+* **agent:** sync vendored guide to skills@bf94300 ([#689](https://github.com/wrightkit/wright/issues/689)) ([4e6423c](https://github.com/wrightkit/wright/commit/4e6423c83e0d1548b8843c7a0e9af0f5005c865d))
+
+
+### Code Refactoring
+
+* **driver,cli:** remove duplicated snapshot, severity and span-path code ([#687](https://github.com/wrightkit/wright/issues/687)) ([e798311](https://github.com/wrightkit/wright/commit/e7983113dd1b9e72e23f66bf2e0c1252592e7851))
+
 ## [0.20.1](https://github.com/wrightkit/wright/compare/v0.20.0...v0.20.1) (2026-10-13)
 
 
