@@ -292,7 +292,7 @@ fn run_workflow(command: Command) -> ExitCode {
                     |session| {
                         session.cost().map_result(|mut result| {
                             result.result =
-                                wright_driver::essential::query(&result.result, query.all);
+                                wright_driver::essential::cost(&result.result, query.all);
                             result
                         })
                     },

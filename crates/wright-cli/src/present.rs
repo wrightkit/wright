@@ -1285,6 +1285,39 @@ impl ResultPresentation for CostResult {
         println!("  rules: {}", count(exact, "programRules"));
         println!("  waits: {}", count(exact, "waitActions"));
 
+        // The canonical element count against the client budget (#691),
+        // then each rule's share in payload order — ranked by count, largest
+        // first, with `index` carrying the canonical rule position — and the
+        // generic truncation note when the list was capped.
+        let elements = &self.result["elementCount"];
+        if elements.is_object() {
+            println!(
+                "  {} element(s) of the {}-element budget [exact] — canonical structure, not a statement of client importability",
+                count(elements, "total"),
+                count(elements, "budget"),
+            );
+            for rule in elements["rules"].as_array().into_iter().flatten() {
+                println!(
+                    "    \"{}\": {} element(s)",
+                    rule_name(rule),
+                    count(rule, "count"),
+                );
+            }
+            if let Some(note) = elements["truncation"]["rules"].as_object() {
+                println!(
+                    "    showing {} of {}; --all to see every item",
+                    note["shown"], note["total"]
+                );
+            }
+        } else {
+            println!(
+                "  element count unavailable: {}",
+                self.result["elementCountUnavailable"]
+                    .as_str()
+                    .unwrap_or("counter does not model this program")
+            );
+        }
+
         let mut findings = self.result["findings"]
             .as_array()
             .cloned()

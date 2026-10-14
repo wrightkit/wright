@@ -578,15 +578,13 @@ impl<'a> ToolService<'a> {
                 }
                 result = crate::essential::query(&payload, *all);
             }
+            ToolRequest::CostEstimate { all, .. } => result = crate::essential::cost(&result, *all),
             ToolRequest::Rules { all, .. }
             | ToolRequest::Symbols { all, .. }
             | ToolRequest::Cfg { all, .. }
             | ToolRequest::Findings { all, .. }
             | ToolRequest::PersistentObjects { all }
-            | ToolRequest::CallGraph { all, .. }
-            | ToolRequest::CostEstimate { all, .. } => {
-                result = crate::essential::query(&result, *all)
-            }
+            | ToolRequest::CallGraph { all, .. } => result = crate::essential::query(&result, *all),
             _ => {}
         }
         ToolResponse::Ok { result }
@@ -1693,10 +1691,38 @@ impl<'a> ToolService<'a> {
             "findings": findings,
             "kind": {
                 "exact": "exact target-resource counts",
+                "elementCount": "canonical Workshop structure counted against the client element budget; not a statement of client importability",
                 "findings": "static/heuristic execution indicators",
                 "performance": "compiler-host performance is measured by wright-bench, not in-process",
             },
         });
+        // `report.rules` keeps `program.rules` canonical order, disabled
+        // rules included, so `index` names the rule (#691). Payload order is
+        // ranked by count, largest first — the generic item cap then keeps
+        // the largest rules and `elementCount.truncation.rules` describes the
+        // cut.
+        match loaded.program.element_count(self.session.catalog()) {
+            Ok(report) => {
+                let mut rules: Vec<_> = report.rules.iter().enumerate().collect();
+                rules.sort_by_key(|(index, node)| (std::cmp::Reverse(node.count), *index));
+                result["elementCount"] = json!({
+                    "total": report.total,
+                    "budget": crate::session::WORKSHOP_CLIENT_ELEMENT_LIMIT,
+                    "rules": rules
+                        .iter()
+                        .map(|(index, node)| json!({
+                            "index": index,
+                            "name": loaded.program.rules[*index].name,
+                            "count": node.count,
+                        }))
+                        .collect::<Vec<_>>(),
+                });
+            }
+            Err(error) => {
+                result["elementCount"] = serde_json::Value::Null;
+                result["elementCountUnavailable"] = json!(error.to_string());
+            }
+        }
         if let Some(outcome) = &outcome {
             result["selection"] = serde_json::to_value(outcome).expect("selection serializes");
         }
