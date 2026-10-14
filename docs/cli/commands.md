@@ -247,8 +247,9 @@ resolution never guesses.
 * `inspect cost` accepts the finding-selection options, applied to its
   findings list exactly as on `costEstimate`. Its `elementCount` member is
   the canonical `workshop-rs` element count against the 32768-element
-  client budget, with each rule's share in canonical order — a structure
-  count, not a statement of client importability; it is `null` with an
+  client budget, with each rule's share ranked by count, largest first —
+  `index` is the canonical rule position — a structure count, not a
+  statement of client importability; it is `null` with an
   `elementCountUnavailable` reason when the count cannot run.
 * `persistentObjects` has no standalone command; `analyze` reports aggregate
   counts under `result.persistentObjects`; use the agent operation for details.

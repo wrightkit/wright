@@ -1699,19 +1699,22 @@ impl<'a> ToolService<'a> {
             },
         });
         // `report.rules` keeps `program.rules` canonical order, disabled
-        // rules included, so the index names the rule (#691).
+        // rules included, so `index` names the rule (#691). Payload order is
+        // ranked by count, largest first — the generic item cap then keeps
+        // the largest rules and `elementCount.truncation.rules` describes the
+        // cut.
         match loaded.program.element_count(self.session.catalog()) {
             Ok(report) => {
+                let mut rules: Vec<_> = report.rules.iter().enumerate().collect();
+                rules.sort_by_key(|(index, node)| (std::cmp::Reverse(node.count), *index));
                 result["elementCount"] = json!({
                     "total": report.total,
                     "budget": crate::session::WORKSHOP_CLIENT_ELEMENT_LIMIT,
-                    "rules": report
-                        .rules
+                    "rules": rules
                         .iter()
-                        .enumerate()
                         .map(|(index, node)| json!({
                             "index": index,
-                            "name": loaded.program.rules[index].name,
+                            "name": loaded.program.rules[*index].name,
                             "count": node.count,
                         }))
                         .collect::<Vec<_>>(),

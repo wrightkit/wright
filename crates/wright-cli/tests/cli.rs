@@ -3106,30 +3106,88 @@ fn cost_text_reports_the_element_budget_and_rule_shares() {
         stdout.contains("not a statement of client importability"),
         "{stdout}"
     );
-    // Each rule's share renders by count, largest first.
+    // The payload is already ranked by count, largest first; the text view
+    // renders that order as-is.
     let rules = elements["rules"].as_array().unwrap();
-    let positions: Vec<usize> = rules
-        .iter()
-        .map(|rule| {
-            stdout
-                .find(&format!("\"{}\":", rule["name"].as_str().unwrap()))
-                .expect("the rule's share renders")
-        })
-        .collect();
-    let mut ranked = rules.clone();
-    ranked.sort_by_key(|rule| std::cmp::Reverse(rule["count"].as_u64().unwrap()));
-    let expected: Vec<usize> = ranked
-        .iter()
-        .map(|rule| {
-            stdout
-                .find(&format!("\"{}\":", rule["name"].as_str().unwrap()))
-                .unwrap()
-        })
-        .collect();
     assert!(
-        expected.windows(2).all(|w| w[0] < w[1]),
-        "shares render largest first: {stdout} (positions {positions:?})"
+        rules
+            .windows(2)
+            .all(|w| w[0]["count"].as_u64().unwrap() >= w[1]["count"].as_u64().unwrap()),
+        "payload is ranked by count: {rules:?}"
     );
+    let mut offset = 0;
+    for rule in rules {
+        let needle = format!("\"{}\":", rule["name"].as_str().unwrap());
+        offset = stdout[offset..]
+            .find(&needle)
+            .map(|found| offset + found + needle.len())
+            .expect("shares render in payload order");
+    }
+    let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
+}
+
+/// The default `inspect cost` view keeps the 20 largest rules — payload
+/// order is the ranking, so the generic cap keeps the head of it — and
+/// reports the cut through `elementCount.truncation.rules`.
+#[test]
+fn cost_rule_shares_rank_and_cap_at_twenty_by_default() {
+    // 25 rules with strictly increasing action counts give every rule a
+    // distinct element share.
+    let mut source = String::from("variables {\n    global:\n        0: g\n}\n\n");
+    for index in 0..25 {
+        let actions = "        Set Global Variable(g, 0);\n".repeat(index + 1);
+        source.push_str(&format!(
+            "rule (\"rule-{index}\") {{\n    event {{\n        Ongoing - Global;\n    }}\n    actions {{\n{actions}    }}\n}}\n\n"
+        ));
+    }
+    let path = temp_file("many-rules.ws", &source);
+    let path = path.to_str().unwrap();
+
+    // The expected ranking is workshop-rs' own report, not the CLI output.
+    let catalog = wright_analyzer::catalog::builtin().expect("catalog");
+    let locale = workshop_rs::catalog::Locale::new("en-US");
+    let program = workshop_rs::parser::parse_with_context(&source, &catalog, &locale, &*catalog)
+        .expect("generated program parses");
+    let report = program.element_count(&catalog).expect("program counts");
+    let mut expected: Vec<usize> = (0..report.rules.len()).collect();
+    expected.sort_by_key(|index| (std::cmp::Reverse(report.rules[*index].count), *index));
+
+    let json = run(&["inspect", "cost", path, "-f", "json"]);
+    assert!(json.status.success(), "{}", command_result(&json));
+    let elements = parse_json(&json.stdout)["result"]["elementCount"].clone();
+    let rules = elements["rules"].as_array().unwrap();
+    assert_eq!(rules.len(), 20, "default view keeps the cap: {rules:?}");
+    for (entry, index) in rules.iter().zip(&expected[..20]) {
+        assert_eq!(entry["index"].as_u64().unwrap() as usize, *index);
+        assert_eq!(entry["name"], program.rules[*index].name);
+        assert_eq!(
+            entry["count"].as_u64().unwrap() as usize,
+            report.rules[*index].count
+        );
+    }
+    let truncation = &elements["truncation"]["rules"];
+    assert_eq!(truncation["total"].as_u64(), Some(25));
+    assert_eq!(truncation["shown"].as_u64(), Some(20));
+
+    let all = run(&["inspect", "cost", path, "--all", "-f", "json"]);
+    assert!(all.status.success(), "{}", command_result(&all));
+    let elements = parse_json(&all.stdout)["result"]["elementCount"].clone();
+    let rules = elements["rules"].as_array().unwrap();
+    assert_eq!(rules.len(), 25);
+    assert_eq!(
+        rules
+            .iter()
+            .map(|rule| rule["count"].as_u64().unwrap() as usize)
+            .sum::<usize>(),
+        report.total,
+        "all shares sum to the total"
+    );
+
+    let text = run(&["inspect", "cost", path]);
+    assert!(text.status.success(), "{}", command_result(&text));
+    let stdout = String::from_utf8_lossy(&text.stdout);
+    assert!(stdout.contains("showing 20 of 25"), "{stdout}");
+
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
 

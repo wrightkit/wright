@@ -552,9 +552,9 @@ fn cost_estimate_rejects_a_file_selection_that_cannot_apply() {
 
 /// #691: `costEstimate` reports the canonical element count — the
 /// `workshop-rs`-owned computation — against the client element budget,
-/// with each rule's share in canonical program order. The expected numbers
-/// come from reparsing the fixture through `workshop-rs` itself, not from
-/// the service under test.
+/// with each rule's share ranked by count, largest first. The expected
+/// numbers come from reparsing the fixture through `workshop-rs` itself,
+/// not from the service under test.
 #[test]
 fn cost_estimate_reports_the_canonical_element_count() {
     let source = std::fs::read_to_string(workshop_path()).unwrap();
@@ -595,7 +595,12 @@ fn cost_estimate_reports_the_canonical_element_count() {
         report.total,
         "rule shares sum to the total: {rules:?}"
     );
-    for (index, entry) in rules.iter().enumerate() {
+    // Payload order is ranked by count, largest first with canonical-index
+    // ties broken ascending; `index`/`name`/`count` stay bound to the
+    // canonical rule position in the workshop-rs report.
+    let mut expected: Vec<usize> = (0..report.rules.len()).collect();
+    expected.sort_by_key(|index| (std::cmp::Reverse(report.rules[*index].count), *index));
+    for (entry, index) in rules.iter().zip(expected) {
         assert_eq!(entry["index"], index);
         assert_eq!(entry["name"], program.rules[index].name);
         assert_eq!(

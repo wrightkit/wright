@@ -1271,7 +1271,7 @@ impl ResultPresentation for CostResult {
     }
     /// Totals lead; findings — the cost-relevant units — sort by severity and
     /// collapse identical repeats, bounded like the other query lists (#446).
-    fn render_body(&self, ctx: &RenderContext<'_>) {
+    fn render_body(&self, _ctx: &RenderContext<'_>) {
         let exact = &self.result["exact"];
         println!("\nGenerated resources (exact)");
         println!("  emitted bytes: {}", count(exact, "emittedBytes"));
@@ -1280,8 +1280,9 @@ impl ResultPresentation for CostResult {
         println!("  waits: {}", count(exact, "waitActions"));
 
         // The canonical element count against the client budget (#691),
-        // then each rule's share ranked by count — canonical order breaks
-        // ties — bounded like the other query lists.
+        // then each rule's share in payload order — ranked by count, largest
+        // first, with `index` carrying the canonical rule position — and the
+        // generic truncation note when the list was capped.
         let elements = &self.result["elementCount"];
         if elements.is_object() {
             println!(
@@ -1289,25 +1290,17 @@ impl ResultPresentation for CostResult {
                 count(elements, "total"),
                 count(elements, "budget"),
             );
-            let mut rules: Vec<&serde_json::Value> =
-                elements["rules"].as_array().into_iter().flatten().collect();
-            rules.sort_by_key(|rule| std::cmp::Reverse(count(rule, "count")));
-            let shown = if ctx.presentation.all {
-                rules.len()
-            } else {
-                rules.len().min(20)
-            };
-            for rule in rules.iter().take(shown) {
+            for rule in elements["rules"].as_array().into_iter().flatten() {
                 println!(
                     "    \"{}\": {} element(s)",
                     rule_name(rule),
                     count(rule, "count"),
                 );
             }
-            if shown < rules.len() {
+            if let Some(note) = elements["truncation"]["rules"].as_object() {
                 println!(
-                    "    showing {shown} of {}; --all to see every item",
-                    rules.len()
+                    "    showing {} of {}; --all to see every item",
+                    note["shown"], note["total"]
                 );
             }
         } else {
