@@ -9,16 +9,12 @@ name: CI
 # (Cargo workspace, scripts, test inputs, CI itself) expand to the
 # full check set; narrow path changes run only the relevant capability.
 # Docs-only changes match no path filter, so only `paths` and `CI result` run.
-# Merge queue (`merge_group`): the queued commit is validated against the
-# current `main`. `dorny/paths-filter` diffs the merge group's base_sha against
-# its head_sha, so path selection works as on PRs.
 # The workflow itself is never skipped, so `CI result` always reports.
 
 on:
   push:
     branches: ["main"]
   pull_request:
-  merge_group:
 
 permissions:
   contents: read

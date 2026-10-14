@@ -150,8 +150,9 @@ support claims require real-project validation in addition to focused tests.
   or manually refresh a committed test-result file; put results in the PR
   description and CI logs/artifacts. Committed fixtures and source/licensing input
   manifests are allowed only as reproducible, machine-validated inputs.
-- Merges are squash-only through the merge queue, so each PR is one commit on
-  `main`. CI runs on `merge_group` as well as pull requests and pushes to `main`.
+- Merges are squash-only, so each PR is one commit on `main`. A PR merges once
+  `CI result` passes; there is no merge queue, so CI on the push to `main`
+  catches a break between two individually green PRs.
 - `.github/CODEOWNERS` lists the gate definitions (workflows, metrics baselines
   and corpus, metrics token budgets, committed contract snapshots); code-owner
   review is required for them. Do not change a gate definition in the same PR as
