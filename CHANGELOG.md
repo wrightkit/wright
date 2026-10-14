@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.1](https://github.com/wrightkit/wright/compare/v0.21.0...v0.21.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* **dist:** serve loopback test fixtures without reverse-DNS lookup ([#700](https://github.com/wrightkit/wright/issues/700)) ([6241833](https://github.com/wrightkit/wright/commit/624183348ec42c6c9e42b9bc5829f3a3836f6cd9))
+
 ## [0.21.0](https://github.com/wrightkit/wright/compare/v0.20.2...v0.21.0) (2026-10-14)
 
 
