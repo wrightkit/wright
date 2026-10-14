@@ -365,9 +365,4 @@ mod tests {
         assert_eq!(complete["findings"], input["findings"]);
         assert!(complete.get("truncation").is_none());
     }
-
-    #[test]
-    fn ci_697_parallel_gates_demo_failure() {
-        panic!("deliberate failure for the #697 AC1 demonstration run");
-    }
 }
