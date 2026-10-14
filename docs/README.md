@@ -55,6 +55,8 @@ Issue contract.
   facts, local declarative rules, metadata, and project configuration.
 - [Development priorities](spec/development-priorities.md): how real-project
   failures are triaged across owning repositories.
+- [Lessons](LESSONS.md): short queue of reusable failure classes from merged
+  work, pruned once promoted into tests or standards.
 - [Release/distribution](release.md): packaging and publication contract.
 - [Agent-team governance](agent-team.md): role/authority coordination where
   still applicable.
