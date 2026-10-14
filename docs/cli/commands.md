@@ -248,7 +248,8 @@ resolution never guesses.
   findings list exactly as on `costEstimate`. Its `elementCount` member is
   the canonical `workshop-rs` element count against the 32768-element
   client budget, with each rule's share ranked by count, largest first —
-  `index` is the canonical rule position — a structure count, not a
+  `index` is the canonical rule position; the 5 largest by default,
+  `--all` for every rule — a structure count, not a
   statement of client importability; it is `null` with an
   `elementCountUnavailable` reason when the count cannot run.
 * `persistentObjects` has no standalone command; `analyze` reports aggregate

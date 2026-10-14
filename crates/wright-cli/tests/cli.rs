@@ -3126,11 +3126,11 @@ fn cost_text_reports_the_element_budget_and_rule_shares() {
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
 
-/// The default `inspect cost` view keeps the 20 largest rules — payload
-/// order is the ranking, so the generic cap keeps the head of it — and
+/// The default `inspect cost` view keeps the 5 largest rules — payload
+/// order is the ranking, so the cap keeps the head of it — and
 /// reports the cut through `elementCount.truncation.rules`.
 #[test]
-fn cost_rule_shares_rank_and_cap_at_twenty_by_default() {
+fn cost_rule_shares_rank_and_cap_at_five_by_default() {
     // 25 rules with strictly increasing action counts give every rule a
     // distinct element share.
     let mut source = String::from("variables {\n    global:\n        0: g\n}\n\n");
@@ -3156,8 +3156,8 @@ fn cost_rule_shares_rank_and_cap_at_twenty_by_default() {
     assert!(json.status.success(), "{}", command_result(&json));
     let elements = parse_json(&json.stdout)["result"]["elementCount"].clone();
     let rules = elements["rules"].as_array().unwrap();
-    assert_eq!(rules.len(), 20, "default view keeps the cap: {rules:?}");
-    for (entry, index) in rules.iter().zip(&expected[..20]) {
+    assert_eq!(rules.len(), 5, "default view keeps the cap: {rules:?}");
+    for (entry, index) in rules.iter().zip(&expected[..5]) {
         assert_eq!(entry["index"].as_u64().unwrap() as usize, *index);
         assert_eq!(entry["name"], program.rules[*index].name);
         assert_eq!(
@@ -3167,7 +3167,7 @@ fn cost_rule_shares_rank_and_cap_at_twenty_by_default() {
     }
     let truncation = &elements["truncation"]["rules"];
     assert_eq!(truncation["total"].as_u64(), Some(25));
-    assert_eq!(truncation["shown"].as_u64(), Some(20));
+    assert_eq!(truncation["shown"].as_u64(), Some(5));
 
     let all = run(&["inspect", "cost", path, "--all", "-f", "json"]);
     assert!(all.status.success(), "{}", command_result(&all));
@@ -3186,7 +3186,7 @@ fn cost_rule_shares_rank_and_cap_at_twenty_by_default() {
     let text = run(&["inspect", "cost", path]);
     assert!(text.status.success(), "{}", command_result(&text));
     let stdout = String::from_utf8_lossy(&text.stdout);
-    assert!(stdout.contains("showing 20 of 25"), "{stdout}");
+    assert!(stdout.contains("showing 5 of 25"), "{stdout}");
 
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }

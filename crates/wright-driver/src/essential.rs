@@ -244,6 +244,15 @@ pub fn query(result: &Value, all: bool) -> Value {
     output
 }
 
+/// `elementCount.rules` is already ranked largest-first by the service, so the
+/// default view keeps the five largest like analyze hotspots; the generic cap
+/// would otherwise keep twenty.
+pub fn cost(result: &Value, all: bool) -> Value {
+    let mut output = result.clone();
+    cap(&mut output["elementCount"], "rules", 5, all);
+    query(&output, all)
+}
+
 /// Preserve the complete-set verdict while bounding its displayed diagnostics.
 pub fn envelope(result: &mut Value, all: bool) {
     if let Some(diagnostics) = result["diagnostics"].as_array_mut() {
@@ -319,6 +328,20 @@ mod tests {
             DEFAULT_ITEMS + 1
         );
         assert_eq!(query(&bare, true), bare);
+    }
+    #[test]
+    fn cost_keeps_the_five_largest_rule_shares_by_default() {
+        let rules = (0..DEFAULT_ITEMS + 1)
+            .map(|id| json!({"index": id, "name": format!("r{id}"), "count": id}))
+            .collect::<Vec<_>>();
+        let input = json!({"elementCount":{"total":1,"budget":32768,"rules":rules},"findings":[]});
+        let bounded = cost(&input, false);
+        let kept = bounded["elementCount"]["rules"].as_array().unwrap();
+        assert_eq!(kept.len(), 5);
+        let note = &bounded["elementCount"]["truncation"]["rules"];
+        assert_eq!(note["total"], DEFAULT_ITEMS + 1);
+        assert_eq!(note["shown"], 5);
+        assert_eq!(cost(&input, true), input);
     }
     #[test]
     fn long_findings_fit_the_default_budget_without_changing_the_verdict() {

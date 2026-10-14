@@ -578,15 +578,13 @@ impl<'a> ToolService<'a> {
                 }
                 result = crate::essential::query(&payload, *all);
             }
+            ToolRequest::CostEstimate { all, .. } => result = crate::essential::cost(&result, *all),
             ToolRequest::Rules { all, .. }
             | ToolRequest::Symbols { all, .. }
             | ToolRequest::Cfg { all, .. }
             | ToolRequest::Findings { all, .. }
             | ToolRequest::PersistentObjects { all }
-            | ToolRequest::CallGraph { all, .. }
-            | ToolRequest::CostEstimate { all, .. } => {
-                result = crate::essential::query(&result, *all)
-            }
+            | ToolRequest::CallGraph { all, .. } => result = crate::essential::query(&result, *all),
             _ => {}
         }
         ToolResponse::Ok { result }
