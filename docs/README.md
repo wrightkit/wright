@@ -53,6 +53,8 @@ Issue contract.
   licensing constraints.
 - [Extensible lint rules](specs/SPEC-309-extensible-lint-rules.md): canonical
   facts, local declarative rules, metadata, and project configuration.
+- [Development priorities](spec/development-priorities.md): how real-project
+  failures are triaged across owning repositories.
 - [Release/distribution](release.md): packaging and publication contract.
 - [Agent-team governance](agent-team.md): role/authority coordination where
   still applicable.
