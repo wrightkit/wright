@@ -623,12 +623,24 @@ impl SummaryStatus {
         }
     }
 
+    /// Maps a JSON finding's severity string, for the paths that carry no
+    /// typed [`Severity`].
     fn from_finding_severity(severity: &str) -> Self {
         match severity {
             "error" => Self::Error,
             "warning" => Self::Warn,
             "info" | "notice" => Self::Pass,
             _ => Self::Warn,
+        }
+    }
+}
+
+impl From<Severity> for SummaryStatus {
+    fn from(severity: Severity) -> Self {
+        match severity {
+            Severity::Error => Self::Error,
+            Severity::Warning => Self::Warn,
+            Severity::Info => Self::Pass,
         }
     }
 }
@@ -645,7 +657,7 @@ fn findings_summary_status(
     match selection {
         Some(selection) => {
             if let Some(severity) = selection.max_severity {
-                *status = (*status).max(SummaryStatus::from_finding_severity(severity.as_str()));
+                *status = (*status).max(SummaryStatus::from(severity));
             }
         }
         None => {
@@ -873,7 +885,7 @@ impl ResultPresentation for EssentialResult {
     fn update_summary_status(&self, status: &mut SummaryStatus) {
         if let Some(selection) = &self.selection {
             if let Some(severity) = selection.max_severity {
-                *status = (*status).max(SummaryStatus::from_finding_severity(severity.as_str()));
+                *status = (*status).max(SummaryStatus::from(severity));
             }
             return;
         }
@@ -1331,20 +1343,12 @@ fn summary_status<T: serde::Serialize + ResultPresentation>(
         // remainder (#430).
         Some(selection) => {
             if let Some(severity) = selection.max_severity {
-                status = status.max(match severity {
-                    Severity::Error => SummaryStatus::Error,
-                    Severity::Warning => SummaryStatus::Warn,
-                    Severity::Info => SummaryStatus::Pass,
-                });
+                status = status.max(severity.into());
             }
         }
         None => {
             for diag in &envelope.diagnostics {
-                status = status.max(match diag.severity {
-                    Severity::Error => SummaryStatus::Error,
-                    Severity::Warning => SummaryStatus::Warn,
-                    Severity::Info => SummaryStatus::Pass,
-                });
+                status = status.max(diag.severity.into());
             }
         }
     }

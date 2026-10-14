@@ -127,10 +127,7 @@ impl FindingSelection {
                 (
                     parse_severity(finding.get("severity").and_then(|v| v.as_str())),
                     finding.get("code").and_then(|v| v.as_str()).unwrap_or(""),
-                    finding
-                        .get("span")
-                        .and_then(|span| span.get("path"))
-                        .and_then(|path| path.as_str()),
+                    crate::service::json_span_path(finding),
                 )
             },
             file_bases,

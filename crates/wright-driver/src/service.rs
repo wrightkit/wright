@@ -763,6 +763,16 @@ impl<'a> ToolService<'a> {
             .expect("the refresh gate guarantees a snapshot")
     }
 
+    /// The current snapshot with its shared semantic service, for the
+    /// `*_loaded` pipeline entry points.
+    fn snapshot_and_semantic(&self) -> (Loaded, Arc<SemanticService<'static>>) {
+        let semantic = self
+            .semantic
+            .as_ref()
+            .expect("the refresh gate guarantees a snapshot");
+        (self.snapshot().clone(), Arc::clone(semantic))
+    }
+
     /// The document set a provider mutation runs against (#548): the
     /// caller's set when supplied, otherwise the loaded project's members —
     /// each member read from disk at `version` 0 and keyed by `file://` URI,
@@ -881,24 +891,14 @@ impl<'a> ToolService<'a> {
                 if let Some(error) = self.selection_error(selection) {
                     return error;
                 }
-                let loaded = self.snapshot().clone();
-                let semantic = Arc::clone(
-                    self.semantic
-                        .as_ref()
-                        .expect("the refresh gate guarantees a snapshot"),
-                );
+                let (loaded, semantic) = self.snapshot_and_semantic();
                 let result =
                     serde_json::to_value(self.session.analyze_loaded(loaded, &semantic, selection))
                         .expect("analyze result serializes");
                 ToolResponse::Ok { result }
             }
             ToolRequest::Inspect { all: _ } => {
-                let loaded = self.snapshot().clone();
-                let semantic = Arc::clone(
-                    self.semantic
-                        .as_ref()
-                        .expect("the refresh gate guarantees a snapshot"),
-                );
+                let (loaded, semantic) = self.snapshot_and_semantic();
                 let result = serde_json::to_value(self.session.inspect_loaded(loaded, &semantic))
                     .expect("inspect result serializes");
                 ToolResponse::Ok { result }
@@ -1081,12 +1081,7 @@ impl<'a> ToolService<'a> {
         if self.refresh().is_err() {
             return self.session.analyze();
         }
-        let loaded = self.snapshot().clone();
-        let semantic = Arc::clone(
-            self.semantic
-                .as_ref()
-                .expect("the refresh gate guarantees a snapshot"),
-        );
+        let (loaded, semantic) = self.snapshot_and_semantic();
         let selection = self.session.config.selection.clone();
         self.session.analyze_loaded(loaded, &semantic, &selection)
     }
@@ -1100,12 +1095,7 @@ impl<'a> ToolService<'a> {
         if self.refresh().is_err() {
             return self.session.inspect();
         }
-        let loaded = self.snapshot().clone();
-        let semantic = Arc::clone(
-            self.semantic
-                .as_ref()
-                .expect("the refresh gate guarantees a snapshot"),
-        );
+        let (loaded, semantic) = self.snapshot_and_semantic();
         self.session.inspect_loaded(loaded, &semantic)
     }
 
@@ -1742,7 +1732,7 @@ fn invalid_selection(message: String) -> ToolResponse {
 }
 
 /// The `span.path` a resolved semantic item carries, for `file` matching.
-fn json_span_path(item: &serde_json::Value) -> Option<&str> {
+pub(crate) fn json_span_path(item: &serde_json::Value) -> Option<&str> {
     item.get("span")
         .and_then(|span| span.get("path"))
         .and_then(serde_json::Value::as_str)
