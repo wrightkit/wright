@@ -104,7 +104,8 @@ jobs:
 
   # -------------------------------------------------------------------------
   # [1] RUST QUALITY & TESTS  (fundamental gate)
-  # All other Rust-based jobs depend on this.
+  # Runs concurrently with every other job: downstream jobs depend only on the
+  # artifacts they consume, so one PR run reports every independent failure.
   # -------------------------------------------------------------------------
   rust-quality:
     name: Rust (stable)
@@ -162,7 +163,7 @@ jobs:
   # -------------------------------------------------------------------------
   wright-cli-build:
     name: Build CLI
-    needs: [paths, rust-quality, rust-msrv]
+    needs: [paths]
     if: needs.paths.outputs.opy == 'true' || needs.paths.outputs.cli == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -205,7 +206,7 @@ jobs:
   # -------------------------------------------------------------------------
   workshop-integration:
     name: Workshop (${{ matrix.project }})
-    needs: [paths, rust-quality, rust-msrv, wright-cli-build]
+    needs: [paths, wright-cli-build]
     if: needs.paths.outputs.rust_core == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -311,7 +312,7 @@ jobs:
   # -------------------------------------------------------------------------
   opy-integration:
     name: Product integration
-    needs: [paths, rust-quality, rust-msrv, wright-cli-build]
+    needs: [paths, wright-cli-build]
     if: needs.paths.outputs.opy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -356,7 +357,7 @@ jobs:
   # -------------------------------------------------------------------------
   lpp-integration:
     name: LPP integration
-    needs: [paths, rust-quality, rust-msrv]
+    needs: [paths]
     if: needs.paths.outputs.lpp == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -401,7 +402,7 @@ jobs:
   # -------------------------------------------------------------------------
   cli-behavior:
     name: CLI behavior
-    needs: [paths, rust-quality, rust-msrv, wright-cli-build]
+    needs: [paths, wright-cli-build]
     if: needs.paths.outputs.cli == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -429,11 +430,10 @@ jobs:
   # -------------------------------------------------------------------------
   # [5] BENCHMARK  (performance evidence)
   # Non-blocking on PRs; records regression-detectable output as artifact.
-  # Depends on rust-quality so a fundamental failure skips benchmark time.
   # -------------------------------------------------------------------------
   benchmark:
     name: Benchmarks
-    needs: [paths, rust-quality, rust-msrv]
+    needs: [paths]
     if: needs.paths.outputs.opy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -472,7 +472,7 @@ jobs:
   # -------------------------------------------------------------------------
   metrics-drift:
     name: Metrics drift
-    needs: [paths, rust-quality, rust-msrv, wright-cli-build]
+    needs: [paths, wright-cli-build]
     if: needs.paths.outputs.opy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -503,7 +503,7 @@ jobs:
   # -------------------------------------------------------------------------
   metrics-latency:
     name: Metrics latency (trend)
-    needs: [paths, rust-quality, rust-msrv, wright-cli-build]
+    needs: [paths, wright-cli-build]
     if: github.event_name == 'push' && needs.paths.outputs.opy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -536,24 +536,13 @@ jobs:
 
   # -------------------------------------------------------------------------
   # [8] DISTRIBUTION VALIDATION  (cross-platform package/binary smoke)
-  # When source changes are in scope, this remains gated on the relevant Rust
-  # and integration jobs. Distribution-only changes run this job directly.
+  # Builds and validates its own binaries, so it starts with the path filter
+  # and runs concurrently with the quality and integration gates.
   # -------------------------------------------------------------------------
   dist-cli-build:
     name: Build dist (${{ matrix.os }})
-    needs:
-      - paths
-      - rust-quality
-      - rust-msrv
-      - opy-integration
-      - lpp-integration
-    if: |
-      always() &&
-      needs.paths.outputs.dist == 'true' &&
-      (needs.rust-quality.result == 'success' || needs.paths.outputs.rust_core != 'true') &&
-      (needs.rust-msrv.result == 'success' || needs.paths.outputs.rust_core != 'true') &&
-      (needs.opy-integration.result == 'success' || needs.paths.outputs.opy != 'true') &&
-      (needs.lpp-integration.result == 'success' || needs.paths.outputs.lpp != 'true')
+    needs: [paths]
+    if: needs.paths.outputs.dist == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -590,23 +579,12 @@ jobs:
             target/debug/wright-lsp.exe
           if-no-files-found: error
 
+  # A failed build skips this job; CI result then reports both the failure and
+  # the wrongly skipped required job.
   dist-validation:
     name: Dist validation (${{ matrix.channel }}, ${{ matrix.os }})
-    needs:
-      - paths
-      - rust-quality
-      - rust-msrv
-      - opy-integration
-      - lpp-integration
-      - dist-cli-build
-    if: |
-      always() &&
-      needs.paths.outputs.dist == 'true' &&
-      (needs.rust-quality.result == 'success' || needs.paths.outputs.rust_core != 'true') &&
-      (needs.rust-msrv.result == 'success' || needs.paths.outputs.rust_core != 'true') &&
-      (needs.opy-integration.result == 'success' || needs.paths.outputs.opy != 'true') &&
-      (needs.lpp-integration.result == 'success' || needs.paths.outputs.lpp != 'true') &&
-      needs.dist-cli-build.result == 'success'
+    needs: [paths, dist-cli-build]
+    if: needs.paths.outputs.dist == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
@@ -684,8 +662,9 @@ jobs:
 
   # -------------------------------------------------------------------------
   # [9] CI RESULT  (the single required merge check)
-  # Fails when any gating job failed or was cancelled; skipped jobs (path
-  # filtered or blocked by a failed dependency, which itself fails here) pass.
+  # Fails when any gating job failed or was cancelled, and when a job whose
+  # path condition selected it did not finish successfully — a skipped
+  # required job must never read as a pass.
   # `benchmark` (Benchmarks) and `metrics-latency` (Metrics latency (trend))
   # are deliberately NOT in `needs`: they are non-blocking evidence jobs.
   # Every other job above must be listed here.
@@ -709,9 +688,34 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Fail on failed or cancelled jobs
+      - name: Fail on failed, cancelled, or wrongly skipped jobs
         env:
           NEEDS: ${{ toJSON(needs) }}
+          PATHS: ${{ toJSON(needs.paths.outputs) }}
         run: |
           echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          echo "$NEEDS" | jq -e 'all(.[]; .result != "failure" and .result != "cancelled")' >/dev/null
+          fail=0
+          echo "$NEEDS" | jq -e 'all(.[]; .result != "failure" and .result != "cancelled")' >/dev/null || fail=1
+          # Each job's required-when expression must mirror its own `if:` —
+          # change both together whenever a job's path condition changes.
+          required=$(jq -n --argjson p "$PATHS" '{
+            "rust-quality": ($p.rust_core == "true"),
+            "rust-msrv": ($p.rust_core == "true"),
+            "workshop-integration": ($p.rust_core == "true"),
+            "wright-cli-build": ($p.opy == "true" or $p.cli == "true"),
+            "opy-integration": ($p.opy == "true"),
+            "lpp-integration": ($p.lpp == "true"),
+            "cli-behavior": ($p.cli == "true"),
+            "metrics-drift": ($p.opy == "true"),
+            "dist-cli-build": ($p.dist == "true"),
+            "dist-validation": ($p.dist == "true"),
+            "agent-guide": ($p.agent_guide == "true")
+          }')
+          for job in $(jq -r 'keys[]' <<<"$required"); do
+            result=$(jq -r --arg job "$job" '.[$job].result // "missing"' <<<"$NEEDS")
+            if [[ "$(jq -r --arg job "$job" '.[$job]' <<<"$required")" == "true" && "$result" != "success" ]]; then
+              echo "::error::required job '$job' did not succeed for the changed paths: $result"
+              fail=1
+            fi
+          done
+          exit "$fail"
