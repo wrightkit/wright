@@ -469,13 +469,30 @@ jobs:
   # It measures the current-run debug CLI against the latest provider:
   # pinning an old provider would measure a snapshot nobody uses, and the
   # report records both versions so drift can be attributed.
+  #
+  # The corpus is measured one project per shard and compared once, merged,
+  # by `Metrics drift`, so partitioning cannot change the verdict. A project
+  # missing from the matrix fails the merged check as `removed-from-run`.
   # -------------------------------------------------------------------------
-  metrics-drift:
-    name: Metrics drift
+  metrics-shard:
+    name: Metrics shard (${{ matrix.project }})
     needs: [paths, wright-cli-build]
     if: needs.paths.outputs.opy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - small-workshop
+          - seed-modify-target-score
+          - seed-repair-runaway-loop
+          - seed-understand-score-flow
+          - seed-modify-opy-project
+          - seed-repair-opy-runaway-loop
+          - seed-understand-opy-project
+          - bastion
+          - overwatch-ai-pve
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -489,11 +506,43 @@ jobs:
       - name: Prepare CLI executable
         run: chmod +x target/debug/wright
 
+      - name: Measure project
+        run: |
+          target/debug/wright update provider opy
+          python3 benchmarks/metrics/metrics.py run --project "${{ matrix.project }}" \
+            --repeats 1 --cli-repeats 1 --jobs 4 --wright target/debug/wright \
+            --out "$RUNNER_TEMP/${{ matrix.project }}.json"
+
+      - name: Upload shard run
+        uses: actions/upload-artifact@v7
+        with:
+          name: metrics-shard-${{ matrix.project }}
+          path: ${{ runner.temp }}/${{ matrix.project }}.json
+          if-no-files-found: error
+
+  metrics-drift:
+    name: Metrics drift
+    needs: [paths, metrics-shard]
+    if: needs.paths.outputs.opy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Download shard runs
+        uses: actions/download-artifact@v8
+        with:
+          pattern: metrics-shard-*
+          merge-multiple: true
+          path: metrics-shards
+
       - name: Check agent-facing metrics drift
         run: |
           python3 -m unittest discover -s benchmarks/metrics
-          target/debug/wright update provider opy
-          python3 benchmarks/metrics/metrics.py check --skip-latency --wright target/debug/wright
+          shards=()
+          for run in metrics-shards/*.json; do shards+=(--from "$run"); done
+          python3 benchmarks/metrics/metrics.py check --skip-latency "${shards[@]}"
 
   # -------------------------------------------------------------------------
   # [5b] AGENT-FACING LATENCY TREND  (main only, never blocking)
@@ -681,6 +730,7 @@ jobs:
       - opy-integration
       - lpp-integration
       - cli-behavior
+      - metrics-shard
       - metrics-drift
       - dist-cli-build
       - dist-validation
@@ -706,6 +756,7 @@ jobs:
             "opy-integration": ($p.opy == "true"),
             "lpp-integration": ($p.lpp == "true"),
             "cli-behavior": ($p.cli == "true"),
+            "metrics-shard": ($p.opy == "true"),
             "metrics-drift": ($p.opy == "true"),
             "dist-cli-build": ($p.dist == "true"),
             "dist-validation": ($p.dist == "true"),

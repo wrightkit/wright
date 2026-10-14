@@ -102,11 +102,19 @@ file so old bands stay auditable.
 
 ## In CI
 
-The `Metrics drift` job runs `check --skip-latency`: each metric runs
-once and only tokens, bytes, and counts are compared. It fails only on the
-blocking changes above; drift appears in the job log and does not fail the PR.
-A failing `Metrics drift` job fails the required `CI result` check and blocks
-merging. Wall time on shared
+The corpus is measured in parallel, one `Metrics shard (<project>)` job per
+project running `run --project <id> --repeats 1 --cli-repeats 1 --jobs 4`;
+`--jobs` overlaps the project's independent invocations, which blurs latency,
+so it is used only where latency is discarded. The
+`Metrics drift` job then runs `check --skip-latency --from <shard runs>`: the
+shards are merged (they must agree on the build and provider identity and must
+not overlap) and compared once, so partitioning cannot change the verdict. A
+corpus project with no shard fails as `removed-from-run`, and a failed shard
+fails `CI result`. Each metric runs once and only tokens, bytes, and counts are
+compared. It fails only on the blocking changes above; drift appears in the job
+log and does not fail the PR. A failing shard or `Metrics drift` job fails the
+required `CI result` check and blocks merging. When the corpus gains a project,
+add it to the `metrics-shard` matrix in `.github/workflows/ci.yml`. Wall time on shared
 hosted runners varies by about a factor of two between runs, and the machine
 factor cannot cancel a shift that differs by operation (small agent
 operations and CLI commands moved in opposite directions on the same run), so
