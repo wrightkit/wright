@@ -550,6 +550,67 @@ fn cost_estimate_rejects_a_file_selection_that_cannot_apply() {
     assert!(cost["selection"]["total"].as_u64().unwrap() > 0);
 }
 
+/// #691: `costEstimate` reports the canonical element count — the
+/// `workshop-rs`-owned computation — against the client element budget,
+/// with each rule's share in canonical program order. The expected numbers
+/// come from reparsing the fixture through `workshop-rs` itself, not from
+/// the service under test.
+#[test]
+fn cost_estimate_reports_the_canonical_element_count() {
+    let source = std::fs::read_to_string(workshop_path()).unwrap();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(workshop_path()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+    let cost = result_of(
+        &mut service,
+        &ToolRequest::CostEstimate {
+            selection: FindingSelection::default(),
+            all: true,
+        },
+    );
+
+    let catalog = wright_analyzer::catalog::builtin().expect("catalog");
+    let locale = workshop_rs::catalog::Locale::new("en-US");
+    let program = workshop_rs::parser::parse_with_context(&source, &catalog, &locale, &*catalog)
+        .expect("fixture parses");
+    let report = program.element_count(&catalog).expect("fixture counts");
+
+    let elements = &cost["elementCount"];
+    assert_eq!(
+        elements["total"].as_u64().map(|total| total as usize),
+        Some(report.total)
+    );
+    assert_eq!(elements["budget"].as_u64(), Some(32768));
+    let rules = elements["rules"].as_array().unwrap();
+    assert_eq!(rules.len(), program.rules.len());
+    assert_eq!(
+        rules
+            .iter()
+            .map(|rule| rule["count"].as_u64().unwrap() as usize)
+            .sum::<usize>(),
+        report.total,
+        "rule shares sum to the total: {rules:?}"
+    );
+    for (index, entry) in rules.iter().enumerate() {
+        assert_eq!(entry["index"], index);
+        assert_eq!(entry["name"], program.rules[index].name);
+        assert_eq!(
+            entry["count"].as_u64().map(|count| count as usize),
+            Some(report.rules[index].count)
+        );
+    }
+    assert!(
+        cost["kind"]["elementCount"]
+            .as_str()
+            .is_some_and(|kind| kind.contains("not a statement of client importability")),
+        "the kind map scopes the count: {cost}"
+    );
+}
+
 #[test]
 fn session_cost_keeps_the_selection_outcome_for_the_verdict() {
     // #635: the in-process `CostResult` keeps the full set's outcome so the

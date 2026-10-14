@@ -1271,13 +1271,53 @@ impl ResultPresentation for CostResult {
     }
     /// Totals lead; findings — the cost-relevant units — sort by severity and
     /// collapse identical repeats, bounded like the other query lists (#446).
-    fn render_body(&self, _ctx: &RenderContext<'_>) {
+    fn render_body(&self, ctx: &RenderContext<'_>) {
         let exact = &self.result["exact"];
         println!("\nGenerated resources (exact)");
         println!("  emitted bytes: {}", count(exact, "emittedBytes"));
         println!("  actions: {}", count(exact, "programActions"));
         println!("  rules: {}", count(exact, "programRules"));
         println!("  waits: {}", count(exact, "waitActions"));
+
+        // The canonical element count against the client budget (#691),
+        // then each rule's share ranked by count — canonical order breaks
+        // ties — bounded like the other query lists.
+        let elements = &self.result["elementCount"];
+        if elements.is_object() {
+            println!(
+                "  {} element(s) of the {}-element budget [exact] — canonical structure, not a statement of client importability",
+                count(elements, "total"),
+                count(elements, "budget"),
+            );
+            let mut rules: Vec<&serde_json::Value> =
+                elements["rules"].as_array().into_iter().flatten().collect();
+            rules.sort_by_key(|rule| std::cmp::Reverse(count(rule, "count")));
+            let shown = if ctx.presentation.all {
+                rules.len()
+            } else {
+                rules.len().min(20)
+            };
+            for rule in rules.iter().take(shown) {
+                println!(
+                    "    \"{}\": {} element(s)",
+                    rule_name(rule),
+                    count(rule, "count"),
+                );
+            }
+            if shown < rules.len() {
+                println!(
+                    "    showing {shown} of {}; --all to see every item",
+                    rules.len()
+                );
+            }
+        } else {
+            println!(
+                "  element count unavailable: {}",
+                self.result["elementCountUnavailable"]
+                    .as_str()
+                    .unwrap_or("counter does not model this program")
+            );
+        }
 
         let mut findings = self.result["findings"]
             .as_array()

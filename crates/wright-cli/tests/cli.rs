@@ -2632,6 +2632,90 @@ for line in sys.stdin:
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #691: `inspect cost` on a provider-backed `.opy` reports the canonical
+/// element count of the compiled artifact — the same `workshop-rs` count a
+/// `wright compile` re-parse measures. The provider is a staged LPP script
+/// serving one canned artifact, so the test stays hermetic.
+#[cfg(unix)]
+#[test]
+fn provider_backed_opy_cost_reports_the_artifact_element_count() {
+    use std::os::unix::fs::PermissionsExt;
+
+    const PROVIDER: &str = r#"#!/usr/bin/env python3
+import json, os, sys
+artifact = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifact.ws")).read()
+def reply(id, result=None, error=None):
+    message = {"jsonrpc": "2.0", "id": id}
+    message.update({"error": error} if error else {"result": result})
+    print(json.dumps(message), flush=True)
+def lpp_error(id, kind, details, text):
+    reply(id, error={"code": -32000, "message": text, "data": {"lpp": {"kind": kind, "details": details}}})
+for line in sys.stdin:
+    request = json.loads(line)
+    id, method = request["id"], request["method"]
+    if method == "lpp/initialize":
+        if request["params"]["protocolVersion"] != "1.1":
+            lpp_error(id, "protocolVersionMismatch", {"supportedProtocolVersions": ["1.1"]}, "unsupported")
+        else:
+            reply(id, {"protocolVersion": "1.1", "serverInfo": {"name": "fake", "version": "0"},
+                       "languages": [{"id": "opy", "extensions": ["opy"]}],
+                       "capabilities": {"check": True, "compile": True, "reconstruct": False, "symbols": False, "definition": False, "references": False, "rename": False, "editValidation": False, "projectLoading": True}})
+    elif method == "lpp/compile":
+        reply(id, {"diagnostics": [], "artifact": {"format": "workshop-rs/text-v1", "content": artifact}})
+    else:
+        reply(id, {})
+"#;
+
+    let dir = temp_dir();
+    let script = dir.join("fake-provider");
+    std::fs::write(&script, PROVIDER).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(
+        dir.join("artifact.ws"),
+        corpus_workshop("synthetic/control-flow"),
+    )
+    .unwrap();
+    let opy = std::fs::read_to_string(workspace_root().join("tests/fixtures/opy/basic-rule.opy"))
+        .unwrap();
+    let input = dir.join("main.opy");
+    std::fs::write(&input, &opy).unwrap();
+    let provider = script.to_str().unwrap();
+    let input = input.to_str().unwrap();
+
+    // `wright compile` emits the artifact the cost query loads; the
+    // canonical count of that output — measured by the owner's own
+    // counter — is the expected total.
+    let output = run(&["compile", input, "--opy-provider", provider, "-o", "-"]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let compiled = String::from_utf8_lossy(&output.stdout);
+    let catalog = wright_analyzer::catalog::builtin().expect("catalog");
+    let locale = workshop_rs::catalog::Locale::new("en-US");
+    let program = workshop_rs::parser::parse_with_context(&compiled, &catalog, &locale, &*catalog)
+        .expect("compiled artifact parses");
+    let report = program.element_count(&catalog).expect("artifact counts");
+
+    let output = run(&[
+        "inspect",
+        "cost",
+        input,
+        "--opy-provider",
+        provider,
+        "-f",
+        "json",
+    ]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let envelope = parse_json(&output.stdout);
+    let elements = &envelope["result"]["elementCount"];
+    assert_eq!(elements["total"], report.total);
+    assert_eq!(elements["budget"], 32768);
+    assert_eq!(
+        elements["rules"].as_array().unwrap().len(),
+        program.rules.len()
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // ── Convert (#126) ───────────────────────────────────────────────────────────
 
 #[test]
@@ -2991,6 +3075,61 @@ fn cost_reports_exact_counts_and_selected_findings() {
     assert_eq!(envelope["result"]["findings"].as_array().unwrap().len(), 2);
     assert_eq!(envelope["result"]["selection"]["total"], 10);
     assert_eq!(envelope["result"]["selection"]["withheld"], 8);
+    let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
+}
+
+/// #691: text `inspect cost` reports the canonical element count against
+/// the client budget — scoped as structure, not importability — and each
+/// rule's share ranked by count.
+#[test]
+fn cost_text_reports_the_element_budget_and_rule_shares() {
+    let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
+    let path = path.to_str().unwrap();
+
+    let json = run(&["inspect", "cost", path, "-f", "json"]);
+    assert!(json.status.success(), "{}", command_result(&json));
+    let elements = parse_json(&json.stdout)["result"]["elementCount"].clone();
+    let total = elements["total"]
+        .as_u64()
+        .expect("the payload reports a total");
+
+    let output = run(&["inspect", "cost", path]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(&format!(
+            "{total} element(s) of the 32768-element budget [exact]"
+        )),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("not a statement of client importability"),
+        "{stdout}"
+    );
+    // Each rule's share renders by count, largest first.
+    let rules = elements["rules"].as_array().unwrap();
+    let positions: Vec<usize> = rules
+        .iter()
+        .map(|rule| {
+            stdout
+                .find(&format!("\"{}\":", rule["name"].as_str().unwrap()))
+                .expect("the rule's share renders")
+        })
+        .collect();
+    let mut ranked = rules.clone();
+    ranked.sort_by_key(|rule| std::cmp::Reverse(rule["count"].as_u64().unwrap()));
+    let expected: Vec<usize> = ranked
+        .iter()
+        .map(|rule| {
+            stdout
+                .find(&format!("\"{}\":", rule["name"].as_str().unwrap()))
+                .unwrap()
+        })
+        .collect();
+    assert!(
+        expected.windows(2).all(|w| w[0] < w[1]),
+        "shares render largest first: {stdout} (positions {positions:?})"
+    );
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
 

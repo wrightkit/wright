@@ -245,7 +245,11 @@ resolution never guesses.
   {"total", "withheld"}}`; an unknown filter value exits 1 with an
   `invalid-selection` diagnostic.
 * `inspect cost` accepts the finding-selection options, applied to its
-  findings list exactly as on `costEstimate`.
+  findings list exactly as on `costEstimate`. Its `elementCount` member is
+  the canonical `workshop-rs` element count against the 32768-element
+  client budget, with each rule's share in canonical order — a structure
+  count, not a statement of client importability; it is `null` with an
+  `elementCountUnavailable` reason when the count cannot run.
 * `persistentObjects` has no standalone command; `analyze` reports aggregate
   counts under `result.persistentObjects`; use the agent operation for details.
 

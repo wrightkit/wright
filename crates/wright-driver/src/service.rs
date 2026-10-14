@@ -1693,10 +1693,35 @@ impl<'a> ToolService<'a> {
             "findings": findings,
             "kind": {
                 "exact": "exact target-resource counts",
+                "elementCount": "canonical Workshop structure counted against the client element budget; not a statement of client importability",
                 "findings": "static/heuristic execution indicators",
                 "performance": "compiler-host performance is measured by wright-bench, not in-process",
             },
         });
+        // `report.rules` keeps `program.rules` canonical order, disabled
+        // rules included, so the index names the rule (#691).
+        match loaded.program.element_count(self.session.catalog()) {
+            Ok(report) => {
+                result["elementCount"] = json!({
+                    "total": report.total,
+                    "budget": crate::session::WORKSHOP_CLIENT_ELEMENT_LIMIT,
+                    "rules": report
+                        .rules
+                        .iter()
+                        .enumerate()
+                        .map(|(index, node)| json!({
+                            "index": index,
+                            "name": loaded.program.rules[index].name,
+                            "count": node.count,
+                        }))
+                        .collect::<Vec<_>>(),
+                });
+            }
+            Err(error) => {
+                result["elementCount"] = serde_json::Value::Null;
+                result["elementCountUnavailable"] = json!(error.to_string());
+            }
+        }
         if let Some(outcome) = &outcome {
             result["selection"] = serde_json::to_value(outcome).expect("selection serializes");
         }

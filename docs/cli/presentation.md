@@ -162,7 +162,9 @@ subcommand leads with its subject and summary before its detail:
 * `inspect callgraph` prints the edge shape first, then notable fan-in and
   fan-out — subroutines with more than one caller and rules calling more
   than one subroutine — then the edge list.
-* `inspect cost` prints exact generated-resource totals, then static findings
+* `inspect cost` prints exact generated-resource totals, the canonical
+  element count against the client element budget with each rule's share
+  ranked by count, then static findings
   ordered by severity with consecutive identical findings collapsed into one
   counted entry.
 
