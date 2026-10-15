@@ -101,6 +101,8 @@ impl OpyProviderResolver {
         self.install_release(None, &target)
     }
 
+    /// Downgrading requires an explicit `version`: a bare `update` keeps a
+    /// newer active install instead of rolling it back.
     pub fn update(
         &self,
         requested_version: Option<&str>,
@@ -187,8 +189,6 @@ impl OpyProviderResolver {
             None => self.fetch_latest_version(&client)?,
         };
         if let Some((active, executable)) = self.active_provider(target)? {
-            // An explicit `--version` is the only downgrade contract; a bare
-            // update keeps a newer install instead of rolling it back.
             let already_active = active == version;
             let implicit_downgrade = requested_version.is_none()
                 && matches!(
@@ -852,9 +852,6 @@ mod tests {
         let bytes = archive("2.0.0", target, b"newer");
         let resolver = OpyProviderResolver::new(&root).with_target(target);
         resolver.install_archive("2.0.0", target, &bytes).unwrap();
-        // The release pointer resolves an older version; a bare update must
-        // not downgrade, so no archive or checksum request follows the
-        // version-pointer fetch.
         let (base_url, requests, server) =
             test_server_n(1, b"1.0.0".to_vec(), Vec::new(), Vec::new());
         let resolver = resolver.with_base_url(format!("{base_url}/opy-rs"));

@@ -969,14 +969,12 @@ mod tests {
             std::env::temp_dir().join(format!("wright-update-layout-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&staged);
         std::fs::create_dir_all(&staged).unwrap();
-        // An archive missing wright-lsp must fail layout validation.
         let bytes = build_archive("9.9.9", &[("wright", b"#!/bin/sh\n")]);
         unpack(&bytes, &staged, "9.9.9", "x86_64-unknown-linux-gnu").unwrap();
         let error = validated_payload(&staged, "9.9.9", "x86_64-unknown-linux-gnu").unwrap_err();
         assert!(error.message().contains("unexpected archive layout"));
         let _ = std::fs::remove_dir_all(&staged);
 
-        // A complete archive passes.
         let staged =
             std::env::temp_dir().join(format!("wright-update-layout-ok-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&staged);

@@ -394,7 +394,6 @@ pub(crate) mod test_support {
                 walk(def, Some(name), &mut edges);
             }
         }
-        // DFS for a cycle through the local-$defs graph.
         fn visit<'a>(
             node: &'a str,
             edges: &'a HashMap<String, HashSet<String>>,

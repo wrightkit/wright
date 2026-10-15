@@ -179,14 +179,9 @@ impl CompilerSession {
         }
         if let Some(diagnostic) = write_input_refusal(&self.config.input, "lint --write") {
             envelope.diagnostics.push(diagnostic);
-            retune(&mut envelope);
+            recompute_verdict(&mut envelope);
             return envelope;
         }
-        // `write`: each pass applies the first fix that still validates —
-        // a write changes the source identity every other fix's
-        // precondition names, so fixes are re-planned from a fresh lint
-        // after each application. A fix that never removes its finding
-        // cannot loop forever: the initial fixable count bounds the passes.
         let mut applied = Vec::new();
         let mut aborted = None;
         let mut budget = envelope.result.findings.as_array().map_or(0, |findings| {
@@ -238,7 +233,7 @@ impl CompilerSession {
                                 "re-linting the edited source failed; this fix was not attempted",
                             ));
                             envelope.diagnostics.push(diagnostic);
-                            retune(&mut envelope);
+                            recompute_verdict(&mut envelope);
                             break;
                         }
                     }
@@ -250,16 +245,11 @@ impl CompilerSession {
                         "an earlier fix's write failed; this fix was not attempted",
                     ));
                     envelope.diagnostics.push(diagnostic);
-                    retune(&mut envelope);
+                    recompute_verdict(&mut envelope);
                     break;
                 }
             }
         }
-        // The final pass reports what remains: offered fixes that were not
-        // applied get their validated preview or structured refusal. Fixes
-        // already reported by the write loop are not re-reported, and fixes
-        // that would have applied after an aborted run report a refusal —
-        // they were never attempted, not merely previewed.
         let sources = current_sources(&self.config);
         let mut seen: std::collections::HashSet<(String, String)> = applied
             .iter()
@@ -444,9 +434,6 @@ impl CompilerSession {
     }
 }
 
-/// A fix that validated: the deserialized transaction and the source
-/// previews `write_previews` applies — the internal handle a previewed
-/// [`LintFixOutcome`] carries through the write path.
 struct ResolvedFix {
     transaction: EditTransaction,
     previews: Vec<crate::edit::SourcePreview>,
@@ -461,11 +448,6 @@ struct ProviderFixContext {
     project_root: Option<String>,
 }
 
-/// A write run needs a disk-backed input: writing updates the file, but
-/// `reload`/`resolve` hands a `Text` session its caller-held buffer back, so
-/// the next pass would plan against bytes the write did not produce — the
-/// first fix applies and the retry fails `edit-stale-source` mid-batch.
-/// Refuse before the first write rather than partially apply the run.
 fn write_input_refusal(input: &InputSpec, operation: &str) -> Option<Diagnostic> {
     let reason = match input {
         InputSpec::Path(_) => return None,
@@ -479,17 +461,13 @@ fn write_input_refusal(input: &InputSpec, operation: &str) -> Option<Diagnostic>
     ))
 }
 
-/// The input's current text for fix validation — the same fresh resolve
-/// `validate_transaction` performs, kept for the preview's before-text.
 fn current_sources(config: &crate::config::SessionConfig) -> Option<BTreeMap<String, String>> {
     input::resolve(config)
         .ok()
         .map(|resolved| BTreeMap::from([(resolved.display, resolved.text)]))
 }
 
-/// Recompute an envelope's verdict after pushing diagnostics outside
-/// `finish` — the lint pass had already packaged its diagnostics.
-fn retune(envelope: &mut Envelope<LintResult>) {
+fn recompute_verdict(envelope: &mut Envelope<LintResult>) {
     envelope.exit = exit_code_from(&envelope.diagnostics);
     envelope.ok = envelope.exit == crate::result::exit::SUCCESS;
 }

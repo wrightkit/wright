@@ -37,9 +37,6 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, default=Path("dist"))
     args = parser.parse_args()
     version = args.version.removeprefix("v")
-    # Both names are interpolated into the payload path before it is deleted
-    # and recreated — reject anything that is not a single safe path
-    # component so a malformed argument cannot retarget the rmtree.
     if not re.fullmatch(
         r"[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?", version
     ):

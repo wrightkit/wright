@@ -22,7 +22,6 @@ use wright_driver::{CompileWrite, OutputDest, Overwrite};
 
 use crate::cli::{Cli, Command, CommonArgs, ConvertTargetArg, OutputFormatArg};
 
-/// The CLI name and version banner.
 pub const CLI_NAME: &str = "wright";
 pub const CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
 

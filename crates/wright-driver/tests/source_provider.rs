@@ -351,8 +351,6 @@ fn provider_backend_lint_and_analyze_use_the_canonical_artifact_without_opy_span
     cleanup(dir);
 }
 
-/// A source map for `text` whose spans point into `authored`, edited by
-/// `edit` before decoding, as a provider would return it.
 fn mapped_provenance(
     text: &str,
     authored: &Path,
@@ -373,7 +371,6 @@ fn mapped_provenance(
     wright_driver::SourceProvenance::Mapped(mapped.map)
 }
 
-/// Every span object (`file`, `start`, `end`) nested anywhere in `value`.
 fn collect_spans(value: &serde_json::Value, spans: &mut Vec<serde_json::Value>) {
     match value {
         serde_json::Value::Object(object) => {
@@ -475,8 +472,6 @@ fn mapped_provider_project_reports_its_source_file_count() {
             }));
     });
 
-    // `analyze` and `lint` compose the same `program` summary `inspect`
-    // reports.
     let analyze = session.analyze();
     assert!(analyze.ok, "mapped analyze: {:?}", analyze.diagnostics);
     assert_eq!(analyze.result.program["files"], 2);
@@ -711,8 +706,6 @@ for line in sys.stdin:
         })
     }
 
-    // Re-derives its artifact from the member's current text: the edited
-    // member compiles to the `elif`-free chain on the post-write reload.
     struct FixProvider {
         entry: PathBuf,
     }
@@ -1000,8 +993,6 @@ fn check_reports_the_catalog_validation_errors_compile_reports() {
     let provider = RecordingProvider {
         target: Arc::new(Mutex::new(None)),
         operations: Arc::new(Mutex::new(Vec::new())),
-        // The provider's own check op reports clean — the divergence the
-        // issue reproduces.
         check_compilation: Some(SourceCompilation {
             workshop_text: None,
             locale: Some("en-US".to_string()),
@@ -1045,8 +1036,6 @@ fn check_reports_the_catalog_validation_errors_compile_reports() {
     let span = check_findings[0].1.as_ref().expect("error span");
     assert_eq!((span.start.line, span.start.col), (10, 85));
 
-    // A second session on the same provider shape: `compile` reports the
-    // identical code and span.
     let (dir2, entry2) = temp_entry();
     let compile_provider = RecordingProvider {
         target: Arc::new(Mutex::new(None)),
@@ -1184,8 +1173,6 @@ fn service_check_and_compile_run_without_a_prewarmed_snapshot() {
         .expect("provider session");
     let mut service = ToolService::new(&mut session).expect("service constructs");
 
-    // A service over a check-only provider starts with no snapshot — the
-    // construction never compiles just to warm one.
     assert!(service.loaded().is_none());
     assert_eq!(service.reload_count(), 0);
 
@@ -1199,16 +1186,12 @@ fn service_check_and_compile_run_without_a_prewarmed_snapshot() {
     assert_eq!(result["ok"], true, "{result}");
     assert_eq!(*operations.lock().expect("ops"), vec!["check", "compile"]);
 
-    // The direct method is the same workflow: check again, still no
-    // compile-only provider call just to establish a query snapshot.
     assert!(service.check().ok);
     assert_eq!(
         *operations.lock().expect("ops"),
         vec!["check", "compile", "check", "compile"]
     );
 
-    // Canonical queries still refuse explicitly — no compile capability
-    // means no snapshot, not a placeholder program.
     for request in [
         ToolRequest::Project,
         ToolRequest::Symbols {
@@ -1230,8 +1213,6 @@ fn service_check_and_compile_run_without_a_prewarmed_snapshot() {
         "snapshot queries refuse without asking the provider to compile"
     );
 
-    // `compile` is the provider's own refusal, in the envelope — not the
-    // service's snapshot precondition.
     let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile {
         output: None,
         force: false,
@@ -1270,7 +1251,6 @@ fn service_compile_establishes_the_snapshot_and_recovers_after_reload() {
         .expect("provider session");
     let mut service = ToolService::new(&mut session).expect("service constructs");
 
-    // A fresh service holds no snapshot until a workflow establishes one.
     assert!(service.loaded().is_none());
 
     let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile {
@@ -1282,15 +1262,12 @@ fn service_compile_establishes_the_snapshot_and_recovers_after_reload() {
     assert_eq!(result["ok"], true, "{result}");
     assert!(service.loaded().is_some(), "compile supplied the snapshot");
 
-    // The adopted snapshot serves queries — no second provider compile.
     let ToolResponse::Ok { result } = service.handle(&ToolRequest::Project) else {
         panic!("project reads the established snapshot")
     };
     assert!(result["rules"].as_u64().unwrap() > 0, "{result}");
     assert_eq!(*operations.lock().expect("ops"), vec!["compile"]);
 
-    // A disk change under the session invalidates the snapshot; `compile`
-    // re-resolves through the provider's own operation and re-establishes it.
     std::fs::write(&entry, "// edited project source").expect("edit entry");
     let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check { all: true }) else {
         panic!("check must return the workflow envelope")
@@ -1668,11 +1645,6 @@ fn wright_originated_refusal_keeps_its_verbatim_code() {
     cleanup(dir);
 }
 
-// ---------------------------------------------------------------------
-// #569: the real `LppSourceProvider` maps a typed `ProviderError` to a
-// classified `SourceProviderError` carrying the operation/entry context.
-// ---------------------------------------------------------------------
-
 /// A `LanguageProvider` that fails the entry-scoped requests with a scripted
 /// typed error; every other method is unreachable on these paths. When
 /// `capabilities_failure` is `Some`, `capabilities()` fails with that error
@@ -1967,8 +1939,6 @@ fn provider_backend_inspect_and_queries_run_the_compile_load() {
         "provider rules --content: {:?}",
         rules.diagnostics
     );
-    // The first compile established the canonical snapshot; every query
-    // after it reads the cache instead of re-compiling.
     assert_eq!(*operations.lock().expect("ops"), vec!["compile"]);
     cleanup(dir);
 }
@@ -2003,7 +1973,6 @@ fn check_only_provider_inspect_reports_the_provider_compile_decline() {
         "the provider's own decline message surfaces: {diagnostic:?}"
     );
     assert!(result.result.program.is_null());
-    // The compile operation was asked once; the refusal is the provider's.
     assert_eq!(*operations.lock().expect("ops"), vec!["compile"]);
     cleanup(dir);
 }
@@ -2038,7 +2007,6 @@ fn opy_rules_content_reports_names_unavailable() {
         Box::new(provider),
     )
     .expect("provider session");
-    // A compile establishes the canonical snapshot semantic queries serve.
     let compile = session.compile();
     assert!(compile.ok, "provider compile: {:?}", compile.diagnostics);
     let mut service = ToolService::new(&mut session).expect("service loads");

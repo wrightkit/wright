@@ -328,9 +328,6 @@ impl LanguageService {
         RenameOutcome::Applied(applied)
     }
 
-    /// The document when it is a raw Workshop buffer this service backs:
-    /// a source-language document keeps its provider boundary regardless
-    /// of its tag.
     fn workshop_document(&self, uri: &str) -> Option<&Document> {
         let document = self.store.document(uri)?;
         if is_source_document(uri) || !is_workshop_document(document) {
@@ -359,9 +356,6 @@ impl LanguageService {
         })
     }
 
-    /// The canonical `SemanticIndex` over the document's current buffer —
-    /// the same index `inspect` serves — or `None` when the text does not
-    /// load to a validated program.
     fn workshop_index(&self, document: &Document) -> Option<SemanticIndex> {
         let mut session = self.workshop_session(document).ok()?;
         let loaded = session.load().ok()?;
@@ -369,8 +363,8 @@ impl LanguageService {
     }
 }
 
-/// Map a document URI to its provider language id when it is a
-/// source-language document.
+const PENDING_PROVIDER_LANGUAGES: &[&str] = &["ostw", "del"];
+
 fn source_language_id(uri: &str) -> Option<String> {
     let ext = crate::document::uri_to_path(uri)?
         .extension()?
@@ -378,10 +372,7 @@ fn source_language_id(uri: &str) -> Option<String> {
         .to_lowercase();
     match ext.as_str() {
         "opy" => Some(wright_driver::opy_provider::OPY_LANGUAGE_ID.to_string()),
-        // DEL/OSTW have no provider implementation yet; the extension is the
-        // opaque id so the registry refusal stays explicit and names the
-        // language once a provider ships.
-        "ostw" | "del" => Some(ext),
+        id if PENDING_PROVIDER_LANGUAGES.contains(&id) => Some(id.to_string()),
         _ => None,
     }
 }
@@ -390,10 +381,6 @@ fn is_source_document(uri: &str) -> bool {
     source_language_id(uri).is_some()
 }
 
-/// A document is raw Workshop when the editor tagged it `workshop`, or —
-/// untagged — when its extension is one `wright check` accepts as Workshop
-/// input. An explicit non-Workshop language id stays quiet even on a
-/// `.txt` URI.
 fn is_workshop_document(document: &Document) -> bool {
     if let Some(language_id) = document.language_id.as_deref() {
         return language_id == "workshop";
@@ -428,7 +415,6 @@ fn symbol_at<'index>(
     }
 }
 
-/// One driver `Diagnostic` as a `SourceDiagnostic` on the open document.
 fn source_diagnostic(
     document: &Document,
     diagnostic: &wright_driver::Diagnostic,

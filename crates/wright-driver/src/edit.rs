@@ -193,17 +193,10 @@ pub fn validate_transaction(
     if let Some(diagnostic) = edit_kind_gate(resolved.kind, "providerValidateEdit") {
         return refuse(vec![diagnostic]);
     }
-    // A transaction that arrived over the wire carries no structural
-    // guarantee: re-run the constructor's normalization and invariants so
-    // empty, overlapping, or unsorted edit lists meet the same contract as
-    // `EditTransaction::new` callers.
     let transaction = match EditTransaction::new(transaction.edits.clone()) {
         Ok(transaction) => transaction,
         Err(diagnostic) => return refuse(vec![diagnostic]),
     };
-    // Every edit must target the loaded input itself — applying a caller's
-    // edit to a source that is not part of this program would validate
-    // text the transaction never touched.
     if let Some(edit) = transaction
         .edits
         .iter()
@@ -266,9 +259,6 @@ pub fn validate_transaction(
             return refuse(diagnostics);
         }
     };
-    // A Workshop project is one source file: the edited text is the preview
-    // when the transaction touched the input, else the caller's current
-    // text for it, else the on-disk input the edits were checked against.
     let edited = previews
         .iter()
         .find(|preview| same_source(&preview.source, &resolved))
@@ -451,9 +441,6 @@ pub fn semantic_rename(
             &defaulted_sources
         }
     };
-    // The caller supplies the current text of the file being renamed; it
-    // must be the text the loaded program was parsed from, so every
-    // provenance span indexes into it exactly.
     let Some((source, current)) = sources
         .iter()
         .find(|(source, _)| same_file(source, &input_path))
@@ -523,10 +510,6 @@ pub fn semantic_rename(
         )]);
     }
 
-    // Rewrite every occurrence through the program's exact identifier
-    // provenance. A reference without an authored span — or one whose span
-    // does not cover exactly the identifier in the supplied text — refuses
-    // rather than guessing.
     let mut spans: Vec<workshop_rs::source::Span> = Vec::new();
     for reference in index.references(symbol.id) {
         let Some(occurrence) = reference.occurrence else {
@@ -583,7 +566,6 @@ pub fn semantic_rename(
         Ok(previews) => previews,
         Err(diagnostic) => return refuse(vec![diagnostic]),
     };
-    // The rename edits only ever touch the loaded input's source.
     let edited = previews
         .iter()
         .find(|preview| same_file(&preview.source, &input_path))
@@ -628,8 +610,6 @@ fn resolve_rename_target<'a>(
     }
 }
 
-/// Resolve a `source`/`line`/`col` position to the symbol whose identifier
-/// occurrence contains it.
 fn symbol_at_position<'a>(
     index: &'a SemanticIndex,
     loaded: &Loaded,
@@ -676,10 +656,6 @@ fn symbol_at_position<'a>(
     }
 }
 
-/// A provenance gap on one reference: either no authored identifier span
-/// exists, or the span does not cover exactly the symbol's name in the
-/// caller's text. Both are refusals — rename never degrades to a textual
-/// search.
 fn rename_unmapped(loaded: &Loaded, symbol: &Symbol) -> Diagnostic {
     Diagnostic::error(
         "rename-unmapped-span",
@@ -738,7 +714,6 @@ fn verify_rename(
     }
 }
 
-/// The sorted multiset of reference kinds for one symbol.
 fn reference_signature(index: &SemanticIndex, id: SymbolId) -> Vec<ReferenceKind> {
     let mut kinds: Vec<ReferenceKind> = index
         .references(id)
@@ -935,8 +910,6 @@ fn apply_edit(source: &str, edit: &SourceEdit) -> Result<String, Diagnostic> {
     ))
 }
 
-/// The byte offset a 1-based line/column position splices at: the preceding
-/// lines and their newlines, plus the column's byte inside its own line.
 fn position_byte(lines: &[&str], line: u32, col: u32) -> usize {
     lines[..line as usize - 1]
         .iter()
@@ -1203,8 +1176,6 @@ mod tests {
     #[test]
     fn rename_does_not_touch_longer_identifiers() {
         let edit = rename_edit(SOURCE, "score", "total");
-        // A hypothetical `scoreboard` must not be renamed (not present, but
-        // the word-boundary logic is what keeps it safe).
         assert!(!edit.new_text.contains("totalboard"));
     }
 
@@ -1271,8 +1242,6 @@ mod tests {
             },
             new_text: String::new(),
         };
-        // The current text is missing entirely: the precondition refuses
-        // before any range or compile work.
         let validation = validate_transaction(
             &SessionConfig {
                 input: crate::InputSpec::Path(path),
@@ -1310,8 +1279,6 @@ mod tests {
 
     #[test]
     fn rename_occurrences_works_without_a_declaration() {
-        // A source that only references the symbol (declared elsewhere) is
-        // still editable: rename_occurrences does not require a declaration.
         let source = "rule \"r\":\n    @Event global\n    showStatus()\n";
         let edit = rename_occurrences(
             source,
@@ -1342,7 +1309,6 @@ mod tests {
     fn workshop_edits_validate_by_reparsing_the_source() {
         let (dir, mut session) = workshop_session(WORKSHOP);
         let loaded = session.load().expect("loaded");
-        // One identifier edit: `score` → `total` in the declaration.
         let edit = SourceEdit {
             edit_kind: "edit".to_string(),
             source: loaded.input.display.clone(),
@@ -1370,8 +1336,6 @@ mod tests {
 
     #[test]
     fn workshop_edits_refuse_with_the_reparse_diagnostics() {
-        // Renaming the declaration to a name that breaks reparse — `0)` —
-        // refuses with the Workshop parse diagnostic, not a provider error.
         let (dir, mut session) = workshop_session(WORKSHOP);
         let loaded = session.load().expect("loaded");
         let edit = SourceEdit {
@@ -1423,7 +1387,6 @@ mod tests {
         for edit in &transaction.edits {
             assert_eq!(edit.edit_kind, "rename");
             assert_eq!(edit.new_text, "total");
-            // The edited range covers exactly the old identifier.
             let lines: Vec<&str> = loaded.input.text.split('\n').collect();
             let line = lines[edit.range.start_line as usize - 1];
             assert_eq!(edit.range.start_line, edit.range.end_line);
@@ -1459,8 +1422,6 @@ mod tests {
         );
         assert!(by_position.ok, "{:?}", by_position.diagnostics);
 
-        // A stale current text refuses: provenance spans must index the
-        // loaded program's text.
         let stale = BTreeMap::from([(
             loaded.input.display.clone(),
             loaded.input.text.replacen("score", "other", 1),
@@ -1480,7 +1441,6 @@ mod tests {
         assert!(!rename.ok);
         assert_eq!(rename.diagnostics[0].code, "edit-stale-source");
 
-        // Unknown and missing targets refuse explicitly.
         for (target, code) in [
             (
                 RenameTarget {
@@ -1515,7 +1475,6 @@ mod tests {
         let (dir, mut session) = workshop_session(WORKSHOP);
         let loaded = session.load().expect("loaded");
         let sources = BTreeMap::from([(loaded.input.display.clone(), loaded.input.text.clone())]);
-        // `to` names another global variable: a same-namespace collision.
         let collision = semantic_rename(
             &loaded,
             session.catalog(),
@@ -1529,7 +1488,6 @@ mod tests {
             },
         );
         assert!(collision.ok);
-        // Add a second variable and collide with it.
         let (dir2, mut session2) =
             workshop_session(&WORKSHOP.replacen("0: score", "0: score\n        1: other", 1));
         let loaded2 = session2.load().expect("loaded");
@@ -1549,7 +1507,6 @@ mod tests {
         );
         assert!(!collision.ok);
         assert_eq!(collision.diagnostics[0].code, "rename-name-collision");
-        // A rule symbol is not a rename target.
         let rule = semantic_rename(
             &loaded,
             session.catalog(),
@@ -1564,7 +1521,6 @@ mod tests {
         );
         assert!(!rule.ok);
         assert_eq!(rule.diagnostics[0].code, "rename-unsupported-kind");
-        // A mistyped name refuses with the same candidates `usage` reports.
         let typo = semantic_rename(
             &loaded,
             session.catalog(),
@@ -1601,7 +1557,6 @@ mod tests {
             .symbols()
             .find(|symbol| symbol.name == "score")
             .expect("score symbol");
-        // Edit only the declaration, leaving the two references stale.
         let edited = loaded.input.text.replacen("0: score", "0: total", 1);
         let result = verify_rename(&index, symbol, "total", &edited, &loaded, session.catalog());
         let diagnostics = result.expect_err("a partial rename refuses");
@@ -1637,7 +1592,6 @@ mod tests {
         assert!(text.contains("Event Player, combo,"), "{text}");
         assert!(text.contains("Event Player.combo"), "{text}");
         assert!(!text.contains("streak"), "{text}");
-        // Only `combo` identifiers rewrote: `helper` is untouched.
         assert!(text.contains("Call Subroutine(helper)"), "{text}");
 
         let subroutine = semantic_rename(
@@ -1714,7 +1668,6 @@ mod tests {
         let transaction = rename.transaction.as_ref().unwrap();
         let previews = rename.preview.as_ref().unwrap();
 
-        // Stale: the file changed since the transaction was validated.
         std::fs::write(loaded.input.path.as_ref().unwrap(), "// changed\n").unwrap();
         let error = write_previews(previews, transaction).unwrap_err();
         assert_eq!(error.code, "edit-stale-source");
@@ -1724,14 +1677,12 @@ mod tests {
             "a stale write leaves the file untouched"
         );
 
-        // Fresh: the file's identity matches and the write lands.
         std::fs::write(loaded.input.path.as_ref().unwrap(), &loaded.input.text).unwrap();
         let written = write_previews(previews, transaction).expect("writes");
         assert_eq!(written.len(), 1);
         let text = std::fs::read_to_string(loaded.input.path.as_ref().unwrap()).unwrap();
         assert!(text.contains("0: total"), "{text}");
         assert!(text.contains("Global.total"), "{text}");
-        // No temporary sibling remains.
         let leftovers: Vec<_> = std::fs::read_dir(&dir)
             .unwrap()
             .filter_map(|entry| entry.ok())
@@ -1987,10 +1938,6 @@ mod tests {
 
     #[test]
     fn wire_transactions_recheck_the_transaction_invariants() {
-        // A transaction deserialized off the wire bypasses
-        // `EditTransaction::new`; validation re-normalizes it so empty or
-        // overlapping edits refuse and unsorted edits still apply in source
-        // order rather than splicing blindly.
         let (dir, session) = workshop_session(WORKSHOP);
         let path = dir.join("input.ws");
         let key = path.to_string_lossy().into_owned();
@@ -2024,7 +1971,6 @@ mod tests {
         assert!(!validation.ok);
         assert_eq!(validation.diagnostics[0].code, "edit-empty-transaction");
 
-        // Overlapping ranges on line 11 (`score` and `core,`) refuse.
         let validation = validate_transaction(
             &session.config,
             session.catalog(),
@@ -2037,8 +1983,6 @@ mod tests {
         assert!(!validation.ok);
         assert_eq!(validation.diagnostics[0].code, "edit-overlap");
 
-        // Unsorted disjoint edits normalize: `Add` (cols 36-39) listed before
-        // `score` (cols 29-34) still produces the correctly spliced source.
         let validation = validate_transaction(
             &session.config,
             session.catalog(),
@@ -2055,8 +1999,6 @@ mod tests {
             "{text}"
         );
 
-        // An edit targeting a source that is not the loaded input refuses —
-        // validating it would check text the transaction never touched.
         let mut wider = sources.clone();
         wider.insert("other.ws".to_string(), WORKSHOP.to_string());
         let foreign = serde_json::json!({

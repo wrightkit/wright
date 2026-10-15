@@ -63,9 +63,7 @@ def release_promotion_order() -> None:
     parts = (REPO_ROOT / ".github/workflows/release.yml").read_text().split("\njobs:", 1)
     if len(parts) != 2:
         fail("release.yml has no jobs section")
-    # Comments are stripped so `# needs: x` cannot fabricate or hide an edge.
     lines = [re.sub(r"(\s|^)#.*$", "", line).rstrip() for line in parts[1].splitlines()]
-    # The jobs section ends at the next top-level key.
     end = next((i for i, line in enumerate(lines) if line[:1].strip()), len(lines))
     lines = lines[:end]
     starts: dict[str, int] = {}

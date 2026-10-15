@@ -216,14 +216,12 @@ mod tests {
             PathBuf::from("/project"),
             5,
         ));
-        // Equal and older versions are rejected.
         assert!(!store.change("file:///a.opy", "stale equal", 5));
         assert!(!store.change("file:///a.opy", "stale older", 4));
         assert_eq!(
             store.document("file:///a.opy").unwrap().text,
             "rule \"a\":\n"
         );
-        // A newer version applies.
         assert!(store.change("file:///a.opy", "newer", 6));
         assert_eq!(store.document("file:///a.opy").unwrap().text, "newer");
         assert_eq!(store.document("file:///a.opy").unwrap().version, 6);
@@ -252,17 +250,14 @@ mod tests {
 
     #[test]
     fn uri_to_path_decodes_percent_encoding_spaces_and_unicode() {
-        // Spaces and percent-encoded segments resolve to real paths.
         assert_eq!(
             uri_to_path("file:///tmp/my%20dir/main.opy"),
             Some(PathBuf::from("/tmp/my dir/main.opy"))
         );
-        // Unicode filenames decode from percent-encoded URIs.
         assert_eq!(
             uri_to_path("file:///tmp/%E6%96%87%E4%BB%B6.opy"),
             Some(PathBuf::from("/tmp/文件.opy"))
         );
-        // Non-file schemes are not filesystem paths.
         assert_eq!(uri_to_path("untitled:scratch"), None);
         assert_eq!(uri_to_path("https://example.com/a.opy"), None);
     }
@@ -300,14 +295,12 @@ mod tests {
 
     #[test]
     fn source_to_uri_normalizes_uris_and_paths_consistently() {
-        // A percent-encoded file URI round-trips through the same parser.
         let uri = source_to_uri("file:///tmp/my%20dir/%E6%96%87%E4%BB%B6.opy").unwrap();
         assert_eq!(
             uri_to_path(&uri),
             Some(PathBuf::from("/tmp/my dir/文件.opy")),
             "normalized URI decodes back to the intended path"
         );
-        // A resolved filesystem path converts to a standard file URI.
         let uri = source_to_uri("/tmp/my dir/文件.opy").unwrap();
         assert!(uri.starts_with("file:///tmp/my%20dir/"), "{uri}");
         assert_eq!(
@@ -315,7 +308,6 @@ mod tests {
             Some(PathBuf::from("/tmp/my dir/文件.opy")),
             "path -> URI -> path round-trips"
         );
-        // Non-file identities are not filesystem sources.
         assert_eq!(source_to_uri("untitled:scratch"), None);
     }
 

@@ -1,9 +1,3 @@
-//! Validated lint fixes (#556): `duplicate-condition` and `repeated-value`
-//! findings carry a materialized `EditTransaction` on both the session and
-//! ToolService surfaces; applying it through the existing edit path removes
-//! the finding and keeps `check` clean, and a stale source refuses with no
-//! write.
-
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -94,7 +88,6 @@ fn lint_findings_carry_fix_transactions_on_session_and_service() {
         "both duplicated occurrences wrap"
     );
 
-    // Detailed findings preserve source-edit transactions; lint reports actionable summaries.
     let mut service = ToolService::new(&mut session).unwrap();
     let lint = match service.handle(&ToolRequest::Lint {
         selection: FindingSelection::default(),
@@ -174,7 +167,6 @@ fn lint_fix_preview_validates_and_write_applies_to_completion() {
         "each occurrence wraps the complete expression: {applied}"
     );
 
-    // The resolved findings are gone and the input still checks clean.
     let mut session = make_session(path);
     let relint = session.lint();
     assert!(
@@ -204,7 +196,6 @@ fn a_fix_refuses_a_stale_source_and_writes_nothing() {
     let transaction: EditTransaction =
         serde_json::from_value(fix["transaction"].clone()).expect("fix carries a transaction");
 
-    // The source moves after the fix was planned.
     let edited = SOURCE.replacen("other, 1", "other, 9", 1);
     std::fs::write(&path, &edited).unwrap();
 
@@ -217,9 +208,6 @@ fn a_fix_refuses_a_stale_source_and_writes_nothing() {
         "a refused fix writes nothing"
     );
 
-    // The write path checks the same precondition again before touching
-    // disk: previews materialized while the source was current refuse once
-    // the file moves.
     let path = temp_workshop(SOURCE);
     let mut session = make_session(path.clone());
     let envelope = session.lint();
@@ -239,10 +227,6 @@ fn a_fix_refuses_a_stale_source_and_writes_nothing() {
 
 #[test]
 fn lint_fix_write_refuses_a_caller_held_text_input() {
-    // A `Text` session's buffer is its source: writing the named file and
-    // reloading resolves the unchanged buffer, so the batch would apply one
-    // fix then fail its own stale-source precondition. Refuse before the
-    // first write instead.
     let path = temp_workshop(SOURCE);
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Text {
@@ -273,7 +257,6 @@ fn lint_fix_write_refuses_a_caller_held_text_input() {
         "the refusal writes nothing"
     );
 
-    // rename --write carries the same boundary.
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Text {
             text: SOURCE.to_string(),

@@ -1,24 +1,3 @@
-//! Provider-driven mutation end-to-end tests (#139) through the tool
-//! service and Wright's LPP client against the reference conformance mock
-//! provider.
-//!
-//! These tests prove the #139 seam end to end: semantic rename target
-//! resolution and edit generation route through the LPP `rename` capability,
-//! the resulting source edits are wrapped in Wright's own edit transaction
-//! (identity/version preconditions, deterministic ordering, overlap checks,
-//! atomic preview), and semantic validation routes through the provider's
-//! project semantics (`lpp/validateEdits` per edited document, then
-//! `lpp/check` over the edited project). Provider refusals, unsupported
-//! capabilities, stale sources, and semantic validation failures must all be
-//! structured refusals with no partial edit set.
-//!
-//! The mock provider serves the deliberately foreign reference language
-//! `x-demo-lang`, so these tests also prove the seam has no OPY/DEL-specific
-//! logic. The provider binary is located through the `LPP_MOCK_PROVIDER`
-//! environment variable; when absent the mock-dependent tests are skipped
-//! with a clear reason (CI sets it; see `.github/workflows/ci.yml` and
-//! `crates/wright-lpp/tests/mock_provider.rs` for the pinned commit).
-
 #![allow(clippy::result_large_err)]
 
 use std::collections::BTreeMap;
@@ -31,13 +10,11 @@ use wright_driver::provider_edit::ProviderMutation;
 use wright_driver::service::{ToolRequest, ToolResponse, ToolService};
 use wright_lpp::{Document, DocumentSet, Position};
 
-/// The reference mock provider's deliberately foreign language id.
 const DEMO_LANGUAGE_ID: &str = "x-demo-lang";
 
 /// A clean x-demo-lang puzzle document (from the LPP v1 spec transcript).
 const CLEAN_PUZZLE: &str = "puzzle clean {\n  target = 40\n  start = 10\n  ops {\n    double: x => x * 2\n    plus1: x => x + 1\n  }\n  solution = [ double, double ]\n}";
 
-/// A puzzle declaring only the `double` op.
 const SINGLE_OP_PUZZLE: &str = "puzzle clean {\n  target = 40\n  start = 10\n  ops {\n    double: x => x * 2\n  }\n  solution = [ double, double ]\n}";
 
 const URI: &str = "file:///project/puzzle.xdl";
@@ -65,8 +42,6 @@ fn mock_provider_path() -> Option<PathBuf> {
     }
 }
 
-/// A tool session with the given provider registry and no unrelated source
-/// project to load.
 fn session_with_providers(providers: wright_lpp::ProviderRegistry) -> CompilerSession {
     let config = SessionConfig {
         input: InputSpec::Path(workshop_path()),
@@ -77,8 +52,6 @@ fn session_with_providers(providers: wright_lpp::ProviderRegistry) -> CompilerSe
     CompilerSession::new(config).expect("session")
 }
 
-/// A tool service over a session with the mock provider registered (with
-/// optional `--without` capability flags).
 fn tool_service(without: &[&str]) -> ToolService<'static> {
     let path = mock_provider_path().expect("mock provider path");
     let mut registry = wright_lpp::ProviderRegistry::new();
@@ -124,7 +97,6 @@ fn two_document_set() -> DocumentSet {
     documents
 }
 
-/// The caller's current text view for a document set (identical texts).
 fn sources_of(documents: &DocumentSet) -> BTreeMap<String, String> {
     documents
         .iter()
@@ -132,8 +104,6 @@ fn sources_of(documents: &DocumentSet) -> BTreeMap<String, String> {
         .collect()
 }
 
-/// The rename request the way an agent would send it through the tool
-/// service.
 fn rename_request(
     documents: DocumentSet,
     position_document_uri: &str,
@@ -167,10 +137,6 @@ fn handle(service: &mut ToolService<'_>, request: &ToolRequest) -> ProviderMutat
     }
 }
 
-// ---------------------------------------------------------------------------
-// Semantic rename through the provider
-// ---------------------------------------------------------------------------
-
 #[test]
 fn single_file_rename_routes_through_the_provider() {
     let Some(_) = mock_provider_path() else {
@@ -190,9 +156,6 @@ fn single_file_rename_routes_through_the_provider() {
     );
     assert!(mutation.ok, "rename succeeds: {:?}", mutation.diagnostics);
 
-    // Wright-owned transaction: exact-range rename edits carrying the
-    // identity precondition of the text they were computed against,
-    // deterministically ordered (declaration first, then references).
     let transaction = mutation.transaction.expect("transaction");
     assert_eq!(
         transaction.edits.len(),
@@ -213,7 +176,6 @@ fn single_file_rename_routes_through_the_provider() {
         "every edit carries the source identity precondition"
     );
 
-    // Atomic preview: the complete edited text, all references renamed.
     let preview = mutation.preview.expect("preview");
     assert_eq!(preview.len(), 1);
     assert_eq!(preview[0].source, URI);
@@ -264,7 +226,6 @@ fn multi_file_rename_edits_every_received_document_consistently() {
         "second document: declaration plus references"
     );
 
-    // Atomic preview covers every edited source.
     let preview = mutation.preview.expect("preview");
     assert_eq!(preview.len(), 2);
     for source_preview in &preview {
@@ -345,9 +306,6 @@ fn stale_current_sources_refuse_with_no_partial_edit_set() {
     };
     let mut service = tool_service(&[]);
     let documents = single_document_set();
-    // The caller's current text no longer matches the snapshot the provider
-    // computed the rename against: the Wright-owned identity precondition
-    // refuses before anything can be applied.
     let mut stale_sources = sources_of(&documents);
     stale_sources.insert(URI.to_string(), format!("{CLEAN_PUZZLE}\n"));
     let mutation = handle(
@@ -359,10 +317,6 @@ fn stale_current_sources_refuse_with_no_partial_edit_set() {
     assert!(mutation.transaction.is_none(), "no partial edit set");
     assert!(mutation.preview.is_none(), "no partial preview");
 }
-
-// ---------------------------------------------------------------------------
-// Capability and failure refusals
-// ---------------------------------------------------------------------------
 
 #[test]
 fn missing_rename_capability_refuses_explicitly() {
@@ -397,10 +351,6 @@ fn provider_failure_mid_rename_applies_nothing() {
     let Some(_) = mock_provider_path() else {
         return;
     };
-    // The rename capability is available but the edit-validation capability
-    // is not: the provider computes the rename, then the mandatory semantic
-    // gate refuses. The failure happens after edit generation, so this
-    // proves nothing partial is ever returned.
     let mut service = tool_service(&["editValidation"]);
     let documents = single_document_set();
     let mutation = handle(
@@ -455,8 +405,6 @@ fn semantic_validation_failure_is_atomic_across_documents() {
 
 #[test]
 fn unconfigured_language_id_refuses_explicitly() {
-    // The source session itself refuses before any static frontend can be
-    // selected; provider edit requests therefore cannot inherit a fallback.
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(workspace_root().join("tests/fixtures/opy/basic-rule.opy")),
         kind: SourceKind::Opy,
@@ -469,10 +417,6 @@ fn unconfigured_language_id_refuses_explicitly() {
     };
     assert_eq!(diagnostic.code, "source-provider-unavailable");
 }
-
-// ---------------------------------------------------------------------------
-// Caller-proposed transaction validation through the provider
-// ---------------------------------------------------------------------------
 
 /// A Wright transaction renaming every occurrence of `double` to `twice` in
 /// the clean puzzle (declaration at 5:5-5:11, references at 8:16-8:22 and
@@ -581,10 +525,6 @@ fn caller_transaction_that_breaks_the_source_refuses() {
     assert!(mutation.preview.is_none(), "no partial preview");
 }
 
-// ---------------------------------------------------------------------------
-// Provider operations are independent of the session project (#512)
-// ---------------------------------------------------------------------------
-
 /// Provider mutations carry their own documents and project context: an
 /// unrelated broken session project neither blocks them nor gets loaded by
 /// them.
@@ -601,8 +541,6 @@ fn provider_mutations_do_not_require_the_session_project() {
             Vec::new(),
         ))
         .expect("registered");
-    // The configured session input does not exist; the service still
-    // starts, without a snapshot.
     let dir = std::env::temp_dir().join(format!("wright-provider-512-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let session = CompilerSession::new(SessionConfig {
@@ -646,14 +584,9 @@ fn provider_mutations_do_not_require_the_session_project() {
         "the provider validation succeeds over its own documents: {:?}",
         validate.diagnostics
     );
-    // Neither flow triggered the unrelated session-project load.
     assert!(service.loaded().is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
-
-// ---------------------------------------------------------------------------
-// Session-derived document sets (#548)
-// ---------------------------------------------------------------------------
 
 /// An LPP fake provider that accepts the mutation surface unconditionally:
 /// `lpp/rename` answers one five-character edit on the first document,
@@ -700,11 +633,15 @@ for line in sys.stdin:
         reply(id, {})
 "#;
 
-/// A tool service over a loaded Workshop session with the session-docs fake
-/// provider registered, plus the file the provider records the shown
-/// document URIs into.
 #[cfg(unix)]
-fn session_docs_service() -> (PathBuf, PathBuf, ToolService<'static>) {
+struct SessionDocs {
+    dir: PathBuf,
+    capture: PathBuf,
+    service: ToolService<'static>,
+}
+
+#[cfg(unix)]
+fn session_docs_service() -> SessionDocs {
     use std::os::unix::fs::PermissionsExt;
     use std::sync::atomic::{AtomicUsize, Ordering};
     static NEXT: AtomicUsize = AtomicUsize::new(0);
@@ -739,11 +676,13 @@ fn session_docs_service() -> (PathBuf, PathBuf, ToolService<'static>) {
     })
     .expect("session");
     let session = Box::leak(Box::new(session));
-    (dir, capture, ToolService::new(session).expect("service"))
+    SessionDocs {
+        dir,
+        capture,
+        service: ToolService::new(session).expect("service"),
+    }
 }
 
-/// The session member's identity in the defaulted document set: the
-/// input's `file://` URI.
 fn member_uri() -> String {
     url::Url::from_file_path(workshop_path())
         .expect("file uri")
@@ -757,7 +696,11 @@ fn member_uri() -> String {
 #[cfg(unix)]
 #[test]
 fn an_omitted_document_set_derives_from_the_loaded_project() {
-    let (dir, capture, mut service) = session_docs_service();
+    let SessionDocs {
+        dir,
+        capture,
+        mut service,
+    } = session_docs_service();
     let member_uri = member_uri();
     let member_text = std::fs::read_to_string(workshop_path()).unwrap();
 
@@ -794,18 +737,17 @@ fn an_omitted_document_set_derives_from_the_loaded_project() {
         "{}",
         preview[0].new_text
     );
-    // The provider was shown exactly the session's member set at version 0.
     let shown = std::fs::read_to_string(&capture).unwrap();
     assert_eq!(shown.trim(), member_uri);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// The same defaulting serves `providerValidateEdit`: a transaction naming
-/// a session member by its `file://` URI applies against the derived set.
 #[cfg(unix)]
 #[test]
 fn an_omitted_document_set_validates_a_session_member_edit() {
-    let (dir, _capture, mut service) = session_docs_service();
+    let SessionDocs {
+        dir, mut service, ..
+    } = session_docs_service();
     let member_text = std::fs::read_to_string(workshop_path()).unwrap();
     let transaction = EditTransaction::new(vec![SourceEdit {
         edit_kind: "edit".to_string(),
@@ -850,7 +792,9 @@ fn an_omitted_document_set_validates_a_session_member_edit() {
 #[cfg(unix)]
 #[test]
 fn omitted_sources_default_to_each_documents_text() {
-    let (dir, _capture, mut service) = session_docs_service();
+    let SessionDocs {
+        dir, mut service, ..
+    } = session_docs_service();
     let mutation = handle(
         &mut service,
         &ToolRequest::ProviderSemanticRename {

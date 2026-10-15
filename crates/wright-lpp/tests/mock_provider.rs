@@ -36,24 +36,17 @@ use wright_lpp::{
     TextEdit, WorkshopArtifact,
 };
 
-/// The pinned language-provider-protocol commit the tests were written and
-/// validated against.
 const PINNED_LPP_COMMIT: &str = "416b293e26e6fb2d29061608a493a7aecd2ce14f";
 
-/// The reference mock provider's deliberately foreign language id.
 const DEMO_LANGUAGE_ID: &str = "x-demo-lang";
 
-/// The mock provider's artifact format for compiled puzzles.
 const DEMO_ARTIFACT_FORMAT: &str = "x-demo/puzzle-eval-v1";
 
 /// A clean x-demo-lang puzzle document (from the LPP v1 spec transcript).
 const CLEAN_PUZZLE: &str = "puzzle clean {\n  target = 40\n  start = 10\n  ops {\n    double: x => x * 2\n    plus1: x => x + 1\n  }\n  solution = [ double, double ]\n}";
 
-/// A puzzle with an unresolved op reference.
 const BROKEN_PUZZLE: &str = "puzzle broken {\n  target = 40\n  start = 10\n  ops {\n    double: x => x * 2\n  }\n  solution = [ triple ]\n}";
 
-/// The mock provider binary path from the environment, skipping the test
-/// with a clear reason when absent.
 fn mock_provider_path() -> Option<PathBuf> {
     match std::env::var("LPP_MOCK_PROVIDER") {
         Ok(path) if !path.is_empty() => Some(PathBuf::from(path)),
@@ -103,11 +96,6 @@ fn initialize() -> (StdioLanguageProvider, wright_lpp::InitializeResult) {
     (provider, result)
 }
 
-// ---------------------------------------------------------------------------
-// Initialize / handshake / capability negotiation
-// ---------------------------------------------------------------------------
-
-/// An LPP `x.y` protocol version as a comparable tuple.
 fn protocol_tuple(version: &str) -> (u32, u32) {
     let mut parts = version.split('.');
     let parse = |part: Option<&str>| part.and_then(|part| part.parse().ok()).unwrap_or(0);
@@ -125,8 +113,6 @@ fn initializes_and_negotiates_capabilities_with_x_demo_lang() {
     assert_eq!(result.languages.len(), 1);
     assert_eq!(result.languages[0].id, DEMO_LANGUAGE_ID);
     assert_eq!(result.languages[0].extensions, vec!["xdl"]);
-    // The reference language is deliberately foreign: the opaque language
-    // id is served exactly as declared.
     let negotiated = provider.capabilities().expect("negotiated");
     assert_eq!(negotiated.language_ids(), vec![DEMO_LANGUAGE_ID]);
     for capability in Capability::ALL {
@@ -154,7 +140,6 @@ fn registry_lookup_is_by_opaque_language_id() {
     registry
         .register(ProviderConfig::new(DEMO_LANGUAGE_ID, path, Vec::new()))
         .expect("registered");
-    // A second registration for the same id refuses.
     assert_eq!(
         registry
             .register(ProviderConfig::new(
@@ -167,10 +152,7 @@ fn registry_lookup_is_by_opaque_language_id() {
             language_id: DEMO_LANGUAGE_ID.to_string(),
         }
     );
-    // A configured id spawns a session (dropped below; the provider is
-    // terminated on drop).
     drop(registry.spawn(DEMO_LANGUAGE_ID).expect("spawns"));
-    // An unconfigured language id refuses explicitly; there is no fallback.
     let error = registry
         .spawn("x-other-lang")
         .err()
@@ -183,10 +165,6 @@ fn registry_lookup_is_by_opaque_language_id() {
         }
     );
 }
-
-// ---------------------------------------------------------------------------
-// Document operations through the full session
-// ---------------------------------------------------------------------------
 
 #[test]
 fn check_reports_clean_and_broken_documents() {
@@ -251,8 +229,6 @@ fn compile_produces_an_opaque_artifact_and_refuses_on_errors() {
         Some("x-demo/unresolved-op")
     );
 
-    // Compiling more than one document is refused by the provider with a
-    // structured refusal, which the client surfaces as a refusal.
     let mut multi = clean_document_set();
     multi.insert(
         "file:///project/second.xdl".to_string(),
@@ -352,7 +328,6 @@ fn symbols_definition_and_references_resolve_across_the_document() {
         "declaration first, then sorted references"
     );
 
-    // No symbol at a position: a structured refusal, session stays healthy.
     let error = provider
         .definition(
             &documents["file:///project/puzzle.xdl"],
@@ -364,7 +339,6 @@ fn symbols_definition_and_references_resolve_across_the_document() {
         .expect_err("no symbol at position");
     assert_eq!(error.refusal_code(), Some("definition.noSymbolAtPosition"));
 
-    // Position outside the document: invalidPosition LPP error.
     let error = provider
         .definition(
             &documents["file:///project/puzzle.xdl"],
@@ -503,10 +477,6 @@ fn unserved_language_id_is_refused_by_the_provider() {
     provider.shutdown().expect("shutdown");
 }
 
-// ---------------------------------------------------------------------------
-// Capability negotiation and explicit refusal
-// ---------------------------------------------------------------------------
-
 #[test]
 fn missing_capability_is_an_explicit_refusal_not_a_fallback() {
     let Some(path) = mock_provider_path() else {
@@ -540,16 +510,11 @@ fn missing_capability_is_an_explicit_refusal_not_a_fallback() {
     assert_eq!(lpp.capability(), Some("compile"));
     assert_eq!(lpp.method(), Some("lpp/compile"));
 
-    // The session is healthy: an available capability still works.
     provider
         .check(&clean_document_set(), None)
         .expect("check works");
     provider.shutdown().expect("shutdown");
 }
-
-// ---------------------------------------------------------------------------
-// Process lifecycle and failure handling
-// ---------------------------------------------------------------------------
 
 #[test]
 fn graceful_shutdown_exits_with_status_zero() {
@@ -604,10 +569,6 @@ fn provider_without_shutdown_is_cleaned_up_on_drop() {
     let Some(_) = mock_provider_path() else {
         return;
     };
-    // Dropping an initialized provider (without shutdown) must not leave the
-    // process running: the child is terminated on drop. The test completes
-    // without hanging, and the graceful path is covered by
-    // `graceful_shutdown_exits_with_status_zero`.
     let (provider, _) = initialize();
     drop(provider);
 }

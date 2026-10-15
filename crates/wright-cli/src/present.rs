@@ -36,7 +36,6 @@ pub(crate) struct Activity {
     status: Arc<Mutex<Option<ProgressEvent>>>,
     output: Arc<Mutex<()>>,
     #[cfg(test)]
-    #[allow(dead_code)]
     frame: Arc<AtomicUsize>,
     handle: Option<thread::JoinHandle<()>>,
 }
@@ -100,7 +99,6 @@ impl ProgressObserver for Activity {
             return;
         }
         if event.phase == ProgressPhase::Confirmation {
-            // Stop drawing and leave the line clean for the prompt.
             self.done.store(true, Ordering::Release);
             let _guard = self.output.lock().expect("lock");
             if self.visible.swap(false, Ordering::AcqRel) {
@@ -346,15 +344,14 @@ fn render_text<T: serde::Serialize + ResultPresentation>(
         // namespaced (`workshop.unknown-value.futurevaluething`), so any
         // code segment carrying the `unknown-` kind qualifies. The
         // structured result is unchanged; the pointer lives in text only.
-        // A `'<none>'` spelling means no name was rejected (e.g.
-        // `unknown-language` when detection finds no markers), so there is
-        // nothing `wright lookup` could resolve — skip the hint.
+        // `unknown-language` is `WorkshopError::NotDetected` — detection
+        // found no markers and rejected no name, so there is nothing
+        // `wright lookup` could resolve; skip the hint.
         if matches!(envelope.command.as_str(), "check" | "compile")
             && diagnostic
                 .code
                 .split('.')
-                .any(|segment| segment.starts_with("unknown-"))
-            && !diagnostic.message.contains("'<none>'")
+                .any(|segment| segment.starts_with("unknown-") && segment != "unknown-language")
         {
             // `lookup` answers in the vocabulary of the rejected name's
             // source (#692): an OPY diagnostic names `--language opy`,
@@ -1573,14 +1570,13 @@ fn align_lines<'a>(old: &[&'a str], new: &[&'a str]) -> Vec<(Option<usize>, Opti
             .chain((0..m).map(|index| (None, Some(index))))
             .collect();
     }
-    // `len[i][j]` is the LCS length of `old[i..]` and `new[j..]`.
-    let mut len = vec![vec![0u32; m + 1]; n + 1];
+    let mut lcs_suffix = vec![vec![0u32; m + 1]; n + 1];
     for i in (0..n).rev() {
         for j in (0..m).rev() {
-            len[i][j] = if old[i] == new[j] {
-                len[i + 1][j + 1] + 1
+            lcs_suffix[i][j] = if old[i] == new[j] {
+                lcs_suffix[i + 1][j + 1] + 1
             } else {
-                len[i + 1][j].max(len[i][j + 1])
+                lcs_suffix[i + 1][j].max(lcs_suffix[i][j + 1])
             };
         }
     }
@@ -1590,7 +1586,7 @@ fn align_lines<'a>(old: &[&'a str], new: &[&'a str]) -> Vec<(Option<usize>, Opti
         if old[i] == new[j] {
             i += 1;
             j += 1;
-        } else if len[i + 1][j] >= len[i][j + 1] {
+        } else if lcs_suffix[i + 1][j] >= lcs_suffix[i][j + 1] {
             rows.push((Some(i), None));
             i += 1;
         } else {
@@ -1765,9 +1761,6 @@ fn render_lint(result: &LintResult, ctx: &RenderContext<'_>) {
             println!("  ... {} finding(s) withheld (--max)", selection.withheld);
         }
     }
-    // The closing summary carries only execution metadata: files the
-    // reported findings point at, rules that could not evaluate, and elapsed
-    // time on interactive terminals.
     let files: BTreeSet<&str> = findings
         .iter()
         .filter_map(|finding| finding.get("span"))
@@ -2650,7 +2643,6 @@ mod tests {
             "at <stdin>:1:1 (no source file)"
         );
 
-        // A missing file keeps the reported spelling with no frame.
         let missing = serde_json::json!({"path": "gone.ws", "start": {"line": 1, "col": 1}});
         let (display, readable) = finding_location(&missing, Some(&root)).unwrap();
         assert_eq!(display, "gone.ws");

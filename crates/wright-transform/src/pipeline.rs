@@ -385,9 +385,6 @@ mod tests {
         };
         let global_g = || Value::GlobalVariable("g".to_string());
 
-        // An identifier-bearing operand survives: `Or(True, Global.g)`
-        // keeps its `g` read, as do the `and`/`or` mirrored forms and a
-        // call carrying an occurrence.
         for value in [
             Value::call("or", [true.into(), global_g()]),
             Value::call("or", [global_g(), true.into()]),
@@ -401,8 +398,6 @@ mod tests {
             );
         }
 
-        // Literal-only operands still fold, including nested literal
-        // containers and the all-Bool forms.
         for value in [
             Value::call("or", [true.into(), 0.0.into()]),
             Value::call(

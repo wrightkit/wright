@@ -1,17 +1,3 @@
-//! LSP contract tests for the currently backed capability set.
-//!
-//! `wright-lsp` advertises document synchronization, raw-Workshop
-//! diagnostics/hover/definition/references, and rename when versioned
-//! workspace edits are negotiated; unbacked editor capabilities are neither
-//! advertised nor answered. Raw Workshop documents publish the same
-//! diagnostics `wright check` reports for the buffer text, while
-//! OPY/DEL/OSTW documents report an explicit `source-provider-unavailable`
-//! diagnostic. Rename routes through the provider-owned mutation path:
-//! applied renames return a `WorkspaceEdit`, and unsupported documents,
-//! unconfigured providers, and provider refusals answer with a
-//! `RequestFailed` error carrying the structured refusal code in
-//! `error.data.code`.
-
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
@@ -215,7 +201,6 @@ fn malformed_params_answer_invalid_params_and_the_server_keeps_serving() {
         );
     }
 
-    // a malformed notification gets no response but costs no session either
     client.send(serde_json::json!({"jsonrpc": "2.0", "method": "textDocument/didOpen"}));
     let shutdown = client.request(9, "shutdown", serde_json::json!(null));
     assert!(shutdown["result"].is_null());
@@ -400,7 +385,6 @@ fn workshop_diagnostics_track_the_current_buffer() {
     assert_eq!(diagnostics[0]["severity"], 1);
     assert_eq!(diagnostics[0]["range"], lsp_range((8, 4), (8, 5)));
 
-    // A full-document change republishes the new buffer's diagnostics.
     client.notify(
         "textDocument/didChange",
         serde_json::json!({
@@ -625,12 +609,10 @@ fn malformed_frames_answer_parse_errors_and_the_server_keeps_serving() {
     assert_eq!(error["error"]["code"], -32700, "{error}");
     assert!(error["id"].is_null());
 
-    // A non-UTF-8 body is malformed for the same reason.
     client.send_raw(b"Content-Length: 2\r\n\r\n\xff\xfe");
     let error = client.read_message();
     assert_eq!(error["error"]["code"], -32700, "{error}");
 
-    // The session still serves normally after both malformed frames.
     let init = initialize(&mut client);
     assert_eq!(init["result"]["serverInfo"]["name"], "wright-lsp");
     client.notify("initialized", serde_json::json!({}));
@@ -720,8 +702,6 @@ fn malformed_initialize_params_are_invalid_params() {
         );
     }
 
-    // The server stayed in the pre-initialize state and still accepts a
-    // conforming initialize.
     let init = initialize(&mut client);
     assert_eq!(init["result"]["serverInfo"]["name"], "wright-lsp");
     let shutdown = client.request(3, "shutdown", serde_json::json!(null));
@@ -736,7 +716,6 @@ fn requests_outside_the_running_state_are_refused() {
     let mut client = LspClient::spawn(&root);
     let uri = "file:///workspace/main.ws";
 
-    // A request before initialize is refused ServerNotInitialized.
     client.send(serde_json::json!({
         "jsonrpc": "2.0",
         "id": 1,
@@ -751,7 +730,6 @@ fn requests_outside_the_running_state_are_refused() {
     // the document it carried is never registered.
     open_document(&mut client, uri, "workshop", WORKSHOP_SOURCE);
 
-    // Shutdown before initialize is refused too.
     client.send(serde_json::json!({
         "jsonrpc": "2.0",
         "id": 2,
@@ -773,7 +751,6 @@ fn requests_outside_the_running_state_are_refused() {
         "a document opened before initialize must not exist: {hover}"
     );
 
-    // A second initialize is InvalidRequest and does not reset state.
     client.send(serde_json::json!({
         "jsonrpc": "2.0",
         "id": 4,
@@ -786,8 +763,6 @@ fn requests_outside_the_running_state_are_refused() {
     let shutdown = client.request(5, "shutdown", serde_json::json!(null));
     assert!(shutdown["result"].is_null());
 
-    // Requests after shutdown are refused InvalidRequest; the session
-    // is over.
     client.send(serde_json::json!({
         "jsonrpc": "2.0",
         "id": 6,
@@ -805,12 +780,10 @@ fn requests_outside_the_running_state_are_refused() {
 fn exit_before_shutdown_exits_with_status_1() {
     let root = workspace_root();
 
-    // Never initialized.
     let mut client = LspClient::spawn(&root);
     client.notify("exit", serde_json::json!({}));
     assert_eq!(client.wait_status(), Some(1));
 
-    // Initialized but not shut down.
     let mut client = LspClient::spawn(&root);
     initialize(&mut client);
     client.notify("exit", serde_json::json!({}));
@@ -886,7 +859,6 @@ fn stale_or_ranged_didchange_neither_republishes_nor_corrupts() {
             }],
         }),
     );
-    // The next conforming full change applies and republishes.
     client.notify(
         "textDocument/didChange",
         serde_json::json!({
@@ -908,8 +880,6 @@ fn stale_or_ranged_didchange_neither_republishes_nor_corrupts() {
         "the clean v3 buffer clears diagnostics: {republished}"
     );
 
-    // The stored buffer is the v3 replacement — hover still resolves the
-    // rule name at its span.
     let hover = client.request(4, "textDocument/hover", position_request(uri, 19, 9));
     assert_eq!(
         hover["result"]["contents"]["value"], "`rule main`",

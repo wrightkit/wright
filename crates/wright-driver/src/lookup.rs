@@ -66,7 +66,6 @@ const UNKNOWN_WITHIN: &str = "lookup.unknownWithin";
 /// The `within` selector kinds tried for an identity, in order.
 const WITHIN_KINDS: [&str; 3] = ["enum", "callable", "settings"];
 
-/// Run one `lookup` request against `session`'s language vocabulary.
 pub(crate) fn lookup(
     session: &CompilerSession,
     language: &str,
@@ -138,8 +137,6 @@ fn unavailable(language: &str, owner: &str, message: impl Into<String>) -> ToolR
     }
 }
 
-// -- workshop --------------------------------------------------------------
-
 fn workshop_lookup(
     session: &CompilerSession,
     query: Option<&str>,
@@ -179,9 +176,6 @@ fn workshop_lookup(
     result("workshop", OWNER_WORKSHOP, entries)
 }
 
-/// The effective locale: the request's, then the session's configured
-/// override, then the catalog primary locale. `None` when the chosen locale
-/// is not declared — the only query the owner cannot answer.
 fn workshop_locale(
     session: &CompilerSession,
     catalog: &Catalog,
@@ -194,8 +188,6 @@ fn workshop_locale(
     catalog.supports(&locale).then_some(locale)
 }
 
-/// The owner-issued identity of one `lookup` match — the `identity` an
-/// entry carries.
 fn match_identity(found: &LookupMatch) -> Option<String> {
     match found {
         LookupMatch::Builtin { id, .. } => Some(id.clone()),
@@ -210,10 +202,6 @@ fn match_identity(found: &LookupMatch) -> Option<String> {
     }
 }
 
-/// One `lookup` match projected to the contract entry: owner identity and
-/// kind, the accepted spelling, the display name, and a Wright-rendered
-/// `signature` for callables (plus the structured `callable`/`enum`/
-/// `setting` facts the owner supplies).
 fn workshop_entry(catalog: &Catalog, locale: &Locale, found: LookupMatch) -> Option<Value> {
     let identity = match_identity(&found)?;
     Some(match found {
@@ -399,9 +387,6 @@ fn callable_facts(signature: &workshop_rs::lookup::Signature) -> Value {
     json!({ "parameters": parameters })
 }
 
-/// One Workshop signature parameter as the renderer's fact view. An enum
-/// domain the catalog cannot resolve degrades to the declared type, the
-/// same way the owner's own rendering degrades.
 fn workshop_param<'a>(
     catalog: &Catalog,
     locale: &Locale,
@@ -438,10 +423,6 @@ fn workshop_param<'a>(
     }
 }
 
-/// Render a Workshop declared default in the locale's call syntax: a
-/// `Domain.Member` literal resolves to the member's accepted localized
-/// spelling, a canonical value id to its localized spelling, and any other
-/// literal stays as declared.
 fn workshop_default(catalog: &Catalog, locale: &Locale, default: &str) -> String {
     if let Some((domain, member)) = default.split_once('.') {
         if let Some(spelling) = catalog.enum_spelling(domain, locale, member) {
@@ -530,8 +511,6 @@ fn setting_facts(definition: &SettingDefinition) -> Value {
     }
     wire
 }
-
-// -- opy -------------------------------------------------------------------
 
 /// `opy` lookup answers through the configured provider's LPP 1.5
 /// `lpp/lookup` capability. A missing provider, a session that cannot
@@ -632,8 +611,6 @@ fn opy_lookup(
     result("opy", OWNER_OPY, entries)
 }
 
-// -- signature rendering ----------------------------------------------------
-//
 // One renderer serves both languages (ADR-0021 decision 4): parameters in
 // call order, `name: Type` for a required parameter, `name=default` or
 // `name?` for an optional one (types of optional non-enum parameters are
@@ -642,7 +619,6 @@ fn opy_lookup(
 // `name: Domain(N members)` for a larger domain. An optional enum parameter
 // shows its default and never lists members.
 
-/// The renderer's view of one parameter, adapted from either owner's facts.
 struct ParamView<'a> {
     name: &'a str,
     param_type: Option<&'a str>,
@@ -652,21 +628,13 @@ struct ParamView<'a> {
 }
 
 struct DomainView {
-    /// The domain's display name in the locale (or the identity tail for
-    /// opaque provider identities).
     name: String,
-    /// The domain's member spellings, already localized by the owner.
     members: Vec<String>,
 }
 
-/// How a parameter's declared default renders in the signature.
 enum DefaultView {
-    /// No declared default: `name: Type`/`name: Domain(...)` when required,
-    /// `name?` when optional.
     None,
-    /// A declared null default: `name?`.
     Null,
-    /// A declared default already in source terms: `name=<text>`.
     Text(String),
 }
 
@@ -768,8 +736,6 @@ fn lpp_signature(entry: &Value, callable: &Value) -> Option<String> {
     Some(render_signature(head, receiver, variadic, params))
 }
 
-/// An LPP scalar default in source terms: strings are already source
-/// spellings; other scalars print as their JSON literal.
 fn lpp_default_text(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),

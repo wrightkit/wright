@@ -24,7 +24,6 @@ fn coded<'a>(findings: &'a [Finding], code: &str) -> Vec<&'a Finding> {
         .collect()
 }
 
-/// The authored text a span covers, resolved through the retained source.
 fn span_text(program: &workshop_rs::Program, source: &str, span: Span) -> String {
     let range = program
         .source(span.file)
@@ -86,8 +85,6 @@ fn duplicate_condition_offers_a_dead_branch_fix_over_the_branch_extent() {
 
 #[test]
 fn duplicate_condition_fix_spans_a_nested_block_inside_the_dead_branch() {
-    // A dead branch containing its own `If … End` block must not stop at
-    // the nested `End`: the removal runs through the real chain boundary.
     let nested = r#"variables {
     global:
         0: index
@@ -183,8 +180,6 @@ rule ("disabled") {
 
 #[test]
 fn duplicate_condition_fix_materializes_for_a_localized_source() {
-    // Fix spans resolve through the retained source bytes, so a zh-CN
-    // document plans the same dead-branch removal on its own spellings.
     let localized = r#"变量 {
     全局:
         0: index
@@ -229,16 +224,29 @@ fn duplicate_condition_fix_materializes_for_a_localized_source() {
 
 #[test]
 fn duplicate_condition_refuses_a_fix_when_the_condition_can_move() {
-    let volatile = DUPLICATE.replace(
-        "Else If(Compare(Global.index, ==, 0));",
-        "Else If(Compare(Global.index, ==, Random Integer(0, 1)));",
-    );
-    // The duplicated condition itself must be the volatile one: repeat it.
-    let volatile = volatile.replace(
-        "If(Compare(Global.index, ==, 0));\n            Set Global Variable(other, 1);",
-        "If(Compare(Global.index, ==, Random Integer(0, 1)));\n            Set Global Variable(other, 1);",
-    );
-    let (_, findings) = analyze_source(&volatile);
+    let volatile = r#"variables {
+    global:
+        0: index
+        1: other
+}
+rule ("duplicates") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        If(Compare(Global.index, ==, Random Integer(0, 1)));
+            Set Global Variable(other, 1);
+        Else If(Compare(Global.index, ==, 1));
+            Set Global Variable(other, 2);
+        Else If(Compare(Global.index, ==, Random Integer(0, 1)));
+            Set Global Variable(other, 3);
+        Else;
+            Set Global Variable(other, 4);
+        End;
+    }
+}
+"#;
+    let (_, findings) = analyze_source(volatile);
     let [finding] = coded(&findings, "duplicate-condition")[..] else {
         panic!("the volatile repeat still reports: {findings:?}")
     };
@@ -250,7 +258,6 @@ fn duplicate_condition_refuses_a_fix_when_the_condition_can_move() {
 
 #[test]
 fn duplicate_condition_fix_boundaries_cover_else_if_and_end_markers() {
-    // Dead branch bounded by another `Else If`, then by `End`.
     let bounded_by_elseif = r#"variables {
     global:
         0: index
@@ -366,9 +373,6 @@ fn repeated_value_treats_evaluate_once_as_already_resolved() {
 
 #[test]
 fn repeated_value_fix_wraps_a_multiline_expression_extent() {
-    // The wrap inserts `Evaluate Once(` at the expression's start byte and
-    // `)` at its end byte under standard splice semantics — an extent that
-    // spans lines must cover the whole expression, not one line.
     let multiline = r#"variables {
     global:
         0: index
@@ -528,7 +532,6 @@ rule ("frames") {
         "both occurrences live inside Update Every Frame: {finding:?}"
     );
 
-    // One framed occurrence still leaves a fix over the others.
     let mixed = framed.replacen(
         "Update Every Frame(Distance Between(Position Of(Event Player), Vector(0, 0, 0)))",
         "Distance Between(Position Of(Event Player), Vector(0, 0, 0))",
@@ -710,8 +713,6 @@ rule ("live") {
     let Some(LintFix::EvaluateOnce { occurrences }) = &finding.fix else {
         panic!("the once-evaluated occurrences still wrap: {finding:?}")
     };
-    // The live `StartPosition` argument keeps its read; the Color argument
-    // and the ordinary body occurrence wrap.
     assert_eq!(occurrences.len(), 2);
     for occurrence in occurrences {
         let line = live
@@ -728,9 +729,6 @@ rule ("live") {
 
 #[test]
 fn repeated_value_withholds_the_fix_when_two_live_args_keep_the_family() {
-    // Two occurrences inside parameters the mode keeps live stay
-    // duplicated after any partial wrap, so the family carries no fix —
-    // the surviving finding would stand regardless.
     let live = r#"variables {
     global:
         0: index

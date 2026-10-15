@@ -1,8 +1,3 @@
-//! `lookup` (ADR-0021, #529): the operation answers from language
-//! vocabulary alone — with or without a loadable project — through the
-//! workshop-rs catalog in process and the configured provider's LPP 1.5
-//! `lpp/lookup` capability for `opy`.
-
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
@@ -73,8 +68,6 @@ fn workshop_lookup_resolves_a_display_name_to_an_action() {
 fn workshop_lookup_renders_signature_from_owner_facts() {
     let mut owned = session(workshop_path());
     let mut service = ToolService::new(&mut owned).unwrap();
-    // `wait` takes a required duration and an optional enum-typed
-    // behavior whose declared enum default renders as its spelling.
     let entries = entries_of(service.handle(&lookup_request("workshop", Some("Wait"))));
     let wait = entries
         .iter()
@@ -358,9 +351,6 @@ fn lookup_kind_filter_accepts_every_kind_the_service_emits() {
         );
     }
 
-    // The scoped cases from the report: `within` a callable, narrowed to
-    // its `parameter` children, and `within` a settings prefix narrowed
-    // to its `settingPath` segments.
     for (within, kind) in [("createHudText", "parameter"), ("heroes", "settingPath")] {
         let entries = entries_of(service.handle(&ToolRequest::Lookup {
             language: "workshop".to_string(),
@@ -434,8 +424,6 @@ fn lookup_accepts_every_kind_any_response_emits() {
         }
     }
 
-    // The canned `opy` provider emits `action` and `enum` entries; replay
-    // them the same way against the provider-backed path.
     #[cfg(unix)]
     {
         let (dir, mut opy) = service_with_provider(LOOKUP_PROVIDER);

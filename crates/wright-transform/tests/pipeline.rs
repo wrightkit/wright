@@ -1,8 +1,3 @@
-//! Transformation pipeline tests (#51/#52): `off` is a no-op, the compat
-//! pass is evidence-backed with before/after metrics, and every pass leaves
-//! the program validated. Source-semantic initializer synthesis is owned by
-//! the frontend, not by this pipeline (#112).
-
 use workshop_rs::{Action, Event, Program, Rule, Value, Variable};
 use wright_transform::profile::Profile;
 use wright_transform::{run, run_validated};
@@ -42,14 +37,12 @@ fn compat_profile_folds_constants_with_metrics() {
     let results = run(&mut program, Profile::Compat).unwrap();
     assert_eq!(results.len(), 1, "one compat pass");
 
-    // fold-constants: `2 * 3` collapsed to `6`.
     let fold = results
         .iter()
         .find(|result| result.stats.pass == "fold-constants")
         .expect("fold-constants ran");
     assert!(fold.stats.changed >= 1, "changed: {}", fold.stats.changed);
 
-    // The folded expression is now Add(len(points), 6).
     let rule = &program.rules[0];
     let Action::SetGlobalVariable { value, .. } = &rule.actions[0] else {
         panic!("expected Set Global Variable");

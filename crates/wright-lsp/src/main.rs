@@ -362,7 +362,7 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
                     continue;
                 };
                 if id.is_none() {
-                    continue; // a notification gets no response and no provider call
+                    continue;
                 }
                 if !versioned_workspace_edits {
                     // `WorkspaceEdit.changes` cannot carry the document
@@ -495,9 +495,7 @@ enum Frame {
     Malformed(i64, &'static str),
 }
 
-/// A single header line may not exceed this many bytes.
 const MAX_HEADER_LINE: usize = 8 * 1024;
-/// The whole header section may not exceed this many bytes.
 const MAX_HEADER_BYTES: usize = 64 * 1024;
 /// A frame body may not exceed this many bytes — the declared
 /// `Content-Length` is never trusted enough to allocate it unchecked.

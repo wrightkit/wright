@@ -284,7 +284,6 @@ impl<'a> SemanticService<'a> {
     }
 }
 
-/// The hotpath measurement label for one semantic request's dispatch.
 #[cfg_attr(not(feature = "hotpath"), allow(dead_code))]
 fn request_label(request: &Request) -> &'static str {
     match request {
@@ -348,7 +347,7 @@ fn lint_rules(
         "skipped": skipped,
     })
 }
-pub(super) fn span_json(span: Option<Span>) -> JsonValue {
+pub fn span_json(span: Option<Span>) -> JsonValue {
     span.map_or(JsonValue::Null, |span| json!({"file": span.file.index(), "start": {"line": span.start.line, "col": span.start.col}, "end": {"line": span.end.line, "col": span.end.col}}))
 }
 fn symbol_json(symbol: &Symbol) -> JsonValue {

@@ -1,12 +1,3 @@
-//! Protocol/client unit tests against a scripted fake provider.
-//!
-//! The fake provider is a thread speaking over real OS pipes (os-pipe), so
-//! framing, flushing, correlation, timeouts, protocol violations, and
-//! end-of-stream behavior are exercised through the exact same byte
-//! transport a spawned provider process uses — without needing a provider
-//! binary. The end-to-end suite against the real LPP conformance mock
-//! provider lives in `tests/mock_provider.rs`.
-
 #![allow(clippy::result_large_err)]
 
 use std::io::{BufRead, BufReader, BufWriter, Write};
@@ -22,27 +13,15 @@ use wright_lpp::{
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// One scripted fake-provider behavior. Every request-consuming step
-/// records the request line it read (for later assertions).
 enum FakeStep {
-    /// Respond to the next request, patching the response id from the
-    /// request.
     Respond(Value),
-    /// Respond to the next request with a verbatim line (no id patching).
     RespondRaw(String),
-    /// Read and ignore the next request (used to provoke timeouts).
     NoResponse,
-    /// Write a verbatim line without consuming a request (spontaneous
-    /// provider output such as stray blank lines).
     Spontaneous(String),
-    /// Keep the output open for a duration without writing (lets a timeout
-    /// fire before end-of-stream).
     Hold(Duration),
-    /// Close the provider output (end-of-stream to the client).
     Close,
 }
 
-/// A scripted fake provider over OS pipes.
 struct FakeProvider {
     requests: mpsc::Receiver<String>,
     handle: Option<JoinHandle<()>>,
@@ -77,12 +56,10 @@ impl FakeProvider {
         )
     }
 
-    /// The next recorded request line, or a timeout when none arrived.
     fn next_request(&self) -> Result<String, RecvTimeoutError> {
         self.requests.recv_timeout(Duration::from_millis(250))
     }
 
-    /// Assert that no further request line arrives within a short window.
     fn assert_no_request(&self) {
         match self.requests.recv_timeout(Duration::from_millis(100)) {
             Err(RecvTimeoutError::Timeout) => {}
@@ -91,7 +68,6 @@ impl FakeProvider {
         }
     }
 
-    /// Join the script thread (the script ends at end-of-stream).
     fn join(self) {
         let handle = self.handle.expect("script thread present");
         handle.join().expect("script thread panicked");
@@ -108,7 +84,6 @@ fn run_script(
     let mut writer = provider_write;
     let mut line = String::new();
     for step in script {
-        // Spontaneous and hold steps run without consuming a request.
         match &step {
             FakeStep::Spontaneous(raw) => {
                 if write_line(&mut writer, raw).is_err() {
@@ -166,7 +141,6 @@ fn write_line(writer: &mut os_pipe::PipeWriter, line: &str) -> std::io::Result<(
     writer.flush()
 }
 
-/// The request line the recorded message belongs to (for id patching).
 fn request_id(request: &str) -> Value {
     serde_json::from_str::<Value>(request)
         .ok()
@@ -207,10 +181,6 @@ fn lpp_error(kind: &str, details: Value, message: &str) -> Value {
         }
     })
 }
-
-// ---------------------------------------------------------------------------
-// Framing and correlation
-// ---------------------------------------------------------------------------
 
 #[test]
 fn initialize_handshake_is_a_single_flushed_line() {
@@ -268,10 +238,6 @@ fn empty_lines_and_crlf_are_accepted() {
     fake.join();
 }
 
-// ---------------------------------------------------------------------------
-// Timeouts and late responses
-// ---------------------------------------------------------------------------
-
 #[test]
 fn missing_response_times_out_deterministically() {
     let (mut client, fake) = FakeProvider::spawn_with_timeout(
@@ -328,10 +294,6 @@ fn late_response_after_timeout_is_ignored_and_session_survives() {
     fake.join();
 }
 
-// ---------------------------------------------------------------------------
-// End-of-stream and provider failure
-// ---------------------------------------------------------------------------
-
 #[test]
 fn eof_fails_pending_request_and_records_exit() {
     let (mut client, fake) = FakeProvider::spawn(vec![
@@ -350,10 +312,6 @@ fn eof_fails_pending_request_and_records_exit() {
     );
     fake.join();
 }
-
-// ---------------------------------------------------------------------------
-// Protocol violations (session poisoning)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn malformed_json_poisons_the_session() {
@@ -432,10 +390,6 @@ fn wrong_jsonrpc_version_poisons_the_session() {
     fake.join();
 }
 
-// ---------------------------------------------------------------------------
-// Malformed payloads (request-scoped, session survives)
-// ---------------------------------------------------------------------------
-
 #[test]
 fn both_result_and_error_fails_only_that_request() {
     let (mut client, fake) = FakeProvider::spawn(vec![
@@ -475,10 +429,6 @@ fn neither_result_nor_error_fails_only_that_request() {
     assert_eq!(ok, json!({ "documents": [] }));
     fake.join();
 }
-
-// ---------------------------------------------------------------------------
-// Error mapping
-// ---------------------------------------------------------------------------
 
 #[test]
 fn standard_jsonrpc_error_is_surfaced() {
@@ -592,10 +542,6 @@ fn lpp_code_without_lpp_data_is_a_malformed_payload() {
     fake.join();
 }
 
-// ---------------------------------------------------------------------------
-// Session phase guards
-// ---------------------------------------------------------------------------
-
 #[test]
 fn request_before_initialize_is_refused_without_wire_traffic() {
     let (mut client, fake) = FakeProvider::spawn(vec![]);
@@ -651,17 +597,12 @@ fn non_null_shutdown_result_fails_the_shutdown() {
     client.initialize(json!({})).expect("initialize");
     let error = client.shutdown().expect_err("non-null result");
     assert_eq!(error.code(), "provider-malformed");
-    // The session stays usable after a failed shutdown.
     let ok = client
         .request("lpp/check", json!({ "documents": {} }))
         .expect("session survives");
     assert_eq!(ok, json!({ "documents": [] }));
     fake.join();
 }
-
-// ---------------------------------------------------------------------------
-// Initialize failure paths keep the session restartable
-// ---------------------------------------------------------------------------
 
 #[test]
 fn protocol_version_mismatch_keeps_session_fresh_for_retry() {
@@ -721,10 +662,6 @@ fn malformed_initialize_response_fails_the_initialize_only() {
     assert_eq!(second["protocolVersion"], "1.0");
     fake.join();
 }
-
-// ---------------------------------------------------------------------------
-// Capability model
-// ---------------------------------------------------------------------------
 
 #[test]
 fn capability_require_refuses_unnegotiated_capabilities() {
@@ -794,8 +731,6 @@ fn capability_subsets_deserialize_and_unknown_ids_survive() {
         "an unmodelled capability id is retained verbatim"
     );
 
-    // Serializing back round-trips the retained ids alongside the modelled
-    // ones, so a forwarded negotiation does not lose them.
     let serialized = serde_json::to_value(&forward).expect("serialize");
     assert_eq!(serialized["sourceIdentity"], serde_json::json!(true));
     assert_eq!(

@@ -448,6 +448,8 @@ fn max(d: &[Duration]) -> f64 {
 }
 
 fn peak_rss_mb() -> f64 {
+    // SAFETY: `usage` is a valid, correctly sized out-buffer for `getrusage`,
+    // and `RUSAGE_SELF` only reads the calling process's own accounting.
     unsafe {
         let mut usage: libc::rusage = std::mem::zeroed();
         if libc::getrusage(libc::RUSAGE_SELF, &mut usage) == 0 {

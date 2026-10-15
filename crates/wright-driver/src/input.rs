@@ -84,9 +84,6 @@ pub(crate) fn disk_fingerprint(
         return digest_tree(&root);
     }
     if path.is_dir() {
-        // A native directory input resolves to its matching direct children
-        // (exactly one for Workshop); digest the whole matching set so an
-        // added or removed member also changes the fingerprint.
         return digest_files(direct_source_files(&path, resolved.kind));
     }
     digest_files(vec![path])
@@ -564,7 +561,6 @@ mod tests {
         assert_eq!(resolved.kind, SourceKind::Workshop);
         assert_eq!(resolved.text, "rule (\"r\") {}\n");
 
-        // The same convention covers caller-held text and stdin bytes.
         let resolved = resolve(&SessionConfig {
             input: InputSpec::Text {
                 text: "\u{FEFF}rule (\"r\") {}\n".to_string(),
@@ -612,7 +608,6 @@ mod tests {
             Some(directory.join("main.ws").as_path())
         );
 
-        // A directory whose only matching names are hidden has no member.
         let hidden = temp_dir("hidden-only");
         std::fs::write(hidden.join("._main.ws"), "rule (\"r\") {}\n")
             .expect("write AppleDouble source");

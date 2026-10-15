@@ -23,9 +23,6 @@
 //! refusals), and client-side session-phase violations. Each variant carries
 //! a stable machine `code()`.
 
-// LPP errors legitimately carry full structured detail values, so error
-// returns are large; boxing would add an allocation per error without a
-// measured benefit (the same policy as wright-driver).
 #![allow(clippy::result_large_err)]
 
 pub mod client;

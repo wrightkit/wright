@@ -784,7 +784,6 @@ fn is_code_position(chars: &[char], position: usize) -> bool {
     !quoted
 }
 
-/// Whether the 1-based `line`/`col` falls inside the half-open span.
 fn position_in_span(span: Span, line: u32, col: u32) -> bool {
     (line > span.start.line || (line == span.start.line && col >= span.start.col))
         && (line < span.end.line || (line == span.end.line && col < span.end.col))
@@ -841,13 +840,9 @@ mod tests {
             other => panic!("expected one symbol at {line}:{col}, got {other:?}"),
         };
 
-        // A declaration occurrence resolves.
         assert_eq!(resolved(3, 14), ("globalVariable", "score".to_string()));
-        // A write occurrence resolves the same symbol.
         assert_eq!(resolved(16, 31), ("globalVariable", "score".to_string()));
-        // A subroutine call resolves.
         assert_eq!(resolved(15, 27), ("subroutine", "shared".to_string()));
-        // A rule name resolves its rule symbol.
         assert_eq!(resolved(10, 9), ("rule", "main".to_string()));
 
         for (line, col) in [(1, 1), (5, 1), (11, 2)] {
@@ -858,8 +853,6 @@ mod tests {
         }
     }
 
-    /// Occurrences are half-open: the start column resolves, the end
-    /// column does not.
     #[test]
     fn symbol_at_honors_half_open_occurrence_spans() {
         let text = concat!(

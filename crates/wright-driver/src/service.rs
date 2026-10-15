@@ -409,8 +409,6 @@ pub struct ToolService<'a> {
     /// than failing the service, so `None` is the unloaded state — never an
     /// empty placeholder program.
     loaded: Option<Loaded>,
-    /// The shared semantic service over `loaded` — `Some` exactly when a
-    /// snapshot is held.
     semantic: Option<Arc<SemanticService<'static>>>,
     lint_semantic: Option<SemanticService<'static>>,
     /// The disk state `loaded` was read from, recomputed before every
@@ -670,10 +668,6 @@ impl<'a> ToolService<'a> {
         };
         self.adopt(loaded);
         self.reloads += 1;
-        // The reloaded program's numeric ids are a different space: ids
-        // issued before the reload refuse `stale-id` until a `symbols` or
-        // `rules` listing — or an `ambiguous-*` refusal, which already names
-        // the current candidates — re-establishes them.
         self.symbol_ids_current = false;
         self.rule_ids_current = false;
         Ok(())
@@ -689,7 +683,6 @@ impl<'a> ToolService<'a> {
         self.invalidated = true;
     }
 
-    /// Drop the served snapshot and mark its numeric id spaces stale.
     fn clear_snapshot(&mut self) {
         self.loaded = None;
         self.semantic = None;
@@ -734,8 +727,6 @@ impl<'a> ToolService<'a> {
         }
     }
 
-    /// The loader's diagnostic carried through the request's structured
-    /// refusal unchanged.
     fn loader_error(diagnostic: Diagnostic) -> ToolErrorInfo {
         ToolErrorInfo {
             code: diagnostic.code,
@@ -743,7 +734,6 @@ impl<'a> ToolService<'a> {
         }
     }
 
-    /// Replace the loaded snapshot and rebuild the semantic services over it.
     fn adopt(&mut self, loaded: Loaded) {
         let semantic = self.session.shared_semantic(&loaded);
         self.lint_semantic = (!self.session.config.lint.rules.is_empty())
@@ -753,16 +743,12 @@ impl<'a> ToolService<'a> {
         self.loaded = Some(loaded);
     }
 
-    /// The current snapshot — present whenever a program-reading request
-    /// reaches `dispatch`, because `refresh` succeeded first.
     fn snapshot(&self) -> &Loaded {
         self.loaded
             .as_ref()
             .expect("the refresh gate guarantees a snapshot")
     }
 
-    /// The current snapshot with its shared semantic service, for the
-    /// `*_loaded` pipeline entry points.
     fn snapshot_and_semantic(&self) -> (Loaded, Arc<SemanticService<'static>>) {
         let semantic = self
             .semantic
@@ -798,7 +784,6 @@ impl<'a> ToolService<'a> {
         crate::source_provider::provider_document_set(&loaded.source_files, base, language_id)
     }
 
-    /// The semantic service over the current snapshot — built in `adopt`.
     fn semantic(&self) -> &SemanticService<'static> {
         self.semantic
             .as_deref()
@@ -1111,8 +1096,6 @@ impl<'a> ToolService<'a> {
         self.session.language_provider(language_id)
     }
 
-    /// Run a provider-driven mutation flow (#139) through the session's
-    /// shared provider lifecycle path.
     fn run_provider_flow(
         &self,
         language_id: &str,
@@ -1171,7 +1154,6 @@ impl<'a> ToolService<'a> {
         }
     }
 
-    /// `persistentObjects`: persistent-object facts with resolved source paths.
     fn persistent_objects(&self) -> ToolResponse {
         self.semantic_query_with_resolved_span_paths(Request::GetPersistentObjects)
     }
@@ -1207,7 +1189,6 @@ impl<'a> ToolService<'a> {
         }
     }
 
-    /// Run one semantic query over the loaded program.
     fn semantic_query(&self, request: Request) -> ToolResponse {
         self.semantic().handle(&request)
     }
@@ -1300,9 +1281,6 @@ impl<'a> ToolService<'a> {
             Some(address) => match self.rule_address(address) {
                 Ok(id) if (id as usize) < self.snapshot().program.rules.len() => Some(id as u64),
                 Ok(id) => return invalid_selection(format!("unknown rule {id}")),
-                // An unmatched name is a selection error like every other
-                // selection field; a duplicate name keeps the `ambiguous-rule`
-                // refusal `cfg` reports so the caller learns the candidates.
                 Err(error) if error.code == "unknown-rule" => {
                     return invalid_selection(error.message);
                 }
@@ -1340,9 +1318,6 @@ impl<'a> ToolService<'a> {
         }
     }
 
-    /// Add `content` to every rule of a selected `rules` result. A rule
-    /// whose content cannot be rendered fails the whole call: a partial
-    /// result would make an assertion on it silently wrong.
     fn attach_rule_content(&self, response: ToolResponse) -> ToolResponse {
         let ToolResponse::Ok { mut result } = response else {
             return response;
@@ -1595,7 +1570,6 @@ impl<'a> ToolService<'a> {
         self.ok(result)
     }
 
-    /// Program summary with origin and source identity.
     fn project(&self) -> serde_json::Value {
         let loaded = self.snapshot();
         let index = SemanticIndex::build(&loaded.program);
@@ -1757,14 +1731,12 @@ fn invalid_selection(message: String) -> ToolResponse {
     }
 }
 
-/// The `span.path` a resolved semantic item carries, for `file` matching.
 pub(crate) fn json_span_path(item: &serde_json::Value) -> Option<&str> {
     item.get("span")
         .and_then(|span| span.get("path"))
         .and_then(serde_json::Value::as_str)
 }
 
-/// The hotpath measurement label for one request's dispatch.
 #[cfg_attr(not(feature = "hotpath"), allow(dead_code))]
 fn request_label(request: &ToolRequest) -> &'static str {
     match request {

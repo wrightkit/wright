@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Exercise the CLI's GitHub Actions renderer contract.
 
 set -euo pipefail
 
