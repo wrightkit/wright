@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# Functional tests for install.sh against a mock release server (#108).
-#
-# Serves fake release archives and checksums over a local HTTP server and
-# exercises install.sh end to end: platform mapping, checksum verification,
-# archive layout, version resolution, and failure modes. Runs on Linux and
-# macOS runners; WRIGHT_INSTALL_OS/ARCH overrides cover the other
-# architectures.
-#
 # Usage: scripts/test-install.sh
 
 set -euo pipefail
@@ -50,7 +42,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# --- mock release tree -------------------------------------------------------
 
 make_fake_binary() {
   cat > "$1" <<EOF
@@ -97,7 +88,6 @@ SERVER_PID=$!
 BASE_URL="http://127.0.0.1:$PORT"
 wait_for_server "$BASE_URL"
 
-# --- helpers -----------------------------------------------------------------
 
 report() {
   local name="$1" ok="$2"
@@ -144,7 +134,6 @@ expect_failure() {
   fi
 }
 
-# --- tests -------------------------------------------------------------------
 
 expect_success "pinned install (native platform)" "$WORK/d1" --version "$VERSION"
 
@@ -231,7 +220,6 @@ else
   report "default install directory (\$HOME/.local/bin)" fail
 fi
 
-# Archive-layout regression: an archive missing wright-lsp must fail cleanly.
 make_archive "$WORK/mock-broken/wright" "x86_64-unknown-linux-gnu"
 release="$WORK/mock-broken/wright/releases/$VERSION"
 rm -f "$release/wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz" \

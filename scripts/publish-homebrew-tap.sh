@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Publish the generated Homebrew formula to the dedicated tap repository.
 
 set -euo pipefail
 

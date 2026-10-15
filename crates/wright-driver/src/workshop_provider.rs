@@ -116,10 +116,6 @@ pub fn diagnostic_code(kind: &str, identity: &str) -> String {
     )
 }
 
-/// Project an owner canonical-validation rejection into a provider
-/// diagnostic: the owner error keeps its identity and source span while the
-/// rejection surfaces as an error-severity finding, like the residual
-/// diagnostics this path already returns.
 fn canonical_diagnostic(error: &workshop_rs::WorkshopError, path: &Path) -> ProviderDiagnostic {
     ProviderDiagnostic {
         code: "workshop.catalog-validation".to_string(),

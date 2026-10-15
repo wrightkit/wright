@@ -56,8 +56,6 @@ pub fn live_actions(actions: &[Action]) -> impl Iterator<Item = (usize, &Action)
     })
 }
 
-/// The [`live_actions`] complement as an index-addressable mask over the
-/// same flat action list.
 pub(crate) fn dead_actions(actions: &[Action]) -> Vec<bool> {
     let mut dead = vec![true; actions.len()];
     for (index, _) in live_actions(actions) {

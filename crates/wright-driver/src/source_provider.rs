@@ -132,8 +132,6 @@ pub enum SourceProviderError {
 /// parsing `message`.
 const PROVIDER_REFUSAL_CODE_PREFIX: &str = "provider-refusal-";
 
-/// A refusal code Wright itself generated (as opposed to a provider-defined
-/// one); it stays verbatim so all of its surfaces report the same code.
 fn wright_refusal_code(code: &str) -> bool {
     code == "session-config-changed"
 }
@@ -236,8 +234,7 @@ impl LppSourceProvider {
         target
             .project_root
             .as_deref()
-            .and_then(|r| url::Url::from_directory_path(r).ok())
-            .map(|u| u.to_string())
+            .and_then(provider_project_root)
     }
 }
 
@@ -333,8 +330,6 @@ impl SourceProvider for LppSourceProvider {
     }
 }
 
-/// The human-facing context of one provider request: the operation and the
-/// entry it ran against (`{operation}` for `{entry}`).
 fn request_context(operation: &str, target: &SourceTarget) -> String {
     format!(
         "the source provider {operation} request for '{}' failed",
@@ -359,20 +354,10 @@ pub(crate) fn provider_failure_code(error: &wright_lpp::ProviderError) -> String
     }
 }
 
-/// Classify one provider failure into the stage its diagnostic reports at:
-/// the same mapping `SourceProviderError::diagnostic` applies to the code
-/// `provider_failure_code` produced. Keeping this on the typed error lets
-/// every `ProviderError` consumer share the source-provider classification
-/// rules instead of re-deriving them.
 pub(crate) fn provider_failure_stage(error: &wright_lpp::ProviderError) -> Stage {
     failed_stage(&provider_failure_code(error))
 }
 
-/// Reduce a typed `wright_lpp::ProviderError` to the source-provider error
-/// contract, preserving the machine-usable classification in `code` and the
-/// failing operation/entry context in the human message. Classification
-/// happens here, while the typed error is still available; downstream
-/// consumers only see the resulting code and stage.
 pub(crate) fn provider_error(
     error: wright_lpp::ProviderError,
     context: &str,
@@ -491,8 +476,6 @@ pub(crate) fn provider_document_set(
     Ok(set)
 }
 
-/// The `project_root` URI a provider request carries for a resolved input
-/// root — the same directory-URI spelling `LppSourceProvider` sends.
 pub(crate) fn provider_project_root(root: &Path) -> Option<String> {
     url::Url::from_directory_path(root)
         .ok()

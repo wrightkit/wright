@@ -1,7 +1,6 @@
 pub mod analysis;
 pub mod canonical;
 pub mod catalog;
-pub mod cfg;
 pub mod declarative;
 pub mod registry;
 pub mod service;

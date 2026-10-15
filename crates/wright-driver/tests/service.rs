@@ -1,6 +1,3 @@
-//! ToolService preserves the machine contract over canonical Workshop input
-//! and reports provider-owned OPY gaps as structured refusals.
-
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -190,7 +187,6 @@ fn agent_finding_selection_filters_and_truncates_without_touching_defaults() {
         ToolResponse::Error { error } => panic!("{error:?}"),
     };
 
-    // No selection fields: the bare array result is unchanged.
     let plain = result_of(ToolRequest::Findings {
         selection: FindingSelection::default(),
         all: true,
@@ -198,8 +194,6 @@ fn agent_finding_selection_filters_and_truncates_without_touching_defaults() {
     assert!(plain.is_array(), "the default result stays a bare array");
     assert_eq!(plain.as_array().unwrap().len(), 10);
 
-    // `severity` is a threshold; `error` selects none of the warning findings
-    // while the summary still reports the true total.
     let errors = result_of(ToolRequest::Findings {
         selection: FindingSelection {
             severity: Some(Severity::Error),
@@ -213,7 +207,6 @@ fn agent_finding_selection_filters_and_truncates_without_touching_defaults() {
         serde_json::json!({"total": 10, "withheld": 0})
     );
 
-    // `rule` + `max` on `lint` embed the same summary beside the findings.
     let lint = result_of(ToolRequest::Lint {
         selection: FindingSelection {
             rule: Some("repeated-value".to_string()),
@@ -228,7 +221,6 @@ fn agent_finding_selection_filters_and_truncates_without_touching_defaults() {
         serde_json::json!({"total": 10, "withheld": 7})
     );
 
-    // The same fields apply to `costEstimate` findings.
     let cost = result_of(ToolRequest::CostEstimate {
         selection: FindingSelection {
             max: Some(1),
@@ -379,13 +371,10 @@ fn analyze_selection_narrows_risks_and_reports_the_outcome() {
         )
     };
 
-    // No selection: the bare result keeps every risk and no `selection`.
     let plain = analyze(FindingSelection::default());
     assert_eq!(plain["result"]["risks"].as_array().unwrap().len(), 10);
     assert!(plain["result"].get("selection").is_none());
 
-    // `severity` is a threshold: `error` selects none of the warnings while
-    // the summary reports the true set.
     let errors = analyze(FindingSelection {
         severity: Some(Severity::Error),
         ..FindingSelection::default()
@@ -396,7 +385,6 @@ fn analyze_selection_narrows_risks_and_reports_the_outcome() {
         serde_json::json!({"total": 10, "withheld": 0})
     );
 
-    // `rule` + `max` narrow and truncate; the withheld count stays visible.
     let bounded = analyze(FindingSelection {
         rule: Some("repeated-value".to_string()),
         max: Some(2),
@@ -427,7 +415,6 @@ fn analyze_selection_narrows_risks_and_reports_the_outcome() {
         serde_json::json!({"total": 10, "withheld": 0})
     );
 
-    // Essential presentation preserves selected counts and the outcome.
     let essential = result_of(
         &mut service,
         &ToolRequest::Analyze {
@@ -444,7 +431,6 @@ fn analyze_selection_narrows_risks_and_reports_the_outcome() {
         serde_json::json!({"total": 10, "withheld": 0})
     );
 
-    // The session-level selection takes the identical path.
     let mut selected_session = CompilerSession::new(SessionConfig {
         selection: FindingSelection {
             severity: Some(Severity::Error),
@@ -532,7 +518,6 @@ fn cost_estimate_rejects_a_file_selection_that_cannot_apply() {
             panic!("an inapplicable file selection must not return a result: {result}")
         }
     }
-    // `severity`/`rule`/`max` still apply: findings carry code and severity.
     let cost = result_of(
         &mut service,
         &ToolRequest::CostEstimate {
@@ -595,9 +580,6 @@ fn cost_estimate_reports_the_canonical_element_count() {
         report.total,
         "rule shares sum to the total: {rules:?}"
     );
-    // Payload order is ranked by count, largest first with canonical-index
-    // ties broken ascending; `index`/`name`/`count` stay bound to the
-    // canonical rule position in the workshop-rs report.
     let mut expected: Vec<usize> = (0..report.rules.len()).collect();
     expected.sort_by_key(|index| (std::cmp::Reverse(report.rules[*index].count), *index));
     for (entry, index) in rules.iter().zip(expected) {
@@ -666,8 +648,6 @@ fn an_empty_selection_serializes_identically_to_no_selection() {
     );
 }
 
-// Essential presentation
-
 #[test]
 fn essential_forms_report_actions_without_fact_dumps() {
     let mut session = CompilerSession::new(SessionConfig {
@@ -678,7 +658,6 @@ fn essential_forms_report_actions_without_fact_dumps() {
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
 
-    // Presentation exposes actionable summaries and detail commands.
     let lint = result_of(
         &mut service,
         &ToolRequest::Lint {
@@ -768,8 +747,6 @@ fn tool_service_keeps_provider_refusals_structured() {
     assert_eq!(diagnostic.code, "source-provider-unavailable");
 }
 
-// ── Semantic query commands and name addressing (#429) ───────────────────────
-
 fn declarations_path() -> PathBuf {
     workspace_root().join("tests/fixtures/workshop/synthetic/declarations-rules.ws")
 }
@@ -805,8 +782,6 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
 
-    // Discover the numeric ids through the shared semantic index rather than
-    // hardcoding them.
     let symbols = result_of(
         &mut service,
         &ToolRequest::Symbols {
@@ -846,7 +821,6 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
             .unwrap_or_else(|| panic!("no rule named {name}")) as u32
     };
 
-    // Names and ids produce the same payloads.
     for (by_name, by_id) in [
         (
             ToolRequest::References {
@@ -895,8 +869,6 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
         );
     }
 
-    // `usage` echoes the resolved identity so a name-addressed caller can
-    // correlate with `symbols`.
     let usage = result_of(
         &mut service,
         &ToolRequest::Usage {
@@ -907,8 +879,6 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
     assert_eq!(usage["kind"], "globalVariable");
     assert_eq!(usage["symbol"], "score");
 
-    // The split numbering spaces are why names exist: "player starts" is
-    // symbol id 4 but rule index 1; its symbol id is an invalid `cfg` target.
     assert_eq!(symbol_id("player starts"), 4);
     assert_eq!(rule_index("player starts"), 1);
     match service.handle(&ToolRequest::Cfg {
@@ -922,7 +892,6 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
         ToolResponse::Ok { result } => panic!("rule index 4 must not exist: {result}"),
     }
 
-    // References and symbols carry resolved source paths, not bare file ids.
     let references = result_of(
         &mut service,
         &ToolRequest::References {
@@ -1093,8 +1062,6 @@ rule ("dup") {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// ── Semantic query selection and bounds (#531) ───────────────────────────────
-
 #[test]
 fn semantic_query_selection_wraps_filters_and_bounds() {
     // #531: a request with any selection field returns `{<key>: [...],
@@ -1109,8 +1076,6 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
 
-    // `symbols`: `kind` narrows, `max` bounds, `file` selects by resolved
-    // path; the bare request stays a bare array.
     let all = result_of(
         &mut service,
         &ToolRequest::Symbols {
@@ -1189,9 +1154,6 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
     assert!(elsewhere["symbols"].as_array().unwrap().is_empty());
     assert_eq!(elsewhere["selection"]["total"], total);
 
-    // `rules`: `name` narrows, `file`/`max` behave like `symbols`. Spans
-    // resolve their `path` in every selection form, as `symbols` spans do —
-    // a `file` id without its path is unusable.
     let rules = result_of(
         &mut service,
         &ToolRequest::Rules {
@@ -1246,7 +1208,6 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
         serde_json::json!({"total": rule_total, "withheld": rule_total - 1})
     );
 
-    // `references`: `kind` and `rule` (index or name) narrow the set.
     let references = result_of(
         &mut service,
         &ToolRequest::References {
@@ -1308,8 +1269,6 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
         references["references"].as_array().unwrap().len()
     );
 
-    // `cfg`: `kind`/`max` bound `blocks`; entry/exit and the original block
-    // ids are preserved so `successors` still address the full graph.
     let cfg = result_of(
         &mut service,
         &ToolRequest::Cfg {
@@ -1348,7 +1307,6 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
     assert_eq!(bounded_cfg["blocks"].as_array().unwrap().len(), 1);
     assert_eq!(bounded_cfg["selection"]["withheld"], block_total - 1);
 
-    // `callGraph`: `caller`/`callee` narrow edges by declared name.
     let graph = result_of(
         &mut service,
         &ToolRequest::CallGraph {
@@ -1445,7 +1403,6 @@ disabled rule ("disabled caller") {
         ToolResponse::Error { error } => panic!("{error:?}"),
     };
 
-    // No call edge exists for a disabled call or a disabled rule.
     let graph = result_of(ToolRequest::CallGraph {
         caller: None,
         callee: None,
@@ -1455,8 +1412,6 @@ disabled rule ("disabled caller") {
     });
     assert_eq!(graph.as_array().unwrap(), &Vec::<serde_json::Value>::new());
 
-    // `programActions` and `waitActions` agree: both count zero for a
-    // program whose only wait and call are disabled.
     let cost = result_of(ToolRequest::CostEstimate {
         selection: FindingSelection::default(),
         all: true,
@@ -1471,7 +1426,6 @@ disabled rule ("disabled caller") {
         })
     );
 
-    // `analyze` reports the same counts through `facts.cost.counts`.
     let analyze = result_of(ToolRequest::Analyze {
         selection: FindingSelection::default(),
         all: true,
@@ -1624,8 +1578,6 @@ fn semantic_query_selection_refuses_unknown_filter_values() {
         );
     }
 
-    // A closed-vocabulary error names the accepted values — the caller
-    // must not have to guess the namespace.
     for (request, expected) in [
         (
             ToolRequest::Symbols {
@@ -1739,7 +1691,6 @@ fn session_query_workflows_return_the_agent_operation_payloads() {
         agent_symbols
     );
 
-    // `refs` is the usage payload plus the references list under `references`.
     let refs = serde_json::to_value(cli.refs("score", None, None, None, None).result).unwrap();
     assert_eq!(refs, agent_references);
     for (key, value) in agent_usage.as_object().unwrap() {
@@ -1841,7 +1792,6 @@ rule ("hot path") {
         .map(|condition| condition["elements"].as_u64().expect("condition cost"))
         .sum();
     assert_eq!(rule["conditionElements"].as_u64(), Some(condition_elements));
-    // Resolved locations: authored path on the source-parsed input (#445).
     assert_eq!(rule["span"]["path"], "hot.ws");
     assert_eq!(conditions[1]["span"]["path"], "hot.ws");
 
@@ -1921,8 +1871,6 @@ rule ("dup") {
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
-
-// ── Session freshness and stale-id refusal (#471) ───────────────────────────
 
 /// `score` is symbol id 0 and `"setup"` rule index 0.
 const FRESHNESS_V1: &str = r#"
@@ -2261,8 +2209,6 @@ fn directory_inputs_observe_added_and_removed_sources() {
     assert_eq!(rules(&mut service), 2);
     assert_eq!(service.reload_count(), 1);
 
-    // An added member changes the fingerprint; the reload surfaces the
-    // resolver's ambiguity refusal rather than serving either file's program.
     std::fs::write(dir.join("other.ws"), FRESHNESS_V1).unwrap();
     assert_eq!(
         refusal_code(
@@ -2279,7 +2225,6 @@ fn directory_inputs_observe_added_and_removed_sources() {
         ),
         "input-kind-ambiguous"
     );
-    // The broken state refuses consistently until the directory heals.
     assert_eq!(
         refusal_code(&mut service, &ToolRequest::Project),
         "input-kind-ambiguous"
@@ -2314,7 +2259,6 @@ fn directory_inputs_observe_added_and_removed_sources() {
         },
     );
 
-    // Removing the sole member is equally observable.
     std::fs::remove_file(dir.join("program.ws")).unwrap();
     assert_eq!(
         refusal_code(&mut service, &ToolRequest::Project),
@@ -2337,15 +2281,11 @@ fn a_failed_reload_refuses_requests_until_the_input_heals() {
     let mut service = ToolService::new(&mut session).unwrap();
     assert_eq!(service.reload_count(), 0);
 
-    // The locale still resolves but the program is malformed: the reload
-    // failure is the parser's own `parse-error` diagnostic.
     std::fs::write(
         &input,
         "variables {\n    global:\n        0: score\n}\nrule (\"setup\") {\n",
     )
     .unwrap();
-    // Every program-reading request refuses with the loader's diagnostic;
-    // the stale program is never served. `capabilities` answers regardless.
     for request in [
         ToolRequest::Symbols {
             kind: None,
@@ -2398,7 +2338,6 @@ fn a_failed_reload_refuses_requests_until_the_input_heals() {
     );
     assert_eq!(service.reload_count(), 1);
 
-    // Deleting the input is a reload failure, not a snapshot to serve.
     std::fs::remove_file(&input).unwrap();
     let code = refusal_code(&mut service, &ToolRequest::Project);
     assert_eq!(code, "input-io");
@@ -2418,7 +2357,6 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
 
-    // Both spaces are current on a fresh service: `score` is symbol id 0.
     result_of(
         &mut service,
         &ToolRequest::References {
@@ -2442,9 +2380,6 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
 
     std::fs::write(&input, FRESHNESS_V2).unwrap();
 
-    // Every operation that consumes a numeric program address refuses
-    // `stale-id` after the reload; name addressing stays usable because it
-    // resolves against the new program.
     for request in [
         ToolRequest::References {
             symbol: 0.into(),
@@ -2503,7 +2438,6 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
         },
     );
 
-    // `symbols` re-establishes only the symbol space; `rules` the rule space.
     result_of(
         &mut service,
         &ToolRequest::Symbols {
@@ -2616,8 +2550,6 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
 
     std::fs::write(&input, REORDER_V2).unwrap();
 
-    // Index 0 is a *valid* rule index in the new program — bounds checking
-    // alone cannot catch the stale address; the freshness contract must.
     assert_eq!(
         refusal_code(
             &mut service,
@@ -2657,8 +2589,6 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
         "only the write inside 'first' matches: {filtered}"
     );
 
-    // Numeric symbol and numeric rule filters are each checked, including a
-    // request carrying both.
     for request in [
         ToolRequest::References {
             symbol: 0.into(),
@@ -2693,7 +2623,6 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
         );
     }
 
-    // Observing only symbols restores symbol ids, not rule indexes.
     result_of(
         &mut service,
         &ToolRequest::Symbols {
@@ -2718,7 +2647,6 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
         "stale-id"
     );
 
-    // Observing the rules list restores rule-index addressing.
     result_of(
         &mut service,
         &ToolRequest::Rules {
@@ -2777,8 +2705,6 @@ fn ambiguous_refusals_re_establish_the_current_id_space() {
 
     std::fs::write(&input, FRESHNESS_AMBIGUOUS).unwrap();
 
-    // An ambiguous refusal already names the current candidates, so the
-    // space it resolved against is observed even though it is an error.
     assert_eq!(
         refusal_code(
             &mut service,
@@ -2850,7 +2776,6 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
     result_of(&mut service, &ToolRequest::Project);
     std::fs::write(&input, FRESHNESS_V2).unwrap();
 
-    // Numeric addresses into the pre-reload spaces refuse `stale-id`.
     for request in [
         ToolRequest::References {
             symbol: 0.into(),
@@ -2875,8 +2800,6 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
         );
     }
 
-    // Metadata and provider operations answer without consulting the loaded
-    // program; every program-reading operation reports the reloaded program.
     result_of(&mut service, &ToolRequest::Capabilities);
     result_of(&mut service, &ToolRequest::TargetMetadata);
     for (request, command) in [
@@ -2912,9 +2835,6 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
             .iter()
             .any(|symbol| symbol["name"] == "points")
     );
-    // Id-issuing responses carry the new program's numbering: `usage`
-    // resolves the reloaded index, `references`/`findings` point at the new
-    // rule indexes, and `inspect`/`analyze` expose the fresh facts.
     let usage = result_of(
         &mut service,
         &ToolRequest::Usage {
@@ -2952,8 +2872,6 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
             all: true,
         },
     );
-    // Rule-internal references carry the new program's rule indexes; the
-    // declaration itself is rule-less (`rule: null`).
     assert!(
         references["references"]
             .as_array()
@@ -3019,8 +2937,6 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
             .any(|symbol| symbol["name"] == "points")
     );
 
-    // The edit surfaces serve the caller's sources against the reloaded
-    // program; name addressing resolves "points" in the new program.
     let source_key = input.to_string_lossy().into_owned();
     let sources =
         std::collections::BTreeMap::from([(source_key.clone(), FRESHNESS_V2.to_string())]);
@@ -3060,9 +2976,6 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
     );
     assert_eq!(rename["ok"], true, "{rename}");
 
-    // Provider operations carrying their own documents do not consult the
-    // program; an unconfigured language id is the usual structured provider
-    // refusal, not `stale-id`.
     for request in [
         ToolRequest::ProviderSemanticRename {
             language_id: "not-a-language".to_string(),
@@ -3090,12 +3003,6 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// ── Deferred project load and project-independent operations (#512) ────────
-
-/// An unreadable configured input does not fail service construction:
-/// project-independent operations answer without consulting the load, and
-/// program-reading requests refuse with the loader's diagnostic until the
-/// input heals — all within the same running service.
 #[test]
 fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
     let dir = freshness_dir("deferred");
@@ -3112,13 +3019,9 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
         "no placeholder snapshot is adopted"
     );
 
-    // Project-independent operations answer without triggering a load.
     result_of(&mut service, &ToolRequest::Capabilities);
     result_of(&mut service, &ToolRequest::TargetMetadata);
 
-    // Every program-reading request refuses with the loader's diagnostic;
-    // no snapshot — stale or empty — is ever served. A numeric id is the
-    // same load refusal, not a `stale-id` against a nonexistent space.
     for request in [
         ToolRequest::Project,
         ToolRequest::Rules {
@@ -3189,10 +3092,8 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
         ),
         "input-io"
     );
-    // None of the above triggered the project load.
     assert!(service.loaded().is_none());
 
-    // The embedding `check` workflow surfaces the same loader diagnostic.
     let check = service.check();
     assert!(!check.ok);
     assert!(
@@ -3201,8 +3102,6 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
         check.diagnostics
     );
 
-    // Repairing the input lets the same service answer program-reading
-    // requests — no restart, no explicit reload.
     std::fs::write(&input, FRESHNESS_V1).unwrap();
     let symbols = result_of(
         &mut service,
@@ -3225,7 +3124,6 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
     // The deferred initial load is not a disk-change reload.
     assert_eq!(service.reload_count(), 0);
 
-    // Breaking it again refuses program reads until it heals once more.
     std::fs::remove_file(&input).unwrap();
     for request in [
         ToolRequest::Project,
@@ -3248,9 +3146,6 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A malformed configured input behaves the same way: construction
-/// succeeds, program reads refuse with the parse diagnostic, and repair in
-/// place resumes normal service.
 #[test]
 fn a_malformed_input_defers_the_load_and_recovers_in_place() {
     let dir = freshness_dir("malformed");
@@ -3283,7 +3178,6 @@ fn a_malformed_input_defers_the_load_and_recovers_in_place() {
             "{request:?}"
         );
     }
-    // `compile` reports the same diagnostic inside its envelope (#591).
     let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile {
         output: None,
         force: false,
@@ -3358,8 +3252,6 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
         "parse-error"
     );
 
-    // The repaired program is adopted, but the previous snapshot's numeric
-    // ids refuse `stale-id` until the client re-observes each space.
     std::fs::write(&input, FRESHNESS_V2).unwrap();
     assert_eq!(
         refusal_code(
@@ -3460,8 +3352,6 @@ fn a_failed_refresh_invalidates_the_snapshot_even_when_bytes_return() {
     );
     let builds = service.semantic_build_count();
 
-    // Break the input, observe the refusal, then restore the exact previous
-    // bytes.
     std::fs::write(
         &input,
         "variables {\n    global:\n        0: score\n}\nrule (\"setup\") {\n",
@@ -3477,12 +3367,9 @@ fn a_failed_refresh_invalidates_the_snapshot_even_when_bytes_return() {
     );
     std::fs::write(&input, FRESHNESS_V1).unwrap();
 
-    // The next program read reloads: the fingerprint-identical restored
-    // bytes still produce a fresh snapshot, not the pre-failure one.
     result_of(&mut service, &ToolRequest::Project);
     assert_eq!(service.semantic_build_count(), builds + 1);
 
-    // The pre-failure numeric ids are stale until the space is re-observed.
     assert_eq!(
         refusal_code(
             &mut service,
@@ -3519,8 +3406,6 @@ fn a_failed_refresh_invalidates_the_snapshot_even_when_bytes_return() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
-
-// ── #472: `sources` is optional on the raw Workshop edit operations ──────
 
 const RENAMEABLE: &str = "variables {\n    global:\n        0: score\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(score, Add(Global.score, 1));\n    }\n}\n";
 
@@ -3563,8 +3448,6 @@ fn edit_operations_default_sources_to_the_on_disk_text() {
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
 
-    // `semanticRename` by symbol name: omitting `sources` returns the same
-    // validated transaction as supplying the on-disk text.
     let rename = |sources| ToolRequest::SemanticRename {
         sources,
         target: rename_target(),
@@ -3584,8 +3467,6 @@ fn edit_operations_default_sources_to_the_on_disk_text() {
         "{defaulted:?}"
     );
 
-    // `validateEditTransaction`: omitting `sources` validates against the
-    // on-disk text and returns the same result as explicit `sources`.
     let validate = |sources| ToolRequest::ValidateEdit {
         sources,
         transaction: rename_edit_transaction(&key, wright_driver::input_identity(&on_disk)),
@@ -3669,8 +3550,6 @@ fn edit_operations_keep_supplied_source_and_project_boundaries() {
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
 
-    // A supplied `sources` text that differs from the loaded program still
-    // refuses with `edit-stale-source`.
     for (op, result) in [
         (
             "semanticRename",
@@ -3707,8 +3586,6 @@ fn edit_operations_keep_supplied_source_and_project_boundaries() {
         assert!(result["preview"].is_null(), "{op}: no partial preview");
     }
 
-    // A transaction naming a file that is not part of the loaded project
-    // refuses with a structured error — with or without `sources`.
     let foreign = |sources| ToolRequest::ValidateEdit {
         sources,
         transaction: rename_edit_transaction("other.ws", wright_driver::input_identity(&on_disk)),
@@ -3795,10 +3672,6 @@ fn unsourced_transaction_unifies_spelling_variants_of_the_input() {
         end_col: 9,
     };
 
-    // Two spellings of the same loaded input — a `file://` URI and the
-    // plain path — are one file, not two sources: without `sources` the
-    // transaction still produces a single atomic preview carrying both
-    // edits, identical to the canonical explicit request.
     let uri = format!("file://{key}");
     let transaction = |first: &str, second: &str| {
         EditTransaction::new(vec![
@@ -3830,8 +3703,6 @@ fn unsourced_transaction_unifies_spelling_variants_of_the_input() {
         "{new_text}"
     );
 
-    // Cross-spelling overlaps refuse the same way same-spelling ones do —
-    // they must not slip through as two divergent previews of one file.
     let refused = result_of(
         &mut service,
         &ToolRequest::ValidateEdit {
@@ -3848,11 +3719,6 @@ fn unsourced_transaction_unifies_spelling_variants_of_the_input() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// ── Shared semantic state over one loaded snapshot (#513) ──────────────────
-
-/// `analyze` renders through the service the loaded snapshot already
-/// holds: repeated transport requests never rebuild the index, and the
-/// embedding `analyze` shares the same build.
 #[test]
 fn repeated_analyze_requests_do_not_rebuild_semantic_state() {
     let mut session = CompilerSession::new(SessionConfig {
@@ -3877,14 +3743,10 @@ fn repeated_analyze_requests_do_not_rebuild_semantic_state() {
     }
     assert_eq!(service.semantic_build_count(), 1);
 
-    // The embedding method renders through the same held service.
     assert!(service.analyze().ok);
     assert_eq!(service.semantic_build_count(), 1);
 }
 
-/// The session's own embedding workflows share the loaded snapshot's
-/// semantic service: one construction serves analyze/inspect/lint and
-/// every service_query command.
 #[test]
 fn repeated_embedding_workflows_share_one_semantic_build() {
     let mut session = CompilerSession::new(SessionConfig {
@@ -3904,7 +3766,6 @@ fn repeated_embedding_workflows_share_one_semantic_build() {
     assert!(session.cost().ok);
     assert_eq!(session.semantic_build_count(), 1);
 
-    // Repetition on the unchanged snapshot is still the same build.
     assert!(session.analyze().ok);
     assert!(session.inspect().ok);
     assert!(session.lint().ok);
@@ -3912,9 +3773,6 @@ fn repeated_embedding_workflows_share_one_semantic_build() {
     assert_eq!(session.semantic_build_count(), 1);
 }
 
-/// An effective lint configuration still configures the lint run over the
-/// shared index: the custom severity reaches `lint`, and repeats keep
-/// sharing the one build.
 #[test]
 fn session_lint_keeps_the_effective_configuration_over_the_shared_index() {
     let mut lint = wright_driver::config::LintConfig::default();
@@ -3943,8 +3801,6 @@ fn session_lint_keeps_the_effective_configuration_over_the_shared_index() {
     assert_eq!(session.semantic_build_count(), 1);
 }
 
-/// The tool-service `analyze` result equals the session workflow's — one
-/// report rendered through the shared service.
 #[test]
 fn tool_service_analyze_matches_session_analyze() {
     let mut session = CompilerSession::new(SessionConfig {
@@ -3965,8 +3821,6 @@ fn tool_service_analyze_matches_session_analyze() {
     assert_eq!(service.semantic_build_count(), 1);
 }
 
-/// A reload produces a fresh program and therefore a fresh service: the
-/// count grows by exactly one and the new snapshot's facts are served.
 #[test]
 fn a_reload_rebuilds_the_semantic_service_once() {
     let dir = freshness_dir("semantic");
@@ -4006,7 +3860,6 @@ fn a_reload_rebuilds_the_semantic_service_once() {
     );
     assert_eq!(service.semantic_build_count(), 2);
 
-    // The new snapshot is stable again: further semantic requests share it.
     result_of(
         &mut service,
         &ToolRequest::Analyze {
@@ -4038,8 +3891,6 @@ fn rules_content_serves_bounded_canonical_call_trees() {
         all: true,
     };
 
-    // Without `max` the selection shape is still returned, and every rule
-    // carries the owner's format.
     let all = result_of(&mut service, &request(None, None));
     let rules = all["rules"].as_array().unwrap();
     assert_eq!(all["selection"]["withheld"], 0);
@@ -4051,8 +3902,6 @@ fn rules_content_serves_bounded_canonical_call_trees() {
     // A raw Workshop result carries neither `names` nor `unavailable`.
     assert!(all.get("names").is_none() && all.get("unavailable").is_none());
 
-    // `rule` selects exactly one, by name or id; the statements are catalog
-    // call trees with positional arguments and Wright's statement spans.
     let one = result_of(
         &mut service,
         &request(Some(Address::Name("player starts".to_string())), None),
@@ -4082,7 +3931,6 @@ fn rules_content_serves_bounded_canonical_call_trees() {
     let by_id = result_of(&mut service, &request(Some(Address::Id(1)), None));
     assert_eq!(by_id["rules"][0]["content"], rule["content"]);
 
-    // Every statement carries a resolved span path — never read from text.
     for statement in rule["content"]["conditions"]
         .as_array()
         .unwrap()
@@ -4092,13 +3940,10 @@ fn rules_content_serves_bounded_canonical_call_trees() {
         assert_eq!(statement["span"]["path"], "declarations-rules.ws");
     }
 
-    // `max` bounds the rule count and reports what it withheld; a selected
-    // rule's content is never truncated.
     let bounded = result_of(&mut service, &request(None, Some(1)));
     assert_eq!(bounded["rules"].as_array().unwrap().len(), 1);
     assert_eq!(bounded["selection"]["withheld"], rules.len() - 1);
 
-    // An unknown rule, by name or by id, is an `invalid-selection` error.
     assert_eq!(
         refusal_code(
             &mut service,
@@ -4111,7 +3956,6 @@ fn rules_content_serves_bounded_canonical_call_trees() {
         "invalid-selection"
     );
 
-    // Without `content` the previous shape is unchanged.
     let plain = result_of(
         &mut service,
         &ToolRequest::Rules {

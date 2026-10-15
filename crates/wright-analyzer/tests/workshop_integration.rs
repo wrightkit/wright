@@ -4,6 +4,7 @@
 //! source spans.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde_json::Value;
 use workshop_rs::catalog::Locale;
@@ -14,8 +15,8 @@ use workshop_rs::{
 };
 use wright_analyzer::analysis::Severity;
 use wright_analyzer::canonical::analyze;
-use wright_analyzer::registry::LintConfig;
-use wright_analyzer::service::SemanticService;
+use wright_analyzer::registry::{LintConfig, LintRegistry};
+use wright_analyzer::service::{Origin, SemanticService};
 
 fn workshop_path(fixture_id: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -33,17 +34,38 @@ fn workshop_service(fixture_id: &str) -> SemanticService<'static> {
     workshop_service_from_text(&text)
 }
 
+fn workshop_origin() -> Origin {
+    Origin {
+        kind: "workshop".to_string(),
+        locale: Some(Locale::new("en-US").to_string()),
+    }
+}
+
+fn service_for(program: Program) -> SemanticService<'static> {
+    SemanticService::with_shared_program(
+        Arc::new(program),
+        Origin {
+            kind: "unknown".to_string(),
+            locale: None,
+        },
+        LintConfig::default(),
+        Arc::new(LintRegistry::default()),
+    )
+}
+
 fn workshop_service_from_text(text: &str) -> SemanticService<'static> {
-    // SAFETY-free approach: the service borrows the program; keep both in a
-    // leaked box for the test scope. The catalog supplies the canonical
-    // expected enum domains (e.g. Create HUD Text's Reevaluation argument is
-    // HudReeval), resolving bare members that are ambiguous across the
-    // catalog's enum domains (#118).
+    // The catalog supplies the canonical expected enum domains (e.g. Create
+    // HUD Text's Reevaluation argument is HudReeval), resolving bare members
+    // that are ambiguous across the catalog's enum domains (#118).
     let catalog = wright_analyzer::catalog::builtin().unwrap();
     let program = parser::parse_with_context(text, &catalog, &Locale::new("en-US"), &*catalog)
         .unwrap_or_else(|error| panic!("Workshop source must parse: {error}"));
-    let program = Box::leak(Box::new(program));
-    SemanticService::from_workshop(program, "en-US")
+    SemanticService::with_shared_program(
+        Arc::new(program),
+        workshop_origin(),
+        LintConfig::default(),
+        Arc::new(LintRegistry::default()),
+    )
 }
 
 fn query(service: &SemanticService<'_>, request: Value) -> Value {
@@ -109,7 +131,6 @@ fn workshop_input_runs_all_semantic_queries() {
         query(&service, request);
     }
 
-    // Origin metadata identifies the Workshop source and locale.
     let program_response: Value =
         serde_json::from_str(&service.handle_json(r#"{"op":"program"}"#)).unwrap();
     assert_eq!(program_response["result"]["origin"]["kind"], "workshop");
@@ -127,8 +148,7 @@ fn player_event_queries_keep_catalog_event_ids() {
             target: EventTarget::All,
         },
     ));
-    let program = Box::leak(Box::new(program));
-    let service = SemanticService::new(program);
+    let service = service_for(program);
     let rule = query(&service, serde_json::json!({"op": "getRule", "rule": 0}));
     assert_eq!(rule["event"], "playerDealtDamage");
 }
@@ -706,8 +726,7 @@ fn disabled_rules_and_statements_contribute_no_persistent_objects() {
                 action: Box::new(Action::call("destroyEffect", [])),
             }),
     );
-    let program = Box::leak(Box::new(program));
-    let service = SemanticService::new(program);
+    let service = service_for(program);
     let objects = query(&service, serde_json::json!({"op": "getPersistentObjects"}));
     let objects = objects.as_array().unwrap();
     assert_eq!(
@@ -931,8 +950,7 @@ fn disabled_conditions_are_excluded_from_ongoing_gate_counts() {
             .condition(Condition::disabled(WorkshopValue::call("distance", [])))
             .condition(WorkshopValue::call("distance", [])),
     );
-    let program = Box::leak(Box::new(program));
-    let service = SemanticService::new(program);
+    let service = service_for(program);
     let findings = query(&service, serde_json::json!({"op": "getFindings"}));
     let findings = findings.as_array().unwrap();
     assert_eq!(findings.len(), 2);
@@ -1044,8 +1062,7 @@ fn persistent_object_identity_reflects_the_immediate_assignment() {
                 value: WorkshopValue::call("lastTextId", []),
             }),
     );
-    let program = Box::leak(Box::new(program));
-    let service = SemanticService::new(program);
+    let service = service_for(program);
     let objects = query(&service, serde_json::json!({"op": "getPersistentObjects"}));
     assert_eq!(objects[0]["identityRetained"], true);
     assert_eq!(objects[1]["identityRetained"], false);
@@ -1230,8 +1247,6 @@ rule ("same-name text") {
         serde_json::json!({"op": "findReferences", "symbol": symbol}),
     );
     let references = references.as_array().unwrap();
-    // Declaration + the two authored reads; the comment and string
-    // occurrences are never reported.
     assert_eq!(references.len(), 3, "{references:?}");
     for reference in references {
         assert_eq!(
@@ -1264,8 +1279,6 @@ rule ("same-name text") {
 
 #[test]
 fn workshop_subroutine_references_slice_to_the_identifier() {
-    // Declaration (subroutines table), definition (event binding), and call
-    // each slice to `showStatus`.
     let source = fixture_text("synthetic/declarations-rules");
     let service = workshop_service("synthetic/declarations-rules");
     let symbol = id_for(
@@ -1322,8 +1335,6 @@ rule ("player reads") {
         serde_json::json!({"op": "findReferences", "symbol": symbol}),
     );
     let references = references.as_array().unwrap();
-    // Declaration, the write target, and the nested `Event Player.stamina`
-    // read all slice to `stamina`.
     assert_eq!(references.len(), 3, "{references:?}");
     for reference in references {
         assert_eq!(
@@ -1346,8 +1357,7 @@ fn workshop_references_without_provenance_are_unmapped() {
             value: WorkshopValue::GlobalVariable("unmapped".into()),
         }),
     );
-    let program = Box::leak(Box::new(program));
-    let service = SemanticService::new(program);
+    let service = service_for(program);
     let symbols = query(&service, serde_json::json!({"op": "listSymbols"}));
     let symbol = symbols
         .as_array()
@@ -1376,8 +1386,6 @@ fn workshop_references_without_provenance_are_unmapped() {
         );
     }
 }
-
-// ── Name addressing (#429) ────────────────────────────────────────────────────
 
 const DUPLICATE_NAMES: &str = r#"
 variables {
@@ -1409,8 +1417,6 @@ fn name_resolution_finds_unique_symbols_and_rules() {
     let score = service.resolve_symbol("score").unwrap();
     assert_eq!(score.name, "score");
     assert_eq!(score.id.index(), 0);
-    // `player starts` is rule index 1 but symbol id 4 — the two spaces are
-    // different, which is why callers address by name.
     assert_eq!(service.resolve_rule("player starts").unwrap(), 1);
     assert_eq!(
         service.resolve_symbol("player starts").unwrap().id.index(),
@@ -1427,14 +1433,10 @@ fn name_resolution_rejects_unknown_and_ambiguous_names() {
     let error = service.resolve_rule("nope").unwrap_err();
     assert_eq!(error.code, "unknown-rule");
 
-    // A name matching only a non-rule symbol is still unknown as a rule:
-    // the rule space resolves rules only.
     let error = service.resolve_rule("solo").unwrap_err();
     assert_eq!(error.code, "unknown-rule");
     assert!(service.resolve_symbol("solo").is_ok());
 
-    // `dup` names one variable and two rules; both resolutions fail with
-    // the candidate list instead of guessing.
     let error = service.resolve_symbol("dup").unwrap_err();
     assert_eq!(error.code, "ambiguous-symbol");
     for candidate in ["globalVariable 0", "rule 2", "rule 3"] {

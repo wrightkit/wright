@@ -4,7 +4,6 @@ use std::path::Path;
 use super::{CompilerSession, Loaded, Provenance, ProviderOperation, root_relative};
 use workshop_rs::actions::ElementNodeKind;
 use workshop_rs::catalog::Catalog;
-use workshop_rs::source::Span;
 use wright_analyzer::canonical::SemanticService;
 use wright_analyzer::service::Request;
 
@@ -16,7 +15,6 @@ use crate::result::{
 };
 use crate::service::{Address, ToolErrorInfo, ToolRequest, ToolResponse, ToolService};
 
-/// Extract the `result` payload of a semantic-service request as JSON.
 fn service_response(service: &SemanticService<'_>, request: &Request) -> serde_json::Value {
     match service.handle(request) {
         wright_analyzer::service::Response::Ok { result } => result,
@@ -64,8 +62,6 @@ fn semantic_facts(
         })
         .unwrap_or_default();
 
-    // `Ok` carries the per-rule tree used below; `Err` only changes the cost
-    // section — an unavailable count must not erase the rest of the report.
     let element_count = loaded.program.element_count(catalog);
 
     let rules = service_response(service, &Request::ListRules)
@@ -118,7 +114,7 @@ fn semantic_facts(
                                 conditions.push(serde_json::json!({
                                     "index": conditions.len(),
                                     "elements": child.count,
-                                    "span": fact_span_json(child.span),
+                                    "span": wright_analyzer::canonical::span_json(child.span),
                                 }));
                             }
                             entry["elements"] = serde_json::json!(node.count);
@@ -143,18 +139,6 @@ fn semantic_facts(
         // Persistent Workshop object facts join the semantic report rather
         // than living behind a query-only operation (#429).
         "persistentObjects": service_response(service, &Request::GetPersistentObjects),
-    })
-}
-
-/// The `{file,start,end}` span shape every other `facts` entry carries, so
-/// `resolve_span_paths` maps element-count locations the same way.
-fn fact_span_json(span: Option<Span>) -> serde_json::Value {
-    span.map_or(serde_json::Value::Null, |span| {
-        serde_json::json!({
-            "file": span.file.index(),
-            "start": {"line": span.start.line, "col": span.start.col},
-            "end": {"line": span.end.line, "col": span.end.col},
-        })
     })
 }
 
@@ -247,8 +231,6 @@ fn risk_facts(service: &SemanticService<'_>) -> serde_json::Value {
     serde_json::Value::Array(risks)
 }
 
-/// The `Request::Program` summary for `loaded`, with `files` from the loaded
-/// source-file table like `project` reports.
 fn program_summary(service: &SemanticService<'_>, loaded: &Loaded) -> serde_json::Value {
     let mut program = service_response(service, &Request::Program);
     if let serde_json::Value::Object(object) = &mut program {
@@ -315,7 +297,6 @@ fn analyze_result(
     }
 }
 
-/// Unwrap a [`ToolResponse`] into its result or its structured error.
 fn tool_result(response: ToolResponse) -> Result<serde_json::Value, ToolErrorInfo> {
     match response {
         ToolResponse::Ok { result } => Ok(result),
@@ -354,36 +335,41 @@ pub(crate) fn resolve_span_paths(value: &mut serde_json::Value, loaded: &Loaded)
 }
 
 pub(crate) fn span_path(file: Option<u64>, loaded: &Loaded) -> String {
-    if loaded.provenance == Provenance::Unmapped {
-        "<provider-artifact>".to_string()
-    } else if loaded.provenance == Provenance::Mapped {
-        // Every mapped file is an authored source; file 0 is not the input.
-        match file.and_then(|file| loaded.source_files.get(file as usize)) {
-            Some(source) => root_relative(Some(Path::new(source)), &loaded.input.root)
-                .unwrap_or_else(|| source.clone()),
-            None => "<provider-artifact>".to_string(),
-        }
-    } else if let Some(file) = file {
-        if let Some(source) = loaded.source_files.get(file as usize) {
-            let p = if file == 0 {
-                loaded
-                    .input
-                    .path
-                    .as_deref()
-                    .or_else(|| Some(Path::new(source)))
-            } else if Path::new(source).is_absolute() {
-                Some(Path::new(source))
-            } else {
-                None
-            };
-            p.and_then(|path| root_relative(Some(path), &loaded.input.root))
-                .unwrap_or_else(|| source.clone())
-        } else {
-            format!("<file {file}>")
-        }
-    } else {
-        loaded.input.display.clone()
+    match loaded.provenance {
+        Provenance::Unmapped => "<provider-artifact>".to_string(),
+        Provenance::Mapped => mapped_span_path(file, loaded),
+        Provenance::Source => source_span_path(file, loaded),
     }
+}
+
+fn mapped_span_path(file: Option<u64>, loaded: &Loaded) -> String {
+    match file.and_then(|file| loaded.source_files.get(file as usize)) {
+        Some(source) => root_relative(Some(Path::new(source)), &loaded.input.root)
+            .unwrap_or_else(|| source.clone()),
+        None => "<provider-artifact>".to_string(),
+    }
+}
+
+fn source_span_path(file: Option<u64>, loaded: &Loaded) -> String {
+    let Some(file) = file else {
+        return loaded.input.display.clone();
+    };
+    let Some(source) = loaded.source_files.get(file as usize) else {
+        return format!("<file {file}>");
+    };
+    let path = if file == 0 {
+        loaded
+            .input
+            .path
+            .as_deref()
+            .or_else(|| Some(Path::new(source)))
+    } else if Path::new(source).is_absolute() {
+        Some(Path::new(source))
+    } else {
+        None
+    };
+    path.and_then(|path| root_relative(Some(path), &loaded.input.root))
+        .unwrap_or_else(|| source.clone())
 }
 
 impl CompilerSession {

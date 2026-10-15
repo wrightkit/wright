@@ -37,9 +37,6 @@ def _doc(projects):
 class BandTest(unittest.TestCase):
     def test_within_band_is_clean(self):
         base = _doc({"p": {"status": "ok", "metrics": {"m": _metric(1000, 100.0, 10)}}})
-        # tokens: 250 -> 285 (+14%, +35 tokens absolute -> inside 15%? no:
-        # +35% of 250 = 37.5 allowed? band is 15% AND 30 abs; +35 tokens is
-        # >30 absolute but +14% is within 15% -> clean)
         run = _doc({"p": {"status": "ok", "metrics": {"m": _metric(1140, 140.0, 11)}}})
         violations, _ = metrics.compare_metrics(base, run)
         self.assertEqual(violations, [])
@@ -66,7 +63,6 @@ class BandTest(unittest.TestCase):
         )
 
     def test_small_absolute_change_within_30_is_clean(self):
-        # tokens 250 -> 280: +30 absolute is not > 30, and +12% < 15%
         run = _doc({"p": {"status": "ok", "metrics": {"m": _metric(1120)}}})
         violations, _ = metrics.compare_metrics(
             _doc({"p": {"status": "ok", "metrics": {"m": _metric(1000)}}}), run
@@ -74,7 +70,6 @@ class BandTest(unittest.TestCase):
         self.assertEqual(violations, [])
 
     def test_relative_jump_over_15_percent_needs_over_30_absolute(self):
-        # counts 10 -> 12 is +20% but only +2 absolute -> clean
         base = _doc({"p": {"status": "ok", "metrics": {"m": _metric(1000, 100.0, 10)}}})
         run = _doc({"p": {"status": "ok", "metrics": {"m": _metric(1000, 100.0, 12)}}})
         violations, _ = metrics.compare_metrics(base, run)
@@ -96,8 +91,6 @@ class BandTest(unittest.TestCase):
         self.assertEqual(violations2, [])
 
     def test_uniform_latency_shift_is_machine_speed_not_drift(self):
-        # Every metric at 1.6x — a slower host, not a per-operation
-        # regression; the median factor normalizes it out and is reported.
         count = metrics.MIN_LATENCY_PAIRS + 2
         base_map = {f"m{i}": _metric(1000, 100.0) for i in range(count)}
         run_map = {f"m{i}": _metric(1000, 160.0) for i in range(count)}
@@ -109,8 +102,6 @@ class BandTest(unittest.TestCase):
         self.assertTrue(any("machine factor: 1.60" in w for w in warnings), warnings)
 
     def test_one_latency_outlier_flags_against_the_fleet(self):
-        # Eleven metrics at 1.6x and one at 5x: the outlier deviates from the
-        # normalized baseline (160 * 1.5) while the fleet stays clean.
         count = metrics.MIN_LATENCY_PAIRS + 2
         base_map = {f"m{i}": _metric(1000, 100.0) for i in range(count)}
         run_map = {f"m{i}": _metric(1000, 160.0) for i in range(count)}
@@ -123,7 +114,6 @@ class BandTest(unittest.TestCase):
         self.assertEqual(flagged, ["m11"], violations)
 
     def test_too_few_pairs_falls_back_to_absolute_band(self):
-        # Below MIN_LATENCY_PAIRS the machine factor is not trusted.
         base_map = {f"m{i}": _metric(1000, 100.0) for i in range(3)}
         run_map = {f"m{i}": _metric(1000, 160.0) for i in range(3)}
         violations, _ = metrics.compare_metrics(
@@ -187,8 +177,6 @@ class BandTest(unittest.TestCase):
         )
 
     def test_matching_skip_marker_stays_a_warning(self):
-        # A deterministic skip recorded identically in the baseline (for
-        # example "no addressable symbol/rule") is unchanged, not a break.
         skip = {"skipped": "no addressable symbol/rule"}
         base = _doc({"p": {"status": "ok", "metrics": {"m": skip}}})
         run = _doc({"p": {"status": "ok", "metrics": {"m": dict(skip)}}})
@@ -310,7 +298,6 @@ class RunTest(unittest.TestCase):
             measure.assert_not_called()
 
     def test_size_and_latency_drift_report_without_failing(self):
-        # Drift is reviewed, not gated: a fix legitimately moves sizes.
         with tempfile.TemporaryDirectory() as tmp:
             baseline_path = Path(tmp) / "baseline.json"
             baseline = _doc({"p": {"status": "ok", "metrics": {"m": _metric(1000)}}})

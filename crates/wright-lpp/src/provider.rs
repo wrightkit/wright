@@ -365,8 +365,6 @@ impl StdioLanguageProvider {
         Ok(result)
     }
 
-    /// Send a request through the client, enriching transport failures with
-    /// the observed process status.
     fn request(&mut self, method: &str, params: Value) -> Result<Value, ProviderError> {
         match self.client.request(method, params) {
             Ok(value) => Ok(value),
@@ -377,9 +375,6 @@ impl StdioLanguageProvider {
         }
     }
 
-    /// When a request failed through a transport error (I/O or exit), the
-    /// provider process is likely dead: observe its status (bounded) and
-    /// report a deterministic `Exited` failure carrying the exit code.
     fn enrich_transport_error(&mut self, error: &mut ProviderError, method: &str) {
         if !matches!(error.code(), "provider-io" | "provider-exited") {
             return;
@@ -403,8 +398,6 @@ impl StdioLanguageProvider {
         }
     }
 
-    /// The capability guard: refuse explicitly when the capability was not
-    /// negotiated (or when the session is not initialized).
     fn require_capability(&self, capability: Capability) -> Result<(), ProviderError> {
         match &self.negotiated {
             Some(negotiated) => negotiated.require(capability),
@@ -667,7 +660,6 @@ impl LanguageProvider for StdioLanguageProvider {
     }
 }
 
-/// The common `documents`/`projectRoot` parameter shape.
 fn documents_params(documents: &DocumentSet, project_root: Option<&str>) -> Value {
     let mut params =
         json!({ "documents": serde_json::to_value(documents).expect("document set serializes") });
@@ -697,8 +689,6 @@ fn capability_unavailable<T>(capability: &str, method: &str) -> Result<T, Provid
     ))
 }
 
-/// Parse a typed result, converting shape failures into a deterministic
-/// malformed-response error.
 fn parse_result<T: DeserializeOwned>(value: Value, method: &str) -> Result<T, ProviderError> {
     serde_json::from_value(value).map_err(|error| ProviderError::Malformed {
         detail: format!("{method} result is not a valid LPP v1 response: {error}"),
@@ -707,10 +697,6 @@ fn parse_result<T: DeserializeOwned>(value: Value, method: &str) -> Result<T, Pr
 
 #[cfg(test)]
 mod tests {
-    //! Provider-layer tests with a scripted fake transport. These cover
-    //! initialize strictness and capability guards that a conforming
-    //! provider (the conformance mock) can never trigger on its own; the
-    //! end-to-end suite exercises the real binary.
 
     use std::io::{BufRead, BufReader, BufWriter, Write};
     use std::path::Path;
@@ -724,8 +710,6 @@ mod tests {
     use crate::client::{ClientConfig, ClientPhase};
     use crate::types::LookupWithin;
 
-    /// A placeholder child whose pipes are taken and discarded; only the
-    /// exit-status surface is used by these tests.
     fn dummy_child() -> ChildProcess {
         let (command, args): (&str, Vec<String>) = if cfg!(windows) {
             (
@@ -796,8 +780,6 @@ mod tests {
             )
         }
 
-        /// Drain exactly `expected` request lines, then assert that nothing
-        /// further reaches the provider (no unexpected wire traffic).
         fn assert_only_requests(&self, expected: usize) {
             for _ in 0..expected {
                 let line = self
@@ -938,7 +920,6 @@ mod tests {
             .compile(&documents, Some("file:///project"))
             .expect_err("compile not negotiated");
         assert_eq!(error.code(), "capability-unavailable");
-        // The session is healthy and check still works end to end.
         let check = provider.check(&documents, None).expect("check works");
         assert!(check.documents.is_empty());
         fake.assert_only_requests(2);

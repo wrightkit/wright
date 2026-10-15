@@ -1,4 +1,3 @@
-# Dependabot version updates for the Wright workspace.
 # Docs: https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 version: 2
 updates:
@@ -8,7 +7,6 @@ updates:
     schedule:
       interval: monthly
 
-  # CI workflows and their action pins.
   - package-ecosystem: github-actions
     directory: /
     schedule:

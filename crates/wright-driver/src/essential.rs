@@ -295,7 +295,7 @@ mod tests {
             result["truncation"]["diagnostics"]["total"],
             DEFAULT_ITEMS + 1
         );
-        envelope(&mut result, true); // Capping never manufactures missing facts.
+        envelope(&mut result, true);
         let mut complete = input;
         envelope(&mut complete, true);
         assert_eq!(

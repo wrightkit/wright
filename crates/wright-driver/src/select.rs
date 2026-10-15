@@ -247,16 +247,10 @@ impl FileMatch {
     }
 }
 
-/// The bases under which `file` selection arguments and reported
-/// `span.path` spellings resolve for one session input: the invocation
-/// working directory and the input include root.
 pub(crate) fn file_bases(input: &ResolvedInput) -> Vec<PathBuf> {
     vec![input.cwd.clone(), input.root.clone()]
 }
 
-/// The canonical paths `path` resolves to under each base; absolute paths
-/// resolve once regardless of base, and unresolvable spellings (virtual or
-/// missing files) contribute nothing.
 fn canonical_forms(path: &Path, bases: &[PathBuf]) -> BTreeSet<PathBuf> {
     bases
         .iter()
@@ -326,7 +320,6 @@ mod tests {
         ];
         let (kept, _) = selection(json!({"rule": "a", "file": "x.ws"})).apply_findings(items, &[]);
         assert_eq!(kept.len(), 1);
-        // No span path never matches a file selection.
         let (kept, _) = selection(json!({"file": "x.ws"}))
             .apply_findings(vec![finding("a", "warning", None)], &[]);
         assert!(kept.is_empty());
@@ -357,20 +350,16 @@ mod tests {
             },
         };
 
-        // An absolute `file` selects a finding reported root-relative.
         let items = vec![finding("a", "warning", Some("sub/f.ws"))];
         let (kept, _) = selection(json!({"file": abs.to_str().unwrap()}))
             .apply_findings(items, &file_bases(&input));
         assert_eq!(kept.len(), 1);
 
-        // A root-relative `file` selects a finding reported absolute/cwd
-        // relative (the display form).
         let items = vec![finding("a", "warning", Some(abs.to_str().unwrap()))];
         let (kept, _) =
             selection(json!({"file": "sub/f.ws"})).apply_findings(items, &file_bases(&input));
         assert_eq!(kept.len(), 1);
 
-        // A different file name still selects nothing.
         let items = vec![finding("a", "warning", Some("sub/f.ws"))];
         let (kept, _) =
             selection(json!({"file": "sub/other.ws"})).apply_findings(items, &file_bases(&input));

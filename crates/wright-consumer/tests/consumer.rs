@@ -1,6 +1,3 @@
-//! External-consumer validation (#61): the public embedding API works from
-//! outside the core crates on representative inputs.
-
 use std::path::{Path, PathBuf};
 
 fn workspace_root() -> PathBuf {

@@ -1,14 +1,3 @@
-//! End-to-end `wright update` tests (#116, #439, #455) against a mock release
-//! server.
-//!
-//! Serves fake R2 release routes — the `latest/version` pointer plus
-//! versioned archives and checksums, the same shape `scripts/test-install.sh`
-//! uses for `install.sh` — and exercises
-//! the real `wright` binary: the consolidated update surface (`update`,
-//! `update self`, `update provider [opy]`), version resolution, `--check`
-//! without modification, checksum-verified installs, atomic replacement of
-//! both binaries, and the refusal/skip paths.
-
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -20,15 +9,11 @@ use std::thread::JoinHandle;
 
 use sha2::Digest;
 
-/// The fake release version served by the mock server.
 const RELEASE: &str = "9.9.9";
 const TRIPLE: &str = "x86_64-unknown-linux-gnu";
-/// The OPY provider versions used by the provider update tests.
 const PROVIDER_OLD: &str = "1.0.0";
 const PROVIDER_RELEASE: &str = "1.4.0";
 
-/// A minimal HTTP/1.1 server serving a fixed path -> body map and recording
-/// the paths clients requested.
 struct MockServer {
     addr: SocketAddr,
     shutdown: Arc<AtomicBool>,
@@ -65,12 +50,10 @@ impl MockServer {
         format!("http://127.0.0.1:{}", self.addr.port())
     }
 
-    /// The request paths the server has served so far, in order.
     fn requests(&self) -> Vec<String> {
         self.requests.lock().unwrap().clone()
     }
 
-    /// Environment overrides that point the child at this server.
     fn env(&self) -> Vec<(&'static str, String)> {
         vec![
             ("WRIGHT_INSTALL_BASE_URL", self.base_url()),
@@ -214,7 +197,6 @@ fn provider_binary() -> &'static str {
     }
 }
 
-/// The OPY provider store under the `WRIGHT_PROVIDER_DATA_DIR` each child gets.
 fn provider_store(dir: &Path) -> PathBuf {
     dir.join("provider-data").join("providers").join("opy")
 }
@@ -268,7 +250,6 @@ fn provider_release(version: &str, files: &mut HashMap<String, Vec<u8>>) {
     );
 }
 
-/// Environment overrides that point the child at this server's provider routes.
 fn provider_env(server: &MockServer) -> Vec<(&'static str, String)> {
     let mut env = server.env();
     env.push((
@@ -278,7 +259,6 @@ fn provider_env(server: &MockServer) -> Vec<(&'static str, String)> {
     env
 }
 
-/// A fresh install directory holding copies of the real test binary.
 fn install_dir(tag: &str) -> PathBuf {
     install_dir_under(std::env::temp_dir(), tag)
 }
@@ -381,7 +361,6 @@ fn update_installs_and_replaces_both_binaries() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains(RELEASE), "{stdout}");
 
-    // Both binaries are the fake release payloads now.
     assert_eq!(
         String::from_utf8_lossy(&read(&dir.join("wright"))),
         format!("#!/bin/sh\necho \"fake wright {RELEASE}\"\n")
@@ -403,7 +382,6 @@ fn update_installs_and_replaces_both_binaries() {
         .unwrap();
     assert!(String::from_utf8_lossy(&lsp_version.stdout).contains(RELEASE));
 
-    // No staging directories are left behind.
     let leftovers: Vec<_> = std::fs::read_dir(&dir)
         .unwrap()
         .filter_map(|entry| entry.ok())
@@ -678,7 +656,6 @@ fn update_installs_a_named_provider_into_an_empty_store() {
         .join(provider_target().unwrap())
         .join(provider_binary());
     assert_eq!(read(&executable), provider_body(PROVIDER_RELEASE));
-    // The self target is not part of `update provider <NAME>`.
     assert!(!stdout.contains("installing wright"), "{stdout}");
     let _ = std::fs::remove_dir_all(&dir);
 }

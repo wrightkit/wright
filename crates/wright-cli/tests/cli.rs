@@ -1,12 +1,7 @@
-//! Black-box CLI end-to-end tests (#41): the actual `wright` executable is
-//! exercised across commands, inputs, output modes, exit codes, diagnostics,
-//! and stdout/stderr separation — the automation contract of the CLI.
-
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-/// The path of the `wright` binary under test.
 fn wright() -> &'static str {
     env!("CARGO_BIN_EXE_wright")
 }
@@ -440,8 +435,6 @@ fn analyze_low_cost_program_reports_cost_without_risks() {
         stdout.contains("Performance and stability risks"),
         "{stdout}"
     );
-    // A small clean program still prints the bounded frame and an explicit
-    // empty risk section rather than fabricating concerns.
     let risks = stdout
         .split("Performance and stability risks")
         .nth(1)
@@ -487,7 +480,6 @@ fn check_excludes_configurable_lint_findings() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// ── Check output hierarchy (#443) ────────────────────────────────────────────
 // Two `raw-setting` warnings plus one `unknown-value` error exercise the
 // blocking/non-blocking split and the errors-first ordering at once.
 
@@ -520,8 +512,6 @@ fn check_text_leads_with_verdict_and_blocking_count() {
         "never",
     ]);
     assert_eq!(output.status.code(), Some(1));
-    // The verdict leads stdout: failure status plus the blocking error count
-    // and the non-blocking remainder, then only execution metadata closes it.
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut lines = stdout.lines();
     assert_eq!(lines.next(), Some("ERROR check"), "{stdout}");
@@ -531,8 +521,6 @@ fn check_text_leads_with_verdict_and_blocking_count() {
     assert_eq!(lines.next(), Some("  1 file(s) affected"), "{stdout}");
     assert!(lines.next().is_none(), "the footer stays compact: {stdout}");
 
-    // Diagnostics render errors before non-blocking diagnostics, each with
-    // its actionable location, source context, and secondary stage metadata.
     let stderr = String::from_utf8_lossy(&output.stderr);
     let error_at = stderr.find("error[").expect("an error diagnostic");
     let warning_at = stderr.find("warning[").expect("a warning diagnostic");
@@ -582,7 +570,6 @@ fn terminal_renderer_marks_independent_diagnostics() {
         stderr.contains("Set Global Variable(B, FutureValueThing(2));"),
         "the source context renders inside the rail: {stderr}"
     );
-    // The verdict stream is untouched by the connectors.
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.starts_with("ERROR check\n"), "{stdout}");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -736,7 +723,6 @@ fn check_json_prioritizes_blocking_diagnostics_like_text() {
     let output = run(&["check", path.to_str().unwrap(), "-f", "json"]);
     assert_eq!(output.status.code(), Some(1));
     let envelope = parse_json(&output.stdout);
-    // Both formats prioritize blocking diagnostics without changing the set.
     let severities: Vec<&str> = envelope["diagnostics"]
         .as_array()
         .unwrap()
@@ -837,12 +823,9 @@ fn inspect_over_workshop_input_lists_rules_and_symbols() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// ── Lint (#98) ───────────────────────────────────────────────────────────────
-
 #[test]
 fn lint_over_workshop_input_reports_findings_in_text_and_json() {
     let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
-    // Text mode: summary line, findings with evidence and source spans.
     let output = run(&["lint", path.to_str().unwrap()]);
     assert!(
         output.status.success(),
@@ -856,7 +839,6 @@ fn lint_over_workshop_input_reports_findings_in_text_and_json() {
         stdout.contains("evidence:"),
         "text mode exposes the evidence class: {stdout}"
     );
-    // JSON mode: the lint envelope with findings, rules, and config.
     let output = run(&["lint", path.to_str().unwrap(), "-f", "json"]);
     assert!(output.status.success());
     let envelope = parse_json(&output.stdout);
@@ -875,8 +857,6 @@ fn lint_over_workshop_input_reports_findings_in_text_and_json() {
     assert!(envelope["result"]["config"].is_null());
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
-
-// ── Validated lint fixes (#556) ──────────────────────────────────────────────
 
 const FIXABLE_WORKSHOP: &str = r#"variables {
     global:
@@ -907,7 +887,6 @@ fn lint_fix_previews_and_writes_validated_fixes() {
     let path = temp_file("fixable.ws", FIXABLE_WORKSHOP);
     let path = path.to_str().unwrap();
 
-    // Findings carry the materialized fix transaction.
     let output = run(&["lint", path, "--fix", "-f", "json"]);
     assert!(output.status.success(), "{}", command_result(&output));
     let findings = parse_json(&output.stdout)["result"]["findings"]
@@ -928,7 +907,6 @@ fn lint_fix_previews_and_writes_validated_fixes() {
         );
     }
 
-    // `--fix` previews each fix's validated diff without writing.
     let output = run(&["lint", path, "--fix"]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -940,8 +918,6 @@ fn lint_fix_previews_and_writes_validated_fixes() {
         "preview writes nothing"
     );
 
-    // `--fix --write` applies through the validated edit path; the resolved
-    // findings are gone and the source still checks clean.
     let output = run(&["lint", path, "--fix", "--write"]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1084,7 +1060,6 @@ fn span_path_is_consistent_across_input_spellings() {
 #[test]
 fn lint_rule_flags_control_findings() {
     let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
-    // --disable-rule removes the rule's findings and reports enabled:false.
     let output = run(&[
         "lint",
         path.to_str().unwrap(),
@@ -1177,7 +1152,6 @@ fn lint_flags_are_usage_errors_for_other_commands() {
     }
 }
 
-// ── Finding selection (#430) ─────────────────────────────────────────────────
 // `real-world/overpy-cake.ws` produces 10 findings: 9 identical
 // `repeated-value` warnings and 1 `min-wait-loop` warning.
 
@@ -1186,8 +1160,6 @@ fn lint_selection_filters_findings_and_reports_withheld() {
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
     let path = path.to_str().unwrap();
 
-    // --rule-id selects one rule; --max truncates and reports the withheld
-    // count in the envelope.
     let output = run(&[
         "lint",
         path,
@@ -1308,8 +1280,6 @@ fn selection_never_changes_the_verdict_or_exit_code() {
         full
     );
 
-    // The lint verdict survives an empty selected set on the warning-only
-    // fixture: severity=error selects nothing, the verdict still says WARN.
     let cake = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
     let output = run(&["lint", cake.to_str().unwrap(), "--severity", "error"]);
     assert!(output.status.success());
@@ -1413,8 +1383,6 @@ fn essential_reports_bound_lists_and_expose_expansion() {
     assert_eq!(content["rules"].as_array().unwrap().len(), 21);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
-// ── #635: default/all verdict parity, risk selection, span paths ──────────────
-
 /// A program whose only risk is the wait-less `While(True)` warning — the
 /// smallest input that separates the verdict paths #635 joined.
 const WAITLESS_LOOP: &str = "rule (\"r\") {
@@ -1431,7 +1399,6 @@ const WAITLESS_LOOP: &str = "rule (\"r\") {
 
 #[test]
 fn analyze_default_and_all_report_the_same_verdict() {
-    // Expansion must preserve the same complete-set verdict.
     let path = temp_file("waitless.txt", WAITLESS_LOOP);
     for args in [
         vec!["analyze", path.to_str().unwrap()],
@@ -1503,8 +1470,6 @@ fn analyze_selection_narrows_facts_risks() {
     assert!(envelope["result"]["risks"].as_array().unwrap().is_empty());
     assert_eq!(envelope["result"]["selection"]["total"], 10);
 
-    // The text verdict still reports the full set's severity, and `--max`
-    // names what it withheld.
     let output = run(&["analyze", path.to_str().unwrap(), "--severity", "error"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("WARN analyze"), "{stdout}");
@@ -1517,8 +1482,6 @@ fn analyze_selection_narrows_facts_risks() {
 
 #[test]
 fn inspect_json_resolves_span_paths() {
-    // `inspect --format json` resolves `path` on every span like
-    // `inspect symbols` and `analyze` already do.
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
     let output = run(&["inspect", "rules", path.to_str().unwrap(), "-f", "json"]);
     assert!(output.status.success());
@@ -1576,8 +1539,6 @@ fn inspect_cost_verdict_and_file_selection() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("--file"), "{stderr}");
 
-    // Selection that can apply still narrows: `--severity error` empties the
-    // warning set while the verdict keeps the full set's severity.
     let output = run(&[
         "inspect",
         "cost",
@@ -1610,8 +1571,6 @@ fn inspect_cost_verdict_and_file_selection() {
 
 #[test]
 fn analyze_github_renderer_emits_risk_annotations() {
-    // The GitHub renderer reports analyze risks as workflow annotations like
-    // lint findings.
     let path = temp_file("waitless.txt", WAITLESS_LOOP);
     let output = run_with_env(
         &[
@@ -1637,8 +1596,6 @@ fn lint_text_collapses_identical_findings_into_one_entry() {
     let output = run(&["lint", path.to_str().unwrap()]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // The nine identical findings render as one entry listing nine locations;
-    // the verdict still reports the true total by severity.
     assert!(stdout.contains("10 warning(s)"), "{stdout}");
     assert_eq!(
         stdout.matches("[repeated-value]").count(),
@@ -1758,8 +1715,6 @@ fn lint_text_presents_a_finding_with_location_context_and_secondary_metadata() {
     let output = run(&["lint", path.to_str().unwrap()]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // The message leads; the location and source frame follow; the evidence
-    // class trails dimmed as secondary metadata.
     assert!(stdout.contains("WARN lint"), "{stdout}");
     assert!(stdout.contains("1 warning(s)"), "{stdout}");
     let message = stdout
@@ -1891,7 +1846,6 @@ fn an_unknown_rule_id_in_the_lint_policy_is_a_usage_error() {
 
 #[test]
 fn stdin_workshop_works_and_legacy_protocol_is_refused() {
-    // Workshop text on stdin.
     let output = run_with_stdin(&["check", "-"], &corpus_workshop("synthetic/basic-rule"));
     assert_eq!(output.status.code(), Some(0));
 
@@ -1920,7 +1874,6 @@ fn bom_prefixed_workshop_behaves_like_the_plain_file() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("PASS check"), "{stdout}");
 
-    // Compilation emits byte-identical text to the BOM-less spelling.
     let bommed_out = run(&["compile", bommed.to_str().unwrap(), "-o", "-"]);
     let plain_out = run(&["compile", plain.to_str().unwrap(), "-o", "-"]);
     assert!(bommed_out.status.success() && plain_out.status.success());
@@ -1998,11 +1951,9 @@ fn json_output_is_deterministic_across_runs() {
 #[test]
 fn stdout_stderr_separation_holds_in_both_modes() {
     let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
-    // Text mode: result on stdout, no stderr on success.
     let output = run(&["check", path.to_str().unwrap()]);
     assert!(output.stderr.is_empty());
     assert!(String::from_utf8_lossy(&output.stdout).contains("PASS check"));
-    // JSON mode: envelope on stdout only.
     let output = run(&["check", path.to_str().unwrap(), "-f", "json"]);
     assert!(output.stderr.is_empty());
     parse_json(&output.stdout);
@@ -2210,7 +2161,6 @@ fn completion_install_explicit_shell_and_dir() {
     let content = std::fs::read_to_string(&target).unwrap();
     assert!(content.contains("#compdef wright") || content.contains("wright"));
 
-    // Idempotent rerun: reports already up to date
     let output2 = run(&[
         "completion",
         "install",
@@ -2222,7 +2172,6 @@ fn completion_install_explicit_shell_and_dir() {
     let stdout2 = String::from_utf8_lossy(&output2.stdout);
     assert!(stdout2.contains("is already up to date"), "{stdout2}");
 
-    // Force rerun: reports updated
     let output3 = run(&[
         "completion",
         "install",
@@ -2325,7 +2274,6 @@ fn agent_install_writes_the_guide_and_refreshes_it() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("--force"));
     assert!(install(&["--force"]).status.success());
 
-    // --dry-run reports the destination and writes nothing.
     let _ = std::fs::remove_dir_all(&dir);
     let output = install(&["--dry-run"]);
     assert!(output.status.success());
@@ -2356,7 +2304,6 @@ fn agent_tools_emits_messages_and_json_schema_forms_deterministically() {
             serde_json::json!(["code_execution_20260120"])
         );
     }
-    // Identical input emits identical bytes.
     assert_eq!(run(&["agent", "tools"]).stdout, messages.stdout);
 
     let plain = run(&["agent", "tools", "--format", "json-schema"]);
@@ -2722,7 +2669,6 @@ for line in sys.stdin:
         parse_json(&output.stdout)
     };
 
-    // Bare `inspect` reports the provider-compiled program's rule.
     let envelope = run_inspect(&["inspect", &input, "--opy-provider", &provider, "-f", "json"]);
     assert_eq!(envelope["command"], "inspect");
     assert_eq!(envelope["ok"], true);
@@ -2730,7 +2676,6 @@ for line in sys.stdin:
     assert_eq!(rules.len(), 1, "{envelope}");
     assert_eq!(rules[0]["name"], "setup");
 
-    // `inspect rules --content` serves the canonical call tree.
     let envelope = run_inspect(&[
         "inspect",
         "rules",
@@ -2751,7 +2696,6 @@ for line in sys.stdin:
         "{envelope}"
     );
 
-    // `inspect symbols` lists the provider-compiled program's symbols.
     let envelope = run_inspect(&[
         "inspect",
         "symbols",
@@ -2856,8 +2800,6 @@ for line in sys.stdin:
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// ── Convert (#126) ───────────────────────────────────────────────────────────
-
 #[test]
 fn convert_workshop_input_to_opy_requires_provider_reconstruct_capability() {
     let path = temp_file("convert.txt", &corpus_workshop("synthetic/basic-rule"));
@@ -2916,8 +2858,6 @@ fn convert_json_envelope_reports_command_result_and_target() {
 
 #[test]
 fn convert_requires_an_explicit_target_flag() {
-    // Missing or unknown --target is a usage error (exit 2); --target on
-    // another command is a usage error too.
     let path = temp_file("convert.txt", &corpus_workshop("synthetic/basic-rule"));
     let path = path.to_str().unwrap();
     let output = run(&["convert", path]);
@@ -2962,7 +2902,6 @@ fn convert_rejects_non_workshop_input() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// ── Semantic query commands (#429) ───────────────────────────────────────────
 // `inspect symbols`, `inspect refs`, `inspect cfg`, `inspect callgraph`,
 // and `inspect cost` run the same operations the agent contract serves;
 // `refs`/`cfg` address their target by name.
@@ -3754,7 +3693,6 @@ fn agent_install_mcp_configures_a_project_whose_server_answers_mcp() {
     std::fs::write(project.join(".mcp.json"), config.to_string()).unwrap();
     assert!(install(&["--mcp", "claude", "--no-guide"]).status.success());
 
-    // An unsupported target and `--no-guide` alone are usage errors.
     let output = install(&["--mcp", "emacs"]);
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("claude"));
@@ -3763,7 +3701,6 @@ fn agent_install_mcp_configures_a_project_whose_server_answers_mcp() {
     let _ = std::fs::remove_dir_all(&elsewhere);
 }
 
-// ── `wright lookup` (#529) ─────────────────────────────────────────────────
 // The command is the agent contract's `lookup` operation on argv: vocabulary
 // answers need no input and never load a project.
 
@@ -3970,8 +3907,8 @@ for line in sys.stdin:
 #[test]
 fn check_text_skips_the_lookup_hint_when_no_name_was_rejected() {
     // `unknown-language` fires when the input holds no Workshop language
-    // markers at all — the rejected "name" is `<none>`, which lookup cannot
-    // resolve, so the pointer must not appear.
+    // markers at all — detection rejected no name, so lookup has nothing
+    // to resolve and the pointer must not appear.
     let path = temp_file("lookup-hint-none.txt", "0.11.0\n");
     let output = run(&[
         "check",

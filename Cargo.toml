@@ -10,7 +10,6 @@ license = "AGPL-3.0-or-later"
 repository = "https://github.com/wrightkit/wright"
 
 [workspace.dependencies]
-# Canonical Workshop core.
 workshop-rs = "1.16.0"
 libc = "0.2"
 serde = "1"
@@ -25,25 +24,17 @@ wright-driver = { path = "crates/wright-driver" }
 wright-transform = { path = "crates/wright-transform" }
 
 [workspace.lints.rust]
-# Unsafe operations inside an unsafe function still need an explicit block so
-# the unsafe surface and its invariants remain visible at the operation site.
 unsafe_op_in_unsafe_fn = "deny"
-# Public items in a private module are not part of a usable crate API.
 unreachable_pub = "deny"
 
 [workspace.lints.clippy]
-# These groups cover bug-prone findings without enabling broad style or
-# restriction policies; CI promotes the remaining warning-level checks.
 correctness = { level = "deny", priority = -1 }
 suspicious = { level = "deny", priority = -1 }
 perf = { level = "warn", priority = -1 }
-# These development/progress macros must not reach compiler or tooling code.
 dbg_macro = "deny"
 todo = "deny"
 unimplemented = "deny"
 
-# Reduce dependency artifact volume while retaining line-table diagnostics for
-# WrightKit code. See wrightkit/.github docs/rust-build-artifacts.md.
 [profile.dev]
 debug = 1
 

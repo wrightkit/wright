@@ -100,8 +100,6 @@ enum ProviderOperation {
 /// (workshop-rs ADR-0010).
 pub(crate) const WORKSHOP_CLIENT_ELEMENT_LIMIT: usize = 32768;
 
-/// The origin reported on diagnostics and services for a loaded program:
-/// an unmapped provider artifact is not presented as authored source.
 fn loaded_origin(loaded: &Loaded) -> Origin {
     Origin {
         kind: if loaded.provenance == Provenance::Unmapped {
@@ -144,12 +142,8 @@ pub struct CompilerSession {
     source_provider: Option<Box<dyn SourceProvider>>,
 }
 
-/// The default-config semantic service built over one loaded program.
-/// `program` is the `Arc` identity reuse is keyed on: a reload or a
-/// provider re-resolution produces a fresh `Arc`, so the pointer check can
-/// never serve a stale index.
 struct SessionSemantic {
-    program: Arc<Program>,
+    program_key: Arc<Program>,
     service: Arc<SemanticService<'static>>,
 }
 
@@ -427,8 +421,6 @@ impl CompilerSession {
         Ok(loaded)
     }
 
-    /// Load a source-language result through the explicit product provider
-    /// seam, then hand its canonical Workshop text to `workshop-rs`.
     fn load_from_source_provider(
         &mut self,
         resolved: &mut ResolvedInput,
@@ -1063,11 +1055,11 @@ impl CompilerSession {
         if self
             .semantic
             .as_ref()
-            .is_none_or(|cached| !Arc::ptr_eq(&cached.program, &loaded.program))
+            .is_none_or(|cached| !Arc::ptr_eq(&cached.program_key, &loaded.program))
         {
             self.semantic_builds += 1;
             self.semantic = Some(SessionSemantic {
-                program: Arc::clone(&loaded.program),
+                program_key: Arc::clone(&loaded.program),
                 service: Arc::new(self.shared_service_with(loaded, LintConfig::default())),
             });
         }
@@ -1114,9 +1106,6 @@ impl CompilerSession {
         }) {
             Ok(report) => report,
             Err(error) => {
-                // Without the canonical count the budget is unevaluated —
-                // say so rather than let a missing warning read as "within
-                // the limit".
                 self.diagnostics.push(Diagnostic {
                     code: "element-count-unavailable".to_string(),
                     stage: Stage::Emission,
@@ -1146,8 +1135,6 @@ impl CompilerSession {
             span: None,
             source: Some(loaded_origin(loaded)),
         };
-        // Point at the largest contributing rule: the concise hotspot that
-        // `analyze` reports in full.
         if let Some(top) = report.rules.iter().max_by_key(|rule| rule.count) {
             diagnostic.message.push_str(&format!(
                 "; largest contributor: rule \"{}\" ({} elements)",
@@ -1252,8 +1239,6 @@ impl CompilerSession {
     fn finish<T: serde::Serialize>(&mut self, command: &str, result: T) -> Envelope<T> {
         let diagnostics = std::mem::take(&mut self.diagnostics);
         let exit = exit_code_from(&diagnostics);
-        // Selection narrows the reported diagnostics after the exit code is
-        // fixed; filtering must never change the verdict.
         let bases = self.selection_file_bases();
         let (diagnostics, selection) = self.config.selection.apply_diagnostics(diagnostics, &bases);
         Envelope {
@@ -1304,12 +1289,6 @@ fn apply_profile(
     Ok(())
 }
 
-/// The root-relative form of `path` when it sits under `root`.
-///
-/// `canonicalize` makes both paths absolute and resolves symlinks, so
-/// absolute, relative, and cwd-relative spellings of the same file all
-/// produce the same root-relative result. Returns `None` when there is no
-/// path (stdin) or the path is not under the root.
 fn root_relative(path: Option<&Path>, root: &Path) -> Option<String> {
     let path = path?;
     let abs_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
@@ -1327,7 +1306,6 @@ fn root_relative(path: Option<&Path>, root: &Path) -> Option<String> {
     }
 }
 
-/// Map a Workshop-language error to a driver diagnostic.
 pub(crate) fn workshop_diag(
     error: workshop_rs::WorkshopError,
     resolved: &ResolvedInput,
@@ -1363,21 +1341,11 @@ pub(crate) fn workshop_diag(
         }
         _ => ("workshop-error".to_string(), Stage::Internal, None),
     };
-    let message = match &error {
-        // A zero-marker detection has no rejected spelling; text
-        // `check`/`compile` skips its `wright lookup` hint on the
-        // `'<none>'` marker the old `Unknown` spelling carried, so the
-        // message keeps that marker for the same suppression.
-        workshop_rs::WorkshopError::NotDetected { .. } => {
-            format!("{error} (rejected name: '<none>')")
-        }
-        _ => error.to_string(),
-    };
     Diagnostic {
         code,
         stage,
         severity: crate::diag::Severity::Error,
-        message,
+        message: error.to_string(),
         status: None,
         span,
         source: Some(resolved.origin.clone()),
@@ -1443,21 +1411,22 @@ fn mutual_protocol_version(supported: &[String], target: InputTarget) -> Option<
         InputTarget::Directory => wright_lpp::LPP_SOURCE_IDENTITY_PROTOCOL_VERSION,
         _ => wright_lpp::LPP_PROJECT_LOADING_PROTOCOL_VERSION,
     };
+    let floor = protocol_version_tuple(floor)?;
     wright_lpp::LPP_SUPPORTED_PROTOCOL_VERSIONS
         .iter()
         .copied()
-        .filter(|version| protocol_version_tuple(version) >= protocol_version_tuple(floor))
-        .filter(|version| supported.iter().any(|s| s == version))
-        .max_by_key(|version| protocol_version_tuple(version))
+        .filter_map(|version| protocol_version_tuple(version).map(|tuple| (tuple, version)))
+        .filter(|(tuple, _)| *tuple >= floor)
+        .filter(|(_, version)| supported.iter().any(|s| s == version))
+        .max_by_key(|(tuple, _)| *tuple)
+        .map(|(_, version)| version)
 }
 
-/// `major.minor` as an ordered pair; an unparseable version sorts before
-/// every real one so it can never win the mutual computation.
-fn protocol_version_tuple(version: &str) -> (u32, u32) {
+fn protocol_version_tuple(version: &str) -> Option<(u32, u32)> {
     let mut parts = version.split('.');
-    let major = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
-    let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
-    (major, minor)
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    Some((major, minor))
 }
 
 #[cfg(test)]

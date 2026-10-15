@@ -7,9 +7,6 @@ fn service() -> LanguageService {
     LanguageService::new(PathBuf::from("."))
 }
 
-/// A raw Workshop program with a declared global variable, a subroutine
-/// called from a rule, and two rules. `wright inspect` on the same text is
-/// the reference the semantic queries are compared against.
 const WORKSHOP_SOURCE: &str = concat!(
     "variables {\n",
     "    global:\n",
@@ -50,8 +47,6 @@ fn open_workshop(service: &mut LanguageService, text: &str) -> String {
     uri
 }
 
-/// A 1-based `{start,end}` span from the inspect JSON contract as the
-/// document's UTF-16 range.
 fn inspect_span(text: &str, span: &serde_json::Value) -> Range {
     let at = |key: &str| {
         line_col_position(
@@ -186,7 +181,6 @@ fn workshop_semantic_queries_match_inspect_for_the_same_text() {
     };
     let shared = symbol_id("subroutine", "shared");
 
-    // Hover at the `shared` call site names the symbol inspect reports.
     let hover = service
         .hover(
             &uri,
@@ -198,7 +192,6 @@ fn workshop_semantic_queries_match_inspect_for_the_same_text() {
         .expect("hover on an identifier occurrence");
     assert_eq!(hover.contents, "`subroutine shared`");
 
-    // Definition targets the declared span inspect reports for the symbol.
     let definition = service
         .definition(
             &uri,
@@ -214,7 +207,6 @@ fn workshop_semantic_queries_match_inspect_for_the_same_text() {
         inspect_span(WORKSHOP_SOURCE, &symbols[shared]["span"])
     );
 
-    // References are the occurrence spans inspect reports for the symbol.
     let mut locations: Vec<Range> = service
         .references(
             &uri,
@@ -238,7 +230,6 @@ fn workshop_semantic_queries_match_inspect_for_the_same_text() {
     expected.sort_by_key(|r| (r.start.line, r.start.character));
     assert_eq!(locations, expected);
 
-    // `includeDeclaration` filters the declaration kind inspect reports.
     let filtered = service
         .references(
             &uri,
@@ -255,7 +246,6 @@ fn workshop_semantic_queries_match_inspect_for_the_same_text() {
         "the declaration reference drops out"
     );
 
-    // A rule name resolves its rule symbol.
     let rule_hover = service
         .hover(
             &uri,
@@ -267,7 +257,6 @@ fn workshop_semantic_queries_match_inspect_for_the_same_text() {
         .expect("hover on a rule name");
     assert_eq!(rule_hover.contents, "`rule main`");
 
-    // A variable occurrence resolves through the same shared rule.
     let score = symbol_id("globalVariable", "score");
     let variable_definition = service
         .definition(
@@ -293,7 +282,6 @@ fn workshop_semantic_queries_match_inspect_for_the_same_text() {
         .expect("hover on a variable write");
     assert_eq!(variable_hover.contents, "`globalVariable score`");
 
-    // Positions outside any identifier occurrence resolve nothing.
     for position in [
         Position {
             line: 0,

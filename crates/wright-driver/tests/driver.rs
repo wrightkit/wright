@@ -1,9 +1,3 @@
-//! Driver contract tests after the OPY provider cutover.
-//!
-//! Raw Workshop remains an in-process product path. OPY source behavior is
-//! exercised at the provider boundary; these tests ensure a missing provider
-//! cannot silently select a removed static frontend.
-
 use std::path::{Path, PathBuf};
 
 use wright_driver::edit::{EditTransaction, RenameTarget};
@@ -556,8 +550,6 @@ fn session_config_mutation_refuses_workflows() {
         &session.rename("x", "y", false).diagnostics
     ));
 
-    // Restoring the construction-time values is not a change: the session
-    // serves again.
     session.config.kind = SourceKind::Workshop;
     assert!(session.check().ok, "check: {:?}", session.diagnostics());
 }
@@ -642,8 +634,6 @@ fn session_config_mutation_refuses_provider_workflows() {
         "{error:?}"
     );
 
-    // The provider-mutation flow surfaces the same structured refusal and
-    // never runs its flow.
     let mutation = session.run_provider_flow(
         "x-demo",
         &wright_lpp::ClientInfo {
@@ -697,8 +687,6 @@ fn workshop_text_input_replaces_the_disk_read() {
         "the buffer text yields the check diagnostics its bytes on disk yield"
     );
 
-    // The buffer wins even when the disk has different bytes: an unsaved
-    // document at a path that does not exist still loads from its text.
     let unsaved_source = concat!(
         "rule (\"unsaved\") {\n",
         "    event {\n",
@@ -722,8 +710,6 @@ fn workshop_text_input_replaces_the_disk_read() {
         unsaved_check.diagnostics
     );
 
-    // An anonymous document carries no identity for kind detection; an
-    // explicit kind keeps it loadable.
     let mut kindless = CompilerSession::new(SessionConfig {
         input: InputSpec::Text {
             text: String::new(),
@@ -812,7 +798,6 @@ fn compile_to_asks_before_replacing_and_never_replaces_the_input() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A failed compile writes no file, neither the explicit path nor the default.
 #[test]
 fn failed_compile_writes_no_file() {
     use wright_driver::{CompileWrite, OutputDest, Overwrite};

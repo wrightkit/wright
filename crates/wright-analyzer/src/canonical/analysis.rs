@@ -244,8 +244,6 @@ fn condition_value_or_ancestor_span(
         .or_else(|| program.rule_span(rule))
 }
 
-/// The same ancestor walk for a value nested inside a direct action argument:
-/// the argument's own span, then the action's, then the rule's.
 fn argument_value_or_ancestor_span(
     program: &Program,
     rule: RuleId,
@@ -340,10 +338,6 @@ fn duplicate_condition_findings(
     dead: &[bool],
     value_ids: &HashMap<usize, ValueId>,
 ) -> Vec<Finding> {
-    // A repeated condition is unreachable only as a later branch of the same
-    // `If`/`Else If` chain, so conditions are compared within the chain that
-    // owns them. Non-`If` blocks still push an entry so their `End` stays
-    // aligned; `disabled` statements and their regions are not live.
     enum Block<'a> {
         IfChain(Vec<&'a Value>),
         Other,
@@ -516,9 +510,6 @@ fn dead_branch_span(scan: &SourceScan, marker: usize, boundary: usize) -> Option
     (start < end).then(|| scan.span(start, end))
 }
 
-/// The position of the chain marker (`Else If`, `Else`, or `End`) that ends
-/// the `Else If` branch opened at `elseif` — nested blocks are skipped by
-/// the same opener/`End` accounting the chain scan uses.
 fn elseif_branch_end(actions: &[Action], elseif: usize) -> Option<usize> {
     let mut depth = 0usize;
     for (index, action) in actions.iter().enumerate().skip(elseif + 1) {
@@ -540,8 +531,6 @@ fn elseif_branch_end(actions: &[Action], elseif: usize) -> Option<usize> {
     None
 }
 
-/// The `If` that opens the chain containing the `Else If` at `elseif` —
-/// nested blocks are skipped by the same depth accounting, walked backward.
 fn chain_if_index(actions: &[Action], elseif: usize) -> Option<usize> {
     let mut depth = 0usize;
     for index in (0..elseif).rev() {
@@ -618,14 +607,12 @@ impl<'a> SourceScan<'a> {
         }
     }
 
-    /// The byte offset of a 1-based line/column position.
     fn byte(&self, position: Position) -> Option<usize> {
         self.document
             .byte_range(Span::new(self.file, position, position))
             .map(|range| range.start)
     }
 
-    /// The first non-trivia character at or after `pos`.
     fn next(&self, mut pos: usize) -> Option<(usize, char)> {
         let text = self.document.text();
         loop {
@@ -646,7 +633,6 @@ impl<'a> SourceScan<'a> {
         }
     }
 
-    /// The last non-trivia character before `pos`.
     fn prev(&self, mut pos: usize) -> Option<(usize, char)> {
         let text = self.document.text();
         loop {
@@ -670,7 +656,6 @@ impl<'a> SourceScan<'a> {
         }
     }
 
-    /// The position a byte offset lands at, recomputed from the line index.
     fn position(&self, byte: usize) -> Position {
         let line = match self.line_starts.binary_search(&byte) {
             Ok(line) => line + 1,
@@ -681,7 +666,6 @@ impl<'a> SourceScan<'a> {
         Position::new(line, col)
     }
 
-    /// The byte a byte offset's line begins at.
     fn line_start(&self, byte: usize) -> usize {
         match self.line_starts.binary_search(&byte) {
             Ok(line) => self.line_starts[line],
@@ -694,7 +678,6 @@ impl<'a> SourceScan<'a> {
     }
 }
 
-/// The direct children of `value`, in [`visit_value_tree`] order.
 fn value_children(value: &Value) -> Vec<&Value> {
     match value {
         Value::Array(values) | Value::Call { args: values, .. } => values.iter().collect(),
@@ -747,7 +730,6 @@ fn expr_extent_bytes(
         _ => return (start < node.end).then_some(start..node.end),
     };
     let end = if children.is_empty() {
-        // Zero-argument call: `Name` alone, or `Name()` spelled out.
         let (index, char) = scan.next(node.end)?;
         if char == '(' {
             let (close, ')') = scan.next(index + 1)? else {
@@ -768,7 +750,6 @@ fn expr_extent_bytes(
     (start < end).then_some(start..end)
 }
 
-/// The end byte of `value`'s authored extent — see [`expr_extent_bytes`].
 fn expr_extent_end(
     value: &Value,
     span_of: &mut dyn FnMut(&[usize]) -> Option<Span>,
@@ -777,19 +758,11 @@ fn expr_extent_end(
     Some(expr_extent_bytes(value, span_of, scan)?.end)
 }
 
-/// The byte a derived/infix-shaped expression begins at: from the earliest
-/// child position, walk back over the leftmost token's characters to the
-/// `(` or `,` that separates it from the previous argument, then forward
-/// past trivia.
 fn expr_start_anchor(scan: &SourceScan, mut pos: usize) -> Option<usize> {
     let text = scan.document.text();
     loop {
         pos = scan.prev(pos)?.0;
-        if text[pos..]
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_alphanumeric() || matches!(c, '_' | '.'))
-        {
+        if text[pos..].chars().next().is_some_and(is_member_path_char) {
             continue;
         }
         return match text[pos..].chars().next()? {
@@ -797,6 +770,10 @@ fn expr_start_anchor(scan: &SourceScan, mut pos: usize) -> Option<usize> {
             _ => None,
         };
     }
+}
+
+fn is_member_path_char(c: char) -> bool {
+    c.is_alphanumeric() || matches!(c, '_' | '.')
 }
 
 /// The start byte of the `Else If (<condition>);` marker statement whose
@@ -836,10 +813,8 @@ fn keyword_marker_start(scan: &SourceScan, keyword: &str, anchor: usize) -> Opti
     (&scan.document.text()[start..end] == keyword).then_some(start)
 }
 
-/// The `(` matching the `)` at `close`, scanning backward over trivia and
-/// balanced parens. Strings refuse outright — a paren inside a string
-/// would confuse the depth count, and a rare shape the transaction's
-/// reparse would catch anyway.
+const PAREN_SCAN_BOUNDARY: &[char] = &['"', ';', '{', '}'];
+
 fn paren_match_back(scan: &SourceScan, close: usize) -> Option<usize> {
     let mut depth = 0usize;
     let mut pos = close + 1;
@@ -853,14 +828,13 @@ fn paren_match_back(scan: &SourceScan, close: usize) -> Option<usize> {
                     return Some(index);
                 }
             }
-            '"' | ';' | '{' | '}' => return None,
+            c if PAREN_SCAN_BOUNDARY.contains(&c) => return None,
             _ => {}
         }
         pos = index;
     }
 }
 
-/// The word ending immediately before `pos`, skipping trivia.
 fn word_back(scan: &SourceScan, pos: usize) -> Option<(usize, usize)> {
     let text = scan.document.text();
     let (end_pos, c) = scan.prev(pos)?;
@@ -901,16 +875,13 @@ enum OccurrenceOrigin {
     BodyAction(usize),
 }
 
-/// What the collector records for every gathered value node.
 struct Collected<'a> {
     values: Vec<&'a Value>,
     parents: Vec<Option<usize>>,
     /// The reported node span (`identifier.or(span)` — a callee phrase,
     /// not the full expression extent).
     spans: Vec<Option<Span>>,
-    /// The node's path from its argument root, for span lookups.
     paths: Vec<Vec<usize>>,
-    /// The argument index the node was collected under.
     arguments: Vec<usize>,
     origins: Vec<OccurrenceOrigin>,
 }
@@ -1074,7 +1045,6 @@ fn collect_value_at<'a>(
 /// extent, and after wrapping the once-evaluated occurrences at most one
 /// unwrappable occurrence may keep the shape — otherwise the family (and
 /// its finding) survives.
-#[allow(clippy::too_many_arguments)]
 fn evaluate_once_fix(
     program: &Program,
     rule_id: RuleId,
@@ -1181,20 +1151,10 @@ fn action_argument_reevaluates(catalog: &Catalog, action: &Action, argument: usi
         }
         match args.get(index) {
             Some(Value::Enum { value, .. }) if value == "NONE" => false,
-            Some(Value::Enum { value, .. }) => {
-                // Reviewed coverage names the live positions; an
-                // unreviewed member keeps the conservative refusal.
-                entry
-                    .reevaluation_coverage(value)
-                    .is_none_or(|coverage| coverage.contains(&argument))
-            }
-            // A computed mode cannot be proven `NONE`, so every argument
-            // stays live — matching the previous whole-action refusal.
+            Some(Value::Enum { value, .. }) => entry
+                .reevaluation_coverage(value)
+                .is_none_or(|coverage| coverage.contains(&argument)),
             Some(_) => true,
-            // Omitted means the engine's implicit mode applies — and the
-            // catalog only records a declared default when there is one —
-            // so only an explicit `NONE` default proves the field evaluates
-            // once; anything else stays live.
             None => entry
                 .param_default(index)
                 .is_none_or(|default| default.rsplit('.').next() != Some("NONE")),

@@ -8,7 +8,6 @@
 use super::symbols::{RuleId, SemanticIndex, Symbol, SymbolKind};
 use crate::service::ErrorInfo;
 
-/// The most candidates a refusal names.
 const CANDIDATE_LIMIT: usize = 3;
 
 impl SemanticIndex {
@@ -98,9 +97,6 @@ fn unknown<'a>(
     }
 }
 
-/// Up to [`CANDIDATE_LIMIT`] distinct names nearest to `name`, ranked by
-/// case-insensitive edit distance, ties in declaration order. A name of fewer
-/// than six characters admits one edit, a longer one two.
 fn nearest<'a>(name: &str, declared: impl Iterator<Item = &'a str>) -> Vec<&'a str> {
     let name = name.to_lowercase();
     let max = if name.chars().count() >= 6 { 2 } else { 1 };
@@ -135,7 +131,6 @@ mod tests {
             nearest("progressionDeathCounte", declared.into_iter()),
             ["progressionDeathCounter"]
         );
-        // Case is insignificant; short names admit one edit only.
         assert_eq!(nearest("ZZ", declared.into_iter()), ["zzz"]);
         assert!(nearest("zz_x", declared.into_iter()).is_empty());
         assert_eq!(

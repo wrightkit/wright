@@ -545,7 +545,6 @@ fn public_value_matches(value: &PublicValue, pattern: &CanonicalValuePattern) ->
     }
 }
 
-#[allow(unreachable_patterns)]
 pub(crate) fn public_event_id(event: &workshop_rs::Event) -> &str {
     match event {
         workshop_rs::Event::Global => "global",

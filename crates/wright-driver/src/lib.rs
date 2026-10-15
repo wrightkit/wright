@@ -1,6 +1,3 @@
-// Diagnostics are the primary error type of this crate, so error-returning
-// functions legitimately carry the full `Diagnostic` value; boxing it would
-// add an allocation per error without a measured benefit.
 #![allow(clippy::result_large_err)]
 
 pub mod config;

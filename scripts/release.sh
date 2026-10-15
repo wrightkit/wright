@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# Wright standalone release build (#54).
-#
-# Builds the release artifacts, runs every v1 gate, proves standalone
-# operation without Node/OverPy, and packages the artifacts with version
-# metadata. The gates must pass before the release is stamped. This is the
-# local staging path and validation suite for the explicit stable and nightly
-# publication workflows; GitHub Actions publishes the per-target archives.
-#
 # Usage: scripts/release.sh [version]
 
 set -euo pipefail

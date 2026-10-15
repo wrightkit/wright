@@ -58,25 +58,20 @@ TOKEN_BYTES = 4
 SIZE_REL_BAND = 0.15
 SIZE_ABS_BAND = 30.0
 LATENCY_REL_BAND = 0.50
-# Median latency below ~1 ms is measurement noise at our timer resolution;
-# require a minimum absolute delta before the relative band applies.
+# Median latency under ~1 ms is timer-resolution noise; the relative band
+# applies only once the absolute delta clears this floor.
 LATENCY_ABS_BAND = 1.0
-# Latency is machine-relative: a baseline recorded on one host re-run on
-# another differs by a uniform speed factor, not a per-operation change.
-# `check` derives that factor as the median run/baseline latency ratio over
-# every comparable metric and bands each metric against `baseline * factor`,
-# so a slower CI runner does not flag a fleet of metrics while one operation
-# deviating from the fleet still does. Below this many comparable pairs the
-# factor is not trustworthy and the absolute band applies unchanged.
+# A baseline recorded on another host differs by a uniform speed factor, so
+# `check` bands each metric against `baseline * median(run/baseline)`. Below
+# MIN_LATENCY_PAIRS comparable pairs that factor is untrusted.
 MIN_LATENCY_PAIRS = 10
 REQUEST_TIMEOUT_S = 180.0
 
 METRICS_DIR = Path(__file__).resolve().parent
 CACHE_DIR = METRICS_DIR / ".cache"
 
-# Every wright-agent/v1 read operation, in measurement order. Mutation
-# operations (semanticRename, validateEditTransaction, provider*) need
-# caller-supplied transactions and are not measured.
+# Mutation operations (semanticRename, validateEditTransaction, provider*)
+# are absent: they need caller-supplied transactions and are not measured.
 AGENT_OPS = [
     "capabilities",
     "targetMetadata",
@@ -104,8 +99,6 @@ DEFAULT_OPS = {"check", "lint", "analyze", "inspect", "rules", "symbols", "refer
 INSPECT_COMMANDS = ["rules", "symbols", "refs", "cfg", "callgraph", "cost"]
 DEFAULT_TOKEN_BUDGET = 1500
 
-# Verdict/error availability and default output budgets block independently
-# of baseline drift, which is reported for review.
 BLOCKING_CHANGES = {"removed-from-run", "broken-in-run", "removed", "exceeds-default-budget"}
 
 
@@ -299,8 +292,6 @@ def agent_counts(op: str, result) -> dict:
     if op == "lintRules":
         return {"rules": len(result.get("rules") or [])}
     if op in ("check", "analyze", "inspect", "compile"):
-        # These operations return the CLI result envelope
-        # ({command, diagnostics, exit, ok, result, wright}).
         return cli_counts(op, result)
     return {}
 
@@ -358,10 +349,9 @@ def run_agent_ops(
         "compile": {"output": str(Path(scratch.name) / "compiled.ow"), "force": True}
     }
     with scratch, ServeSession(wright, entry, kind, project_dir) as session:
-        # Warm the session once before measuring: the first envelope
-        # response drains diagnostics produced while loading (e.g. the
-        # source-map audit warning), so a repeats=1 run would otherwise
-        # measure a different shape than a repeats=N median.
+        # Warm-up is not optional: the first envelope drains load-time
+        # diagnostics, so a repeats=1 run without it measures a different
+        # shape than a repeats=N median.
         try:
             session.request("check")
         except (queue.Empty, TimeoutError):
@@ -676,8 +666,8 @@ def run_metrics(
             sc for sc in corpus.get("scenarios", []) if sc["id"] in project.get("scenarios", [])
         ]
         cli_runs = repeats if cli_repeats is None else cli_repeats
-        # The three surfaces are independent; with jobs > 1 they overlap, which
-        # blurs latency, so only a run that discards latency may ask for it.
+        # Parallel surfaces overlap and blur latency, so only a run that
+        # discards latency may request jobs > 1.
         with ThreadPoolExecutor(max_workers=3 if jobs > 1 else 1) as pool:
             surfaces = [
                 pool.submit(run_agent_ops, wright, entry, project["kind"], directory, repeats),
@@ -752,9 +742,6 @@ def merge_runs(documents: list[dict], corpus: dict) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Band comparison
-# ---------------------------------------------------------------------------
 
 
 def _size_out_of_band(base: float, current: float) -> bool:

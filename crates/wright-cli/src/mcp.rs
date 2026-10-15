@@ -249,7 +249,6 @@ mod tests {
         assert!(input["properties"].get("op").is_none());
         assert!(input["properties"].get("within").is_some());
 
-        // Bounded report tools expose the expansion field in their schemas.
         for op in ["analyze", "inspect", "lint"] {
             let spec = TOOL_SPECS.iter().find(|spec| spec.op == op).unwrap();
             let input = input_schema(&defs, spec, &[]);

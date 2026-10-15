@@ -1,7 +1,3 @@
-//! Source edits remain Wright-owned data contracts. Raw Workshop
-//! transactions validate through `workshop-rs` reparse (#434); source
-//! languages route to the provider operations instead of a static frontend.
-
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -132,9 +128,6 @@ fn empty_transaction_is_rejected_without_source_access() {
 
 #[test]
 fn multiline_edits_splice_as_a_standard_half_open_range() {
-    // A range from one line's start column through a later line's start
-    // column removes the covered newlines with the lines — the same
-    // interpretation any consumer of the `EditRange` contract applies.
     let source = "a\nb\nc\nd\n";
     let sources = BTreeMap::from([("program.opy".to_string(), source.to_string())]);
     let transaction = EditTransaction::new(vec![SourceEdit {
@@ -153,7 +146,6 @@ fn multiline_edits_splice_as_a_standard_half_open_range() {
     let previews = transaction.apply(&sources).expect("the range splices");
     assert_eq!(previews[0].new_text, "a\nd\n");
 
-    // A mid-line range merges the boundary lines it splices between.
     let source = "alpha\nbeta\ngamma\n";
     let sources = BTreeMap::from([("program.opy".to_string(), source.to_string())]);
     let transaction = EditTransaction::new(vec![SourceEdit {

@@ -1,8 +1,5 @@
 name: Release
 
-# Stable releases start from the vX.Y.Z tag that release-please creates when
-# its Release PR is merged. A manual dispatch re-runs an existing tag or
-# publishes a nightly. Nightlies follow every successful CI run on main.
 on:
   push:
     tags:

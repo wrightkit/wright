@@ -1,7 +1,3 @@
-//! Transport adapter tests (#60, #473): the stdio, JSON-RPC, and MCP adapters
-//! expose the same operations and structured results as the in-process tool
-//! service, with capability/version negotiation intact.
-
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -231,7 +227,6 @@ fn stdio_transport_applies_finding_selection() {
 
 #[test]
 fn transports_match_in_process_semantics() {
-    // The same query through both transports yields equivalent results.
     let stdio = run_lines(
         "stdio",
         &corpus_workshop("synthetic/control-flow"),
@@ -401,7 +396,6 @@ fn invalid_utf8_on_stdin_is_a_parse_error_not_a_clean_eof() {
         "the session answers the request after the bad line"
     );
 
-    // jsonrpc: -32700 with a null id, and the following request still runs.
     let output = run_bytes(
         "jsonrpc",
         &input,
@@ -420,7 +414,6 @@ fn invalid_utf8_on_stdin_is_a_parse_error_not_a_clean_eof() {
     assert_eq!(responses[2]["id"], 2);
     assert!(responses[2].get("result").is_some());
 
-    // mcp: same JSON-RPC parse error shape after initialization.
     let output = run_bytes(
         "mcp",
         &input,
@@ -801,7 +794,6 @@ rule ("extra") {
             .collect::<Vec<_>>()
     };
     assert_eq!(names(&exchange(r#"{"op":"symbols"}"#)), ["score", "setup"]);
-    // A numeric id issued by the current program works.
     assert!(
         exchange(r#"{"op":"references","symbol":0}"#)
             .get("result")
@@ -810,8 +802,6 @@ rule ("extra") {
 
     std::fs::write(&input, v2).unwrap();
 
-    // The id issued by the earlier program refuses `stale-id`; the name still
-    // resolves against the reloaded program.
     let stale = exchange(r#"{"op":"references","symbol":0}"#);
     assert_eq!(stale["error"]["code"], "stale-id", "{stale}");
     let by_name = exchange(r#"{"op":"references","symbol":"points"}"#);
@@ -834,7 +824,6 @@ rule ("extra") {
     assert!(exchange(r#"{"op":"rules"}"#).get("result").is_some());
     assert!(exchange(r#"{"op":"cfg","rule":1}"#).get("result").is_some());
 
-    // The workflow ops observe the same reloaded program.
     let check = exchange(r#"{"op":"check"}"#);
     assert_eq!(check["result"]["ok"], false, "{check}");
     assert!(
@@ -888,8 +877,6 @@ fn transports_are_equivalent_for_mutation_operations() {
     assert_eq!(stdio[0]["result"], jsonrpc[0]["result"]);
     assert_eq!(stdio[0]["result"]["ok"], true, "{:?}", stdio[0]);
 }
-
-// ── MCP transport (#473) ──────────────────────────────────────────────────
 
 fn mcp_call(id: u64, name: &str, arguments: serde_json::Value) -> String {
     serde_json::json!({
@@ -959,7 +946,6 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
             "wright_lookup",
         ]
     );
-    // tools/list is a subset of the contract's advertised operations.
     let caps = run_lines("stdio", &input, &[r#"{"op":"capabilities"}"#]);
     let operations: Vec<String> = caps[0]["result"]["operations"]
         .as_array()
@@ -1032,8 +1018,6 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
 
 #[test]
 fn mcp_transport_results_match_the_service_contract() {
-    // For every exposed tool, the MCP payload equals the result the stdio
-    // transport reports for the same request on the same fixture.
     let input = corpus_workshop("synthetic/control-flow");
     let source = std::fs::read_to_string(&input).unwrap();
     let key = input.to_string_lossy().into_owned();
@@ -1201,7 +1185,6 @@ rule ("dup") {
     assert_eq!(responses[3]["error"]["code"], -32602);
     assert_eq!(responses[4]["error"]["code"], -32602);
 
-    // Ambiguous names refuse with the same code as the service emits.
     let dup_line = mcp_call(1, "wright_references", serde_json::json!({"symbol": "dup"}));
     let dup_responses = run_lines("mcp", &dup, &[dup_line.as_str()]);
     let payload = serde_json::json!(dup_responses);
@@ -1212,8 +1195,6 @@ rule ("dup") {
     assert_eq!(dup_responses[0]["result"]["isError"], true);
     assert_eq!(refusal["code"], "ambiguous-symbol");
 
-    // A supplied `sources` text that no longer matches is `edit-stale-source`
-    // through the adapter exactly as through the service.
     let stale_key = stale.to_string_lossy().into_owned();
     let stale_line = mcp_call(
         1,
@@ -1403,7 +1384,6 @@ fn mcp_transport_bootstraps_over_a_broken_project_and_recovers() {
     assert_eq!(refused["result"]["isError"], true, "{refused}");
     assert_eq!(mcp_payload(&refused)["code"], "input-io", "{refused}");
 
-    // Repairing the input recovers the same running server.
     std::fs::write(
         &input,
         "variables {\n    global:\n        0: score\n}\n\nrule (\"setup\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(score, 1);\n    }\n}\n",
@@ -1416,8 +1396,6 @@ fn mcp_transport_bootstraps_over_a_broken_project_and_recovers() {
     assert!(healed["result"].get("isError").is_none(), "{healed}");
     assert_eq!(mcp_payload(&healed)["rules"], 1, "{healed}");
 
-    // The tool set is independent of project load state: identical before
-    // and after recovery in the same server.
     let healed_list = exchange(serde_json::json!({
         "jsonrpc": "2.0", "id": 5, "method": "tools/list",
     }));
@@ -1546,7 +1524,6 @@ for line in sys.stdin:
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// ── #593: serve startup arguments reject unknown values ─────────────────────
 // `--kind`/`--profile`/`--transport` share the workflow vocabulary: a typo is
 // a usage error naming the accepted values, never a silently remapped
 // default.
@@ -1574,7 +1551,6 @@ fn unknown_serve_kind_profile_and_transport_are_usage_errors() {
             stderr.contains("expected one of") || stderr.contains("possible values"),
             "the usage error names the accepted values: {stderr}"
         );
-        // Nothing served: the error precedes session startup.
         assert!(output.stdout.is_empty(), "{flag} served a response");
     }
 }
@@ -1611,8 +1587,6 @@ fn accepted_serve_kind_profile_and_transport_values_still_work() {
     assert_eq!(response["result"], default[0]["result"]);
 }
 
-// ── #594: serve startup accepts explicit lint policy ─────────────────────────
-
 /// Spawn `wright serve` with `args` over `input` and return the child plus
 /// the responses to `lint` and `lintRules`.
 fn serve_with(args: &[&str], input: &Path) -> (std::process::Child, Vec<serde_json::Value>) {
@@ -1648,7 +1622,6 @@ fn serve_with(args: &[&str], input: &Path) -> (std::process::Child, Vec<serde_js
 fn serve_applies_the_cli_lint_policy_to_the_session() {
     let input = corpus_workshop("real-world/overpy-cake");
 
-    // --disable-rule: the served findings match the CLI's configured lint.
     let (mut child, responses) = serve_with(&["--disable-rule", "repeated-value"], &input);
     let lint = &responses[0];
     assert!(
@@ -1672,7 +1645,6 @@ fn serve_applies_the_cli_lint_policy_to_the_session() {
     );
     assert!(child.wait().unwrap().success());
 
-    // CLI lint with the same flag reports the same finding set.
     let cli = Command::new(wright())
         .args(["lint"])
         .arg(&input)
@@ -1688,7 +1660,6 @@ fn serve_applies_the_cli_lint_policy_to_the_session() {
         "CLI and serve findings agree under the same policy"
     );
 
-    // --rule-severity overrides the effective severity served by lintRules.
     let (mut child, responses) = serve_with(&["--rule-severity", "min-wait-loop:error"], &input);
     let rules = &responses[1];
     let min_wait = rules["result"]["rules"]
@@ -1703,7 +1674,6 @@ fn serve_applies_the_cli_lint_policy_to_the_session() {
     let dir = std::env::temp_dir().join(format!("wright-serve-594-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
 
-    // --lint-config YAML applies identically.
     let config_file = dir.join("policy.yaml");
     std::fs::write(
         &config_file,
@@ -1725,7 +1695,6 @@ fn serve_applies_the_cli_lint_policy_to_the_session() {
     );
     assert!(child.wait().unwrap().success());
 
-    // A missing config file is a startup usage error, not a default policy.
     let output = Command::new(wright())
         .args(["serve", "--lint-config"])
         .arg(dir.join("missing.yaml"))
@@ -1735,7 +1704,6 @@ fn serve_applies_the_cli_lint_policy_to_the_session() {
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty(), "no request was served");
 
-    // An unreadable --rule path fails session construction identically.
     let output = Command::new(wright())
         .args(["serve", "--rule"])
         .arg(dir.join("missing-rules.yaml"))
@@ -1748,7 +1716,6 @@ fn serve_applies_the_cli_lint_policy_to_the_session() {
         "an unreadable --rule path is a startup usage error"
     );
 
-    // A malformed --rule-severity is refused before serving.
     let output = Command::new(wright())
         .args(["serve", "--rule-severity", "min-wait-loop:hot"])
         .arg(&input)
@@ -1791,7 +1758,6 @@ fn serve_applies_the_cli_lint_policy_to_the_session() {
         );
     }
 
-    // A local YAML rule file is discoverable through lintRules.
     let rule_file = dir.join("smoke.yaml");
     std::fs::write(
         &rule_file,

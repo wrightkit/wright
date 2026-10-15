@@ -102,9 +102,6 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
         }
     }
 
-    // Raw Workshop semantic rename (#434): address one declared symbol by
-    // name through the service surface, and verify the validated preview
-    // rewrites its occurrences.
     if input.ends_with(".ws") {
         let renamed = match service.handle(&ToolRequest::Symbols {
             kind: Some("globalVariable".to_string()),

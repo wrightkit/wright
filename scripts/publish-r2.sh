@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Publish verified stable or nightly archives and the stable installer scripts to R2.
-#
 # Phases (#293): `objects` uploads and verifies the immutable release objects
 # (and, for stable, the installer scripts); `pointer` advances the channel's
 # version pointer. `all` (default) runs both — the stable workflow separates

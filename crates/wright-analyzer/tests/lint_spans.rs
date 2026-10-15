@@ -70,9 +70,6 @@ const HOT_CONDITION: &str = r#"rule ("hot condition") {
 
 #[test]
 fn ongoing_condition_finding_falls_back_to_the_condition_span() {
-    // The expensive call is a value nested inside the condition. With only
-    // ancestor-level provenance the finding still lands on the authored
-    // condition instead of reporting no location.
     let program = shallowly_mapped(HOT_CONDITION);
     let findings = analyze(&program, &LintConfig::default());
     let [finding] = coded(&findings, "ongoing-condition-hot-path")[..] else {

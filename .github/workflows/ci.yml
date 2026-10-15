@@ -1,13 +1,5 @@
 name: CI
 
-# ---------------------------------------------------------------------------
-# Trigger rules
-# ---------------------------------------------------------------------------
-# Push to main: capability checks are selected by changed paths, just like PRs.
-# Broad changes still run the full convergence set.
-# PR: capability checks are selected by changed paths.  Broad/core changes
-# (Cargo workspace, scripts, test inputs, CI itself) expand to the
-# full check set; narrow path changes run only the relevant capability.
 # Docs-only changes match no path filter, so only `paths` and `CI result` run.
 # The workflow itself is never skipped, so `CI result` always reports.
 
@@ -19,9 +11,6 @@ on:
 permissions:
   contents: read
 
-# ---------------------------------------------------------------------------
-# Path filter: determines which capability jobs run on PRs and pushes.
-# ---------------------------------------------------------------------------
 jobs:
   paths:
     name: Detect paths
@@ -78,10 +67,6 @@ jobs:
               - 'tests/fixtures/**'
               - 'scripts/**'
               - '.github/workflows/**'
-  # -------------------------------------------------------------------------
-  # Vendored agent guide: the copy under agent-guide/ must equal the skills
-  # repository at the recorded pin. Needs no build, so it does not wait on Rust.
-  # -------------------------------------------------------------------------
   agent-guide:
     name: Agent guide sync
     needs: paths
@@ -102,11 +87,6 @@ jobs:
       - name: Verify the vendored guide matches its pin
         run: python3 scripts/sync-agent-guide.py --skills-dir skills-src --check
 
-  # -------------------------------------------------------------------------
-  # [1] RUST QUALITY & TESTS  (fundamental gate)
-  # Runs concurrently with every other job: downstream jobs depend only on the
-  # artifacts they consume, so one PR run reports every independent failure.
-  # -------------------------------------------------------------------------
   rust-quality:
     name: Rust (stable)
     needs: paths
@@ -117,10 +97,8 @@ jobs:
       cache-shared-key: linux-quality-stable-dev-test
       all-features: true
 
-  # The reusable quality workflow installs its requested toolchain, but the
-  # repository rust-toolchain.toml remains authoritative for bare Cargo
-  # commands. Keep the MSRV gate local so every command explicitly selects
-  # 1.85.0 and cannot silently fall back to stable.
+  # The `+1.85.0` prefixes are load-bearing: without them this gate runs
+  # whichever toolchain the setup action resolved, not the declared MSRV.
   rust-msrv:
     name: Rust (1.85.0)
     needs: paths
@@ -142,9 +120,6 @@ jobs:
       - name: Check formatting
         run: cargo +1.85.0 fmt --all -- --check
 
-      # Keep the surviving owner-independent Wright crates on the declared
-      # MSRV. The provider-backed consumer crates are covered by the stable
-      # full-workspace gate and the dedicated integration jobs below.
       - name: Clippy (independent crates)
         run: >-
           cargo +1.85.0 clippy --locked --all-targets --all-features
@@ -155,12 +130,6 @@ jobs:
           cargo +1.85.0 test --locked --all-targets --all-features
           -p wright-analyzer -p wright-transform -p wright-lpp
 
-  # -------------------------------------------------------------------------
-  # [1a] WRIGHT CLI ARTIFACT  (stable/debug executable for compatible jobs)
-  # Build this exact workflow revision once. Consumers below need the CLI
-  # executable only; jobs with another output or test-build identity stay
-  # independent.
-  # -------------------------------------------------------------------------
   wright-cli-build:
     name: Build CLI
     needs: [paths]
@@ -198,12 +167,6 @@ jobs:
             printf -- "- SHA-256: \`%s\`\n" "$digest"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # -------------------------------------------------------------------------
-  # [1b] WORKSHOP REAL-PROJECT INTEGRATION  (Wright's released Workshop consumer)
-  # Runs the owner-pinned real-project inputs through the actual `wright`
-  # check/lint commands. The source snapshots and residual expectations remain
-  # owned by the released workshop-rs corpus.
-  # -------------------------------------------------------------------------
   workshop-integration:
     name: Workshop (${{ matrix.project }})
     needs: [paths, wright-cli-build]
@@ -286,9 +249,6 @@ jobs:
           check_output="$(run_workflow check)"
           lint_output="$(run_workflow lint)"
           inspect_output="$(run_workflow inspect)"
-          # A passing project must load a lintable program; a project expected
-          # to fail may be rejected at load (canonical validation), leaving no
-          # program but at least one diagnostic.
           jq -e -n \
             --argjson check "$check_output" \
             --argjson lint "$lint_output" \
@@ -304,12 +264,6 @@ jobs:
                end)
             )' >/dev/null
 
-  # -------------------------------------------------------------------------
-  # [2] PRODUCT INTEGRATION  (Wright-owned provider and product contracts)
-  # The source-language owners test language semantics. Wright tests its
-  # provider seam, provider distribution success path, failure routing, and
-  # user-facing product behavior directly.
-  # -------------------------------------------------------------------------
   opy-integration:
     name: Product integration
     needs: [paths, wright-cli-build]
@@ -352,9 +306,6 @@ jobs:
           target/debug/wright compile tests/fixtures/opy/basic-rule.opy
           --profile compat -o "$RUNNER_TEMP/basic-rule.ow"
 
-  # -------------------------------------------------------------------------
-  # [3] LPP INTEGRATION  (Wright's Language Provider Protocol client contract)
-  # -------------------------------------------------------------------------
   lpp-integration:
     name: LPP integration
     needs: [paths]
@@ -385,8 +336,8 @@ jobs:
         run: cargo build --locked -p lpp-mock-provider
         working-directory: language-provider-protocol
 
-      # REQUIRED: these suites self-skip when LPP_MOCK_PROVIDER is absent,
-      # so the variable must be set here for them to run at all.
+      # The LPP suites self-skip when this variable is unset — dropping it
+      # would turn the step green while running nothing.
       - name: Run LPP tests
         env:
           LPP_MOCK_PROVIDER: ${{ github.workspace }}/language-provider-protocol/target/debug/lpp-mock-provider
@@ -394,12 +345,6 @@ jobs:
           cargo test --locked -p wright-lpp -p wright-driver
           --test mock_provider --test lpp --test provider_edit
 
-  # -------------------------------------------------------------------------
-  # [4] CLI BEHAVIOR  (Wright CLI GitHub Actions renderer smoke test)
-  # Validates CLI output format in a real GitHub Actions environment.
-  # Related to #164 (user-facing GHA renderer); this job validates the
-  # repository CI integration, not the renderer semantics layer.
-  # -------------------------------------------------------------------------
   cli-behavior:
     name: CLI behavior
     needs: [paths, wright-cli-build]
@@ -427,10 +372,6 @@ jobs:
       - name: Test GitHub Actions renderer
         run: scripts/test-cli-github-actions.sh target/debug/wright
 
-  # -------------------------------------------------------------------------
-  # [5] BENCHMARK  (performance evidence)
-  # Non-blocking on PRs; records regression-detectable output as artifact.
-  # -------------------------------------------------------------------------
   benchmark:
     name: Benchmarks
     needs: [paths]
@@ -461,19 +402,12 @@ jobs:
           name: benchmark-report
           path: target/wright-bench-report.json
 
-  # -------------------------------------------------------------------------
-  # [5a] AGENT-FACING METRICS DRIFT  (real-project result size and shape)
-  # Blocking and deterministic: every metric runs once and only tokens, bytes
-  # and counts are compared. Wall time on shared runners varies by a factor of
-  # two between runs, so latency is not a PR gate (see metrics-latency below).
-  # It measures the current-run debug CLI against the latest provider:
-  # pinning an old provider would measure a snapshot nobody uses, and the
-  # report records both versions so drift can be attributed.
-  #
-  # The corpus is measured one project per shard and compared once, merged,
-  # by `Metrics drift`, so partitioning cannot change the verdict. A project
-  # missing from the matrix fails the merged check as `removed-from-run`.
-  # -------------------------------------------------------------------------
+  # Measures the current-run debug CLI against the latest released provider:
+  # pinning an old provider would measure a snapshot nobody uses. Each shard
+  # runs one project and `Metrics drift` compares the merged set, so
+  # partitioning cannot change the verdict and a project missing from the
+  # matrix fails the merge as `removed-from-run`. Wall time on shared
+  # runners varies ~2x, so latency is not part of this gate.
   metrics-shard:
     name: Metrics shard (${{ matrix.project }})
     needs: [paths, wright-cli-build]
@@ -544,12 +478,9 @@ jobs:
           for run in metrics-shards/*.json; do shards+=(--from "$run"); done
           python3 benchmarks/metrics/metrics.py check --skip-latency "${shards[@]}"
 
-  # -------------------------------------------------------------------------
-  # [5b] AGENT-FACING LATENCY TREND  (main only, never blocking)
-  # Full repeated measurement against the baseline's latency bands, recorded
+  # Full repeated measurement against the baseline's latency bands, kept
   # as an artifact. A failure here is a signal to look at the trend, not a
   # verdict: hosted-runner speed is too variable to gate on.
-  # -------------------------------------------------------------------------
   metrics-latency:
     name: Metrics latency (trend)
     needs: [paths, wright-cli-build]
@@ -583,11 +514,6 @@ jobs:
           path: target/metrics-latency.json
           if-no-files-found: ignore
 
-  # -------------------------------------------------------------------------
-  # [8] DISTRIBUTION VALIDATION  (cross-platform package/binary smoke)
-  # Builds and validates its own binaries, so it starts with the path filter
-  # and runs concurrently with the quality and integration gates.
-  # -------------------------------------------------------------------------
   dist-cli-build:
     name: Build dist (${{ matrix.os }})
     needs: [paths]
@@ -709,15 +635,12 @@ jobs:
         if: matrix.channel == 'WinGet'
         run: python scripts/test-distribution-winget.py
 
-  # -------------------------------------------------------------------------
-  # [9] CI RESULT  (the single required merge check)
   # Fails when any gating job failed or was cancelled, and when a job whose
   # path condition selected it did not finish successfully — a skipped
   # required job must never read as a pass.
   # `benchmark` (Benchmarks) and `metrics-latency` (Metrics latency (trend))
   # are deliberately NOT in `needs`: they are non-blocking evidence jobs.
   # Every other job above must be listed here.
-  # -------------------------------------------------------------------------
   ci-result:
     name: CI result
     if: always()
