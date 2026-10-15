@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/wrightkit/wright/compare/v0.21.1...v0.22.0) (2026-10-14)
+
+
+### Features
+
+* **cli:** delimit terminal report items with lightweight connectors ([#705](https://github.com/wrightkit/wright/issues/705)) ([43b0b0f](https://github.com/wrightkit/wright/commit/43b0b0fe557328a6df5ab92548f7a44a529e9ca5)), closes [#703](https://github.com/wrightkit/wright/issues/703)
+
 ## [0.21.1](https://github.com/wrightkit/wright/compare/v0.21.0...v0.21.1) (2026-10-14)
 
 
