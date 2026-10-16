@@ -13,7 +13,7 @@ corpus project, it records output size in bytes and estimated tokens
 (items, per-kind breakdowns, findings per rule code). Agent operations repeat
 `--repeats` times (default 5) and CLI commands `--cli-repeats` times
 (default 3), since each CLI run is a full pipeline. CLI text forms are recorded alongside compact JSON defaults; text measurements record size and shape without latency. Correctness stays
-assertion-based in the owning test suites — these metrics watch drift in the
+assertion-based in the owning test suites. These metrics watch drift in the
 agent-facing cost, not behavior.
 
 ## Corpus
@@ -21,7 +21,7 @@ agent-facing cost, not behavior.
 `corpus.json` versions the project set. Entries are:
 
 - vendored small projects under `benchmarks/metrics/corpus/`, including the
-  `seed-*` projects — always available, no network;
+  `seed-*` projects, always available with no network;
 - pinned external repositories (`repository` + `commit`), fetched shallow into
   `benchmarks/metrics/.cache/` by `metrics.py fetch` or on first `run`. Their
   source is never vendored into this repository; only derived metrics are
@@ -68,7 +68,7 @@ regression.
 Blocking (independent of any recorded number):
 
 - a metric or project that stopped measuring (`error`, `skipped`, or a CLI
-  envelope with `ok: false` — a refusal is not a result, so it is never
+  envelope with `ok: false`; a refusal is not a result, so it is never
   recorded as a measurement) unless the baseline recorded the identical marker;
 - a metric or project that vanished from the run;
 - **default output budget**: default `check`, `lint`, `analyze`, `inspect`,
@@ -81,11 +81,11 @@ Blocking (independent of any recorded number):
 Drift (reported, not blocking):
 
 - **tokens and counts**: |delta| > 15% **and** > 30 absolute;
-- **latencyMs** (see below): machine-relative — `check` derives a machine factor as the
+- **latencyMs** (see below): machine-relative. `check` derives a machine factor as the
   median run/baseline latency ratio across every comparable metric (≥10
   pairs) and bands each metric against `baseline * factor`; |delta| > 50%
   AND > 1 ms absolute. A uniformly slower or faster host therefore passes,
-  while one operation deviating from the fleet is flagged — and the factor
+  while one operation deviating from the fleet is flagged. The factor
   itself is reported as a warning (a uniform *product* slowdown is
   indistinguishable from a slower machine, so watch that line). Below 10
   comparable pairs the factor is not trusted and the absolute band applies;

@@ -1,4 +1,4 @@
-# Wright Embedding and Tool API
+# Wright embedding and tool API
 
 Status: accepted baseline (living embedding and tool contract)
 Scope: `wright-driver`'s embedding surface, the session-aware tool service,
@@ -13,7 +13,7 @@ safe source-edit contracts, and the transport adapters
 | `wright_driver::{Envelope, CompileResult, CheckResult, AnalyzeResult, InspectResult, LintResult, Diagnostic, CompiledOutput}` | **stable** | `wright-result/v1` machine contract ([`docs/cli.md`](cli.md)) |
 | `wright_driver::service::{ToolService, ToolRequest, ToolResponse, Capabilities}` | **stable** | Session-aware tool contract `wright-agent/v1` ([`docs/agent-contract.md`](agent-contract.md)); capability discovery, queries, workflows, and validated mutation |
 | `wright_driver::edit::{SourceEdit, EditRange, EditTransaction, SourcePreview, EditValidation, validate_transaction}` | **stable** | Source-edit transactions; validated through the correct owner-backed project semantics (#128); `EditTransaction::apply` applies ranges against one original source snapshot |
-| `wright_driver::edit::{RenameRequest, rename_symbol}` | **deprecated** | `wright-embedding/v1` compatibility helpers retained for source compatibility (#514): a whole-file textual whole-word proposal with no semantic-identity guarantee — strings, comments, and unrelated same-named symbols are not distinguished. The supported rename is `semanticRename` (see below); the helpers may be removed only with a breaking embedding-contract transition |
+| `wright_driver::edit::{RenameRequest, rename_symbol}` | **deprecated** | `wright-embedding/v1` compatibility helpers retained for source compatibility (#514): a whole-file textual whole-word proposal with no semantic-identity guarantee. Strings, comments, and unrelated same-named symbols are not distinguished. The supported rename is `semanticRename` (see below); the helpers may be removed only with a breaking embedding-contract transition |
 | `wright_driver::{input_identity, EMBEDDING_CONTRACT}` | **stable** | `wright-embedding/v1` |
 | Internal HIR/WIR arenas, parser/CST, emitter internals | **internal** | Never part of the public contract |
 | `wright serve` stdio/JSON-RPC/MCP adapters | **stable** | Thin mappings over `ToolService` and `wright-agent/v1`; `wright-serve` remains a workspace binary alias |
@@ -75,7 +75,7 @@ strings, ANSI, percentages, or fabricated completion estimates.
 
 `SessionConfig` is construction-time configuration (#511): every field is
 fixed once `CompilerSession::new` or `CompilerSession::with_source_provider`
-succeeds — input, source kind/backend, locale, root, output/format, transform
+succeeds, covering input, source kind/backend, locale, root, output/format, transform
 profile, lint configuration and rule paths, finding selection, provider
 registry, and first-party provider configuration. Changing configuration
 means constructing a new session. The public `CompilerSession::config` field
@@ -87,9 +87,9 @@ capability: the next workflow (`load`, `compile`, `check`, `analyze`,
 construction refuses with a `session-config-changed` diagnostic naming the
 changed fields, rather than reusing state derived from the earlier
 configuration. The provider surfaces that consume the provider
-registry/first-party provider configuration — `language_provider`,
-`run_provider_flow`, and the `provider*` tool operations routed through them
-— refuse through the provider refusal channel carrying the same
+registry/first-party provider configuration, that is, `language_provider`,
+`run_provider_flow`, and the `provider*` tool operations routed through them,
+refuse through the provider refusal channel carrying the same
 `session-config-changed` refusal code. The supported runtime changes are
 separate explicit capabilities: attaching or clearing a progress observer,
 file contents changing on disk under the configured input (the #471
@@ -101,8 +101,8 @@ parameters/documents.
 `ToolService::new(&mut session)` loads the configured project when it can and
 answers typed [`ToolRequest`]s with owned [`ToolResponse`]s. A project that
 cannot load at construction does not fail the service (#512): the service
-exists without a program snapshot — `loaded()` returns `None` rather than a
-placeholder program — and each program-reading request retries the load,
+exists without a program snapshot, `loaded()` returns `None` rather than a
+placeholder program, and each program-reading request retries the load,
 refusing with the loader's structured diagnostic until the project heals on
 disk. `capabilities`, `targetMetadata`, and the `provider*` operations
 carrying caller-supplied documents answer without consulting the project at
@@ -173,9 +173,9 @@ rename (`semanticRename` above, `ToolRequest::SemanticRename`, or
 [`CompilerSession::semantic_rename`]): on raw Workshop it rewrites exactly
 the identifier spans the parsed program records and revalidates the edited
 project. The deprecated `rename_symbol` helper remains only for
-`wright-embedding/v1` source compatibility — a whole-word textual proposal
-with no semantic-identity guarantee; it is never a fallback when semantic
-rename is unavailable or refused. Raw HIR/WIR mutation is never public, and
+`wright-embedding/v1` source compatibility. It is a whole-word textual
+proposal with no semantic-identity guarantee and is never a fallback when
+semantic rename is unavailable or refused. Raw HIR/WIR mutation is never public, and
 application/writing stays an explicit caller responsibility.
 
 ## Transports
@@ -184,7 +184,7 @@ application/writing stays an explicit caller responsibility.
 2.0, and MCP (`--transport mcp`); all three map to the same `ToolService`
 results as in-process consumers (equivalence tested). Starting the server
 does not require the configured project to load (#512): MCP `initialize` and
-`tools/list` — and the stable tool set itself — are available over a broken
+`tools/list`, and the stable tool set itself, are available over a broken
 project, and a program-reading `tools/call` surfaces the loader's refusal
 until the project heals. The separate
 `wright-serve` workspace binary remains an alias for the same adapter.
@@ -201,7 +201,7 @@ omitted.
   additive within major version 1: new optional fields and operations are
   allowed; removed or renamed fields/ops require a major version.
   Deprecated `wright-embedding/v1` compatibility helpers such as
-  `RenameRequest`/`rename_symbol` follow the same rule — they may be
+  `RenameRequest`/`rename_symbol` follow the same rule. They may be
   deleted only with an embedding-contract breaking transition.
 * Envelope `wright.version` + `wright.contract` identify the result producer;
   `ToolService::capabilities()` identifies the service and agent contract.

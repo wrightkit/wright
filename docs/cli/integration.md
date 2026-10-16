@@ -34,14 +34,14 @@ inputs. The
 provider executable is resolved by the #244 bootstrap path and can be
 overridden with `--opy-provider`. OPY directory targets use the owner-backed
 compile path so the owner selects the project entry. `convert` accepts
-Workshop input only — OPY input stays a stable provider-unsupported refusal.
+Workshop input only. OPY input stays a stable provider-unsupported refusal.
 The source surface is declared in
 [`opy/support-matrix.md`](../opy/support-matrix.md).
 
 ## Library reuse
 
 External Rust consumers depend on `wright-driver` (never the CLI) and drive
-`CompilerSession::new(config)` → `compile`/`check`/`analyze`/`inspect`/`lint`
+`CompilerSession::new(config)`, then `compile`/`check`/`analyze`/`inspect`/`lint`
 or `convert(ConvertTarget)`, each returning a typed `Envelope<T>`. Loading is
 idempotent (`Session::load`), and the driver exposes the resolved locale,
 input identity, and origin metadata. See `crates/wright-driver/tests/driver.rs`

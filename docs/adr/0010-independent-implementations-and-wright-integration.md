@@ -117,10 +117,10 @@ Real user workflows are the default prioritization signal.
 
 When Wright fails on a real project, first identify the owning layer:
 
-- OPY syntax/semantic/compiler gap → `opy-rs`;
-- DEL/OSTW syntax/semantic/runtime/compiler gap → `del-rs`;
-- canonical Workshop semantic/WIR/catalog gap → `workshop-rs`;
-- integration/lint/analysis/source-edit/agent/CI UX gap → Wright.
+- OPY syntax/semantic/compiler gap: `opy-rs`;
+- DEL/OSTW syntax/semantic/runtime/compiler gap: `del-rs`;
+- canonical Workshop semantic/WIR/catalog gap: `workshop-rs`;
+- integration/lint/analysis/source-edit/agent/CI UX gap: Wright.
 
 Architecture cleanup should not displace user-visible functionality unless it
 protects a public/versioned contract, repository ownership, dependency
@@ -145,6 +145,6 @@ observed high-cost maintenance risk.
 - Requiring every repository to ship identical CLI commands.
 - Forcing a single Rust API boundary when LPP/process isolation is preferable.
 - Making `workshop-rs` depend on OPY/DEL implementation details.
-- Expanding the direct OPY↔DEL conversion matrix for symmetry.
+- Expanding the direct conversion matrix between OPY and DEL for symmetry.
 - Claiming compiler or reconstruction completeness that current tests do
   not support.

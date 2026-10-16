@@ -40,10 +40,10 @@ result.
 | `wright inspect symbols [INPUT] [--only KIND] [--file PATH] [--max N]` | List semantic symbols, optionally narrowed to one kind | the symbol list with resolved locations |
 | `wright inspect refs <NAME> [INPUT] [--only KIND] [--rule RULE] [--file PATH] [--max N]` | References and usage counts for one symbol, addressed by name | usage-count header plus the reference list |
 | `wright inspect cfg <RULE> [INPUT] [--only KIND] [--max N]` | Control-flow graph of one rule, addressed by name | block/edge listing |
-| `wright inspect callgraph [INPUT] [--caller RULE] [--callee SUBROUTINE] [--max N]` | Subroutine call graph (caller rules → callee subroutines) | call edges |
+| `wright inspect callgraph [INPUT] [--caller RULE] [--callee SUBROUTINE] [--max N]` | Subroutine call graph (caller rules to callee subroutines) | call edges |
 | `wright inspect cost [INPUT]` | Exact generated-resource counts plus static findings | resource counts and findings |
 | `wright rename <NAME> <NEW_NAME> [INPUT]` | Semantically rename a Workshop variable or subroutine | per-source diff of the validated edits; `--write` applies them |
-| `wright lookup [QUERY]` | Resolve a Workshop or OverPy display name, near spelling, or guess to the owner-accepted spelling and signature (#529); takes no input | one line per entry — signature or spelling, kind, identity |
+| `wright lookup [QUERY]` | Resolve a Workshop or OverPy display name, near spelling, or guess to the owner-accepted spelling and signature (#529); takes no input | one line per entry: signature or spelling, kind, identity |
 | `wright serve [INPUT] [--transport T] [--kind K] [--profile P] [--lint-config YAML] [--rule PATH] [--disable-rule ID] [--rule-severity ID:SEV]` | Serve `wright-agent/v1` over stdio, JSON-RPC 2.0, or MCP | one structured response per request |
 | `wright completion <SHELL>` | Generate static completion script for bash, zsh, fish, or powershell | the generated completion script |
 | `wright completion install [SHELL]` | Install generated completion into standard user-local directory | installation progress and guidance |
@@ -103,7 +103,7 @@ constraints as warnings without failing compilation (#488): a program whose
 canonical element count exceeds the Overwatch client's 32768-element import
 limit still emits its artifact and exits 0, carrying a
 `target-element-limit` warning that reports the observed count and names the
-largest contributing rule. The distinction is deliberate — `compile` means
+largest contributing rule. The distinction is deliberate. `compile` means
 Wright produced valid Workshop text, not that the current client imports it
 under every resource limit. `wright analyze` remains the detailed cost and
 hotspot surface; `check` does not evaluate client importability.
@@ -112,11 +112,11 @@ The rationale for current-directory defaults, directory targets, and explicit
 ownership ambiguity is recorded in
 [`ADR-0016`](../adr/0016-current-directory-and-directory-project-targets.md).
 
-## `wright agent install` — the agent guide (#415)
+## `wright agent install`: the agent guide (#415)
 
-`wright agent install` writes the canonical Wright agent guide — the `wright`
-skill from `wrightkit/skills`, vendored into the binary so the command needs
-no Node tooling and no network — into the project's agent skills directory,
+`wright agent install` writes the canonical Wright agent guide, the `wright`
+skill from `wrightkit/skills` vendored into the binary so the command needs
+no Node tooling and no network, into the project's agent skills directory,
 default `./.agents/skills/wright/` (`--dest DIR` selects another skills
 directory and installs under `DIR/wright/`; `--dry-run` reports the
 destination without writing, though the foreign-path refusal below still
@@ -125,9 +125,9 @@ applies). The installed content is a `SKILL.md` plus its
 upstream skill pin, and the guide's content hash; it contains no executable
 semantic or tool implementation.
 
-The guide teaches an agent to prefer Wright's structured surfaces —
+The guide teaches an agent to prefer Wright's structured surfaces, such as
 capability discovery, `check`/`lint`/`analyze`/`inspect`, `serve`, and
-validated edits — over textual guessing, to re-validate after edits, and to
+validated edits, over textual guessing, to re-validate after edits, and to
 surface refused or unsupported capabilities rather than work around them.
 Manual installation of the same guide stays possible and unchanged: copy
 `skills/wright/` from the `wrightkit/skills` repository into
@@ -135,7 +135,7 @@ Manual installation of the same guide stays possible and unchanged: copy
 
 Re-running `install` refreshes the guide in place: an identical install
 reports already-up-to-date, while an older or edited Wright-installed guide
-is replaced with the current copy — the directory is recreated, so files
+is replaced with the current copy. The directory is recreated, so files
 dropped inside it are removed. A path that was not installed by `wright
 agent install` (directory, file, or link) is refused unless `--force` is
 passed. Removing the directory uninstalls the guide; nothing outside the
@@ -143,7 +143,7 @@ skills directory is touched.
 
 ### MCP bootstrap (`--mcp`, #509)
 
-`wright agent install --mcp <TARGET>` additionally writes the one entry that
+`wright agent install --mcp <TARGET>` also writes the one entry that
 makes a coding-agent harness start `wright serve --transport mcp` for the
 project, so the shipped `wright_*` tools are discoverable without hand-written
 MCP configuration (ADR-0020). `--no-guide` skips the guide and registers only
@@ -174,12 +174,12 @@ refused; writes replace the file atomically.
 To remove the server, delete the `wright` entry from the config file (and the
 guide directory if installed); to update, re-run with `--force`.
 
-## `wright agent tools` — client tool definitions (#535)
+## `wright agent tools`: client tool definitions (#535)
 
 `wright agent tools` prints every operation `capabilities` advertises as
 client tool definitions for code-executing agents, versioned
 `wright-agent/v1` and deterministic. `--format messages` (default) emits
-Anthropic Messages API tool definitions — `name`, `description` (which also
+Anthropic Messages API tool definitions: `name`, `description` (which also
 describes the result), `input_schema`, and
 `allowed_callers: ["code_execution_20260120"]` for programmatic tool
 calling; emitted schemas have no recursive `$ref`, which the API rejects.
@@ -209,8 +209,8 @@ API retains complete typed results. This pre-1.0 shape change is recorded in
 ## Semantic query commands (#429)
 
 `inspect` owns the semantic query surface: the bare command prints the
-bounded summary, and its six subcommands — `inspect rules`, `inspect symbols`,
-`inspect refs`, `inspect cfg`, `inspect callgraph`, `inspect cost` — expose
+bounded summary, and its six subcommands, `inspect rules`, `inspect symbols`,
+`inspect refs`, `inspect cfg`, `inspect callgraph`, `inspect cost`, expose
 each detail area. They run the same operations the agent contract serves
 (`rules`, `symbols`, `references` + `usage`, `cfg`, `callGraph`, `costEstimate`)
 through the session's `ToolService`, so a CLI `result` payload equals the
@@ -219,14 +219,14 @@ keeps the top-level command surface to distinct user intents (#439); the
 agent request names stay flat operation names, not command paths.
 
 `inspect refs <NAME>` and `inspect cfg <RULE>` address their target by its
-declared name — a `variables`/`subroutines` entry or a `rule("name")` —
+declared name, a `variables`/`subroutines` entry or a `rule("name")`,
 resolved against the loaded program's semantic index inside the driver.
 Callers never need the program's numbering, where symbol ids and rule
 indexes are different spaces (the agent contract keeps accepting numeric
 ids too). An unmatched name is a structured `unknown-symbol`/`unknown-rule`
 diagnostic with exit 1; a name shared by several candidates is
-`ambiguous-symbol`/`ambiguous-rule` listing the numeric ids to fall back to —
-resolution never guesses.
+`ambiguous-symbol`/`ambiguous-rule` listing the numeric ids to fall back to.
+Resolution never guesses.
 
 * `inspect refs` reports the `usage` counts (`reads`, `writes`, `calls`,
   `rules`) as the header of the reference list; there is no separate usage
@@ -247,17 +247,17 @@ resolution never guesses.
 * `inspect cost` accepts the finding-selection options, applied to its
   findings list exactly as on `costEstimate`. Its `elementCount` member is
   the canonical `workshop-rs` element count against the 32768-element
-  client budget, with each rule's share ranked by count, largest first —
-  `index` is the canonical rule position; the 5 largest by default,
-  `--all` for every rule — a structure count, not a
-  statement of client importability; it is `null` with an
+  client budget. Each rule's share is ranked by count, largest first, where
+  `index` is the canonical rule position; the 5 largest are shown by default
+  and `--all` shows every rule. The count is a structure count, not a
+  statement of client importability, and is `null` with an
   `elementCountUnavailable` reason when the count cannot run.
 * `persistentObjects` has no standalone command; `analyze` reports aggregate
   counts under `result.persistentObjects`; use the agent operation for details.
 
 Text output follows the human-first presentation described in
 [presentation](presentation.md): each query leads with the target identity and
-its summary — the program inventory and a bounded rule preview for bare
+its summary: the program inventory and a bounded rule preview for bare
 `inspect`, kind-grouped symbols with primary locations for `symbols`, the
 usage counts before the reference list for `refs`, the graph shape before
 block detail for `cfg`, fan-in/fan-out highlights before the edge list for
@@ -265,11 +265,11 @@ block detail for `cfg`, fan-in/fan-out highlights before the edge list for
 first page of 20 entries followed by the total and an expansion hint; `--format json`
 reports the essential result in structured form, with the same list cap as text.
 
-## `wright rename` — semantic rename for raw Workshop (#434)
+## `wright rename`: semantic rename for raw Workshop (#434)
 
 `wright rename <NAME> <NEW_NAME> [INPUT]` renames a global variable, player
 variable, or subroutine in raw Workshop input. `NAME` is the declared symbol
-name — the same addressing `inspect refs` uses — resolved against the loaded
+name, the same addressing `inspect refs` uses, resolved against the loaded
 program's semantic index; an unmatched name is `unknown-symbol` and a name
 shared by several symbols is `ambiguous-symbol` (exit 1).
 
@@ -284,7 +284,7 @@ references no longer bind to the renamed symbol, refuses with
 
 * Default is **preview only**: text mode prints the diff as `-`/`+` line
   pairs, and JSON mode returns the validated `transaction` and per-source
-  `preview` inside the `wright-result/v1` envelope — callers (and agents via
+  `preview` inside the `wright-result/v1` envelope. Callers (and agents via
   `semanticRename`) carry the same atomic edit set.
 * `--write` applies the validated transaction to the input file atomically
   (a sibling temporary file and rename). The write rechecks each source's
@@ -294,12 +294,12 @@ references no longer bind to the renamed symbol, refuses with
   `edit-requires-provider` naming `providerSemanticRename`, and kinds without
   a shipped provider keep their `source-provider-unavailable` refusal.
 
-## `wright lookup` — owner name and signature lookup (#529)
+## `wright lookup`: owner name and signature lookup (#529)
 
 `wright lookup [QUERY]` runs the agent contract's `lookup` operation
 (ADR-0021): it resolves a display name, a near spelling, or a guess to the
 language owner's accepted spelling and signature, answering from language
-vocabulary alone — it takes no `INPUT` and never loads or requires a
+vocabulary alone. It takes no `INPUT` and never loads or requires a
 project. Agents should use it before writing in an unfamiliar language and
 when `check`/`compile` rejects a name; text output of those commands
 prints a one-line hint after each `unknown-*` diagnostic pointing here
@@ -308,20 +308,20 @@ prints a one-line hint after each `unknown-*` diagnostic pointing here
 * `--language workshop|opy` (default `workshop`) selects the owner:
   Workshop answers from the in-process `workshop-rs` catalog; OverPy
   answers through the configured `opy-rs` provider's LPP lookup
-  capability, and reports an explicit `unavailable` payload — exit 3 —
+  capability, and reports an explicit `unavailable` payload with exit 3
   when the provider does not negotiate it. Wright never guesses locally.
-* `--kind` narrows the entry kinds — `action`, `value`, `event`,
+* `--kind` narrows the entry kinds: `action`, `value`, `event`,
   `enum-member`, `enum`, `setting`, `parameter`, `setting-path`,
-  `member-action`, `member-value`, `structural`, `operator`: the union of
-  the kinds both owners emit (#563). A kind one language never emits
-  answers `[]` on it.
+  `member-action`, `member-value`, `structural`, `operator`. This is the
+  union of the kinds both owners emit (#563). A kind one language never
+  emits answers `[]` on it.
 * `--within <IDENTITY>` lists what an identity contains: an enum domain's
   members, a callable's parameters, or a settings path's child segments.
   An unmatched scope identity refuses with `lookup.unknownWithin`.
 * `--locale <LOCALE>` selects the Workshop display-name locale;
   `--limit <N>` bounds the entry count (default 3, maximum 10).
-* Text mode prints one line per entry — the rendered signature for a
-  callable, else the accepted spelling — with its kind and owner identity.
+* Text mode prints one line per entry, the rendered signature for a
+  callable or otherwise the accepted spelling, with its kind and owner identity.
   `-f json` prints the same `result` payload `serve` returns
   (`language`, `owner`, `entries[]`, or `unavailable`).
 
@@ -342,8 +342,9 @@ Wright implementation.
   missing or unknown target is a usage error (exit 2), and `--target` on any
   other command is a usage error too.
 * Only Workshop input is accepted: the available conversion surface is
-  Workshop → OPY. Workshop → OSTW is recognized but unavailable because no
-  DEL/OSTW provider is shipped, with **no direct OPY ↔ OSTW path**.
+  Workshop to OPY. Workshop to OSTW is recognized but unavailable because no
+  DEL/OSTW provider is shipped, and there is **no direct conversion between
+  OPY and OSTW**.
   A non-Workshop input fails with the structured `convert-input-kind`
   diagnostic (exit 1).
 * The result is **canonical reconstructed source** for the selected target
@@ -360,6 +361,6 @@ Wright implementation.
   [`docs/ostw/support-matrix.md`](../ostw/support-matrix.md).
 
 The conversion boundary is covered by the CLI and driver contract tests. They
-assert the available Workshop → OPY provider handoff and the explicit
-Workshop → OSTW refusal; owner reconstruction semantics are tested in the
+assert the available Workshop-to-OPY provider handoff and the explicit
+Workshop-to-OSTW refusal; owner reconstruction semantics are tested in the
 owning language repository.

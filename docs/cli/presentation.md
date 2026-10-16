@@ -117,12 +117,12 @@ rendering remain static and deterministic.
 On the terminal renderer only, independent multi-line items are delimited
 with lightweight connectors (#703): each envelope diagnostic, lint finding
 or fix entry, analyze risk item, `inspect cfg` block, and `inspect rules
---content` entry opens with a `├─` branch marker — or `╰─` for the last item
-— and its child lines (locations, source frames, secondary notes, successors,
+--content` entry opens with a `├─` branch marker, or `╰─` for the last item,
+and its child lines (locations, source frames, secondary notes, successors,
 statements) hang from a `│` continuation rail aligned under the item's text.
 The connectors separate adjacent blocks without extra framing; they draw dim
 when color is on so severity labels and messages keep prominence. One-line
-items and bare verdicts stay flat — a clean `check` remains two undecorated
+items and bare verdicts stay flat. A clean `check` remains two undecorated
 lines. The connector set is a terminal detail: `plain`, GitHub Actions, CI,
 and JSON keep their existing undecorated layout byte-for-byte, and the
 reported findings, verdicts, exit codes, caps, and `--all` expansion are
@@ -133,13 +133,13 @@ terminal/plain text surface only: the verdict line leads with the blocking
 error count before the non-blocking severities, diagnostics render in action
 order (errors before warnings and info notes, stable within a severity), and a
 mapped diagnostic carries its `-->` location plus a one-line source frame on
-the diagnostic stream. Spans whose path is not a readable source file —
-`<stdin>`, `<provider-artifact>`, or a dangling `<file N>` — are never dressed
+the diagnostic stream. Spans whose path is not a readable source file, such as
+`<stdin>`, `<provider-artifact>`, or a dangling `<file N>`, are never dressed
 up as file locations; the reported position and the pipeline stage trail each
 diagnostic as secondary metadata instead. A diagnostic whose code carries an
 `unknown-` kind (a rejected Workshop or OverPy name) is followed by a
 one-line `hint: run 'wright lookup' ...` pointer on `check` and `compile`
-(#529, ADR-0021); an OPY-origin diagnostic names its vocabulary —
+(#529, ADR-0021); an OPY-origin diagnostic names its vocabulary:
 `wright lookup --language opy` (#692). The hint is text presentation only
 and never enters the envelope. A compact footer closes the report
 with the count of affected source files and, on an interactive terminal, the
@@ -154,14 +154,14 @@ leads with finding counts by severity, findings render in action order, and a
 finding entry leads with severity, rule id, and message before its `-->`
 location and one-line source frame. Evidence class and boundedness trail
 dimmed as secondary metadata; pseudo-path spans degrade to position notes.
-Repeated findings keep the shared collapse — one entry naming its finding
-count, using the selected locations — and interactive elapsed time stays presentation-only.
+Repeated findings keep the shared collapse, one entry naming its finding
+count and using the selected locations, and interactive elapsed time stays presentation-only.
 The `wright-result/v1` envelope uses the same selected finding set,
 and the GitHub Actions renderer is unchanged.
 
 The `inspect` queries follow the same human-first hierarchy (#446) on the
 terminal/plain text surface. Bare `wright inspect` prints the program
-inventory — file, rule, variable, subroutine, and finding counts — followed
+inventory of file, rule, variable, subroutine, and finding counts, followed
 by a bounded rule-name preview and the detail commands, so the first screen
 answers "what is this" and routes deeper questions to the owning query. Each
 subcommand leads with its subject and summary before its detail:
@@ -175,8 +175,8 @@ subcommand leads with its subject and summary before its detail:
   loop-header, wait, and call-site counts; entry and exit blocks), then the
   block/edge listing.
 * `inspect callgraph` prints the edge shape first, then notable fan-in and
-  fan-out — subroutines with more than one caller and rules calling more
-  than one subroutine — then the edge list.
+  fan-out, that is, subroutines with more than one caller and rules calling
+  more than one subroutine, then the edge list.
 * `inspect cost` prints exact generated-resource totals, the canonical
   element count against the client element budget with each rule's share
   ranked by count, then static findings

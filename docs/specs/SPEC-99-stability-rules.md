@@ -149,7 +149,7 @@ indicator). No new `heuristic`-class rules are added in this set.
   fixtures also pin the subsumption and per-scope semantics: a duplicated shape
   nested inside a larger duplicated shape yields only the maximal finding, and
   the same shape duplicated in two different loop scopes in one rule yields one
-  finding per scope. The `repeated-value` negative fixture additionally covers
+  finding per scope. The `repeated-value` negative fixture also covers
   duplicated single-call expressions inside a loop (bare `Value In Array`
   reads; single-call predicates with plain operands) producing no findings.
   `while-without-wait`'s positive fixture is a `While(true)` loop with no wait
@@ -293,5 +293,5 @@ indicator). No new `heuristic`-class rules are added in this set.
   `wrightkit/opy-rs`; Wright keeps only focused analyzer/provider integration
   regressions required by Wright-owned behavior.
 - Historical implementation, verification, dependency, and acceptance state
-  for this feature remains in Issues #97–#100 and their PR/CI history rather
+  for this feature remains in Issues #97-#100 and their PR/CI history rather
   than this durable specification.
