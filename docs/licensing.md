@@ -1,4 +1,4 @@
-# Wright and Upstream Reference License Boundary
+# Wright and upstream reference license boundary
 
 Status: accepted engineering policy
 This document is not legal advice and does not settle questions that require a

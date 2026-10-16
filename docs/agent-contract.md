@@ -1,4 +1,4 @@
-# Wright Agent Contract
+# Wright agent contract
 
 - Status: stable, versioned session contract
 - Contract: `wright-agent/v1`
@@ -45,9 +45,9 @@ error (exit 2), never a silently remapped default:
   `off`);
 * `--locale <LOCALE>`: Workshop client locale override;
 * `--lint-config <PATH>`, `--rule <PATH>`, `--disable-rule <ID>`,
-  `--rule-severity <ID>:<SEVERITY>`: explicit lint policy — the same file,
-  local rule paths, and overrides `wright lint` accepts, applied to every
-  lint-consuming operation the session serves (#594).
+  `--rule-severity <ID>:<SEVERITY>`: explicit lint policy. The session applies
+  the same file, local rule paths, and overrides `wright lint` accepts to every
+  lint-consuming operation it serves (#594).
 
 A configured session example: `wright serve --lint-config policy.yaml
 --disable-rule repeated-value project.ws` serves `lint`/`lintRules`
@@ -118,7 +118,7 @@ plus the operation in snake case:
 `tools/list` contains a tool only when its operation is in this set and
 advertised by `capabilities.operations`. `initialize`, `tools/list`, and the
 tool set itself are independent of whether the configured project currently
-loads — a broken project never hides tools (#512). Each tool's `inputSchema`
+loads. A broken project never hides tools (#512). Each tool's `inputSchema`
 is derived from the operation's request schema with `op` removed (the tool
 name carries it); the Workshop edit tools also omit `sources`, which then
 defaults to the on-disk text (#472), and the provider tools likewise omit
@@ -130,7 +130,7 @@ A successful service `result` is returned unchanged as the tool result's JSON
 text content. A service refusal is a tool result with `isError: true` whose
 content carries the same `{code, message}`. Edit operations report their
 outcome inside the result payload (`ok` plus `diagnostics`), which passes
-through as ordinary content — the adapter does not reinterpret it. MCP
+through as ordinary content. The adapter does not reinterpret it. MCP
 protocol errors (unknown tool or method, malformed arguments) are JSON-RPC
 `error` responses and never become tool results.
 
@@ -151,7 +151,7 @@ snake-case operation), a `description` that also describes the result in
 text, an `input_schema` derived from the operation's request schema with
 `op` removed, and `allowed_callers: ["code_execution_20260120"]` so the
 tools are callable from the code execution tool. Emitted schemas keep every
-caller-meaningful field — including `sources`, which the MCP surface drops —
+caller-meaningful field, including `sources`, which the MCP surface drops,
 and ship their `$ref` targets under a local `$defs` with no recursive
 reference, which the Messages API rejects.
 
@@ -174,13 +174,13 @@ the successful `result` payload.
 
 | Operation | Request fields | Successful `result` |
 | --- | --- | --- |
-| `capabilities` | none | Service name/version, `wright-agent/v1`, result contract, operation names, `result_schemas` (operation → committed-schema definition), languages, and profiles |
+| `capabilities` | none | Service name/version, `wright-agent/v1`, result contract, operation names, `result_schemas` (operation to committed-schema definition), languages, and profiles |
 | `compile` | optional `output` (file path), optional `force` | `wright-result/v1` compile envelope: verdict, diagnostics, `output.written_to` and `output.sha256`; the program text is written to the file and never returned. See [Compile output](#compile-output-adr-0025) |
 | `check` | optional `all` | `wright-result/v1` check envelope |
 | `analyze` | optional selection, optional `all` | `wright-result/v1` essential analysis envelope |
 | `inspect` | optional `all` | `wright-result/v1` overview and rule names |
 | `project` | none | Loaded program origin, files, counts, and findings summary |
-| `rules` | optional selection, optional `content` | Canonical Workshop rules — each entry carries `id`, `name`, `event` (the rule's event binding, `subroutine:<name>` for subroutine rules), and `span`; `{"rules": [...], "selection": {...}}` when a selection is applied. See [Rule content](#rule-content-adr-0024) |
+| `rules` | optional selection, optional `content` | Canonical Workshop rules. Each entry carries `id`, `name`, `event` (the rule's event binding, `subroutine:<name>` for subroutine rules), and `span`; `{"rules": [...], "selection": {...}}` when a selection is applied. See [Rule content](#rule-content-adr-0024) |
 | `symbols` | optional selection, optional `all` | Symbols; `{"symbols": [...], "selection": {...}}` when `file`/`max` is applied (a `kind`-only request keeps the bare array) |
 | `references` | required `symbol` (id or name), optional selection and `all` | Usage header and references for the symbol; `{"references": [...], "selection": {...}}` when a selection is applied |
 | `usage` | required `symbol` (id or name) | Usage counts for the symbol, plus its resolved `id` and `kind` |
@@ -190,7 +190,7 @@ the successful `result` payload.
 | `lint` | optional selection, optional `all` | Finding counts by severity and actionable findings; effective policy is available from `lintRules` |
 | `lintRules` | none | Registered lint rules with full metadata and effective configuration |
 | `callGraph` | optional selection, optional `all` | Subroutine call graph; `{"edges": [...], "selection": {...}}` when a selection is applied |
-| `costEstimate` | optional selection, optional `all` | Exact generated-resource counts, `elementCount` (the canonical Workshop structure counted against the client element budget; `rules` ranked by count, largest first — `index` is the canonical rule position; the 5 largest by default, `all: true` for every rule; `null` plus `elementCountUnavailable` when the count cannot run), findings, and `selection` when applied |
+| `costEstimate` | optional selection, optional `all` | Exact generated-resource counts, `elementCount` (the canonical Workshop structure counted against the client element budget; `rules` ranked by count, largest first. `index` is the canonical rule position; the 5 largest by default, `all: true` for every rule; `null` plus `elementCountUnavailable` when the count cannot run), findings, and `selection` when applied |
 | `targetMetadata` | none | Canonical target/catalog metadata |
 | `validateEditTransaction` | `transaction`, optional `sources` | Atomic validation status, diagnostics, and previews when valid |
 | `semanticRename` | `target`, optional `sources` | Validated rename transaction or structured refusal |
@@ -222,22 +222,22 @@ The service may exist without a program snapshot: construction over a
 project that cannot load succeeds, and `capabilities`, `targetMetadata`
 (the static catalog), `lookup` (the language vocabulary), and `provider*`
 operations carrying caller-supplied documents answer without consulting the
-project at all — they neither require nor trigger its load. A `provider*`
+project at all. They neither require nor trigger its load. A `provider*`
 request that omits `documents` derives the set from the loaded project
 (#548) and so loads like any other program-reading request.
 
 A request that consults the program needs a valid current snapshot at
 request time. When none exists, the request performs the deferred initial
 load; when one exists, the service fingerprints the input's observable file
-set — a file input's own content, a directory input's resolved members, or
-every file under a source-language project's entry directory — and reloads
-when it changes, so an edit, an added file, or a removed file is reflected
+set: a file input's own content, a directory input's resolved members, or
+every file under a source-language project's entry directory. It reloads
+when the set changes, so an edit, an added file, or a removed file is reflected
 in the next `symbols`, `references`, `check`, `lint`, or other
 program-reading request without restarting the session. An unchanged input
 is never reloaded.
 
-A load or reload that fails — the entry is missing or unreadable, or the
-source does not parse — refuses the request with the loader's structured
+A load or reload that fails, whether from a missing or unreadable entry or
+a source that does not parse, refuses the request with the loader's structured
 diagnostic code (`input-io`, `parse-error`, `input-kind-ambiguous`, a
 provider diagnostic). The service keeps refusing until the project loads
 again, retrying on every program-reading request; the previously loaded
@@ -245,21 +245,21 @@ program is never served silently, and the service never substitutes an
 empty or placeholder program. The failed attempt invalidates the served
 snapshot: even restoring the input to byte-identical content loads a fresh
 program rather than resurrecting the dropped one. Repairing the input
-recovers the same running session — no restart and no explicit reload
+recovers the same running session, with no restart and no explicit reload
 request.
 
 `check` and `compile` are workflows rather than snapshot queries (#591):
 they run the session's own operation-aware load instead of requiring a
 canonical program snapshot first. A `check` request over a source-language
 provider invokes the provider's check operation and, when the provider can
-compile, its compile operation too — `check` then runs the same canonical
+compile, its compile operation too. `check` then runs the same canonical
 validation `compile` surfaces, so an agent gating on `check` sees every
 error `compile` reports, and a successful `check` supplies the canonical
 snapshot the later `symbols`, `references`, or `findings` requests read
 (#617). A provider whose compile returns `Unsupported` keeps the
 check-only path: it answers `check` from its own diagnostics alone, the
-one deliberate difference from `compile`. Any other compile failure —
-including an LPP refusal — fails `check` the way it fails `compile`. The
+one deliberate difference from `compile`. Any other compile failure,
+including an LPP refusal, fails `check` the way it fails `compile`. The
 freshness gate above still applies: an
 observed disk change invalidates the served snapshot, and the next
 workflow re-resolves the input rather than serving it. A failed load
@@ -285,13 +285,13 @@ never stale.
 digest of the input's primary entry source (the provider's
 `sourceIdentity` per LPP ADR-0003). For a single-file input that covers
 the whole input; for a provider directory project it hashes only the
-entry file, so editing a member file leaves `inputIdentity` unchanged —
-the `stale-id` refusals above, not this value, report freshness.
+entry file, so editing a member file leaves `inputIdentity` unchanged.
+The `stale-id` refusals above, not this value, report freshness.
 
 The responses that issue numeric ids or indexes into the loaded program are
 `symbols` (symbol ids), `rules` (rule indexes), `usage` (the resolved `id`),
 `references`, `findings`, `lint`, `persistentObjects`, `inspect`, `analyze`,
-and the `ambiguous-*` refusal candidates — plus `skipped[].rule` in `lint`
+and the `ambiguous-*` refusal candidates, plus `skipped[].rule` in `lint`
 and `lintRules`. `cfg` block ids are local to that one response and are not
 program addresses; `project`, `callGraph`, `costEstimate`, `targetMetadata`,
 `capabilities`, the `compile`/`check` envelopes, and the edit/provider
@@ -305,8 +305,8 @@ computed from the program that was live at request time.
 `references` and `usage` accept `symbol` as either a numeric symbol id or the
 declared symbol name; `cfg` accepts `rule` as either the rule index or the
 declared rule name. Names resolve against the loaded program's semantic index
-in the driver, so a request never has to learn the program's numbering —
-symbol ids and rule indexes are different spaces (a rule's symbol id is not
+in the driver, so a request never has to learn the program's numbering.
+Symbol ids and rule indexes are different spaces (a rule's symbol id is not
 its rule index). Numeric ids keep their established meaning, and both
 addressings return the same payload for the same target.
 
@@ -316,23 +316,23 @@ distance of at most 1 for names shorter than six
 characters and 2 otherwise, ties in declaration order), or the `symbols` /
 `rules` operation when none is near (#567). The candidates travel in the
 message only, as ADR-0021 decision 6 does for owner vocabulary. A name shared
-by more than one symbol — or more than one rule, for `cfg` — returns
+by more than one symbol, or more than one rule for `cfg`, returns
 `ambiguous-symbol`/`ambiguous-rule` listing the candidate numeric ids.
 Resolution never guesses or returns an empty success; `semanticRename`
 addressed by name reports the same refusals. `usage`
-additionally echoes the resolved `id` and `kind` so a name-addressed caller
+also echoes the resolved `id` and `kind` so a name-addressed caller
 can correlate the result with `symbols`.
 
 ### Finding selection (#430)
 
 `findings`, `lint`, and `costEstimate` accept optional selection fields:
 
-* `severity`: a threshold — `error` reports errors only, `warning` errors and
+* `severity`: a threshold. `error` reports errors only, `warning` errors and
   warnings, `info` everything.
 * `rule`: one lint rule id (the finding `code`). An unknown id is a
   structured `invalid-selection` error, never a silent empty result.
 * `file`: one source file. The reported `span.path` spelling differs per
-  surface, so the argument resolves to the same canonical file — the path as
+  surface, so the argument resolves to the same canonical file. The path as
   passed, root-relative, or absolute spellings all select it. `costEstimate`
   findings carry no span, so `file` selects nothing there.
 * `max`: a bound on the reported count, applied after filtering.
@@ -373,8 +373,8 @@ is never truncated. The CLI form is `wright inspect rules --content`
 selection fields with the same semantics as finding selection: filters narrow
 first, `max` bounds after, and a `selection` member reports `{"total":
 <set before selection>, "withheld": <dropped by max>}`. An unknown filter
-value — a kind outside the listed domain, or a `name`/`rule`/`caller`/`callee`
-that matches nothing in the loaded program — is a structured
+value, such as a kind outside the listed domain or a `name`/`rule`/`caller`/`callee`
+that matches nothing in the loaded program, is a structured
 `invalid-selection` error, never a silent empty result.
 
 * `rules`: `name` (a declared rule name), `rule` (exactly one rule, by index
@@ -389,7 +389,7 @@ that matches nothing in the loaded program — is a structured
   declared name), `file`, `max`.
 * `cfg`: `kind` (`entry`, `exit`, `block`, `if`, `while`, `for`), `max`.
   Selection filters `blocks`, which keep their original `id`s, so
-  `successors` — and the `entry`/`exit` fields — still address the full
+  `successors` and the `entry`/`exit` fields still address the full
   graph's block numbering.
 * `callGraph`: `caller` (a declared rule name), `callee` (a declared
   subroutine name), `max`.
@@ -429,7 +429,7 @@ explicit refusal without a partial edit set.
 
 ### Validated edits and semantic rename for raw Workshop (#434)
 
-On raw Workshop input both operations are supported directly — `workshop-rs`
+On raw Workshop input both operations are supported directly. `workshop-rs`
 owns the source semantics and Wright orchestrates the transaction:
 
 * `validateEditTransaction` applies the caller's transaction to the current
@@ -442,8 +442,8 @@ owns the source semantics and Wright orchestrates the transaction:
   invalid Workshop refuses with the real parse/validation diagnostics and no
   partial preview; a valid one returns `ok: true` with a `preview` of each
   edited source (edited text plus the post-edit identity).
-* `semanticRename` resolves `target` either by `symbol` — a numeric id or a
-  declared name, exactly the addressing `references`/`usage` use — or by a
+* `semanticRename` resolves `target` either by `symbol`, a numeric id or a
+  declared name that is exactly the addressing `references`/`usage` use, or by a
   `source`/`line`/`col` position inside one identifier occurrence. Global
   variables, player variables, and subroutines rename through the exact
   identifier spans `workshop-rs` records: the declaration, the `Subroutine`
@@ -451,7 +451,7 @@ owns the source semantics and Wright orchestrates the transaction:
   arguments, `Set`/`Modify`/`For` variable
   arguments, and `Global.name`/`Event Player.name` value references all
   rewrite, while prefixes, comments, strings, and unrelated identifiers stay
-  untouched. There is no textual-search fallback — an occurrence whose
+  untouched. There is no textual-search fallback. An occurrence whose
   recorded span does not cover exactly the identifier refuses with
   `rename-unmapped-span`.
   `sources` is optional (#472): when omitted or null, the service reads the
@@ -469,18 +469,19 @@ owns the source semantics and Wright orchestrates the transaction:
 * Findings on `lint` and `findings` carry a `fix` member when a rule offers
   a mechanically determined correction (#556): `fix.kind` names the
   remediation, `fix.summary` describes it, and `fix.transaction` is the
-  same `EditTransaction` shape `semanticRename` produces — preview it
+  same `EditTransaction` shape `semanticRename` produces. Preview it
   through `validateEditTransaction` and apply it through the caller's own
   write path; there is no separate apply operation. Fixes exist only on raw
   Workshop input for `exact`-evidence findings whose correction is
-  unambiguous — currently `duplicate-condition` (`remove-dead-branch`:
-  delete the unreachable `Else If` branch) and `repeated-value`
-  (`evaluate-once`: mark each duplicated occurrence with `Evaluate Once`).
-  Shapes the correction cannot safely cover — a condition that can move
-  between evaluations, an occurrence the engine re-evaluates (the loop's
-  `While` condition, `Wait Until`/`Loop If` conditions, `Update Every
-  Frame` subtrees, parameters an enabled reevaluation mode keeps live) —
-  withhold the `fix` entirely rather than offer a risky edit. `evaluate-once` is an
+  unambiguous. The current fixable rules are `duplicate-condition`
+  (`remove-dead-branch`: delete the unreachable `Else If` branch) and
+  `repeated-value` (`evaluate-once`: mark each duplicated occurrence with
+  `Evaluate Once`). Shapes the correction cannot safely cover, such as a
+  condition that can move between evaluations or an occurrence the engine
+  re-evaluates (the loop's `While` condition, `Wait Until`/`Loop If`
+  conditions, `Update Every Frame` subtrees, parameters an enabled
+  reevaluation mode keeps live), withhold the `fix` entirely rather than
+  offer a risky edit. `evaluate-once` is an
   acknowledgment idiom, not a cost reduction: at once-per-execution
   positions it freezes nothing, it marks the repeated evaluation as
   intentional so the finding retires.
@@ -499,12 +500,12 @@ coordinates, the provider validates each edited document, and the edited
 document set is rechecked before `ok: true`. The document set is
 caller-supplied or session-derived:
 
-* `language_id` names the configured provider — `opy` for the shipped
+* `language_id` names the configured provider: `opy` for the shipped
   provider.
-* `documents` is optional (#548). When supplied, it is a URI → `{uri,
-  languageId, version, text}` map describing the project as the provider
+* `documents` is optional (#548). When supplied, it is a map from URI to
+  `{uri, languageId, version, text}` describing the project as the provider
   sees it. When omitted, the session's loaded project supplies the set:
-  every member file read from disk at `version` 0, keyed by `file://` URI —
+  every member file read from disk at `version` 0, keyed by `file://` URI,
   the same project view the session serves, so an agent never reconstructs
   the document set the session already holds. The omitted-set request reads
   the program like any other program-reading operation (#471): it triggers
@@ -514,23 +515,23 @@ caller-supplied or session-derived:
   `position_document_uri` inside the set and refuses provider-returned
   edits outside it with `provider-edit-outside-set`.
 * `sources` is optional (#548) and defaults to each document's text. It is
-  a URI → current-text map covering every source the transaction may edit
-  — each `edits[].source` on `providerValidateEdit`, every document the
-  provider's rename may touch on `providerSemanticRename`: it is the
+  a map from URI to current text covering every source the transaction may
+  edit: each `edits[].source` on `providerValidateEdit` and every document
+  the provider's rename may touch on `providerSemanticRename`. It is the
   precondition each `source_identity` verifies against (SHA-256 hex of the
-  text — for the entry document this equals `project.inputIdentity`) and
+  text; for the entry document this equals `project.inputIdentity`) and
   the text the edits apply to.
 * `providerValidateEdit`'s post-edit check blocks on errors in any
   supplied document, so the set should cover the project documents whose
   diagnostics may break.
 * `providerSemanticRename` resolves the analyzable project from the
-  supplied documents themselves — include the project entry document
+  supplied documents themselves. Include the project entry document
   (e.g. `main.opy`), not only the position file. A member file alone can
   refuse `rename.noSymbolAtPosition` even when the position is valid;
   supply the entry plus every file the rename may touch. The session-
   derived set already contains every loaded member, entry included.
-* `providerSemanticRename`'s `position` is the provider convention —
-  0-based line and UTF-16 character — while `transaction` ranges are the
+* `providerSemanticRename`'s `position` uses the provider convention,
+  0-based line and UTF-16 character, while `transaction` ranges are the
   `EditRange` 1-based half-open columns every edit operation shares. The
   returned transaction's `source` fields are document URIs and each
   `source_identity` is the identity of that document's current text, so
@@ -542,21 +543,21 @@ is configured.
 
 ### Name and signature lookup (#529, ADR-0021)
 
-`lookup` resolves a free-text query — a display name, a near spelling, or a
-guess — against the language owner's vocabulary, so an agent can learn the
+`lookup` resolves a free-text query, such as a display name, a near spelling,
+or a guess, against the language owner's vocabulary, so an agent can learn the
 accepted spelling and signature of a Workshop or OverPy name without
 external documentation, source inspection, or `wright convert`. The
 request's `language` selects the owner (`workshop` or `opy`, the ids
 `capabilities.languages` reports); the remaining fields narrow the answer:
 
 * `query`: the free text to resolve.
-* `kind`: any entry kind an owner emits (#563) — `action`, `value`,
+* `kind`: any entry kind an owner emits (#563): `action`, `value`,
   `event`, `enumMember`, `enum`, `setting`, `parameter`, `settingPath`,
   `memberAction`, `memberValue`, `structural`, or `operator`. A kind one
   language never emits answers `[]` on it.
 * `within`: the identity of an enum domain, a callable, or a settings path
-  prefix. The result then lists its members, parameters, or child segments
-  — this is how a caller enumerates an enum's accepted member spellings or
+  prefix. The result then lists its members, parameters, or child segments,
+  which is how a caller enumerates an enum's accepted member spellings or
   a callable's parameters.
 * `locale`: the Workshop display-name locale (session configuration, then
   the catalog's primary locale when omitted).
@@ -564,7 +565,7 @@ request's `language` selects the owner (`workshop` or `opy`, the ids
 
 Each entry carries its owner `identity`, `kind`, accepted `spelling`, and
 `displayName`, plus the owner fact that describes it (`callable`, `enum`,
-`parameter`, or `setting`). Callables additionally carry `signature`, a
+`parameter`, or `setting`). Callables also carry `signature`, a
 human-readable call shape Wright renders from the owner's parameter facts:
 required parameters name their type, optional parameters show `name?` or
 `name=default`, and an enum domain lists its members inline (a domain
@@ -573,7 +574,7 @@ above the member bound renders as `Domain(count members)`).
 Workshop answers come from the `workshop-rs` catalog in process. OverPy
 answers come from the configured `opy-rs` provider's LPP lookup
 capability; when the provider does not negotiate it, the result is an
-explicit `unavailable` payload naming `opy-rs` — never a Wright-side
+explicit `unavailable` payload naming `opy-rs`, never a Wright-side
 textual guess. An unmatched scope identity refuses with
 `lookup.unknownWithin`; an unknown `language` or `kind` is a usage error.
 The operation reads vocabulary alone, so it works over a session whose
@@ -623,8 +624,8 @@ external fact dumps. The complete typed Rust API remains available.
 One recorded exception applies to the same rule in both contracts, decided
 before the 1.0 contract freeze (#134): the `lint` result's `rules` member
 lists only each rule's `id` and `effectiveSeverity` (#431). Full rule
-metadata — summary, rationale, documentation, known limits, evidence, tags —
-is served once by `lintRules`.
+metadata, meaning summary, rationale, documentation, known limits, evidence,
+and tags, is served once by `lintRules`.
 
 ADR-0020 records a second pre-freeze exception (#472): `sources` is optional
 on `validateEditTransaction` and `semanticRename` rather than required, so

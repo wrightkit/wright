@@ -33,7 +33,7 @@ Readiness depends on the workflow:
 - agent/native-tool readiness requires semantic equivalence with the underlying Wright contract, discoverable project setup for supported harnesses, and representative workflow evidence for task effectiveness and context/tool overhead; shipping a transport adapter alone is not sufficient.
 - language-service readiness requires correct document lifecycle/current-buffer behavior and advertises only editor capabilities backed by the owning implementation; agent-native tools do not substitute for editor document synchronization.
 
-Compatibility is capability-specific. Observable semantic correctness is always required. Source-language compilation additionally converges structurally on the established upstream compiler output (WrightKit `docs/goal.md` principle 7); the owning language engine implements and tests that contract, and Wright consumes it rather than redefining it.
+Compatibility is capability-specific. Observable semantic correctness is always required. Source-language compilation also converges structurally on the established upstream compiler output (WrightKit `docs/goal.md` principle 7); the owning language engine implements and tests that contract, and Wright consumes it rather than redefining it.
 
 ## Source transformation
 
@@ -73,9 +73,9 @@ The durable dependency order is:
 
 At the ecosystem level:
 
-1. **Engine readiness** — make `workshop-rs`, `opy-rs`, and `deltin-rs` correct for the real workflows their declared scopes depend on.
-2. **Wright convergence** — expose those owner capabilities consistently through check/lint/analyze/inspect/edit/CLI/LSP/provider surfaces without semantic fallbacks.
-3. **Advanced tooling** — expand agent contracts and native-tool integration/bootstrap, richer validated edits, stability/cost analysis, reconstruction/conversion, and additional language-service breadth as their dependencies become ready.
+1. **Engine readiness.** Make `workshop-rs`, `opy-rs`, and `deltin-rs` correct for the real workflows their declared scopes depend on.
+2. **Wright convergence.** Expose those owner capabilities consistently through check/lint/analyze/inspect/edit/CLI/LSP/provider surfaces without semantic fallbacks.
+3. **Advanced tooling.** Expand agent contracts and native-tool integration/bootstrap, richer validated edits, stability/cost analysis, reconstruction/conversion, and additional language-service breadth as their dependencies become ready.
 
 This is dependency-driven, not a rigid release-phase sequence. Higher-level work may proceed earlier when its actual prerequisites already exist.
 

@@ -9,14 +9,14 @@ Wright itself manages: a standalone installation and the first-party
 providers recorded in Wright's provider store. It is not a compiler
 workflow, so it is text-only and produces no `wright-result/v1` envelope.
 
-* `wright update`: update every Wright-managed target — the standalone
+* `wright update`: update every Wright-managed target: the standalone
   installation, plus already-installed first-party providers. It never
   installs providers that are not already installed, and a skipped or failed
   target does not block the remaining ones.
 * `wright update --check`: resolve the same targets and report available
   updates without modifying anything.
 * `wright update self [--check] [--version <VERSION>]`: update only the
-  standalone installation through the R2 release distribution — the same
+  standalone installation through the R2 release distribution, the same
   `latest/version` pointer and immutable `releases/<version>/` archive and
   checksum routes the canonical installers consume (see
   `docs/release.md`). The checksum is verified before anything is replaced,
@@ -29,7 +29,7 @@ workflow, so it is text-only and produces no `wright-result/v1` envelope.
 * `wright update provider <NAME> [--check] [--version <VERSION>]`: install or
   update the named first-party provider (currently `opy`). Provider updates
   come from the provider release channel and are checksum-verified; a bare
-  update keeps an installation that is already at — or newer than — the
+  update keeps an installation that is already at or newer than the
   resolved release, and an explicit `--version` is the only downgrade path.
 
 Supported self-update platforms mirror `install.sh`: Linux x86_64 and macOS

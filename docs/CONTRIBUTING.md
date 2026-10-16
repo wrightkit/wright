@@ -39,7 +39,7 @@ cargo +1.85.0 test --workspace --all-targets --all-features
 
 The workspace lint baseline in [`Cargo.toml`](../Cargo.toml) is intentionally
 small. `rustc`/`rustfmt` and the normal Clippy defaults continue to own
-mechanical style; the workspace additionally denies unsafe operations that are
+mechanical style; the workspace also denies unsafe operations that are
 not explicitly scoped, unreachable public items, correctness/suspicious
 Clippy findings, and unfinished development macros. Performance findings stay
 warning-level locally and are errors in the CI commands above. The policy does

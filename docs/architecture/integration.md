@@ -50,11 +50,11 @@ A temporary adapter representation may exist during migration, but its current s
 
 Classify the owner before changing code:
 
-- OPY syntax/preprocessing/semantic/compiler/reconstruction gap → `opy-rs`;
-- DEL/OSTW project/type/runtime/compiler/reconstruction gap → `deltin-rs`;
-- canonical Workshop parser/WIR/catalog/settings/localization/validation/emission gap → `workshop-rs`;
-- LPP framing/version/conformance gap → `language-provider-protocol`;
-- Wright orchestration, lint/analysis/edit/agent/CI/LSP/presentation integration gap → Wright.
+- OPY syntax/preprocessing/semantic/compiler/reconstruction gap: `opy-rs`;
+- DEL/OSTW project/type/runtime/compiler/reconstruction gap: `deltin-rs`;
+- canonical Workshop parser/WIR/catalog/settings/localization/validation/emission gap: `workshop-rs`;
+- LPP framing/version/conformance gap: `language-provider-protocol`;
+- Wright orchestration, lint/analysis/edit/agent/CI/LSP/presentation integration gap: Wright.
 
 If the owner implementation is correct but Wright misuses or loses its contract, fix Wright. If the owner capability does not exist, do not fabricate it in the integration layer.
 

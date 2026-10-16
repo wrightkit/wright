@@ -1,4 +1,4 @@
-# Architecture Decision Records
+# Architecture decision records
 
 ADRs record point-in-time decisions that affected Wright's observable product/compiler contract or component boundaries. They preserve rationale and consequences; they are not a database of current implementation reality.
 

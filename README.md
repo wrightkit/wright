@@ -8,14 +8,14 @@ Wright is the developer CLI for Overwatch Workshop projects. It checks, lints,
 analyzes, inspects, and safely edits Workshop code, for people and for coding
 agents.
 
-- **Diagnostics and lint** — deterministic `check` and `lint` results.
-- **Cost and risk analysis** — Workshop element cost, hotspots, and server-load
+- **Diagnostics and lint.** Deterministic `check` and `lint` results.
+- **Cost and risk analysis.** Workshop element cost, hotspots, and server-load
   risk indicators, each labeled exact, static, or heuristic.
-- **Semantic queries** — symbols, references, control flow, call graph, cost.
-- **Validated edits** — renames that preview a diff before writing.
-- **Agent and editor integration** — `wright serve` (JSON-RPC and MCP) and
+- **Semantic queries.** Symbols, references, control flow, call graph, cost.
+- **Validated edits.** Renames that preview a diff before writing.
+- **Agent and editor integration.** `wright serve` (JSON-RPC and MCP) and
   `wright-lsp`.
-- **CI-friendly output** — JSON reports and GitHub Actions annotations.
+- **CI-friendly output.** JSON reports and GitHub Actions annotations.
 
 ## Language support
 

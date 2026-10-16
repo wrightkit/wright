@@ -1,4 +1,4 @@
-# Wright Tooling Contract
+# Wright tooling contract
 
 Wright owns cross-language product tooling over semantic information supplied by the owning implementations and canonical Workshop.
 
@@ -49,7 +49,7 @@ re-check / re-analyze
 
 Normal source tooling does not require full-file regeneration. Preserve comments/trivia/formatting/unchanged structure where practical. Unsupported or unsafe edits fail explicitly; do not silently degrade to textual search/replace when semantic correctness is required.
 
-For raw Workshop input this model runs through `workshop-rs` itself (#434): `validateEditTransaction` applies a caller's transaction to the current sources and reparses/revalidates the edited project, and `semanticRename` resolves a symbol- or position-addressed target against the loaded program's semantic index and rewrites exactly the identifier spans the parsed program records — never a textual search. `wright rename <NAME> <NEW_NAME> [INPUT]` exposes the same validated rename to users (a diff by default, an atomic write with `--write`). OPY and other source languages remain provider-owned edit surfaces: the raw operations refuse them by naming the `providerValidateEdit`/`providerSemanticRename` operations rather than guessing at source semantics Wright does not own.
+For raw Workshop input this model runs through `workshop-rs` itself (#434): `validateEditTransaction` applies a caller's transaction to the current sources and reparses/revalidates the edited project, and `semanticRename` resolves a symbol- or position-addressed target against the loaded program's semantic index and rewrites exactly the identifier spans the parsed program records, never a textual search. `wright rename <NAME> <NEW_NAME> [INPUT]` exposes the same validated rename to users (a diff by default, an atomic write with `--write`). OPY and other source languages remain provider-owned edit surfaces: the raw operations refuse them by naming the `providerValidateEdit`/`providerSemanticRename` operations rather than guessing at source semantics Wright does not own.
 
 ## Shared services
 
@@ -67,6 +67,6 @@ Rules must distinguish exact semantic facts, static metrics, heuristics, and run
 
 Wright owns the product UX, not the source-language compiler semantics.
 
-Source→Workshop combines source-owner semantics/lowering with `workshop-rs` canonical validation/emission. Workshop→OPY/DEL reconstruction belongs to the respective source implementation. Direct OPY↔DEL translation is optional and should not drive architecture for symmetry.
+Source-to-Workshop combines source-owner semantics/lowering with `workshop-rs` canonical validation/emission. Workshop-to-OPY/DEL reconstruction belongs to the respective source implementation. Direct translation between OPY and DEL is optional and should not drive architecture for symmetry.
 
 A command may exist before every source construct is supported; capability claims must follow owner + integration evidence.

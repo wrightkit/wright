@@ -1,4 +1,4 @@
-# Wright Release Process and Distribution Contract
+# Wright release process and distribution contract
 
 Status: accepted baseline (release automation and distribution contract)
 Scope: release artifact packaging, validation gates, version stamping, and
@@ -83,7 +83,7 @@ explicitly sets `publish = false`, so Cargo package publication cannot become
 an accidental release surface. A failed publication can be rerun for the same
 tag: the release commit is checked for exact identity, while R2 versioned
 objects are reused only when their bytes match. A publication cancelled after
-R2 staging — for example by a package-manifest or GitHub Release failure —
+R2 staging, for example by a package-manifest or GitHub Release failure,
 can leave those verified immutable objects public; they are inert because the
 version pointer never advanced and nothing references them, and a retry
 byte-checks rather than republishes them.
@@ -342,7 +342,7 @@ user `PATH` update instruction. Its functional behavior is covered by
 
 
 Standalone installations are also updatable in place: `wright update`
-consumes the same R2 distribution contract as the installers — it resolves
+consumes the same R2 distribution contract as the installers. It resolves
 the latest stable version from `wright/latest/version` and downloads the
 immutable `wright/releases/<version>/` archive and checksum (no `install.sh`
 re-execution, no second build path, no GitHub API dependency), verifies the

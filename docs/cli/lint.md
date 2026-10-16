@@ -26,10 +26,10 @@ the served session's lint policy identically, so `lint`/`lintRules` over
 stdio, JSON-RPC, or MCP report the same effective enablement, severity,
 options, and findings as the equivalent `wright lint` invocation.
 
-`lint`, `check`, and `analyze` additionally share the finding-selection
+`lint`, `check`, and `analyze` also share the finding-selection
 options (#430). They narrow the *reported* findings/diagnostics through the
-shared `wright-driver` selection — the same model the agent `findings`,
-`lint`, and `costEstimate` operations expose — and never change the verdict
+shared `wright-driver` selection, the same model the agent `findings`,
+`lint`, and `costEstimate` operations expose, and never change the verdict
 or the exit code, which always reflect the complete set:
 
 * `--severity <error|warning|info>`: report findings at or above a severity
@@ -38,13 +38,13 @@ or the exit code, which always reflect the complete set:
   is a usage error (exit 2), never a silent empty result.
 * `--file <PATH>`: report findings located in one source file. The reported
   `span.path` spelling differs per surface (root-relative findings,
-  cwd-relative diagnostics), so any spelling that resolves to the same file —
-  as passed, root-relative, or absolute — selects it.
+  cwd-relative diagnostics), so any spelling that resolves to the same file,
+  whether as passed, root-relative, or absolute, selects it.
 * `--max <N>`: report at most N findings.
 
 When `max` drops findings, the result reports how many were withheld: the
-JSON envelope adds `selection` — `{"total": <findings before selection>,
-"withheld": <dropped by --max>}` — beside the filtered `findings`/`diagnostics`
+JSON envelope adds a `selection` member `{"total": <findings before selection>,
+"withheld": <dropped by --max>}` beside the filtered `findings`/`diagnostics`
 arrays, and text output prints a `... N finding(s) withheld` line. The verdict
 metadata keeps reporting the true total (for example `10 finding(s) across
 6 rule(s)`), so a selected result is never presented as complete.
@@ -52,8 +52,8 @@ metadata keeps reporting the true total (for example `10 finding(s) across
 On the terminal/plain text surface the lint report follows the human-first
 hierarchy: the verdict leads with finding counts by severity (for
 example `1 error(s), 9 warning(s) across 6 rule(s)`), findings render in
-action order — errors before warnings before informational findings, stable
-within a severity — and each entry leads with severity, rule id, and message,
+action order, errors before warnings before informational findings and stable
+within a severity, and each entry leads with severity, rule id, and message,
 then a `--> path:line:col` location, then a one-line source frame when the
 reported path resolves to a readable file. Evidence class and boundedness
 trail dimmed under the entry as secondary metadata. Pseudo-path spans
@@ -84,7 +84,7 @@ any condition.
 The `lint` result envelope carries `input_identity` (the SHA-256 source
 identity; the tool/agent API exposes the same value as `inputIdentity`),
 `program`, `rules`, `config`, `findings`, and `skipped`. `rules` lists each
-registered rule's stable `id` and `effectiveSeverity` — enough to interpret a
+registered rule's stable `id` and `effectiveSeverity`, enough to interpret a
 finding's `code` and `severity`. Full rule metadata (summary, rationale,
 documentation, known limits, evidence class, tags) is served once by the
 `lintRules` agent operation rather than inlined into every `lint` result
@@ -139,7 +139,7 @@ The core workflows have separate contracts:
   measurements and the largest condition trees), performance/stability risk
   indicators, persistent-object facts, and ranked cross-cutting variables.
   Labels distinguish exact measurements (`[exact]`), static facts
-  (`[static]`), and heuristic rankings or indicators (`heuristic`) — nothing
+  (`[static]`), and heuristic rankings or indicators (`heuristic`). Nothing
   in the report claims measured runtime cost or behavior. The `risks` facts
   narrow registry findings to rules that declare a `performance` or
   `stability` tag, keeping each finding's evidence class; correctness
@@ -161,7 +161,7 @@ program file registry. The same source location therefore reports the same
 of how the input was spelled (absolute, relative, or cwd-relative); stdin
 inputs report `<stdin>`.
 
-`while-without-wait` findings additionally carry a machine-readable
+`while-without-wait` findings also carry a machine-readable
 `boundedness` field (`obviously-unbounded` | `statically-bounded` | `unknown`)
 classifying the no-yield loop's repetition evidence, and their severity is
 derived from that evidence class: `warning` for an obviously unbounded or
@@ -180,7 +180,7 @@ Non-`while-without-wait` findings carry `"boundedness": null`.
 ## Validated automated fixes (#556)
 
 An `exact`-evidence finding whose correction is mechanically unambiguous
-carries a `fix` member — on `lint` findings and on the agent `findings`/`lint`
+carries a `fix` member on `lint` findings and on the agent `findings`/`lint`
 operations identically:
 
 ```json
@@ -196,9 +196,9 @@ operations identically:
 
 `fix.transaction` is the same `EditTransaction` `semanticRename` produces:
 the agent path previews it through `validateEditTransaction` and applies it
-through the caller's own write path — there is no separate fix operation.
+through the caller's own write path. There is no separate fix operation.
 On the CLI, `wright lint --fix` renders each offered fix's validated diff,
-and `wright lint --fix --write` applies fixes one at a time — reloading and
+and `wright lint --fix --write` applies fixes one at a time, reloading and
 re-linting after each write so every fix is planned and validated against
 the source version it edits. `--write` requires `--fix` and a path-based
 input. When `--fix` runs, the result
@@ -208,32 +208,32 @@ or `refused`), its `preview`, and any refusal `diagnostics`.
 The current fixable rules and their corrections:
 
 * `duplicate-condition` (`remove-dead-branch`): delete the unreachable
-  `Else If` branch — the marker and its body, through the next `Else If`,
+  `Else If` branch: the marker and its body, through the next `Else If`,
   `Else`, or `End` marker. The fix is withheld when the repeated condition
-  can evaluate differently inside one synchronous pass — calls evaluated
-  fresh per call rather than read from the tick snapshot (random numbers,
-  advancing clocks, sampled server-load metrics): the branch may be
+  can evaluate differently inside one synchronous pass, as with calls
+  evaluated fresh per call rather than read from the tick snapshot (random
+  numbers, advancing clocks, sampled server-load metrics): the branch may be
   reachable after all.
 * `repeated-value` (`evaluate-once`): mark each duplicated occurrence with
-  `Evaluate Once`. Occurrences the engine re-evaluates — the loop's own
+  `Evaluate Once`. The engine re-evaluates some occurrences: the loop's own
   `While` condition, `Wait Until` and `Loop If` conditions, `Update Every
   Frame` subtrees, and parameters a persistent-object action's
-  reevaluation mode keeps live — are never wrapped; the mode's coverage is
+  reevaluation mode keeps live. Those are never wrapped; the mode's coverage is
   catalog-pinned per parameter, so an argument the selected member does
   not re-evaluate still wraps. When more than one occurrence must stay
   live the family carries no fix, because a partial wrap would leave the
   finding standing. `Evaluate Once` is the ecosystem idiom for an
   acknowledged repeated evaluation: at positions the engine already
-  evaluates once per action it changes nothing — the fix retires the
-  finding by marking the duplication as intentional, it does not reduce
+  evaluates once per action it changes nothing. The fix retires the
+  finding by marking the duplication as intentional; it does not reduce
   the evaluation count.
 
 Every offered fix edits only the reported spans, carries the input identity
-as a precondition, and is validated before any write — a raw Workshop fix
+as a precondition, and is validated before any write. A raw Workshop fix
 reparses the edited source, while a provider-mapped fix goes through the
 provider's own edit validation and project check. A stale or malformed
 precondition refuses with `edit-stale-source` (or the real diagnostic) and
 writes nothing. Provider-backed findings carry a `fix` when their source
-map records authored positions — a mapped `duplicate-condition` edits the
+map records authored positions. A mapped `duplicate-condition` edits the
 authored `elif`/`else` chain directly; unmapped provider artifacts have
 spans in generated text and carry no `fix`.

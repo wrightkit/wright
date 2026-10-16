@@ -1,4 +1,4 @@
-# Wright Agent Team Contract
+# Wright agent team contract
 
 Status: active repository contract
 Scope: multi-agent role governance, decision authority, workflow states,
@@ -129,7 +129,7 @@ The body contains these sections:
 - Q-001 [product|architecture|verification]: <question and owner>, if any
 ```
 
-### Spec Lifecycle
+### Spec lifecycle
 
 1. **Creation**: Created under `docs/specs/` by PM when multi-role coordination
    is needed.

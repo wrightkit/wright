@@ -1,6 +1,6 @@
-# Wright Language Services and LSP
+# Wright language services and LSP
 
-Status: current scope — document synchronization, diagnostics, raw
+Status: current scope, covering document synchronization, diagnostics, raw
 Workshop hover/definition/references, and provider-backed rename
 Scope: editor-neutral language services (`wright-language`) and the thin LSP
 adapter (`wright-lsp`)
@@ -35,7 +35,7 @@ analyzer contracts.
 
 The `initialize` result advertises `textDocumentSync`, the UTF-16 position
 encoding, and `hoverProvider`/`definitionProvider`/`referencesProvider`
-unconditionally — they are backed for raw Workshop documents — plus
+unconditionally, since they are backed for raw Workshop documents, plus
 `renameProvider` when the client negotiates
 `workspace.workspaceEdit.documentChanges` (applied renames are returned as
 versioned `TextDocumentEdit`s, and a client that cannot receive the
@@ -47,8 +47,8 @@ response and the server keeps running, as does a semantic request on a
 document that is not raw Workshop.
 
 Diagnostics: opening or changing a raw Workshop document publishes the same
-diagnostics `wright check` reports for the buffer text — code, severity,
-and span carried through, an empty list for a clean buffer (#555). Opening
+diagnostics `wright check` reports for the buffer text, with code, severity,
+and span carried through and an empty list for a clean buffer (#555). Opening
 a source-language document (`.opy`, `.del`, `.ostw`) publishes an explicit
 `source-provider-unavailable` error while no provider language-service
 capability is negotiated. A document that is neither publishes no
@@ -59,9 +59,9 @@ provider-owned mutation path as the CLI and agent surfaces (#156): the
 provider computes edits over the open document set (only the provider can
 compute project membership, so the set stays language-wide), Wright verifies
 document versions and source preconditions, asks the provider to validate
-the transaction, and rechecks the edited project — with the check verdict
+the transaction, and rechecks the edited project, with the check verdict
 scoped to the documents the provider actually edited plus the position
-document, so an unrelated open document cannot block a valid rename — before
+document so an unrelated open document cannot block a valid rename, before
 returning anything. A successful rename answers with versioned
 `WorkspaceEdit.documentChanges`: each `TextDocumentEdit` carries the
 document version the provider computed and Wright re-validated, so the
@@ -73,13 +73,13 @@ advertisement, and their rename requests are refused
 (`rename-unsupported-document`), unopen documents
 (`rename-unknown-document`), unconfigured providers, and provider or
 validation refusals answer with a `RequestFailed` error whose
-`error.data.code` carries the structured refusal code — there is no textual
+`error.data.code` carries the structured refusal code. There is no textual
 search/replace fallback. `--opy-provider <PATH>` points the session at an
 explicit OPY provider executable; by default the resolver locates or
 downloads the released provider like the CLI does.
 
-For source-language documents, editor capabilities beyond rename — hover,
-definition, references, completion, and semantic tokens — are future work
+For source-language documents, editor capabilities beyond rename, namely
+hover, definition, references, completion, and semantic tokens, are future work
 tracked under #156 and the owning implementations (for example `opy-rs`
 language-service capabilities). They arrive through provider capability
 negotiation, not through Wright-side reimplementation or static fallbacks;
@@ -89,7 +89,7 @@ a source-language document answers `null` to hover/definition/references.
 
 ADR-0023 scoped raw Workshop to diagnostics, hover, definition, and
 references for Wright 1.0. The service recognizes a raw Workshop document
-by the editor's `workshop` language id, or — untagged — by a Workshop
+by the editor's `workshop` language id, or, when untagged, by a Workshop
 extension `wright check` accepts (`.txt`, `.ow`, `.ws`, `.workshop`); a
 source-language extension or an explicit non-Workshop language id stays
 out of this path.
@@ -99,7 +99,7 @@ pipeline the CLI runs (`InputSpec::Text` carries the buffer under the
 document's file identity, so an unsaved file still resolves), and answers
 from the canonical `SemanticIndex` `wright inspect` serves:
 
-- diagnostics are `check`'s diagnostics verbatim — code, severity, and
+- diagnostics are `check`'s diagnostics verbatim: code, severity, and
   span, at the buffer's document version;
 - hover names the resolved symbol as `` `kind name` `` over the identifier
   occurrence that matched;
@@ -121,12 +121,12 @@ protocol boundary.
   the host reports one.
 * `DocumentStore`: open/change/close lifecycle with version bumping.
 * Positions and ranges are 0-based editor conventions; the service converts to
-  the compiler's 1-based spans at the boundary. UTF-16 ↔ character conversion
+  the compiler's 1-based spans at the boundary. UTF-16/character conversion
   is centralized in `wright_language::document` (`utf16_offset_to_char`,
   `char_offset_to_utf16`, `span_to_range`) and is the
   only path that consumes or emits editor positions; no UTF-16 offset is ever
   used as a byte index.
-* File URI ↔ filesystem path conversion is centralized in
+* File URI/filesystem path conversion is centralized in
   `wright_language::document` (`uri_to_path`, `path_to_uri`) using the
   standard URL parser, covering percent-encoding, spaces, Unicode filenames,
   and platform drive paths.
@@ -170,7 +170,7 @@ The service produces source-aware `SourceDiagnostic`s. Raw Workshop
 documents publish the session `check` diagnostics for the buffer text
 (#555); source-language documents publish the explicit
 `source-provider-unavailable` refusal, which marks where a negotiated
-provider capability would attach — it is never a static fallback result.
+provider capability would attach. It is never a static fallback result.
 
 ## DEL/OSTW documents (#120)
 
@@ -180,8 +180,8 @@ service reports `source-provider-unavailable` as a structured source error
 for these documents. It never invokes an upstream compiler or a removed
 Wright implementation as a fallback.
 
-Workshop → OPY reconstruction is available only when the provider negotiates
-`reconstruct`; Workshop → OSTW is refused at the provider boundary until a
+Workshop-to-OPY reconstruction is available only when the provider negotiates
+`reconstruct`; Workshop-to-OSTW is refused at the provider boundary until a
 provider is configured.
 
 ## LSP adapter

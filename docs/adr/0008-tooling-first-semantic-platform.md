@@ -114,13 +114,13 @@ Workshop is the interoperability hub.
 
 Required long-term capabilities:
 
-- OPY → Workshop;
-- OSTW → Workshop;
-- Workshop → OPY;
-- Workshop → OSTW;
-- Workshop → Workshop.
+- OPY to Workshop;
+- OSTW to Workshop;
+- Workshop to OPY;
+- Workshop to OSTW;
+- Workshop to Workshop.
 
-Direct OPY ↔ OSTW source conversion is optional and must not drive the core
+Direct source conversion between OPY and OSTW is optional and must not drive the core
 architecture prematurely.
 
 ### 7. Source-edit model

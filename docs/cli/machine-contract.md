@@ -73,8 +73,8 @@ Diagnostic codes are stable per stage: `parse-error`, `unknown-*`,
 `stdin-*` (discovery), `output-exists` / `output-is-input` / `output-declined` / `output-unnamed` (discovery, compile destination), `output-io` and the compile-time client-import
 diagnostics `target-element-limit` / `element-count-unavailable` (emission),
 analysis findings reuse the
-analyzer's codes — including the name-addressing refusals `unknown-symbol`,
-`ambiguous-symbol`, `unknown-rule`, and `ambiguous-rule` (#429) — and
+analyzer's codes, including the name-addressing refusals `unknown-symbol`,
+`ambiguous-symbol`, `unknown-rule`, and `ambiguous-rule` (#429), and
 `*-internal` / `*-unavailable` (internal).
 `source-provider-unavailable` marks the explicit DEL/OSTW provider boundary
 and is reported at the internal stage. Provider failures keep the
@@ -84,7 +84,7 @@ mutation results alike: an LPP refusal is
 `provider-refusal-<refusalCode>` (a Wright-originated refusal keeps its own
 code, e.g. `session-config-changed`), a capability gap is
 `capability-unavailable`, and transport/process failures keep their
-`provider-*` codes — a consumer classifies the failure from `code`/`stage`
+`provider-*` codes, so a consumer classifies the failure from `code`/`stage`
 without parsing `message` (#569, #570). Provider-edit mutation results also
 carry the refusal's `refusalCode` or the failure's typed code verbatim in
 `provider_code`.
@@ -118,10 +118,9 @@ Recorded exceptions apply before the 1.0 contract freeze (#134).
 results with essential defaults, removes `brief`, adds `all`, and makes JSON
 compact without bumping the contract id. The earlier exception remains:
 the `lint` result's `rules` member lists only each rule's `id` and
-`effectiveSeverity` (#431). Full rule metadata — summary, rationale,
-documentation, known limits, evidence, tags — is served once by the
-`lintRules` agent operation instead of being inlined into every `lint`
-result.
+`effectiveSeverity` (#431). `lintRules` serves the full rule metadata once,
+covering summary, rationale, documentation, known limits, evidence, and tags,
+instead of inlining it into every `lint` result.
 
 ## Determinism
 
