@@ -668,7 +668,8 @@ fn only_the_terminal_renderer_draws_the_rail() {
     let terminal = String::from_utf8_lossy(&terminal.stdout).into_owned();
     assert!(terminal.contains('╭'), "{terminal}");
 
-    let undecorated: [(&[&str], &[(&str, &str)]); 5] = [
+    type Env<'a> = &'a [(&'a str, &'a str)];
+    let undecorated: [(&[&str], Env); 5] = [
         (&["--renderer", "plain"], &[]),
         (&[], &[]),
         (&[], &[("CI", "true")]),
