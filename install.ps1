@@ -20,10 +20,15 @@ function Resolve-Setting([string]$Value, [string]$EnvironmentName, [string]$Defa
 }
 
 # Windows PowerShell 5.1 on older .NET Framework releases negotiates only
-# TLS versions the release endpoints no longer accept; allow TLS 1.2 as well.
+# TLS versions the release endpoints no longer accept; allow TLS 1.2 as well,
+# and TLS 1.3 where the .NET Framework exposes it (Tls13 is absent before
+# .NET 4.8-era enum support, so resolve it by name rather than hard-fail).
 if ($PSVersionTable.PSVersion.Major -lt 6) {
-    [Net.ServicePointManager]::SecurityProtocol =
-        [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    $protocols = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    if ([Enum]::GetNames([Net.SecurityProtocolType]) -contains "Tls13") {
+        $protocols = $protocols -bor [Enum]::Parse([Net.SecurityProtocolType], "Tls13")
+    }
+    [Net.ServicePointManager]::SecurityProtocol = $protocols
 }
 
 function Get-RemoteFile([string]$Uri, [string]$Destination) {
