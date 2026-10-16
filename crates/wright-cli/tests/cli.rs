@@ -654,6 +654,36 @@ fn terminal_renderer_marks_lint_findings_and_keeps_compact_results_flat() {
 }
 
 #[test]
+fn terminal_renderer_never_leaks_rail_markers() {
+    // An artifact-stream command prints its diagnostics outside the framed
+    // report (#718); no internal marker byte may reach either stream, for
+    // any decorated shape.
+    let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
+    let path = path.to_str().unwrap();
+    let invocations: [&[&str]; 4] = [
+        &["convert", "--target", "opy", path],
+        &["check", path],
+        &["lint", path],
+        &["analyze", path],
+    ];
+    for args in invocations {
+        let mut args = args.to_vec();
+        args.extend(["--renderer", "terminal", "--color", "never"]);
+        let output = run(&args);
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            !text.contains(['\u{1}', '\u{2}', '\u{3}']),
+            "{args:?} leaked a rail marker: {text:?}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(std::path::Path::new(path).parent().unwrap());
+}
+
+#[test]
 fn terminal_renderer_marks_analyze_risks_and_cfg_blocks() {
     let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
     let output = run(&[

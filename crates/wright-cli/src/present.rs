@@ -312,8 +312,9 @@ pub(crate) struct RenderContext<'a> {
 }
 
 /// The terminal renderer captures the whole report and frames it on one
-/// rail (#718); an artifact stream is the payload itself and prints
-/// directly.
+/// rail (#718). An artifact stream is the payload itself and prints
+/// directly, so its diagnostics keep the flat layout instead of carrying
+/// rail markers nothing would frame.
 fn render_text<T: serde::Serialize + ResultPresentation>(
     envelope: &Envelope<T>,
     pres: Presentation,
@@ -324,6 +325,12 @@ fn render_text<T: serde::Serialize + ResultPresentation>(
     if pres.renderer == Renderer::Terminal && !envelope.result.is_artifact_stream() {
         let lines = rail::capture(|| render_report(envelope, pres, elapsed, source_base, subject));
         rail::emit(rail::frame(lines, pres.color));
+    } else if pres.renderer == Renderer::Terminal {
+        let flat = Presentation {
+            renderer: Renderer::Plain,
+            ..pres
+        };
+        render_report(envelope, flat, elapsed, source_base, subject);
     } else {
         render_report(envelope, pres, elapsed, source_base, subject);
     }
