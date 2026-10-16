@@ -968,6 +968,119 @@ fn disabled_conditions_are_excluded_from_ongoing_gate_counts() {
     );
 }
 
+// #713: `nested-binder-lambda` reports a binder call (`filteredArray`,
+// `sortedArray`, `mappedArray`, `isTrueForAll`, `isTrueForAny`) inside
+// another binder's per-element argument — the structural signature
+// measured on the client-rejected Bastion builds. The flat idioms in the
+// accepted builds produce no findings.
+const NESTED_BINDERS: &str = r#"
+variables {
+    global:
+        0: pool
+        1: flag
+}
+rule ("nested binders") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        Set Global Variable(pool, Filtered Array(All Players(Team 1), Is True For All(Array(Is Alive(Current Array Element), Compare(Hero Of(Current Array Element), ==, Hero(Ana))), Current Array Element)));
+        Set Global Variable(flag, Filtered Array(All Players(Team 1), Compare(Filtered Array(All Players(Team 2), Is Alive(Current Array Element)), !=, Empty Array)));
+        Set Global Variable(pool, Filtered Array(Filtered Array(All Players(Team 1), Is Alive(Current Array Element)), Compare(Current Array Element, !=, Null)));
+        Set Global Variable(flag, Is True For All(Array(Is Alive(Event Player), Compare(Hero Of(Event Player), ==, Hero(Ana))), Current Array Element));
+    }
+}
+"#;
+
+#[test]
+fn binder_nested_in_binder_lambda_reports_the_inner_call() {
+    let service = workshop_service_from_text(NESTED_BINDERS);
+    let findings = query(&service, serde_json::json!({"op": "getFindings"}));
+    let findings = findings.as_array().unwrap();
+    let nested: Vec<_> = findings
+        .iter()
+        .filter(|finding| finding["code"] == "nested-binder-lambda")
+        .collect();
+    assert_eq!(
+        nested.len(),
+        2,
+        "only the binder calls inside a binder's per-element argument report: {findings:?}"
+    );
+    for finding in &nested {
+        assert_eq!(finding["severity"], "warning");
+        assert_eq!(finding["evidence"], "static-indicator");
+    }
+    let message = nested[0]["message"].as_str().unwrap();
+    assert!(
+        message.contains("isTrueForAll") && message.contains("filteredArray"),
+        "the finding names the inner and enclosing binders: {message}"
+    );
+    assert_eq!(nested[0]["action"], 0);
+    let covered = span_text(NESTED_BINDERS, &nested[0]["span"]);
+    assert!(
+        covered.contains("Is True For All"),
+        "the span locates the inner call: {covered}"
+    );
+    let message = nested[1]["message"].as_str().unwrap();
+    assert!(
+        message.contains("filteredArray"),
+        "a binder inside the lambda of a non-condition argument also reports: {message}"
+    );
+    assert_eq!(nested[1]["action"], 1);
+}
+
+#[test]
+fn binder_nested_in_a_rule_condition_reports() {
+    let source = r#"
+variables {
+    global:
+        0: pool
+}
+rule ("condition nesting") {
+    event {
+        Ongoing - Global;
+    }
+    conditions {
+        Compare(Count Of(Filtered Array(All Players(Team 1), Is True For Any(Array(Is Alive(Current Array Element)), Current Array Element))), >, 0);
+        disabled Compare(Count Of(Filtered Array(All Players(Team 1), Is True For Any(Array(True), Current Array Element))), >, 0);
+    }
+    actions {
+        disabled Set Global Variable(pool, Filtered Array(All Players(Team 1), Is True For All(Array(True), Current Array Element)));
+    }
+}
+"#;
+    let service = workshop_service_from_text(source);
+    let findings = query(&service, serde_json::json!({"op": "getFindings"}));
+    let findings = findings.as_array().unwrap();
+    let nested: Vec<_> = findings
+        .iter()
+        .filter(|finding| finding["code"] == "nested-binder-lambda")
+        .collect();
+    assert_eq!(
+        nested.len(),
+        1,
+        "the live condition reports; the disabled condition and action do not: {findings:?}"
+    );
+    assert!(nested[0]["action"].is_null());
+}
+
+#[test]
+fn nested_binder_lambda_respects_disable() {
+    let catalog = wright_analyzer::catalog::builtin().unwrap();
+    let program =
+        parser::parse_with_context(NESTED_BINDERS, &catalog, &Locale::new("en-US"), &*catalog)
+            .expect("Workshop source parses");
+    let mut config = LintConfig::default();
+    config.disable("nested-binder-lambda");
+    let findings = analyze(&program, &config);
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding.code != "nested-binder-lambda"),
+        "a disabled rule reports nothing: {findings:?}"
+    );
+}
+
 #[test]
 fn workshop_cfg_preserves_branches_and_actions_around_loops() {
     let source = r#"

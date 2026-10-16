@@ -280,7 +280,7 @@ impl Default for LintRegistry {
     /// Build the registry containing the first-party lint rules in their
     /// canonical order: `min-wait-loop`, `duplicate-condition`,
     /// `expensive-loop-check`, `ongoing-condition-hot-path`, `repeated-value`,
-    /// `while-without-wait`.
+    /// `while-without-wait`, `nested-binder-lambda`.
     fn default() -> Self {
         let entries = vec![
             RegistryEntry::Native(RuleMeta {
@@ -442,6 +442,42 @@ impl Default for LintRegistry {
                     "evidence; it is NOT assumed to be unbounded (issue #103).",
                 ),
                 tags: &["performance", "stability"],
+            }),
+            RegistryEntry::Native(RuleMeta {
+                id: "nested-binder-lambda",
+                default_severity: Severity::Warning,
+                evidence: EvidenceClass::StaticIndicator,
+                summary: "element-binding array call nested inside another binder's per-element argument",
+                rationale: "Surface a Workshop shape observed only in client-rejected builds.",
+                documentation: concat!(
+                    "The element-binding values — `filteredArray`, `sortedArray`, ",
+                    "`mappedArray`, `isTrueForAll`, `isTrueForAny` — evaluate every ",
+                    "argument after the first once per array element, binding ",
+                    "`Current Array Element`/`Current Array Index` to that element. ",
+                    "A binder inside that per-element argument creates a nested ",
+                    "binding scope: inside the inner call's own per-element ",
+                    "argument the element values denote the inner array and the ",
+                    "outer element is shadowed. The shape compiles and is ",
+                    "semantically defined, but it is the one structural signature ",
+                    "measured so far that separates client-rejected Workshop builds ",
+                    "from accepted ones: the `OWBastion/Bastion#391`-era build and ",
+                    "the workshop-rs import-limits verbatim reproducer carry it, ",
+                    "and no measured accepted build does (`workshop-rs` ",
+                    "`docs/import-limits.md`; wright issue #713). Whether the ",
+                    "client enforces a structural limit on the shape is unconfirmed; ",
+                    "the finding is an indicator, not an established import boundary.",
+                ),
+                known_limits: concat!(
+                    "The trigger is structurally exact but its impact is indicative: ",
+                    "nested binders are valid Workshop and may be intentional — an ",
+                    "inner aggregation over an unrelated array reads correctly. A ",
+                    "binder in the array-source argument (index 0), e.g. ",
+                    "`Filtered Array(Sorted Array(x, r), c)`, creates no nested ",
+                    "scope and is not reported. The rule names a suspect shape, not ",
+                    "a measured client boundary: no confirmed import depth or ",
+                    "nesting limit exists yet in workshop-rs.",
+                ),
+                tags: &["correctness", "stability"],
             }),
         ];
         Self { entries }
