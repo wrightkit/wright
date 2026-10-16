@@ -100,7 +100,7 @@ report() {
   fi
 }
 
-if grep -Fq 'https://releases.wrightkit.dev/wright' "$INSTALLER"; then
+if grep -Fq 'https://install.wrightkit.dev/wright' "$INSTALLER"; then
   report "namespaced R2 default base" ok
 else
   report "namespaced R2 default base" fail

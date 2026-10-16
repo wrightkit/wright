@@ -18,8 +18,8 @@ function Fail([string]$Message) {
 
 try {
     $InstallerText = Get-Content -LiteralPath $Installer -Raw
-    if ($InstallerText -notmatch 'https://releases\.wrightkit\.dev/wright') {
-        Fail "installer must default to the releases.wrightkit.dev/wright release base"
+    if ($InstallerText -notmatch 'https://install\.wrightkit\.dev/wright') {
+        Fail "installer must default to the install.wrightkit.dev/wright release base"
     }
     if ($InstallerText -match 'WinHttp|Http2|HTTP/2|Add-Type|DllImport') {
         Fail "installer must not embed a custom HTTP transport or negotiate HTTP/2"

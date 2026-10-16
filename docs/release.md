@@ -189,11 +189,11 @@ the scripts.
 Pinned installs use immutable versioned objects:
 
 ```text
-https://releases.wrightkit.dev/wright/releases/<version>/wright-<version>-<target-triple>.<ext>
-https://releases.wrightkit.dev/wright/releases/<version>/wright-<version>-<target-triple>.<ext>.sha256
+https://install.wrightkit.dev/wright/releases/<version>/wright-<version>-<target-triple>.<ext>
+https://install.wrightkit.dev/wright/releases/<version>/wright-<version>-<target-triple>.<ext>.sha256
 ```
 
-Latest installs first read `https://releases.wrightkit.dev/wright/latest/version`,
+Latest installs first read `https://install.wrightkit.dev/wright/latest/version`,
 then download the corresponding version-named archive and checksum from
 `/wright/releases/<version>/`. The release workflow publicly verifies every
 versioned archive/checksum pair and both stable scripts before writing that
