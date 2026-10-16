@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.2](https://github.com/wrightkit/wright/compare/v0.22.1...v0.22.2) (2026-10-16)
+
+
+### Bug Fixes
+
+* **distribution:** drop forced HTTP/2 from the Windows installer ([#715](https://github.com/wrightkit/wright/issues/715)) ([714b197](https://github.com/wrightkit/wright/commit/714b197875c8f09171013d2c419f0702cfa6b180))
+
 ## [0.22.1](https://github.com/wrightkit/wright/compare/v0.22.0...v0.22.1) (2026-10-16)
 
 
