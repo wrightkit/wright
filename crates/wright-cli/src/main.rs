@@ -5,6 +5,7 @@ mod completion;
 mod mcp;
 mod present;
 mod provider;
+mod rail;
 mod serve;
 mod tooldefs;
 mod update;

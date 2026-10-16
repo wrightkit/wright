@@ -114,19 +114,22 @@ source context enters the driver envelope or JSON. Plain output,
 redirected/piped output, `TERM=dumb`, CI, GitHub Actions, and explicit JSON
 rendering remain static and deterministic.
 
-On the terminal renderer only, independent multi-line items are delimited
-with lightweight connectors (#703): each envelope diagnostic, lint finding
-or fix entry, analyze risk item, `inspect cfg` block, and `inspect rules
---content` entry opens with a `├─` branch marker, or `╰─` for the last item,
-and its child lines (locations, source frames, secondary notes, successors,
-statements) hang from a `│` continuation rail aligned under the item's text.
-The connectors separate adjacent blocks without extra framing; they draw dim
-when color is on so severity labels and messages keep prominence. One-line
-items and bare verdicts stay flat. A clean `check` remains two undecorated
-lines. The connector set is a terminal detail: `plain`, GitHub Actions, CI,
-and JSON keep their existing undecorated layout byte-for-byte, and the
-reported findings, verdicts, exit codes, caps, and `--all` expansion are
-identical across renderers.
+On the terminal renderer only, a report with independent multi-line items
+is drawn on one continuous rail (#703, #718). The verdict line opens it with
+`╭─`, every section heading, count, and child line continues it with `│`,
+each item (envelope diagnostic, lint finding or fix entry, analyze risk
+item, `inspect cfg` block, `inspect rules --content` entry) branches off with
+`├─`, and the footer closes it with `╰─`, even when a trailing detail hint follows
+it in the flat layout; a report without a footer ends on a bare `╰─`. A blank rail line separates independent blocks, except
+between a one-line section heading and its first item. Content sits on one
+column, so locations, source frames, and secondary notes align under the item
+text. Rail glyphs draw dim when color is on, so severity labels and messages
+keep prominence. A report with no multi-line item, such as a clean `check`
+(two undecorated lines), stays flat. The rail is a terminal detail: lines keep
+the stdout/stderr stream they use elsewhere, `plain`, GitHub Actions, CI, and
+JSON keep their existing undecorated layout byte-for-byte, and the reported
+findings, verdicts, exit codes, caps, and `--all` expansion are identical
+across renderers.
 
 The `check` report follows a human-first hierarchy (#443) on the
 terminal/plain text surface only: the verdict line leads with the blocking
