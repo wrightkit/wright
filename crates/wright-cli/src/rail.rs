@@ -85,8 +85,7 @@ fn blank(stream: Stream) -> Framed {
 }
 
 /// Draws the rail around a captured report whose first line is the verdict.
-/// The rail closes on the footer when the footer is the last line, and on a
-/// bare `╰─` otherwise. A report without a marked item stays flat: only the
+/// The rail closes on the footer, or on a bare `╰─` when the report has none. A report without a marked item stays flat: only the
 /// footer marker is replaced by its plain indent.
 pub(crate) fn frame(lines: Vec<Line>, color: bool) -> Vec<Line> {
     if !lines.iter().any(|(_, text)| text.starts_with(BRANCH)) {
@@ -97,6 +96,13 @@ pub(crate) fn frame(lines: Vec<Line>, color: bool) -> Vec<Line> {
                 None => (stream, text),
             })
             .collect();
+    }
+    // A footer closes the rail even when a trailing hint follows it in the
+    // flat layout.
+    let mut lines = lines;
+    if let Some(at) = lines.iter().rposition(|(_, text)| text.starts_with(END)) {
+        let footer = lines.remove(at);
+        lines.push(footer);
     }
     let total = lines.len();
     let mut framed: Vec<Framed> = Vec::with_capacity(total * 2);
@@ -115,7 +121,7 @@ pub(crate) fn frame(lines: Vec<Line>, color: bool) -> Vec<Line> {
             }
             framed.push(blank(stream));
         };
-        let footer = text.strip_prefix(END).filter(|_| index + 1 == total);
+        let footer = text.strip_prefix(END);
         if index == 0 {
             framed.push(Framed {
                 stream,
@@ -224,28 +230,38 @@ mod tests {
     }
 
     #[test]
-    fn without_a_closing_footer_the_rail_ends_on_a_bare_corner() {
+    fn a_footer_closes_the_rail_even_when_a_hint_follows_it() {
         let framed = frame(
             lines(&[
-                "ERROR analyze",
+                "WARN lint",
                 &format!("{BRANCH}one"),
-                &format!("{CHILD}  nested"),
-                &format!("{END}not last"),
-                "  trailing",
+                &format!("{END}1 file(s) affected"),
+                "  hint",
             ]),
             false,
         );
         assert_eq!(
             texts(framed),
             [
-                "╭─ ERROR analyze",
+                "╭─ WARN lint",
                 "│",
                 "├─ one",
-                "│    nested",
-                "│  not last",
-                "│  trailing",
-                "╰─",
+                "│  hint",
+                "│",
+                "╰─ 1 file(s) affected",
             ]
+        );
+    }
+
+    #[test]
+    fn without_a_footer_the_rail_ends_on_a_bare_corner() {
+        let framed = frame(
+            lines(&["ERROR analyze", &format!("{BRANCH}one"), "  trailing"]),
+            false,
+        );
+        assert_eq!(
+            texts(framed),
+            ["╭─ ERROR analyze", "│", "├─ one", "│  trailing", "╰─"]
         );
     }
 

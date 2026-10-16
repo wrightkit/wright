@@ -119,8 +119,8 @@ is drawn on one continuous rail (#703, #718). The verdict line opens it with
 `╭─`, every section heading, count, and child line continues it with `│`,
 each item (envelope diagnostic, lint finding or fix entry, analyze risk
 item, `inspect cfg` block, `inspect rules --content` entry) branches off with
-`├─`, and the footer closes it with `╰─`; a report without a closing footer
-ends on a bare `╰─`. A blank rail line separates independent blocks, except
+`├─`, and the footer closes it with `╰─`, even when a trailing detail hint follows
+it in the flat layout; a report without a footer ends on a bare `╰─`. A blank rail line separates independent blocks, except
 between a one-line section heading and its first item. Content sits on one
 column, so locations, source frames, and secondary notes align under the item
 text. Rail glyphs draw dim when color is on, so severity labels and messages

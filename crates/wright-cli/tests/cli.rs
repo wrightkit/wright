@@ -631,8 +631,13 @@ fn terminal_renderer_marks_lint_findings_and_keeps_compact_results_flat() {
         "the location hangs under the finding: {stdout}"
     );
     assert!(
-        stdout.ends_with("╰─\n"),
-        "the rail closes after the last line: {stdout}"
+        stdout
+            .trim_end()
+            .rsplit('\n')
+            .next()
+            .unwrap()
+            .starts_with("╰─ "),
+        "the footer closes the rail: {stdout}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 
@@ -651,6 +656,40 @@ fn terminal_renderer_marks_lint_findings_and_keeps_compact_results_flat() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert_eq!(stdout, "PASS check\n  0 diagnostic(s)\n", "{stdout}");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn only_the_terminal_renderer_draws_the_rail() {
+    // The rail is a terminal detail (#718): plain, CI, GitHub Actions, and
+    // JSON keep their undecorated layout for a shape the terminal frames.
+    let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
+    let path = path.to_str().unwrap();
+    let terminal = run(&["lint", path, "--renderer", "terminal", "--color", "never"]);
+    let terminal = String::from_utf8_lossy(&terminal.stdout).into_owned();
+    assert!(terminal.contains('╭'), "{terminal}");
+
+    let undecorated: [(&[&str], &[(&str, &str)]); 5] = [
+        (&["--renderer", "plain"], &[]),
+        (&[], &[]),
+        (&[], &[("CI", "true")]),
+        (&[], &[("GITHUB_ACTIONS", "true")]),
+        (&["--format", "json"], &[]),
+    ];
+    for (flags, env) in undecorated {
+        let mut args = vec!["lint", path];
+        args.extend_from_slice(flags);
+        let output = run_with_env(&args, env);
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            !text.contains(['╭', '├', '╰', '│', '\u{1}', '\u{2}', '\u{3}']),
+            "{flags:?} {env:?} is decorated: {text}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(std::path::Path::new(path).parent().unwrap());
 }
 
 #[test]
