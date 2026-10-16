@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.1](https://github.com/wrightkit/wright/compare/v0.22.0...v0.22.1) (2026-10-16)
+
+
+### Code Refactoring
+
+* strip narrating comments and encode constraints structurally ([#708](https://github.com/wrightkit/wright/issues/708)) ([2b84a6a](https://github.com/wrightkit/wright/commit/2b84a6aebce665dc9080067a5a14bb64d1fe884f))
+
 ## [0.22.0](https://github.com/wrightkit/wright/compare/v0.21.1...v0.22.0) (2026-10-14)
 
 
