@@ -542,9 +542,9 @@ fn check_text_leads_with_verdict_and_blocking_count() {
 
 #[test]
 fn terminal_renderer_marks_independent_diagnostics() {
-    // The terminal layout delimits each diagnostic block with a branch or
-    // end connector so independent findings stay visually separable (#703);
-    // the reported set, order, and content are unchanged.
+    // The terminal layout hangs the whole report on one rail from the
+    // verdict to the footer (#718); the reported set, order, and content
+    // are unchanged.
     let path = temp_file("mixed.txt", MIXED_CHECK_SOURCE);
     let output = run(&[
         "check",
@@ -557,21 +557,30 @@ fn terminal_renderer_marks_independent_diagnostics() {
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("├─ error["), "{stderr}");
-    assert!(stderr.contains("╰─ warning["), "{stderr}");
+    assert!(stderr.contains("├─ warning["), "{stderr}");
     assert!(
-        stderr.contains("│  --> ") && stderr.contains("   --> "),
-        "continuation rails hang under each diagnostic: {stderr}"
+        stderr.contains("│  --> ") && stderr.contains("│  = "),
+        "locations and secondary metadata hang on the rail: {stderr}"
     );
     assert!(
-        stderr.contains("│  = ") && stderr.contains("   = "),
-        "secondary metadata stays inside the block: {stderr}"
+        stderr.contains("│\n├─ warning["),
+        "a blank rail line separates independent diagnostics: {stderr}"
     );
     assert!(
         stderr.contains("Set Global Variable(B, FutureValueThing(2));"),
         "the source context renders inside the rail: {stderr}"
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.starts_with("ERROR check\n"), "{stdout}");
+    assert!(stdout.starts_with("╭─ ERROR check\n│  "), "{stdout}");
+    assert!(
+        stdout
+            .trim_end()
+            .rsplit('\n')
+            .next()
+            .unwrap()
+            .starts_with("╰─ "),
+        "the footer closes the rail: {stdout}"
+    );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -612,19 +621,23 @@ fn terminal_renderer_marks_lint_findings_and_keeps_compact_results_flat() {
     ]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.starts_with("╭─ WARN lint\n"), "{stdout}");
     assert!(
-        stdout.contains("  ╰─ warning["),
-        "the finding block is delimited: {stdout}"
+        stdout.contains("├─ warning["),
+        "the finding block hangs on the rail: {stdout}"
     );
     assert!(
-        stdout.contains("     --> "),
+        stdout.contains("│  --> "),
         "the location hangs under the finding: {stdout}"
+    );
+    assert!(
+        stdout.ends_with("╰─\n"),
+        "the rail closes after the last line: {stdout}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 
-    // A one-finding result still gets its end marker, but a bare verdict
-    // with nothing to group stays flat — no decorative rail is forced onto
-    // compact output.
+    // A bare verdict with nothing to group stays flat — no decorative rail
+    // is forced onto compact output.
     let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
     let output = run(&[
         "check",
@@ -654,9 +667,10 @@ fn terminal_renderer_marks_analyze_risks_and_cfg_blocks() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("  ╰─ warning[min-wait-loop]"),
-        "the risk item is delimited inside its section: {stdout}"
+        stdout.contains("├─ warning[min-wait-loop]"),
+        "the risk item hangs on the rail inside its section: {stdout}"
     );
+    assert!(stdout.ends_with("╰─\n"), "{stdout}");
 
     let output = run(&[
         "inspect",
@@ -670,10 +684,10 @@ fn terminal_renderer_marks_analyze_risks_and_cfg_blocks() {
     ]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("  ├─ block "), "{stdout}");
-    assert!(stdout.contains("  ╰─ block "), "{stdout}");
+    assert!(stdout.starts_with("╭─ PASS cfg\n"), "{stdout}");
+    assert!(stdout.contains("├─ block "), "{stdout}");
     assert!(
-        stdout.contains("  │  -> "),
+        stdout.contains("│  -> "),
         "successors hang under their block: {stdout}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());

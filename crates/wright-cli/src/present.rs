@@ -20,6 +20,7 @@ use wright_driver::result::{
 };
 
 use crate::cli::{ColorArg, CommonArgs, OutputFormatArg, RendererArg};
+use crate::rail::{self, eprintln, println};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct Presentation {
@@ -310,11 +311,29 @@ pub(crate) struct RenderContext<'a> {
     pub(crate) subject: Option<&'a str>,
 }
 
+/// The terminal renderer captures the whole report and frames it on one
+/// rail (#718); an artifact stream is the payload itself and prints
+/// directly.
+fn render_text<T: serde::Serialize + ResultPresentation>(
+    envelope: &Envelope<T>,
+    pres: Presentation,
+    elapsed: Duration,
+    source_base: Option<&Path>,
+    subject: Option<&str>,
+) {
+    if pres.renderer == Renderer::Terminal && !envelope.result.is_artifact_stream() {
+        let lines = rail::capture(|| render_report(envelope, pres, elapsed, source_base, subject));
+        rail::emit(rail::frame(lines, pres.color));
+    } else {
+        render_report(envelope, pres, elapsed, source_base, subject);
+    }
+}
+
 /// The human-first result hierarchy (#443): the verdict leads, blocking
 /// errors come before non-blocking diagnostics, secondary metadata trails
 /// each diagnostic, and execution metadata (affected files, elapsed) closes
 /// the report.
-fn render_text<T: serde::Serialize + ResultPresentation>(
+fn render_report<T: serde::Serialize + ResultPresentation>(
     envelope: &Envelope<T>,
     pres: Presentation,
     elapsed: Duration,
@@ -335,9 +354,8 @@ fn render_text<T: serde::Serialize + ResultPresentation>(
     let diagnostic_total = ordered.len();
     let bounded = !matches!(envelope.command.as_str(), "compile" | "convert" | "rename");
     let limit = if pres.all || !bounded { usize::MAX } else { 20 };
-    let shown = diagnostic_total.min(limit);
-    for (index, diagnostic) in ordered.into_iter().take(limit).enumerate() {
-        let marks = pres.marks(index + 1 == shown);
+    for diagnostic in ordered.into_iter().take(limit) {
+        let marks = pres.marks();
         render_diagnostic(diagnostic, pres.color, &marks);
         // ADR-0021 decision 6: text `check`/`compile` points an agent at
         // `wright lookup` after a rejected-name diagnostic. Owner codes are
@@ -478,7 +496,11 @@ fn render_check_footer<T: serde::Serialize + ResultPresentation>(
         parts.push(format!("{} ms", elapsed.as_millis()));
     }
     if !parts.is_empty() {
-        println!("  {}", dim(&parts.join(" · "), pres.color));
+        println!(
+            "{}{}",
+            pres.footer_head(),
+            dim(&parts.join(" · "), pres.color)
+        );
     }
 }
 
@@ -490,13 +512,12 @@ fn dim(value: &str, color: bool) -> String {
     }
 }
 
-/// The connector pair for one item inside a grouped block (#703): `head`
-/// starts the item's first line and `pad` prefixes each of its child lines,
-/// so every item in a list is visually delimited by a branch (`├─`) or end
-/// (`╰─`) marker with a continuation rail. Only the terminal renderer draws
-/// connectors — plain output keeps its flat deterministic contract, so the
-/// parts collapse to the existing indentation there. Connectors dim with
-/// color on so the severity label and message keep prominence.
+/// The markers for one item inside a grouped block (#703, #718): `head`
+/// starts the item's first line and `pad` prefixes each of its child lines.
+/// The terminal renderer emits the rail's marker characters and leaves the
+/// drawing to `rail::frame`, which sees the whole report; plain output keeps
+/// its flat deterministic contract, so the parts collapse to the existing
+/// indentation there.
 struct Marks {
     head: String,
     pad: String,
@@ -505,34 +526,37 @@ struct Marks {
 impl Presentation {
     /// Marks for a block hung directly under the verdict (envelope
     /// diagnostics).
-    fn marks(&self, last: bool) -> Marks {
-        self.connector(last, "")
+    fn marks(&self) -> Marks {
+        self.connector("")
     }
 
     /// Marks for an item under a section header's two-space indent.
-    fn section_marks(&self, last: bool) -> Marks {
-        self.connector(last, "  ")
+    fn section_marks(&self) -> Marks {
+        self.connector("  ")
     }
 
     /// `base` is the item's own indent; its child lines sit two spaces
-    /// deeper. Terminal connectors draw the marker at `base` and run the
-    /// rail through where the child indent would be, so child content stays
-    /// aligned under the item's text.
-    fn connector(&self, last: bool, base: &str) -> Marks {
+    /// deeper.
+    fn connector(&self, base: &str) -> Marks {
         if self.renderer != Renderer::Terminal {
             return Marks {
                 head: base.to_string(),
                 pad: format!("{base}  "),
             };
         }
-        let (branch, rail) = if last {
-            ("╰─ ", "   ")
-        } else {
-            ("├─ ", "│  ")
-        };
         Marks {
-            head: dim(&format!("{base}{branch}"), self.color),
-            pad: dim(&format!("{base}{rail}"), self.color),
+            head: rail::BRANCH.to_string(),
+            pad: rail::CHILD.to_string(),
+        }
+    }
+
+    /// The prefix of the closing metadata line: the rail's end on the
+    /// terminal, a plain indent elsewhere.
+    fn footer_head(&self) -> &'static str {
+        if self.renderer == Renderer::Terminal {
+            rail::END
+        } else {
+            "  "
         }
     }
 }
@@ -1012,8 +1036,8 @@ impl ResultPresentation for RulesResult {
             println!("  none");
             return;
         }
-        for (index, rule) in rules.iter().enumerate() {
-            let marks = ctx.presentation.section_marks(index + 1 == rules.len());
+        for rule in rules {
+            let marks = ctx.presentation.section_marks();
             let name = rule["name"].as_str().unwrap_or("<unnamed>");
             let event = rule["event"].as_str().unwrap_or("?");
             match rule.get("span").and_then(inline_location) {
@@ -1207,8 +1231,8 @@ impl ResultPresentation for CfgResult {
             self.0["entry"].as_u64().unwrap_or(0),
             self.0["exit"].as_u64().unwrap_or(0)
         );
-        for (index, block) in blocks.iter().enumerate() {
-            let marks = ctx.presentation.section_marks(index + 1 == blocks.len());
+        for block in blocks {
+            let marks = ctx.presentation.section_marks();
             let mut flags = Vec::new();
             if block["waits"].as_bool().unwrap_or(false) {
                 flags.push("waits");
@@ -1704,8 +1728,8 @@ fn render_lint_fixes(result: &LintResult, ctx: &RenderContext<'_>) {
         println!("  none offered");
         return;
     }
-    for (index, fix) in fixes.iter().enumerate() {
-        let marks = ctx.presentation.section_marks(index + 1 == fixes.len());
+    for fix in fixes {
+        let marks = ctx.presentation.section_marks();
         let status = match fix.status {
             wright_driver::result::LintFixStatus::Preview => "fix",
             wright_driver::result::LintFixStatus::Applied => "applied",
@@ -1752,7 +1776,7 @@ fn render_lint(result: &LintResult, ctx: &RenderContext<'_>) {
         {
             end += 1;
         }
-        let marks = ctx.presentation.section_marks(end == findings.len());
+        let marks = ctx.presentation.section_marks();
         render_finding_group(&findings[index..end], ctx, &marks);
         index = end;
     }
@@ -1770,7 +1794,11 @@ fn render_lint(result: &LintResult, ctx: &RenderContext<'_>) {
         .collect();
     let parts = lint_footer_parts(files.len(), array_len(&result.skipped), ctx);
     if !parts.is_empty() {
-        println!("  {}", dim(&parts.join(" · "), ctx.presentation.color));
+        println!(
+            "{}{}",
+            ctx.presentation.footer_head(),
+            dim(&parts.join(" · "), ctx.presentation.color)
+        );
     }
 }
 
@@ -1942,8 +1970,8 @@ fn render_essential_analyze(value: &serde_json::Value, ctx: &RenderContext<'_>) 
         "\nPerformance and stability risks\n  heuristic/static indicators — not measured runtime cost or behavior"
     );
     let risks = value["risks"].as_array().map_or(&[][..], Vec::as_slice);
-    for (index, risk) in risks.iter().enumerate() {
-        let marks = ctx.presentation.section_marks(index + 1 == risks.len());
+    for risk in risks {
+        let marks = ctx.presentation.section_marks();
         println!(
             "{}{}[{}] (evidence: {}): {}",
             marks.head,
@@ -1953,7 +1981,14 @@ fn render_essential_analyze(value: &serde_json::Value, ctx: &RenderContext<'_>) 
             risk["message"].as_str().unwrap_or_default()
         );
         if let Some(span) = finding_location_span(risk) {
-            print_location(&span, &format!("{}  ", marks.pad));
+            // The terminal rail already aligns children under the item text;
+            // plain keeps its deeper hang.
+            let hang = if ctx.presentation.renderer == Renderer::Terminal {
+                ""
+            } else {
+                "  "
+            };
+            print_location(&span, &format!("{}{hang}", marks.pad));
         }
     }
     if count(&value["persistentObjects"], "total") > 0 {
