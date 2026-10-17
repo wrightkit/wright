@@ -25,10 +25,10 @@ fn parse_kind(value: &str) -> Result<SourceKind, String> {
         .ok_or_else(|| "expected one of: auto, opy, ostw, workshop, protocol".to_string())
 }
 
-/// Parse `--profile` against the workflow vocabulary (#593).
+/// Parse `--profile` against the workflow vocabulary (#593); profiles
+/// apply to Workshop input only (ADR-0028, #725).
 fn parse_profile(value: &str) -> Result<wright_driver::Profile, String> {
-    wright_driver::Profile::parse(value)
-        .ok_or_else(|| "expected one of: off, compat, aggressive".to_string())
+    wright_driver::Profile::parse(value).ok_or_else(|| "expected one of: off, compat".to_string())
 }
 
 /// Explicit lint-policy configuration (`--lint-config`, `--rule`,
@@ -123,6 +123,17 @@ pub(crate) fn run(args: ServeArgs) -> ExitCode {
         input: InputSpec::Path(args.input.unwrap_or_else(|| ".".into())),
         ..SessionConfig::default()
     };
+    // Profiles apply to Workshop input only (ADR-0028): with an explicit
+    // `--kind` the combination is a startup usage error; when `--kind auto`
+    // resolves per request, the session's load rejects it the same way.
+    if args.profile != wright_driver::Profile::Off
+        && matches!(args.kind, SourceKind::Opy | SourceKind::Ostw)
+    {
+        eprintln!(
+            "wright: --profile applies to Workshop input only; remove it or pass --kind workshop"
+        );
+        return ExitCode::from(2);
+    }
     // An invalid lint policy is a startup usage error before any request
     // is served — never a silent fallback to the default registry (#594).
     if let Err(message) = args.policy.apply_to(&mut config) {

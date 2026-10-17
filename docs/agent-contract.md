@@ -41,8 +41,10 @@ error (exit 2), never a silently remapped default:
 * `--transport <stdio|jsonrpc|mcp>`: request transport (default `stdio`);
 * `--kind <auto|opy|ostw|workshop|protocol>`: input frontend (default
   `auto`, with the workflow aliases `ws`, `hir`, `json`);
-* `--profile <off|compat|aggressive>`: WIR transformation policy (default
-  `off`);
+* `--profile <off|compat>`: WIR transformation policy (default
+  `off`); applies to Workshop input only — a non-Workshop `--kind`
+  combination is a startup usage error, and a request whose input resolves
+  to OPY or OSTW is refused the same way (ADR-0028, #725);
 * `--locale <LOCALE>`: Workshop client locale override;
 * `--lint-config <PATH>`, `--rule <PATH>`, `--disable-rule <ID>`,
   `--rule-severity <ID>:<SEVERITY>`: explicit lint policy. The session applies

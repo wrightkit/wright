@@ -13,8 +13,6 @@ pub enum Profile {
     /// profile-independent HIR → WIR lowering, never by a profile pass
     /// (#112).
     Compat,
-    /// Experimental marker; in v1 selects the same evidence-backed passes.
-    Aggressive,
 }
 
 impl Profile {
@@ -23,7 +21,6 @@ impl Profile {
         match self {
             Profile::Off => "off",
             Profile::Compat => "compat",
-            Profile::Aggressive => "aggressive",
         }
     }
 
@@ -32,7 +29,6 @@ impl Profile {
         Some(match name {
             "off" => Profile::Off,
             "compat" => Profile::Compat,
-            "aggressive" => Profile::Aggressive,
             _ => return None,
         })
     }

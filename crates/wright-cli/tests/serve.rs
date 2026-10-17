@@ -1587,6 +1587,29 @@ fn accepted_serve_kind_profile_and_transport_values_still_work() {
     assert_eq!(response["result"], default[0]["result"]);
 }
 
+#[test]
+fn serve_rejects_profile_per_request_for_auto_resolved_opy_input() {
+    let input = workspace_root().join("tests/fixtures/opy/basic-rule.opy");
+    let responses = run_lines_with(
+        wright(),
+        &["serve", "--profile", "compat"],
+        &input,
+        &[r#"{"op":"check"}"#],
+    );
+    assert_eq!(responses.len(), 1);
+    let result = &responses[0]["result"];
+    assert_eq!(result["ok"], false, "{result}");
+    assert_eq!(result["exit"], 2, "{result}");
+    assert!(
+        result["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| { d["code"] == "profile-workshop-only" && d["stage"] == "discovery" }),
+        "{result}"
+    );
+}
+
 /// Spawn `wright serve` with `args` over `input` and return the child plus
 /// the responses to `lint` and `lintRules`.
 fn serve_with(args: &[&str], input: &Path) -> (std::process::Child, Vec<serde_json::Value>) {

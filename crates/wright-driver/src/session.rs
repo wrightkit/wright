@@ -347,6 +347,23 @@ impl CompilerSession {
         self.progress(ProgressEvent::new(ProgressPhase::InputResolution));
         let mut resolved =
             hotpath::measure_block!("load::resolve_input", input::resolve(&self.config))?;
+        // ADR-0028: profiles apply to raw Workshop input only. With an
+        // explicitly non-Workshop `--kind` the serve surface already rejects
+        // the combination at startup; here the kind may have been resolved
+        // from the input, so an OPY/OSTW source with a profile is rejected
+        // as a usage error before any load work runs.
+        if self.config.profile != wright_transform::Profile::Off
+            && resolved.kind != SourceKind::Workshop
+        {
+            return Err(Diagnostic::error(
+                "profile-workshop-only",
+                Stage::Discovery,
+                format!(
+                    "--profile applies to Workshop input only; got '{}' input",
+                    resolved.kind.as_str()
+                ),
+            ));
+        }
         let provider_backend = match self.config.source_backend {
             SourceBackend::Native => false,
             SourceBackend::Provider => true,
@@ -707,10 +724,9 @@ impl CompilerSession {
                 },
             )
         })?;
-        if self.config.profile != wright_transform::Profile::Off {
-            self.progress(ProgressEvent::new(ProgressPhase::Lowering));
-        }
-        apply_profile(&mut program, self.config.profile)?;
+        // Provider artifacts are OPY/OSTW output; profiles apply to raw
+        // Workshop input only (ADR-0028), so no pass runs here — and the
+        // session rejects `--profile` with a non-Workshop input upstream.
         resolved.origin.locale = Some(locale.to_string());
         let loaded = Loaded {
             program: Arc::new(program),

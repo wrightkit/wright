@@ -7,6 +7,11 @@ semantics, compatibility tests, reference pins, and support claims; `deltin-rs`
 owns the corresponding DEL/OSTW responsibilities; `workshop-rs` owns canonical
 Workshop semantics and owner-side real-project contracts.
 
+Wright's `--profile` transformation passes run on raw Workshop input only
+(ADR-0028): OPY and OSTW output is compiled — including its own optimization
+and compression — by the owner toolchain and is never transformed by a Wright
+profile. `--profile` with an OPY or OSTW input is a usage error.
+
 Wright does not maintain a source-language compatibility corpus, oracle,
 snapshot database, or generic result-integrity test. A Wright test input exists
 only for a named Wright-owned contract and is kept under

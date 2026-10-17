@@ -3,10 +3,11 @@
 //!
 //! * [`Profile::Off`] — no transformation at all (the clean reference path);
 //! * [`Profile::Compat`] — evidence-backed, compatibility-safe passes, each
-//!   gated on N/E regression fixtures with before/after metrics;
-//! * [`Profile::Aggressive`] — experimental profile marker; in v1 it selects
-//!   the same evidence-backed compat passes (no speculative passes ship
-//!   without evidence).
+//!   gated on N/E regression fixtures with before/after metrics.
+//!
+//! Profiles apply to raw Workshop input only (ADR-0028); OPY and OSTW own
+//! their compilation, so the CLI and serve surfaces reject `--profile` with
+//! a non-Workshop input before this pipeline runs.
 //!
 //! Source-semantic behavior is never owned by this pipeline: declaration
 //! initializers lower into synthetic Initialize rules in the

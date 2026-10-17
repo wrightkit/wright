@@ -84,9 +84,11 @@ def main() -> None:
         if args.version not in output:
             fail(f"{name} did not report version {args.version}: {output.strip()}")
 
+    # Profiles apply to Workshop input only (ADR-0028, #725): the OPY
+    # compile fixture drops the flag; the Workshop check keeps it.
     run(
         "compile",
-        [str(wright), "compile", str(args.compile), "--profile", "compat", "-o", "-"],
+        [str(wright), "compile", str(args.compile), "-o", "-"],
     )
     run("check", [str(wright), "check", str(args.check), "--profile", "compat"])
 

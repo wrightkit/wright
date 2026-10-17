@@ -625,7 +625,6 @@ fn config_from_common(common: &CommonArgs, provider_workflow: bool) -> SessionCo
         profile: match common.profile {
             cli::ProfileArg::Off => wright_driver::Profile::Off,
             cli::ProfileArg::Compat => wright_driver::Profile::Compat,
-            cli::ProfileArg::Aggressive => wright_driver::Profile::Aggressive,
         },
         ..SessionConfig::default()
     }
