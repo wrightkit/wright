@@ -519,7 +519,6 @@ impl<'a> ToolService<'a> {
             profiles: vec![
                 crate::Profile::Off.as_str().to_string(),
                 crate::Profile::Compat.as_str().to_string(),
-                crate::Profile::Aggressive.as_str().to_string(),
             ],
         }
     }

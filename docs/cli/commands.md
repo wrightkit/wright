@@ -66,7 +66,13 @@ ambiguity guidance. Stdin content is auto-detected (protocol JSON starts with
 `{`, otherwise Workshop text). Detection can be overridden with
 `--kind auto|opy|ostw|workshop|protocol`. `--locale`
 overrides Workshop client-locale detection; `--root` sets the include/project
-root; `-o/--output` chooses the `compile` output file. `.ostw`/`.del` inputs
+root; `-o/--output` chooses the `compile` output file. `--profile <off|compat>`
+selects the WIR transformation policy (default `off`) and applies to
+**Workshop input only** (ADR-0028, #725): passing it with an OPY or OSTW
+input is a usage error (exit 2) on `compile`, `inspect`, and the other
+input-taking commands, and in `wright serve` — at startup when `--kind`
+fixes the type, per request when the kind resolves from the input.
+`.ostw`/`.del` inputs
 remain recognized source kinds for a future provider, but Wright does not ship
 a static DEL/OSTW adapter. Every DEL/OSTW workflow fails with the structured
 `source-provider-unavailable` diagnostic (exit 4), without partial output or

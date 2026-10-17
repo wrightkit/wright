@@ -60,7 +60,7 @@ pub fn exit_code_from(diagnostics: &[Diagnostic]) -> u8 {
         }
         if matches!(
             d.code.as_str(),
-            "output-exists" | "output-is-input" | "output-unnamed"
+            "output-exists" | "output-is-input" | "output-unnamed" | "profile-workshop-only"
         ) {
             return exit::USAGE;
         }

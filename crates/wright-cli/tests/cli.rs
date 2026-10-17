@@ -2035,6 +2035,111 @@ fn unknown_extension_is_ambiguous_and_fails_explicitly() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
+/// #725 / ADR-0028: `--profile` applies to Workshop input only — a
+/// non-Workshop input is a usage error (exit 2) on compile and inspect,
+/// `aggressive` is rejected as an unknown value, and serve rejects the
+/// combination at startup when `--kind` fixes the type and per request
+/// when the kind resolves from the input.
+#[test]
+fn profile_applies_to_workshop_input_only() {
+    let opy = std::fs::read_to_string(workspace_root().join("tests/fixtures/opy/basic-rule.opy"))
+        .unwrap();
+    let opy_path = temp_file("profile-fixture.opy", &opy);
+    let ostw_path = temp_file("profile-fixture.ostw", "anything");
+    let workshop_path = temp_file(
+        "profile-fixture.ws",
+        &corpus_workshop("synthetic/control-flow"),
+    );
+
+    // OPY and OSTW inputs with a profile are a usage error, by extension
+    // and by explicit --kind alike.
+    for (input, extra) in [
+        (opy_path.to_str().unwrap().to_string(), vec![]),
+        (ostw_path.to_str().unwrap().to_string(), vec![]),
+        (
+            opy_path.to_str().unwrap().to_string(),
+            vec!["--kind", "opy"],
+        ),
+        (
+            ostw_path.to_str().unwrap().to_string(),
+            vec!["--kind", "ostw"],
+        ),
+    ] {
+        for command in ["compile", "check", "inspect"] {
+            let mut args: Vec<&str> = if command == "inspect" {
+                vec!["inspect", "cost", &input, "--profile", "compat"]
+            } else if command == "compile" {
+                vec!["compile", &input, "--profile", "compat", "-o", "-"]
+            } else {
+                vec![command, &input, "--profile", "compat"]
+            };
+            args.extend(extra.iter());
+            let output = run(&args);
+            assert_eq!(
+                output.status.code(),
+                Some(2),
+                "{args:?}: {}",
+                command_result(&output)
+            );
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("Workshop")
+                    || String::from_utf8_lossy(&output.stdout).contains("Workshop"),
+                "{args:?} names the Workshop-only rule"
+            );
+        }
+    }
+
+    // `aggressive` is rejected as an unknown value; the error lists the
+    // surviving spellings.
+    let aggressive = run(&[
+        "check",
+        workshop_path.to_str().unwrap(),
+        "--profile",
+        "aggressive",
+    ]);
+    assert_eq!(aggressive.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&aggressive.stderr);
+    assert!(
+        stderr.contains("off") && stderr.contains("compat"),
+        "the error lists the surviving spellings: {stderr}"
+    );
+    assert!(
+        !stderr.contains("values: off, compat, aggressive"),
+        "aggressive is no longer a possible value: {stderr}"
+    );
+
+    // A Workshop input with `compat` still folds as before.
+    let workshop = run(&[
+        "check",
+        workshop_path.to_str().unwrap(),
+        "--profile",
+        "compat",
+    ]);
+    assert!(workshop.status.success(), "{}", command_result(&workshop));
+
+    // `serve --kind opy --profile compat` is a startup usage error.
+    let serve = run(&[
+        "serve",
+        "--transport",
+        "stdio",
+        "--kind",
+        "opy",
+        "--profile",
+        "compat",
+        opy_path.to_str().unwrap(),
+    ]);
+    assert_eq!(serve.status.code(), Some(2), "{}", command_result(&serve));
+    assert!(
+        String::from_utf8_lossy(&serve.stderr).contains("Workshop"),
+        "{}",
+        String::from_utf8_lossy(&serve.stderr)
+    );
+
+    let _ = std::fs::remove_dir_all(opy_path.parent().unwrap());
+    let _ = std::fs::remove_dir_all(ostw_path.parent().unwrap());
+    let _ = std::fs::remove_dir_all(workshop_path.parent().unwrap());
+}
+
 #[test]
 fn unknown_flag_is_a_usage_error_exit_two() {
     let output = run(&["check", "--frobnicate"]);

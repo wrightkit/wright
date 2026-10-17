@@ -302,9 +302,10 @@ jobs:
         run: target/debug/wright update provider opy
 
       - name: Compile OPY via provider
+        # ADR-0028: profiles apply to Workshop input only.
         run: >-
           target/debug/wright compile tests/fixtures/opy/basic-rule.opy
-          --profile compat -o "$RUNNER_TEMP/basic-rule.ow"
+          -o "$RUNNER_TEMP/basic-rule.ow"
 
   lpp-integration:
     name: LPP integration

@@ -50,7 +50,7 @@ WORKFLOW OPTIONS:
     --locale <LOCALE>    Workshop client locale override
     --root <DIR>         Include/project root for source inputs
     --opy-provider <PATH> Explicit local first-party OPY provider executable
-    --profile <PROFILE>  WIR transformation policy: off|compat|aggressive
+    --profile <PROFILE>  WIR transformation policy: off|compat (Workshop input only)
     -o, --output <PATH>  Write the program to PATH, or `-` for stdout (compile only)
     --force              Replace an existing compile output file without asking
     --copy               Also copy the compiled program to the clipboard
@@ -673,7 +673,6 @@ pub(crate) enum OutputFormatArg {
 pub(crate) enum ProfileArg {
     Off,
     Compat,
-    Aggressive,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]

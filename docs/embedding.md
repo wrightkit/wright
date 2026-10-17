@@ -17,7 +17,7 @@ safe source-edit contracts, and the transport adapters
 | `wright_driver::{input_identity, EMBEDDING_CONTRACT}` | **stable** | `wright-embedding/v1` |
 | Internal HIR/WIR arenas, parser/CST, emitter internals | **internal** | Never part of the public contract |
 | `wright serve` stdio/JSON-RPC/MCP adapters | **stable** | Thin mappings over `ToolService` and `wright-agent/v1`; `wright-serve` remains a workspace binary alias |
-| `wright-transform` passes | experimental per pass | Only evidence-backed passes ship in `compat`; `aggressive` is an explicit experimental marker |
+| `wright-transform` passes | experimental per pass | Only evidence-backed passes ship in `compat`; passes apply to raw Workshop input only (ADR-0028) |
 
 `wright_transform::run` (also exported as `run_canonical`) validates input before
 transforming it. `run_validated` requires the caller to have successfully called

@@ -87,18 +87,10 @@ fn folding_is_deterministic() {
 }
 
 #[test]
-fn aggressive_profile_uses_evidence_backed_passes_only() {
-    let mut program = arithmetic_program();
-    let results = run(&mut program, Profile::Aggressive).unwrap();
-    assert_eq!(results.len(), 1, "aggressive = compat passes in v1");
-    assert!(program.validate().is_ok());
-}
-
-#[test]
 fn validated_entry_preserves_output_and_pass_results() {
     let catalog = workshop_rs::catalog::Catalog::builtin().unwrap();
     let locale = workshop_rs::catalog::Locale::new("en-US");
-    for profile in [Profile::Off, Profile::Compat, Profile::Aggressive] {
+    for profile in [Profile::Off, Profile::Compat] {
         let mut checked = arithmetic_program();
         let mut validated = checked.clone();
         validated.validate().unwrap();
@@ -118,7 +110,7 @@ fn validated_entry_preserves_output_and_pass_results() {
 
 #[test]
 fn checked_entry_rejects_invalid_input_before_mutation() {
-    for profile in [Profile::Off, Profile::Compat, Profile::Aggressive] {
+    for profile in [Profile::Off, Profile::Compat] {
         let mut program = arithmetic_program();
         program.global_variables.clear();
         let expected = program.validate().unwrap_err().to_string();

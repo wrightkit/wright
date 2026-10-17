@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn settings_carrier_survives_every_profile() {
-        for profile in [Profile::Off, Profile::Compat, Profile::Aggressive] {
+        for profile in [Profile::Off, Profile::Compat] {
             let mut program = program_with_settings();
             run(&mut program, profile).expect("pipeline runs");
             assert!(

@@ -27,9 +27,11 @@ test -x "$BIN" || { echo "release binary missing"; exit 1; }
 test -x "$LSP_BIN" || { echo "release LSP binary missing"; exit 1; }
 test -x "$BENCH_BIN" || { echo "release benchmark binary missing"; exit 1; }
 
-echo "==> first-party provider integration (compat profile)"
+echo "==> first-party provider integration"
 "$BIN" update provider opy --version 0.1.38
-"$BIN" compile "$ROOT/tests/fixtures/opy/basic-rule.opy" --profile compat >/dev/null
+# ADR-0028: profiles apply to Workshop input only, so the OPY fixture
+# compiles without --profile; the Workshop check below keeps it.
+"$BIN" compile "$ROOT/tests/fixtures/opy/basic-rule.opy" >/dev/null
 
 echo "==> benchmarks"
 "$BENCH_BIN" > /dev/null
@@ -42,10 +44,8 @@ cp "$LSP_BIN" "$SANDBOX/wright-lsp"
 (
   export PATH=/usr/bin:/bin
   command -v node >/dev/null 2>&1 && { echo "node unexpectedly present"; exit 1; }
-  "$SANDBOX/wright" compile "$ROOT/tests/fixtures/opy/basic-rule.opy" \
-    --profile compat >/dev/null
-  "$SANDBOX/wright" compile "$ROOT/tests/fixtures/opy/basic-rule.opy" \
-    --profile compat >/dev/null
+  "$SANDBOX/wright" compile "$ROOT/tests/fixtures/opy/basic-rule.opy" >/dev/null
+  "$SANDBOX/wright" compile "$ROOT/tests/fixtures/opy/basic-rule.opy" >/dev/null
   "$SANDBOX/wright" check "$ROOT/tests/fixtures/workshop/synthetic/control-flow.ws" \
     --profile compat >/dev/null
   LSP_VERSION="$("$SANDBOX/wright-lsp" --version)"
