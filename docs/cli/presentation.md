@@ -182,9 +182,13 @@ subcommand leads with its subject and summary before its detail:
   more than one subroutine, then the edge list.
 * `inspect cost` prints exact generated-resource totals, the canonical
   element count against the client element budget with each rule's share
-  ranked by count, then static findings
+  ranked by count and located in source (`path:line:col`), then static
+  findings
   ordered by severity with consecutive identical findings collapsed into one
-  counted entry.
+  counted entry that lists every occurrence's location (#722). With
+  `--rule`, `inspect cost` instead prints that rule's identity and
+  location, its `Costliest statements` ranked by recursive count, and the
+  `By node name` own-cost shares that reconcile to the rule's total (#724).
 
 Text and compact JSON present the same selected items. Detail lists default
 to at most 20 items, with their total and an expansion hint when truncated;

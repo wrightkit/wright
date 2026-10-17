@@ -41,7 +41,7 @@ result.
 | `wright inspect refs <NAME> [INPUT] [--only KIND] [--rule RULE] [--file PATH] [--max N]` | References and usage counts for one symbol, addressed by name | usage-count header plus the reference list |
 | `wright inspect cfg <RULE> [INPUT] [--only KIND] [--max N]` | Control-flow graph of one rule, addressed by name | block/edge listing |
 | `wright inspect callgraph [INPUT] [--caller RULE] [--callee SUBROUTINE] [--max N]` | Subroutine call graph (caller rules to callee subroutines) | call edges |
-| `wright inspect cost [INPUT] [--no-cache] [--baseline NAME] [--save-baseline NAME] [--max-total N]` | Exact generated-resource counts plus static findings; by default compares against the previous run's element cost | resource counts, findings, and the change against the previous run or named baseline |
+| `wright inspect cost [INPUT] [--rule RULE] [--no-cache] [--baseline NAME] [--save-baseline NAME] [--max-total N]` | Exact generated-resource counts plus static findings; `--rule` drills into one rule's element cost, and by default the run compares against the previous run's element cost | resource counts and findings plus the change against the previous run or named baseline, or the rule's statements and node-name shares |
 | `wright rename <NAME> <NEW_NAME> [INPUT]` | Semantically rename a Workshop variable or subroutine | per-source diff of the validated edits; `--write` applies them |
 | `wright lookup [QUERY]` | Resolve a Workshop or OverPy display name, near spelling, or guess to the owner-accepted spelling and signature (#529); takes no input | one line per entry: signature or spelling, kind, identity |
 | `wright serve [INPUT] [--transport T] [--kind K] [--profile P] [--lint-config YAML] [--rule PATH] [--disable-rule ID] [--rule-severity ID:SEV]` | Serve `wright-agent/v1` over stdio, JSON-RPC 2.0, or MCP | one structured response per request |
@@ -251,7 +251,9 @@ Resolution never guesses.
   `index` is the canonical rule position; the 5 largest are shown by default
   and `--all` shows every rule. The count is a structure count, not a
   statement of client importability, and is `null` with an
-  `elementCountUnavailable` reason when the count cannot run.
+  `elementCountUnavailable` reason when the count cannot run. Each rule
+  entry and each finding carries its source location (`span`); a node
+  without a retained span renders and serializes with no location (#722).
 
   **Run cache and gate (ADR-0027).** `compile` and `inspect cost` keep a
   small project-local run cache under `.wright/` at the project root and,
@@ -269,6 +271,14 @@ Resolution never guesses.
   add it to your `.gitignore` — Wright does not edit it for you. A failing
   run never replaces the previous reference, and cache failures never fail
   a command.
+* `inspect cost --rule <NAME>` shows where one declared rule's element cost
+  goes (#724): the rule's `Costliest statements` (its direct conditions and
+  actions ranked by recursive `count`) and `By node name` (each node's own
+  `base_count + adjustment` cost summed per canonical node name, with
+  occurrences). The `byNode` entries reconcile to the rule's `count`. An
+  unknown rule name exits 1 with an `invalid-selection` diagnostic. The
+  agent `costEstimate` operation accepts the same optional `rule` and
+  returns `rule`, `statements[]` and `byNode[]` as additive fields.
 * `persistentObjects` has no standalone command; `analyze` reports aggregate
   counts under `result.persistentObjects`; use the agent operation for details.
 

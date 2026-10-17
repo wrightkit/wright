@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.23.0](https://github.com/wrightkit/wright/compare/v0.22.2...v0.23.0) (2026-10-17)
+
+
+### Features
+
+* **cli:** draw terminal reports on one continuous rail ([#719](https://github.com/wrightkit/wright/issues/719)) ([8b46b01](https://github.com/wrightkit/wright/commit/8b46b01341370f7a40b9af16d385f70e57f84340))
+* **lint:** add nested-binder-lambda import-risk indicator ([#721](https://github.com/wrightkit/wright/issues/721)) ([f1f86dc](https://github.com/wrightkit/wright/commit/f1f86dc2466e14e226f057d2c6342f3179bb733f))
+
 ## [0.22.2](https://github.com/wrightkit/wright/compare/v0.22.1...v0.22.2) (2026-10-16)
 
 

@@ -560,12 +560,14 @@ impl CompilerSession {
     /// `cost` (#429): the `costEstimate` operation's payload; the session's
     /// finding selection applies exactly as on the agent surface, and its
     /// outcome is kept in-process so the verdict reflects the full finding
-    /// set (#635). The run-cache comparison and `--max-total` gate apply
-    /// inside the load, before the envelope's verdict (ADR-0027, #723).
-    pub fn cost(&mut self) -> Envelope<CostResult> {
+    /// set (#635). `rule` selects the per-rule drill-down (#724); the
+    /// run-cache comparison and `--max-total` gate apply inside the load,
+    /// before the envelope's verdict (ADR-0027, #723).
+    pub fn cost(&mut self, rule: Option<String>) -> Envelope<CostResult> {
         let selection = self.config.selection.clone();
         let mut envelope = self.service_query("cost", move |service| {
-            let (mut result, outcome) = service.cost_estimate_result(&selection)?;
+            let (mut result, outcome) =
+                service.cost_estimate_result(&selection, rule.as_deref())?;
             // `--max-total` and the named-baseline usage error are service
             // errors (exit 1) raised before the verdict; the comparison is
             // returned in-process and lifted onto the envelope below — it

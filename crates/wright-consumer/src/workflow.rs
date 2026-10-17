@@ -81,6 +81,7 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
         ToolRequest::LintRules,
         ToolRequest::CostEstimate {
             selection: FindingSelection::default(),
+            rule: None,
             all: true,
         },
         ToolRequest::TargetMetadata,

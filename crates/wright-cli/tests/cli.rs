@@ -1610,18 +1610,42 @@ fn inspect_cost_verdict_and_file_selection() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("WARN cost"), "{stdout}");
 
-    // Cost findings carry no source location, so `--file` can never apply:
-    // the option is a usage error, not a silent empty result.
+    // Cost findings carry resolved source locations (#722), so `--file`
+    // narrows the reported set like `lint` — a matching file keeps its
+    // finding and a non-matching one reports an empty set.
     let output = run(&[
         "inspect",
         "cost",
         path.to_str().unwrap(),
         "--file",
         "waitless.txt",
+        "-f",
+        "json",
     ]);
-    assert_eq!(output.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("--file"), "{stderr}");
+    assert_eq!(output.status.code(), Some(0));
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(envelope["result"]["findings"].as_array().unwrap().len(), 1);
+    assert_eq!(envelope["result"]["selection"]["total"], 1);
+
+    let output = run(&[
+        "inspect",
+        "cost",
+        path.to_str().unwrap(),
+        "--file",
+        "other-file.txt",
+        "-f",
+        "json",
+    ]);
+    assert_eq!(output.status.code(), Some(0));
+    let envelope = parse_json(&output.stdout);
+    assert!(
+        envelope["result"]["findings"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "a non-matching file empties the reported set: {}",
+        envelope["result"]
+    );
 
     let output = run(&[
         "inspect",
@@ -3388,11 +3412,30 @@ fn cost_text_reports_the_element_budget_and_rule_shares() {
     );
     let mut offset = 0;
     for rule in rules {
-        let needle = format!("\"{}\":", rule["name"].as_str().unwrap());
+        // Each share renders `N element(s)  <name>  <path:line:col>` (#722).
+        let needle = format!(
+            "{} element(s)  {}",
+            rule["count"].as_u64().unwrap(),
+            rule["name"].as_str().unwrap()
+        );
         offset = stdout[offset..]
             .find(&needle)
             .map(|found| offset + found + needle.len())
             .expect("shares render in payload order");
+    }
+    // Each rule's printed location equals the span `inspect rules` reports.
+    for rule in rules {
+        let span = &rule["span"];
+        let location = format!(
+            "{}:{}:{}",
+            span["path"].as_str().unwrap(),
+            span["start"]["line"].as_u64().unwrap(),
+            span["start"]["col"].as_u64().unwrap()
+        );
+        assert!(
+            stdout.contains(&location),
+            "rule share carries its location: {stdout}"
+        );
     }
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
@@ -3458,6 +3501,108 @@ fn cost_rule_shares_rank_and_cap_at_five_by_default() {
     assert!(text.status.success(), "{}", command_result(&text));
     let stdout = String::from_utf8_lossy(&text.stdout);
     assert!(stdout.contains("showing 5 of 25"), "{stdout}");
+
+    let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
+}
+
+/// #724: `inspect cost --rule` reports one rule's element-cost breakdown.
+/// The `byNode` own-cost shares sum to the rule's `count`, and each
+/// `Costliest statements` entry is a direct child ranked by recursive
+/// `count` with the same span `inspect rules --content` reports.
+#[test]
+fn cost_rule_drilldown_reconciles_to_the_rule_total() {
+    let path = temp_file("drill.ws", &corpus_workshop("real-world/overpy-cake"));
+    let path = path.to_str().unwrap();
+
+    // The whole-program view names the rule and its total; the rule span
+    // equals the one `inspect rules` reports for it.
+    let whole = run(&["inspect", "cost", path, "-f", "json"]);
+    assert!(whole.status.success(), "{}", command_result(&whole));
+    let whole = parse_json(&whole.stdout);
+    let rule_entry = whole["result"]["elementCount"]["rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["name"].as_str() == Some("cake"))
+        .expect("fixture names the rule")
+        .clone();
+    let rule_total = rule_entry["count"].as_u64().unwrap();
+
+    let rules_json = run(&["inspect", "rules", path, "-f", "json"]);
+    let rules_json = parse_json(&rules_json.stdout);
+    let inspect_span = rules_json["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["name"].as_str() == Some("cake"))
+        .and_then(|r| r.get("span"))
+        .cloned();
+    assert_eq!(
+        rule_entry["span"],
+        inspect_span.unwrap(),
+        "the rule share's span equals `inspect rules`' span (#722)"
+    );
+
+    // The drill-down's own-cost shares sum to the rule's total and its
+    // statements are the direct children ranked by recursive count.
+    let drill = run(&[
+        "inspect", "cost", path, "--rule", "cake", "--all", "-f", "json",
+    ]);
+    assert!(drill.status.success(), "{}", command_result(&drill));
+    let drill = parse_json(&drill.stdout);
+    let drill = &drill["result"];
+    assert_eq!(drill["rule"]["name"], "cake");
+    assert_eq!(drill["rule"]["count"], rule_total);
+    let by_node_sum: u64 = drill["byNode"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["count"].as_u64().unwrap())
+        .sum();
+    assert_eq!(
+        by_node_sum, rule_total,
+        "byNode own-cost shares reconcile to the rule total"
+    );
+    let statements = drill["statements"].as_array().unwrap();
+    assert!(
+        statements
+            .windows(2)
+            .all(|w| w[0]["count"].as_u64().unwrap() >= w[1]["count"].as_u64().unwrap()),
+        "statements rank by recursive count: {statements:?}"
+    );
+    // Each statement's span resolves to a real source location inside the
+    // rule's span — the drill-down surfaces the retained spans (#722/#724).
+    let rule_span = &drill["rule"]["span"];
+    let (r_start, r_end) = (
+        rule_span["start"]["line"].as_u64().unwrap(),
+        rule_span["end"]["line"].as_u64().unwrap(),
+    );
+    for statement in statements {
+        let span = &statement["span"];
+        assert!(
+            span["path"].as_str().is_some(),
+            "a statement with a retained span resolves a path: {span:?}"
+        );
+        let line = span["start"]["line"].as_u64().unwrap();
+        assert!(
+            line >= r_start && line <= r_end,
+            "statement {line} lies inside the rule span {r_start}..={r_end}"
+        );
+    }
+
+    // An unknown rule name is a structured `invalid-selection` usage error.
+    let bad = run(&[
+        "inspect",
+        "cost",
+        path,
+        "--rule",
+        "not-a-rule",
+        "-f",
+        "json",
+    ]);
+    assert_eq!(bad.status.code(), Some(1));
+    let bad = parse_json(&bad.stdout);
+    assert_eq!(bad["diagnostics"][0]["code"], "invalid-selection");
 
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }

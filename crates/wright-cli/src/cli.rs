@@ -173,21 +173,9 @@ pub(crate) struct ReportArgs {
     pub(crate) select: SelectArgs,
 }
 
-/// Arguments of `analyze`: shared workflow options, finding selection, and
-/// an explicit expansion option.
-#[derive(Debug, Args)]
-pub(crate) struct AnalyzeArgs {
-    #[command(flatten)]
-    pub(crate) common: CommonArgs,
-    #[command(flatten)]
-    pub(crate) select: SelectArgs,
-    /// Return every item in the report.
-    #[arg(long)]
-    pub(crate) all: bool,
-}
-
 /// Arguments of `inspect cost`: the shared report options plus the
-/// run-cache and element-total gate options (ADR-0027, #723).
+/// per-rule drill-down selector (#724) and the run-cache / element-total
+/// gate options (ADR-0027, #723).
 #[derive(Debug, Args)]
 pub(crate) struct CostArgs {
     /// Return every selected item instead of the default bounded report.
@@ -197,6 +185,11 @@ pub(crate) struct CostArgs {
     pub(crate) common: CommonArgs,
     #[command(flatten)]
     pub(crate) select: SelectArgs,
+    /// Show where one declared rule's element cost goes — its statements
+    /// ranked by recursive count and the per-name shares that reconcile
+    /// to its total.
+    #[arg(long, value_name = "RULE")]
+    pub(crate) rule: Option<String>,
     /// Neither read nor write the `.wright/` run cache.
     #[arg(long)]
     pub(crate) no_cache: bool,
@@ -209,6 +202,19 @@ pub(crate) struct CostArgs {
     /// Fail with exit 1 when the element total exceeds N; reads no cache.
     #[arg(long, value_name = "N")]
     pub(crate) max_total: Option<usize>,
+}
+
+/// Arguments of `analyze`: shared workflow options, finding selection, and
+/// an explicit expansion option.
+#[derive(Debug, Args)]
+pub(crate) struct AnalyzeArgs {
+    #[command(flatten)]
+    pub(crate) common: CommonArgs,
+    #[command(flatten)]
+    pub(crate) select: SelectArgs,
+    /// Return every item in the report.
+    #[arg(long)]
+    pub(crate) all: bool,
 }
 
 /// Finding-selection options shared by `check`, `analyze`, `lint`, and

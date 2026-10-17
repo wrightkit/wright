@@ -274,12 +274,18 @@ fn run_workflow(command: Command) -> ExitCode {
                 },
             ),
             Some(cli::InspectQuery::Cost(query)) => {
-                // Cost findings carry no source location, so `file` can
-                // never match one — the option is a usage error rather than
-                // a silent empty result (#635).
-                if query.select.file.is_some() {
+                // The drill-down selector conflicts with the finding
+                // selection: a selected rule's statements and node shares
+                // are not findings, so `--severity`/`--rule-id`/`--max` have
+                // nothing to select.
+                if query.rule.is_some()
+                    && (query.select.severity.is_some()
+                        || query.select.rule_id.is_some()
+                        || query.select.max.is_some()
+                        || query.select.file.is_some())
+                {
                     eprintln!(
-                        "wright: 'inspect cost' findings carry no source location; --file cannot apply"
+                        "wright: 'inspect cost --rule' reports one rule's element cost; finding selection (--severity/--rule-id/--max/--file) does not apply"
                     );
                     return ExitCode::from(exit::USAGE);
                 }
@@ -296,7 +302,7 @@ fn run_workflow(command: Command) -> ExitCode {
                     present::Presentation::from_common(&query.common).with_all(query.all),
                     None,
                     |session| {
-                        session.cost().map_result(|mut result| {
+                        session.cost(query.rule.clone()).map_result(|mut result| {
                             result.result =
                                 wright_driver::essential::cost(&result.result, query.all);
                             result
