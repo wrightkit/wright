@@ -258,7 +258,33 @@ pub fn cost(result: &Value, all: bool) -> Value {
         return output;
     }
     cap(&mut output["elementCount"], "rules", 5, all);
-    query(&output, all)
+    let mut output = query(&output, all);
+    // Findings carry resolved span objects (#722), which cost roughly four
+    // times the lint `location` string — on a large project the default
+    // payload would exceed the same ~1.5k-token budget `lint` fits. Bound
+    // the findings list by serialized bytes exactly like `lint` does: pop
+    // from the end until the whole output fits, recording the truncation so
+    // `all: true` / `--all` expands the complete set.
+    if !all && output["findings"].is_array() {
+        let total = output["findings"].as_array().map_or(0, Vec::len);
+        while serde_json::to_vec(&output)
+            .expect("presentation serializes")
+            .len()
+            > DEFAULT_FINDING_BYTES
+        {
+            let shown = {
+                let findings = output["findings"]
+                    .as_array_mut()
+                    .expect("findings is a list");
+                if findings.pop().is_none() {
+                    break;
+                }
+                findings.len()
+            };
+            output["truncation"]["findings"] = json!({"total":total,"shown":shown,"truncated":total-shown,"expand":"--all / all: true"});
+        }
+    }
+    output
 }
 
 /// Preserve the complete-set verdict while bounding its displayed diagnostics.
