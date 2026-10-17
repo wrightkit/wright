@@ -30,7 +30,7 @@ Established tools split this into three layers. Criterion.rs stores results unde
 ### Who writes
 
 8. **`compile` and `inspect cost` write the cache.** A record holds a summary (rule names and element counts, the total, and the budget), never the compiled program. The compiled output file is unchanged by this decision.
-9. **Writing can be turned off.** `--no-cache` on the command and an environment variable (`WRIGHT_NO_CACHE`) disable both reading and writing.
+9. **The cache can be turned off.** `--no-cache` on the command, a non-empty `WRIGHT_NO_CACHE`, or a truthy `CI` (the same check the renderer already uses for CI detection) disable both reading and writing. A CI checkout has no history to compare with and may have a read-only or discarded working directory. There is no flag to force the cache on under `CI`; it is added if a real need appears (for example restoring `.wright/` with a CI cache). The gate in decision 2 is unaffected.
 10. **Cache failures never fail a command.** A read-only directory, a full disk, a corrupt record, or a concurrent write is ignored and does not change the exit code or the verdict.
 
 ### Key and layout
@@ -60,7 +60,7 @@ No source-language syntax, diagnostic, or compiled-output change. The bytes writ
 - a missing, corrupt, or unknown-version record yielding no comparison and an unchanged exit code;
 - concurrent runs of different keys leaving each record complete;
 - `--max-total` behaving identically with and without a cache;
-- `--no-cache` and `WRIGHT_NO_CACHE` leaving `.wright/` untouched.
+- `--no-cache`, `WRIGHT_NO_CACHE`, and a truthy `CI` each leaving `.wright/` untouched.
 
 ## Scope boundaries
 
