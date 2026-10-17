@@ -1,6 +1,6 @@
 # ADR-0027: Project run cache and comparison against the previous run
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-17
 - Related: [Issue #723](https://github.com/wrightkit/wright/issues/723), [Issue #722](https://github.com/wrightkit/wright/issues/722), [Issue #724](https://github.com/wrightkit/wright/issues/724), [ADR-0025](0025-essential-default-output.md), [Agent contract](../agent-contract.md), [Diagnostics schema](../diagnostics-schema.md)
 
