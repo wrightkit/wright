@@ -47,4 +47,5 @@ its audit date.
 * [ADR-0025: Essential default output and the agent-facing token standard](0025-essential-default-output.md)
 * [ADR-0026: The agent benchmark lives with the benchmark suite](0026-agent-benchmark-ownership.md)
 * [ADR-0027: Project run cache and comparison against the previous run](0027-project-run-cache.md)
+* [ADR-0028: Transformation profiles apply to Workshop input only](0028-profile-applies-to-workshop-input-only.md)
 * [Post-ADR-0010 decision inventory](post-0010-inventory.md)
