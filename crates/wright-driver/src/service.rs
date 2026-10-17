@@ -241,10 +241,14 @@ pub enum ToolRequest {
         all: bool,
     },
     /// Generated-resource cost estimates (exact counts + findings),
-    /// optionally narrowed by an inline selection (#430).
+    /// optionally narrowed by an inline selection (#430). An optional
+    /// `rule` selects one declared rule name and returns that rule's
+    /// element-cost breakdown (#724).
     CostEstimate {
         #[serde(flatten)]
         selection: crate::select::FindingSelection,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rule: Option<String>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         all: bool,
     },
@@ -938,7 +942,9 @@ impl<'a> ToolService<'a> {
                 max,
                 ..
             } => self.call_graph(caller.as_deref(), callee.as_deref(), *max),
-            ToolRequest::CostEstimate { selection, .. } => self.cost_estimate(selection),
+            ToolRequest::CostEstimate {
+                selection, rule, ..
+            } => self.cost_estimate(selection, rule.as_deref()),
             ToolRequest::TargetMetadata => self.ok(self.target_metadata()),
             ToolRequest::ValidateEdit {
                 sources,
@@ -1591,11 +1597,16 @@ impl<'a> ToolService<'a> {
     }
 
     /// `costEstimate`: exact generated-resource counts plus static findings.
-    /// The findings subset honors the shared selection (#430); findings carry
-    /// no span, so a `file` selection can never match one and is rejected
-    /// rather than silently emptying the reported set (#635).
-    fn cost_estimate(&self, selection: &crate::select::FindingSelection) -> ToolResponse {
-        match self.cost_estimate_result(selection) {
+    /// The findings subset honors the shared selection (#430); findings
+    /// carry resolved span paths like `lint` (#722), so a `file` selection
+    /// can match them. The `rule` selector (#724) reports one declared
+    /// rule's element-cost breakdown instead of the whole-program view.
+    fn cost_estimate(
+        &self,
+        selection: &crate::select::FindingSelection,
+        rule: Option<&str>,
+    ) -> ToolResponse {
+        match self.cost_estimate_result(selection, rule) {
             Ok((result, _)) => self.ok(result),
             Err(error) => ToolResponse::Error { error },
         }
@@ -1604,19 +1615,27 @@ impl<'a> ToolService<'a> {
     /// The `costEstimate` payload plus the applied selection's outcome: the
     /// result body is the wire payload; the outcome travels in-process so
     /// the session's verdict can reflect the full finding set (#635).
+    /// `rule` selects the per-rule drill-down (#724); `None` keeps the
+    /// whole-program view.
     pub(crate) fn cost_estimate_result(
         &self,
         selection: &crate::select::FindingSelection,
+        rule: Option<&str>,
     ) -> Result<(serde_json::Value, Option<crate::select::SelectionOutcome>), ToolErrorInfo> {
         self.selection_check(selection)?;
-        if selection.file.is_some() {
-            return Err(ToolErrorInfo {
-                code: "invalid-selection".to_string(),
-                message: "costEstimate findings carry no source location; a 'file' selection cannot apply"
-                    .to_string(),
-            });
-        }
         let loaded = self.snapshot();
+        if let Some(rule) = rule {
+            if selection.is_active() {
+                return Err(ToolErrorInfo {
+                    code: "invalid-selection".to_string(),
+                    message: "the 'rule' selector reports one rule's element cost; finding selection fields do not apply"
+                        .to_string(),
+                });
+            }
+            return self
+                .cost_estimate_rule(loaded, rule)
+                .map(|result| (result, None));
+        }
         let locale = CompilerSession::locale_for(loaded);
         let text = workshop_rs::emitter::emit(&loaded.program, self.session.catalog(), &locale)
             .unwrap_or_default();
@@ -1638,16 +1657,23 @@ impl<'a> ToolService<'a> {
             &loaded.program,
             &wright_analyzer::registry::LintConfig::default(),
         );
-        let findings = findings
+        let mut findings = findings
             .iter()
             .map(|f| {
                 json!({
                     "code": f.code,
                     "severity": f.severity.as_str(),
                     "message": f.message,
+                    "span": wright_analyzer::canonical::span_json(f.span),
                 })
             })
             .collect::<Vec<_>>();
+        // Findings resolve `span.path` exactly like `lint` does (#722); a
+        // node without a retained span serializes `null` and keeps no
+        // location — never an error.
+        for finding in findings.iter_mut() {
+            crate::session::resolve_span_paths(finding, loaded);
+        }
         let (findings, outcome) =
             selection.apply_findings(findings, &crate::select::file_bases(&loaded.input));
         let mut result = json!({
@@ -1679,17 +1705,29 @@ impl<'a> ToolService<'a> {
             Ok(report) => {
                 let mut rules: Vec<_> = report.rules.iter().enumerate().collect();
                 rules.sort_by_key(|(index, node)| (std::cmp::Reverse(node.count), *index));
-                result["elementCount"] = json!({
-                    "total": report.total,
-                    "budget": crate::session::WORKSHOP_CLIENT_ELEMENT_LIMIT,
-                    "rules": rules
-                        .iter()
-                        .map(|(index, node)| json!({
+                let rule_entries: Vec<_> = rules
+                    .iter()
+                    .map(|(index, node)| {
+                        // The entry's span is the same span `inspect rules`
+                        // reports for the rule — resolved `span.path` from
+                        // `program.rule_span`, not the report node's own
+                        // span, so both surfaces agree (#722).
+                        let mut entry = json!({
                             "index": index,
                             "name": loaded.program.rules[*index].name,
                             "count": node.count,
-                        }))
-                        .collect::<Vec<_>>(),
+                            "span": wright_analyzer::canonical::span_json(
+                                loaded.program.rule_span(*index),
+                            ),
+                        });
+                        crate::session::resolve_span_paths(&mut entry, loaded);
+                        entry
+                    })
+                    .collect();
+                result["elementCount"] = json!({
+                    "total": report.total,
+                    "budget": crate::session::WORKSHOP_CLIENT_ELEMENT_LIMIT,
+                    "rules": rule_entries,
                 });
             }
             Err(error) => {
@@ -1701,6 +1739,92 @@ impl<'a> ToolService<'a> {
             result["selection"] = serde_json::to_value(outcome).expect("selection serializes");
         }
         Ok((result, outcome))
+    }
+
+    /// The `costEstimate` drill-down for one declared rule name (#724):
+    /// the rule's identity and location, its direct statements ranked by
+    /// recursive `count`, and the per-name sum of each node's own
+    /// (`base_count + adjustment`) contribution so the shares reconcile to
+    /// the rule total without double-counting nested nodes.
+    fn cost_estimate_rule(
+        &self,
+        loaded: &Loaded,
+        rule: &str,
+    ) -> Result<serde_json::Value, ToolErrorInfo> {
+        let rule_id = self
+            .semantic()
+            .resolve_rule(rule)
+            .map_err(|error| ToolErrorInfo {
+                code: "invalid-selection".to_string(),
+                message: error.message,
+            })?;
+        let report = loaded
+            .program
+            .element_count(self.session.catalog())
+            .map_err(|error| ToolErrorInfo {
+                code: "element-count-unavailable".to_string(),
+                message: error.to_string(),
+            })?;
+        let node = report
+            .rules
+            .get(rule_id)
+            .expect("report rules keep program.rules order");
+        let mut statements: Vec<_> = node
+            .children
+            .iter()
+            .map(|child| {
+                let mut statement = json!({
+                    "name": child.name,
+                    "count": child.count,
+                    "span": wright_analyzer::canonical::span_json(child.span),
+                });
+                crate::session::resolve_span_paths(&mut statement, loaded);
+                statement
+            })
+            .collect();
+        statements.sort_by_key(|statement| std::cmp::Reverse(statement["count"].as_u64()));
+
+        // `byNode`: each node's own cost (base + adjustment, children
+        // excluded) summed per canonical node name, so entries over all
+        // names add up to the rule's `count`. Occurrences count nodes, not
+        // elements.
+        let mut by_name: std::collections::BTreeMap<&str, (usize, usize)> =
+            std::collections::BTreeMap::new();
+        fn own_cost<'a>(
+            node: &'a workshop_rs::actions::ElementCountNode,
+            by_name: &mut std::collections::BTreeMap<&'a str, (usize, usize)>,
+        ) {
+            let own = (node.base_count as isize + node.adjustment).max(0) as usize;
+            let entry = by_name.entry(node.name.as_str()).or_default();
+            entry.0 += own;
+            entry.1 += 1;
+            for child in &node.children {
+                own_cost(child, by_name);
+            }
+        }
+        own_cost(node, &mut by_name);
+        let mut by_node: Vec<_> = by_name
+            .iter()
+            .map(|(name, (count, occurrences))| {
+                json!({"name": name, "count": count, "occurrences": occurrences})
+            })
+            .collect();
+        by_node.sort_by_key(|entry| std::cmp::Reverse(entry["count"].as_u64()));
+
+        let mut result = json!({
+            "rule": {
+                "id": rule_id,
+                "name": loaded.program.rules[rule_id].name,
+                "count": node.count,
+                "span": wright_analyzer::canonical::span_json(
+                    loaded.program.rule_span(rule_id),
+                ),
+            },
+            "statements": statements,
+            "byNode": by_node,
+        });
+        crate::session::resolve_span_paths(&mut result["rule"], loaded);
+        Ok(result)
     }
 
     fn target_metadata(&self) -> serde_json::Value {

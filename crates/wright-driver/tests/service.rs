@@ -41,6 +41,7 @@ fn tool_service_queries_canonical_workshop() {
         },
         ToolRequest::CostEstimate {
             selection: FindingSelection::default(),
+            rule: None,
             all: true,
         },
     ] {
@@ -226,6 +227,7 @@ fn agent_finding_selection_filters_and_truncates_without_touching_defaults() {
             max: Some(1),
             ..FindingSelection::default()
         },
+        rule: None,
         all: true,
     });
     assert_eq!(cost["findings"].as_array().unwrap().len(), 1);
@@ -261,6 +263,7 @@ fn an_unknown_rule_id_is_a_service_error_not_an_empty_result() {
                 rule: Some("not-a-rule".to_string()),
                 ..FindingSelection::default()
             },
+            rule: None,
             all: true,
         },
         ToolRequest::Analyze {
@@ -493,9 +496,11 @@ fn inspect_results_resolve_span_paths() {
 }
 
 #[test]
-fn cost_estimate_rejects_a_file_selection_that_cannot_apply() {
-    // #635: cost findings carry no source location, so `file` can never
-    // match one — the option is a usage error, not a silently empty result.
+fn cost_estimate_file_selection_narrows_findings_like_lint() {
+    // #722: cost findings now carry resolved span paths, so `file`
+    // applies exactly like `lint` — it narrows the reported set and the
+    // selection outcome records the withheld count. A matching file
+    // keeps its finding; a non-matching one reports an empty set.
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(workshop_path()),
         kind: SourceKind::Workshop,
@@ -503,21 +508,37 @@ fn cost_estimate_rejects_a_file_selection_that_cannot_apply() {
     })
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
-    match service.handle(&ToolRequest::CostEstimate {
-        selection: FindingSelection {
-            file: Some("control-flow.ws".to_string()),
-            ..FindingSelection::default()
+    let cost = result_of(
+        &mut service,
+        &ToolRequest::CostEstimate {
+            selection: FindingSelection {
+                file: Some("control-flow.ws".to_string()),
+                ..FindingSelection::default()
+            },
+            rule: None,
+            all: true,
         },
-        all: true,
-    }) {
-        ToolResponse::Error { error } => {
-            assert_eq!(error.code, "invalid-selection");
-            assert!(error.message.contains("file"));
-        }
-        ToolResponse::Ok { result } => {
-            panic!("an inapplicable file selection must not return a result: {result}")
-        }
-    }
+    );
+    assert_eq!(cost["findings"].as_array().unwrap().len(), 1);
+    assert_eq!(cost["selection"]["total"].as_u64().unwrap(), 1);
+    assert_eq!(cost["selection"]["withheld"].as_u64().unwrap(), 0);
+
+    let cost = result_of(
+        &mut service,
+        &ToolRequest::CostEstimate {
+            selection: FindingSelection {
+                file: Some("other-file.ws".to_string()),
+                ..FindingSelection::default()
+            },
+            rule: None,
+            all: true,
+        },
+    );
+    assert!(cost["findings"].as_array().unwrap().is_empty());
+    // `total` still counts the full finding set; the non-matching file
+    // drops its findings without a `max`, so nothing is `withheld`.
+    assert_eq!(cost["selection"]["total"].as_u64().unwrap(), 1);
+    assert_eq!(cost["selection"]["withheld"].as_u64().unwrap(), 0);
     let cost = result_of(
         &mut service,
         &ToolRequest::CostEstimate {
@@ -525,6 +546,7 @@ fn cost_estimate_rejects_a_file_selection_that_cannot_apply() {
                 severity: Some(Severity::Error),
                 ..FindingSelection::default()
             },
+            rule: None,
             all: true,
         },
     );
@@ -554,6 +576,7 @@ fn cost_estimate_reports_the_canonical_element_count() {
         &mut service,
         &ToolRequest::CostEstimate {
             selection: FindingSelection::default(),
+            rule: None,
             all: true,
         },
     );
@@ -612,7 +635,7 @@ fn session_cost_keeps_the_selection_outcome_for_the_verdict() {
         ..SessionConfig::default()
     })
     .unwrap();
-    let envelope = session.cost();
+    let envelope = session.cost(None);
     assert!(
         envelope.result.result["findings"]
             .as_array()
@@ -1414,6 +1437,7 @@ disabled rule ("disabled caller") {
 
     let cost = result_of(ToolRequest::CostEstimate {
         selection: FindingSelection::default(),
+        rule: None,
         all: true,
     });
     assert_eq!(
@@ -1680,6 +1704,7 @@ fn session_query_workflows_return_the_agent_operation_payloads() {
         &mut service,
         &ToolRequest::CostEstimate {
             selection: FindingSelection::default(),
+            rule: None,
             all: true,
         },
     );
@@ -1705,7 +1730,10 @@ fn session_query_workflows_return_the_agent_operation_payloads() {
         serde_json::to_value(cli.callgraph(None, None, None).result).unwrap(),
         agent_callgraph
     );
-    assert_eq!(serde_json::to_value(cli.cost().result).unwrap(), agent_cost);
+    assert_eq!(
+        serde_json::to_value(cli.cost(None).result).unwrap(),
+        agent_cost
+    );
 }
 
 #[test]
@@ -2916,6 +2944,7 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
         &mut service,
         &ToolRequest::CostEstimate {
             selection: FindingSelection::default(),
+            rule: None,
             all: true,
         },
     );
@@ -3763,7 +3792,7 @@ fn repeated_embedding_workflows_share_one_semantic_build() {
     assert!(session.refs("score", None, None, None, None).ok);
     assert!(session.cfg("player starts", None, None).ok);
     assert!(session.callgraph(None, None, None).ok);
-    assert!(session.cost().ok);
+    assert!(session.cost(None).ok);
     assert_eq!(session.semantic_build_count(), 1);
 
     assert!(session.analyze().ok);

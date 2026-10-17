@@ -560,12 +560,12 @@ impl CompilerSession {
     /// `cost` (#429): the `costEstimate` operation's payload; the session's
     /// finding selection applies exactly as on the agent surface, and its
     /// outcome is kept in-process so the verdict reflects the full finding
-    /// set (#635).
-    pub fn cost(&mut self) -> Envelope<CostResult> {
+    /// set (#635). `rule` selects the per-rule drill-down (#724).
+    pub fn cost(&mut self, rule: Option<String>) -> Envelope<CostResult> {
         let selection = self.config.selection.clone();
         self.service_query("cost", move |service| {
             service
-                .cost_estimate_result(&selection)
+                .cost_estimate_result(&selection, rule.as_deref())
                 .map(|(result, outcome)| CostResult {
                     result,
                     selection: outcome,
