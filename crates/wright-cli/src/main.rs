@@ -285,6 +285,12 @@ fn run_workflow(command: Command) -> ExitCode {
                 }
                 let mut config = config_from_common(&query.common, true);
                 config.selection = selection_from_args(&query.select);
+                config.run = wright_driver::config::RunOptions {
+                    no_cache: query.no_cache,
+                    baseline: query.baseline.clone(),
+                    save_baseline: query.save_baseline.clone(),
+                    max_total: query.max_total,
+                };
                 run_configured(
                     config,
                     present::Presentation::from_common(&query.common).with_all(query.all),
@@ -357,8 +363,15 @@ fn run_compile(args: &cli::CompileArgs) -> ExitCode {
     let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
     let copy = args.copy;
     let force = args.force;
+    let mut compile_config = config_from_common(&args.common, true);
+    compile_config.run = wright_driver::config::RunOptions {
+        no_cache: args.no_cache,
+        baseline: args.baseline.clone(),
+        save_baseline: args.save_baseline.clone(),
+        max_total: None,
+    };
     run_configured(
-        config_from_common(&args.common, true),
+        compile_config,
         present::Presentation::from_common(&args.common),
         None,
         move |session: &mut wright_driver::CompilerSession| {

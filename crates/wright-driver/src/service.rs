@@ -1703,6 +1703,71 @@ impl<'a> ToolService<'a> {
         Ok((result, outcome))
     }
 
+    /// The CLI-side run-cache comparison and `--max-total` gate for
+    /// `inspect cost` (ADR-0027, #723): `--max-total` fails with the
+    /// overage named and reads no cache; an explicitly named baseline that
+    /// does not exist is a usage error; an absent/corrupt/unknown-version
+    /// record just omits the comparison. Agent `costEstimate` requests
+    /// never reach here — the agent surface takes its reference as inline
+    /// data and returns no implicit comparison (decision 3).
+    ///
+    /// Returns the comparison for the caller to carry in-process; it is
+    /// never serialized into the JSON or agent result.
+    pub(crate) fn apply_cost_run(
+        &self,
+        result: &serde_json::Value,
+    ) -> Result<Option<crate::cache::Comparison>, ToolErrorInfo> {
+        let loaded = self.snapshot();
+        let run = &self.session.config.run;
+        // `--max-total`: exit 1 below the current total, naming the
+        // overage; identical with and without a cache (decision 2).
+        if let (Some(max), Some(total)) = (run.max_total, result["elementCount"]["total"].as_u64())
+        {
+            if total as usize > max {
+                return Err(ToolErrorInfo {
+                    code: "cost-over-budget".to_string(),
+                    message: format!(
+                        "element total {total} exceeds --max-total {max} by {}",
+                        total as usize - max
+                    ),
+                });
+            }
+        }
+        let cost_run = crate::cache::CostRun {
+            no_cache: run.no_cache,
+            root: loaded.input.root.clone(),
+            input_path: loaded.input.path.clone(),
+            kind: loaded.input.kind.as_str().to_string(),
+            locale: CompilerSession::locale_for(loaded).to_string(),
+            profile: self.session.config.profile.as_str().to_string(),
+            baseline: run.baseline.clone(),
+            save_baseline: run.save_baseline.clone(),
+        };
+        if run.baseline.is_some() && !crate::cache::baseline_exists(&cost_run) {
+            return Err(ToolErrorInfo {
+                code: "invalid-selection".to_string(),
+                message: format!(
+                    "unknown baseline '{}': no record under .wright/ for this input kind/locale/profile",
+                    run.baseline.as_deref().unwrap_or_default()
+                ),
+            });
+        }
+        let Ok(report) = loaded.program.element_count(self.session.catalog()) else {
+            return Ok(None);
+        };
+        let snapshot = crate::cache::CostSnapshot {
+            total: report.total,
+            budget: crate::session::WORKSHOP_CLIENT_ELEMENT_LIMIT,
+            rules: report
+                .rules
+                .iter()
+                .enumerate()
+                .map(|(index, node)| (loaded.program.rules[index].name.clone(), node.count))
+                .collect(),
+        };
+        Ok(crate::cache::compare_and_record(&cost_run, &snapshot))
+    }
+
     fn target_metadata(&self) -> serde_json::Value {
         let catalog = self.session.catalog();
         json!({

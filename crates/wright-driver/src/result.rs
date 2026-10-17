@@ -33,6 +33,12 @@ pub struct Envelope<T: Serialize> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selection: Option<crate::select::SelectionOutcome>,
     pub result: T,
+    /// The run-cache comparison for `compile`/`inspect cost` (ADR-0027,
+    /// #723): in-process only — it never serializes into the default JSON
+    /// or agent result (decision 3), so `--format json` and `costEstimate`
+    /// stay deterministic. The text renderer reads it to show the delta.
+    #[serde(skip)]
+    pub comparison: Option<serde_json::Value>,
 }
 
 impl<T: Serialize> Envelope<T> {
@@ -48,6 +54,7 @@ impl<T: Serialize> Envelope<T> {
             diagnostics: self.diagnostics,
             selection: self.selection,
             result: f(self.result),
+            comparison: self.comparison,
         }
     }
 }

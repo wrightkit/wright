@@ -41,7 +41,7 @@ result.
 | `wright inspect refs <NAME> [INPUT] [--only KIND] [--rule RULE] [--file PATH] [--max N]` | References and usage counts for one symbol, addressed by name | usage-count header plus the reference list |
 | `wright inspect cfg <RULE> [INPUT] [--only KIND] [--max N]` | Control-flow graph of one rule, addressed by name | block/edge listing |
 | `wright inspect callgraph [INPUT] [--caller RULE] [--callee SUBROUTINE] [--max N]` | Subroutine call graph (caller rules to callee subroutines) | call edges |
-| `wright inspect cost [INPUT]` | Exact generated-resource counts plus static findings | resource counts and findings |
+| `wright inspect cost [INPUT] [--no-cache] [--baseline NAME] [--save-baseline NAME] [--max-total N]` | Exact generated-resource counts plus static findings; by default compares against the previous run's element cost | resource counts, findings, and the change against the previous run or named baseline |
 | `wright rename <NAME> <NEW_NAME> [INPUT]` | Semantically rename a Workshop variable or subroutine | per-source diff of the validated edits; `--write` applies them |
 | `wright lookup [QUERY]` | Resolve a Workshop or OverPy display name, near spelling, or guess to the owner-accepted spelling and signature (#529); takes no input | one line per entry: signature or spelling, kind, identity |
 | `wright serve [INPUT] [--transport T] [--kind K] [--profile P] [--lint-config YAML] [--rule PATH] [--disable-rule ID] [--rule-severity ID:SEV]` | Serve `wright-agent/v1` over stdio, JSON-RPC 2.0, or MCP | one structured response per request |
@@ -252,6 +252,23 @@ Resolution never guesses.
   and `--all` shows every rule. The count is a structure count, not a
   statement of client importability, and is `null` with an
   `elementCountUnavailable` reason when the count cannot run.
+
+  **Run cache and gate (ADR-0027).** `compile` and `inspect cost` keep a
+  small project-local run cache under `.wright/` at the project root and,
+  by default, report the change in element cost against the previous
+  successful run of the same key (resolved input, kind, locale, profile).
+  The comparison is a convenience for people: it never changes the verdict
+  or exit code, and it is not part of the default JSON or agent result —
+  an agent requests a comparison explicitly by passing the reference as
+  inline data. `--baseline <name>` compares against a named reference
+  (an unknown name is a usage error) and `--save-baseline <name>` records
+  the current run under a name. `--max-total <N>` is an explicit gate on
+  `inspect cost`: exit 1 naming the overage when the element total exceeds
+  N, identical with and without a cache. `--no-cache`, a non-empty
+  `WRIGHT_NO_CACHE`, or a truthy `CI` disable reading and writing `.wright/`;
+  add it to your `.gitignore` — Wright does not edit it for you. A failing
+  run never replaces the previous reference, and cache failures never fail
+  a command.
 * `persistentObjects` has no standalone command; `analyze` reports aggregate
   counts under `result.persistentObjects`; use the agent operation for details.
 

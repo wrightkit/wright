@@ -410,6 +410,12 @@ fn render_report<T: serde::Serialize + ResultPresentation>(
         }
     } else {
         envelope.result.render_body(&ctx);
+        // The run-cache comparison (ADR-0027, #723) rides the envelope
+        // in-process — shown on every renderer, never in the JSON result,
+        // and never after an artifact stream where it would corrupt bytes.
+        if !envelope.result.is_artifact_stream() {
+            render_comparison(envelope.comparison.as_ref());
+        }
     }
     if envelope.command == "check" {
         render_check_footer(envelope, pres, elapsed);
@@ -781,6 +787,44 @@ impl ResultPresentation for CompileResult {
     }
     fn render_body(&self, _ctx: &RenderContext<'_>) {
         render_compile(self);
+    }
+}
+
+/// The run-cache comparison line (ADR-0027, #723): the delta against the
+/// previous run or named baseline, plus the rules whose counts changed.
+/// Absent entirely when no reference existed — never an error line.
+fn render_comparison(comparison: Option<&serde_json::Value>) {
+    let Some(comparison) = comparison.filter(|c| c.is_object()) else {
+        return;
+    };
+    let delta = comparison["totalDelta"].as_i64().unwrap_or(0);
+    let sign = if delta > 0 { "+" } else { "" };
+    let reference = comparison["reference"].as_str().unwrap_or("previous");
+    println!(
+        "\nElement cost: {sign}{delta} vs {reference} run ({} total)",
+        comparison["previousTotal"].as_u64().unwrap_or(0)
+    );
+    let mut lines = Vec::new();
+    for change in comparison["changed"].as_array().into_iter().flatten() {
+        let name = change["name"].as_str().unwrap_or("?");
+        let d = change["delta"].as_i64().unwrap_or(0);
+        let s = if d > 0 { "+" } else { "" };
+        lines.push(format!(
+            "  {name}: {} -> {} ({s}{d})",
+            change["before"], change["after"]
+        ));
+    }
+    for name in comparison["added"].as_array().into_iter().flatten() {
+        lines.push(format!("  {}: added", name.as_str().unwrap_or("?")));
+    }
+    for name in comparison["removed"].as_array().into_iter().flatten() {
+        lines.push(format!("  {}: removed", name.as_str().unwrap_or("?")));
+    }
+    for line in lines.iter().take(5) {
+        println!("{line}");
+    }
+    if lines.len() > 5 {
+        println!("  ... {} more changed rule(s)", lines.len() - 5);
     }
 }
 
@@ -2470,6 +2514,7 @@ mod tests {
                 findings,
                 ..LintResult::default()
             },
+            comparison: None,
         }
     }
 
@@ -2537,6 +2582,7 @@ mod tests {
             diagnostics,
             selection,
             result: CheckResult::default(),
+            comparison: None,
         }
     }
 
