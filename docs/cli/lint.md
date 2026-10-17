@@ -17,7 +17,8 @@ The following lint-policy flags configure the registry and are repeatable:
 * `--rule <PATH>`: load a local YAML rule file or directory.
 * `--disable-rule <ID>`: disable a rule by stable ID (`min-wait-loop`,
   `duplicate-condition`, `expensive-loop-check`, `repeated-value`,
-  `ongoing-condition-hot-path`, `while-without-wait`).
+  `ongoing-condition-hot-path`, `while-without-wait`,
+  `nested-binder-lambda`).
 * `--rule-severity <ID>:<off|warn|error>`: override a rule's project policy.
 
 These flags are usage errors on every other workflow command (exit 2).
@@ -73,6 +74,17 @@ occurrence; a group lists at most ten locations and folds the rest into a
 `... N more location(s)` line, while positions on pseudo-paths fold into the
 secondary notes.
 
+`nested-binder-lambda` is a static indicator about Workshop element-binding
+scopes. The binder values (`filteredArray`, `sortedArray`, `mappedArray`,
+`isTrueForAll`, `isTrueForAny`) evaluate every argument after the first per
+array element, binding `Current Array Element`/`Current Array Index`; a
+binder nested inside that per-element argument shadows the outer element
+inside the inner binder's own argument. The shape is semantically valid and
+may be intentional, but it is the structural signature measured on
+client-rejected Workshop builds and absent from measured accepted ones
+(`workshop-rs` `docs/import-limits.md`; #713). It is a warning, not a
+confirmed client import boundary.
+
 `ongoing-condition-hot-path` is a heuristic about the per-tick evaluation of
 an `Ongoing - Global` or `Ongoing - Each Player` rule's conditions. Each tick
 evaluates conditions in source order until one short-circuits the rule, so a
@@ -106,7 +118,8 @@ documentation, known limits, evidence class, tags) is served once by the
       { "id": "expensive-loop-check", "effectiveSeverity": "info" },
       { "id": "ongoing-condition-hot-path", "effectiveSeverity": "info" },
       { "id": "repeated-value", "effectiveSeverity": "warning" },
-      { "id": "while-without-wait", "effectiveSeverity": "warning" }
+      { "id": "while-without-wait", "effectiveSeverity": "warning" },
+      { "id": "nested-binder-lambda", "effectiveSeverity": "warning" }
     ],
     "config": { "rules": { "min-wait-loop": { "enabled": true, "severity": "warning" } } },
     "findings": [

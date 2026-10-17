@@ -155,6 +155,11 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
                 program, rule_id, rule, &dead, &value_ids,
             ));
         }
+        if config.is_enabled("nested-binder-lambda") {
+            findings.extend(nested_binder_findings(
+                program, rule_id, rule, &dead, &value_ids,
+            ));
+        }
     }
     for finding in &mut findings {
         if let Some(severity) = config.severity_override(&finding.code) {
@@ -329,6 +334,127 @@ fn collect_expensive_values(value: &Value) -> Vec<(Vec<usize>, &Value)> {
         0
     });
     out
+}
+
+/// Canonical ids of the value calls that evaluate every argument after the
+/// first once per element of the array argument, binding
+/// `Current Array Element` and `Current Array Index` to the current
+/// element — `Filtered Array`, `Sorted Array`, `Mapped Array`,
+/// `Is True For All`, and `Is True For Any`. The binding semantics are
+/// canonical Workshop owned by `workshop-rs`; the id list is rule-local
+/// knowledge the way `VOLATILE` is.
+const ELEMENT_BINDER_VALUES: &[&str] = &[
+    "filteredArray",
+    "isTrueForAll",
+    "isTrueForAny",
+    "mappedArray",
+    "sortedArray",
+];
+
+/// `nested-binder-lambda` (#713): report each binder call that occurs
+/// inside an enclosing binder's per-element argument — any argument after
+/// the array source at index 0. The inner call rebinds `Current Array
+/// Element`/`Current Array Index` inside its own per-element argument,
+/// shadowing the enclosing element, and the shape is the one structural
+/// signature measured so far that separates client-rejected Workshop
+/// builds from accepted ones: the `OWBastion/Bastion#391`-era build and the
+/// import-limits verbatim reproducer carry it (1 and 16 occurrences), the
+/// measured accepted builds carry none (`workshop-rs`
+/// `docs/import-limits.md`). Correlation, not a confirmed client limit —
+/// the finding's evidence class says so.
+fn nested_binder_findings(
+    program: &Program,
+    rule_id: RuleId,
+    rule: &Rule,
+    dead: &[bool],
+    value_ids: &HashMap<usize, ValueId>,
+) -> Vec<Finding> {
+    let mut hits = Vec::new();
+    let mut raw = Vec::new();
+    for (condition, cond) in rule.conditions.iter().enumerate() {
+        if cond.disabled {
+            continue;
+        }
+        collect_nested_binders(&cond.value, None, &mut Vec::new(), &mut raw);
+        for (path, inner, value, outer) in raw.drain(..) {
+            let span = condition_value_or_ancestor_span(program, rule_id, condition, &path);
+            hits.push((span, None, inner, value, outer));
+        }
+    }
+    for (action_id, action) in rule.actions.iter().enumerate() {
+        if dead[action_id] {
+            continue;
+        }
+        visit_action_roots(action, &mut |argument, root| {
+            collect_nested_binders(root, None, &mut Vec::new(), &mut raw);
+            for (path, inner, value, outer) in raw.drain(..) {
+                hits.push((
+                    argument_value_or_ancestor_span(program, rule_id, action_id, argument, &path),
+                    Some(action_id),
+                    inner,
+                    value,
+                    outer,
+                ));
+            }
+        });
+    }
+    hits.into_iter()
+        .map(|(span, action, inner, value, outer)| Finding {
+            code: "nested-binder-lambda".into(),
+            severity: Severity::Warning,
+            message: format!(
+                "`{inner}` nested in `{outer}`'s per-element argument binds \
+                 `Current Array Element` to the inner array, shadowing the \
+                 outer element; nested-binder shapes appear in Workshop \
+                 builds the game client rejected on import"
+            ),
+            span,
+            rule: rule_id,
+            action,
+            value: value_ids.get(&(value as *const Value as usize)).copied(),
+            evidence: EvidenceClass::StaticIndicator,
+            boundedness: None,
+            fix: None,
+        })
+        .collect()
+}
+
+/// Collect every binder call — its canonical id, path from the visited
+/// root, and the nearest enclosing binder's canonical id — that sits inside
+/// an enclosing binder's per-element argument. `enclosing` names the binder
+/// whose per-element argument (any argument at index ≥ 1) the current
+/// subtree lives in. The array-source argument at index 0 stays in the
+/// enclosing scope: `Filtered Array(Sorted Array(x, r), c)` chains two
+/// binders without nesting a scope, and is not reported.
+fn collect_nested_binders<'a>(
+    value: &'a Value,
+    enclosing: Option<&'a str>,
+    path: &mut Vec<usize>,
+    out: &mut Vec<(Vec<usize>, &'a str, &'a Value, &'a str)>,
+) {
+    let binder = match value {
+        Value::Call { name, .. } if ELEMENT_BINDER_VALUES.contains(&name.as_str()) => {
+            if let Some(outer) = enclosing {
+                out.push((path.clone(), name.as_str(), value, outer));
+            }
+            Some(name.as_str())
+        }
+        _ => None,
+    };
+    for (index, child) in value_children(value).into_iter().enumerate() {
+        path.push(index);
+        collect_nested_binders(
+            child,
+            if index >= 1 {
+                binder.or(enclosing)
+            } else {
+                enclosing
+            },
+            path,
+            out,
+        );
+        path.pop();
+    }
 }
 
 fn duplicate_condition_findings(
