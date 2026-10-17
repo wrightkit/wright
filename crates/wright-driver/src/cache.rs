@@ -342,6 +342,18 @@ pub fn has_baseline_file(root: &Path, name: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// The cache honors `CI` and `WRIGHT_NO_CACHE`, both of which are set in
+    /// CI — so a test that exercises recording must clear them first (it is
+    /// the only `compare_and_record` caller that disables via env).
+    fn enable() {
+        // SAFETY: tests in this module are the only env mutation; clearing
+        // both guard vars before exercising `compare_and_record` is sound.
+        unsafe {
+            std::env::remove_var("CI");
+            std::env::remove_var("WRIGHT_NO_CACHE");
+        }
+    }
+
     fn snap(total: usize, rules: &[(&str, usize)]) -> CostSnapshot {
         CostSnapshot {
             total,
@@ -352,6 +364,7 @@ mod tests {
 
     #[test]
     fn same_key_second_run_reports_zero_delta() {
+        enable();
         let dir = std::env::temp_dir().join(format!("wright-cache-{}", std::process::id()));
         let run = CostRun {
             no_cache: false,
@@ -373,6 +386,7 @@ mod tests {
 
     #[test]
     fn added_and_grown_rules_are_named() {
+        enable();
         let dir = std::env::temp_dir().join(format!("wright-cache2-{}", std::process::id()));
         let run = CostRun {
             no_cache: false,
@@ -397,6 +411,7 @@ mod tests {
 
     #[test]
     fn entries_differing_only_in_locale_or_profile_never_compare() {
+        enable();
         let dir = std::env::temp_dir().join(format!("wright-cache3-{}", std::process::id()));
         for (locale, profile) in [("en-US", "off"), ("zh-CN", "off"), ("en-US", "compat")] {
             let run = CostRun {
@@ -431,6 +446,7 @@ mod tests {
 
     #[test]
     fn a_missing_or_corrupt_record_yields_no_comparison() {
+        enable();
         let dir = std::env::temp_dir().join(format!("wright-cache4-{}", std::process::id()));
         let run = CostRun {
             no_cache: false,
