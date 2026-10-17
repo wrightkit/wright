@@ -101,8 +101,29 @@ pub struct SessionConfig {
     /// Selection narrows presentation only; verdicts and exit codes are
     /// computed on the full set.
     pub selection: crate::select::FindingSelection,
+    /// The project run cache and cost-comparison options (ADR-0027, #723).
+    /// Comparison is reported on `compile`/`inspect cost` when a reference
+    /// exists; `--max-total` is an explicit gate that reads no cache.
+    pub run: RunOptions,
     pub providers: wright_lpp::ProviderRegistry,
     pub opy_provider: crate::opy_provider::OpyProviderConfig,
+}
+
+/// Run-cache and cost-gate options (ADR-0027). Disabled entirely under
+/// `--no-cache`, a non-empty `WRIGHT_NO_CACHE`, or a truthy `CI`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RunOptions {
+    /// `--no-cache`: neither read nor write `.wright/`.
+    pub no_cache: bool,
+    /// `--baseline <name>`: compare against the named reference instead of
+    /// the previous run. An unknown name given explicitly is a usage error.
+    pub baseline: Option<String>,
+    /// `--save-baseline <name>`: record the current run under `name`.
+    pub save_baseline: Option<String>,
+    /// `--max-total <N>`: `inspect cost` fails with exit 1 when the element
+    /// total exceeds N and names the overage. It reads no cache, so it
+    /// behaves identically with and without history.
+    pub max_total: Option<usize>,
 }
 
 impl SessionConfig {
@@ -146,6 +167,9 @@ impl SessionConfig {
         }
         if self.selection != other.selection {
             changed.push("selection");
+        }
+        if self.run != other.run {
+            changed.push("run");
         }
         if self.providers != other.providers {
             changed.push("providers");

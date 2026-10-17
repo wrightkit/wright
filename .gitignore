@@ -33,3 +33,6 @@ target/
 
 # Metrics corpus external-project cache
 benchmarks/metrics/.cache/
+
+# Wright run cache (ADR-0027): project-local, never committed
+.wright/

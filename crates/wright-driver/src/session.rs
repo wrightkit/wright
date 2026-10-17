@@ -14,6 +14,7 @@ use workshop_rs::Program;
 use wright_analyzer::canonical::SemanticService;
 use wright_analyzer::registry::{LintConfig, LintRegistry};
 
+use crate::cache;
 use crate::config::{InputSpec, SessionConfig, SourceKind};
 use crate::diag::{
     Diagnostic, Origin, Position, Severity, SourceSpan, Stage, source_provider_unavailable,
@@ -841,6 +842,64 @@ impl CompilerSession {
         self.loaded.as_ref().map(|loaded| loaded.input.root.clone())
     }
 
+    /// The element-cost snapshot of the currently loaded program, for the
+    /// project run cache (ADR-0027, #723): the canonical total plus each
+    /// rule's share, in canonical order. `None` when the count cannot run.
+    pub(crate) fn cost_snapshot(&self) -> Option<cache::CostSnapshot> {
+        let loaded = self.loaded.as_ref()?;
+        let report = loaded.program.element_count(&self.catalog).ok()?;
+        Some(cache::CostSnapshot {
+            total: report.total,
+            budget: WORKSHOP_CLIENT_ELEMENT_LIMIT,
+            rules: report
+                .rules
+                .iter()
+                .enumerate()
+                .map(|(index, node)| (loaded.program.rules[index].name.clone(), node.count))
+                .collect(),
+        })
+    }
+
+    /// The `CostRun` key material for the loaded input: the resolved input
+    /// file, kind, locale, and profile — so runs differing only in those
+    /// never compare with each other (ADR-0027 decision 12).
+    pub(crate) fn cost_run(&self) -> Option<cache::CostRun> {
+        let loaded = self.loaded.as_ref()?;
+        let run = &self.config.run;
+        Some(cache::CostRun {
+            no_cache: run.no_cache,
+            root: loaded.input.root.clone(),
+            input_path: loaded.input.path.clone(),
+            kind: loaded.input.kind.as_str().to_string(),
+            locale: Self::locale_for(loaded).to_string(),
+            profile: self.config.profile.as_str().to_string(),
+            baseline: run.baseline.clone(),
+            save_baseline: run.save_baseline.clone(),
+        })
+    }
+
+    /// Compare the current run's element cost against the stored reference
+    /// and record it as the new previous run (plus the named baseline when
+    /// `--save-baseline` is given). Returns the comparison when one was
+    /// available; every cache failure is swallowed (ADR-0027 decision 10).
+    /// An explicitly named but absent baseline is a usage error instead.
+    pub(crate) fn run_cost_comparison(&self) -> Option<cache::Comparison> {
+        let run = self.cost_run()?;
+        if run.baseline.is_some() && !cache::baseline_exists(&run) {
+            return None;
+        }
+        let snapshot = self.cost_snapshot()?;
+        cache::compare_and_record(&run, &snapshot)
+    }
+
+    /// Whether the explicitly named `--baseline` exists — `compile` turns a
+    /// missing one into a usage error like `inspect cost` does (#723).
+    pub(crate) fn named_baseline_missing(&self) -> Option<String> {
+        let run = self.cost_run()?;
+        let name = run.baseline.as_deref()?;
+        (!cache::baseline_exists(&run)).then(|| name.to_string())
+    }
+
     fn load_workshop(&mut self, resolved: &ResolvedInput) -> Result<(Program, String), Diagnostic> {
         let override_locale = self
             .config
@@ -933,16 +992,39 @@ impl CompilerSession {
                 ),
             }
         };
+        let mut comparison = None;
+        let mut missing_baseline = None;
         match written {
             Ok(written_to) => {
                 result.output = Some(CompiledOutput {
                     written_to,
                     ..output
                 });
+                // A successful run becomes the new reference; the change
+                // against the previous run rides the envelope (in-process
+                // only — never the default JSON, ADR-0027 decision 3).
+                missing_baseline = self.named_baseline_missing();
+                if missing_baseline.is_none() {
+                    comparison = self.run_cost_comparison();
+                }
             }
             Err(diagnostic) => self.diagnostics.push(diagnostic),
         }
-        self.finish("compile", result)
+        let mut envelope = self.finish("compile", result);
+        envelope.comparison = comparison.map(|c| c.to_json());
+        // An explicitly named baseline that does not exist is a usage
+        // error, reported like the gate diagnostics — but it must not
+        // change the compiled bytes, so it lands after the write above.
+        if let Some(name) = missing_baseline {
+            envelope.diagnostics.push(Diagnostic::error(
+                "invalid-selection",
+                Stage::Emission,
+                format!("unknown baseline '{name}': no record under .wright/ for this input kind/locale/profile"),
+            ));
+            envelope.ok = false;
+            envelope.exit = crate::result::exit::SOURCE_ERROR;
+        }
+        envelope
     }
 
     fn compile_output(&mut self) -> Result<(CompiledOutput, Option<PathBuf>), Diagnostic> {
@@ -1265,6 +1347,7 @@ impl CompilerSession {
             diagnostics,
             selection,
             result,
+            comparison: None,
         }
     }
 

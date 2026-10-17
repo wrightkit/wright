@@ -132,6 +132,15 @@ pub(crate) struct CompileArgs {
     /// Also copy the program to the system clipboard.
     #[arg(long)]
     pub(crate) copy: bool,
+    /// Neither read nor write the `.wright/` run cache (ADR-0027).
+    #[arg(long)]
+    pub(crate) no_cache: bool,
+    /// Compare this run's element cost against the named baseline.
+    #[arg(long, value_name = "NAME")]
+    pub(crate) baseline: Option<String>,
+    /// Record this run's element cost under the named baseline.
+    #[arg(long, value_name = "NAME")]
+    pub(crate) save_baseline: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -165,7 +174,8 @@ pub(crate) struct ReportArgs {
 }
 
 /// Arguments of `inspect cost`: the shared report options plus the
-/// per-rule drill-down selector (#724).
+/// per-rule drill-down selector (#724) and the run-cache / element-total
+/// gate options (ADR-0027, #723).
 #[derive(Debug, Args)]
 pub(crate) struct CostArgs {
     /// Return every selected item instead of the default bounded report.
@@ -180,6 +190,18 @@ pub(crate) struct CostArgs {
     /// to its total.
     #[arg(long, value_name = "RULE")]
     pub(crate) rule: Option<String>,
+    /// Neither read nor write the `.wright/` run cache.
+    #[arg(long)]
+    pub(crate) no_cache: bool,
+    /// Compare this run's element cost against the named baseline.
+    #[arg(long, value_name = "NAME")]
+    pub(crate) baseline: Option<String>,
+    /// Record this run's element cost under the named baseline.
+    #[arg(long, value_name = "NAME")]
+    pub(crate) save_baseline: Option<String>,
+    /// Fail with exit 1 when the element total exceeds N; reads no cache.
+    #[arg(long, value_name = "N")]
+    pub(crate) max_total: Option<usize>,
 }
 
 /// Arguments of `analyze`: shared workflow options, finding selection, and

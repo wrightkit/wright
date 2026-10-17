@@ -1,5 +1,6 @@
 #![allow(clippy::result_large_err)]
 
+pub mod cache;
 pub mod config;
 pub mod diag;
 pub mod edit;
@@ -20,7 +21,7 @@ pub mod source_provider;
 pub mod workshop_compat;
 pub mod workshop_provider;
 
-pub use config::{InputSpec, LintConfig, OutputFormat, SessionConfig, SourceKind};
+pub use config::{InputSpec, LintConfig, OutputFormat, RunOptions, SessionConfig, SourceKind};
 pub use diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage};
 pub use input::{InputTarget, ResolvedInput, sha256_hex};
 pub use opy_provider::{
