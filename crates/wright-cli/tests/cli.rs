@@ -3223,6 +3223,114 @@ fn callgraph_highlight_sections_fold_beyond_the_bound() {
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
 
+/// #723 / ADR-0027: the `.wright/` run cache compares each `inspect cost`
+/// run against the previous successful run of the same key, never changes
+/// the verdict, and `--no-cache`/`WRIGHT_NO_CACHE`/`CI` leave it untouched.
+#[test]
+fn cost_run_cache_compares_against_the_previous_run() {
+    let dir = temp_dir();
+    let path = dir.join("t.ws");
+    std::fs::write(&path, "rule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Wait(0.016);\n    }\n}\n").unwrap();
+    let path = path.to_str().unwrap();
+
+    // The first run records a reference and reports no comparison.
+    let first = run(&["inspect", "cost", path]);
+    assert!(first.status.success(), "{}", command_result(&first));
+    assert!(
+        !String::from_utf8_lossy(&first.stdout).contains("vs previous run"),
+        "no reference on a first run"
+    );
+    assert!(dir.join(".wright").is_dir(), "the run wrote a record");
+
+    // The second run of the same key reports a zero delta.
+    let second = run(&["inspect", "cost", path]);
+    let stdout = String::from_utf8_lossy(&second.stdout);
+    assert!(stdout.contains("vs previous run"), "{stdout}");
+    assert!(stdout.contains("Element cost: 0 "), "{stdout}");
+
+    // The comparison rides the envelope, never the default JSON result.
+    let json = run(&["inspect", "cost", path, "-f", "json"]);
+    let result = parse_json(&json.stdout)["result"].clone();
+    assert!(
+        result.get("comparison").is_none(),
+        "default JSON carries no comparison (ADR-0027 decision 3): {result}"
+    );
+
+    // `--max-total` below the current total exits 1 and names the overage;
+    // at or above it exits 0 — identical with and without a cache.
+    let over = run(&["inspect", "cost", path, "--max-total", "1"]);
+    assert_eq!(over.status.code(), Some(1), "{}", command_result(&over));
+    let under = run(&["inspect", "cost", path, "--max-total", "32768"]);
+    assert!(under.status.success(), "{}", command_result(&under));
+
+    // `--no-cache`, `WRIGHT_NO_CACHE`, and a truthy `CI` each leave
+    // `.wright/` untouched and produce no comparison.
+    for (args, env) in [
+        (vec!["inspect", "cost", path, "--no-cache"], vec![]),
+        (
+            vec!["inspect", "cost", path],
+            vec![("WRIGHT_NO_CACHE", "1")],
+        ),
+        (vec!["inspect", "cost", path], vec![("CI", "true")]),
+    ] {
+        let before = std::fs::read_dir(dir.join(".wright")).map(|r| r.count());
+        let output = run_with_env(&args, &env);
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            command_result(&output)
+        );
+        assert!(
+            !String::from_utf8_lossy(&output.stdout).contains("vs previous run"),
+            "{args:?} suppressed the comparison"
+        );
+        let after = std::fs::read_dir(dir.join(".wright")).map(|r| r.count());
+        assert_eq!(before.ok(), after.ok(), "{args:?} left the cache untouched");
+    }
+
+    // A named baseline compares against a fixed reference; an unknown name
+    // given explicitly is a usage error.
+    let save = run(&["inspect", "cost", path, "--save-baseline", "v1"]);
+    assert!(save.status.success(), "{}", command_result(&save));
+    let named = run(&["inspect", "cost", path, "--baseline", "v1"]);
+    let stdout = String::from_utf8_lossy(&named.stdout);
+    assert!(stdout.contains("baseline:v1"), "{stdout}");
+    let unknown = run(&["inspect", "cost", path, "--baseline", "nope"]);
+    assert_eq!(
+        unknown.status.code(),
+        Some(1),
+        "{}",
+        command_result(&unknown)
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #723: a fixture pair where the second run adds one rule and grows
+/// another reports exactly those rules with the correct deltas.
+#[test]
+fn cost_run_cache_names_added_and_grown_rules() {
+    let dir = temp_dir();
+    let path = dir.join("t.ws");
+    let base = "rule (\"a\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Wait(0.016);\n    }\n}\n";
+    std::fs::write(&path, base).unwrap();
+    let path_str = path.to_str().unwrap();
+    assert!(run(&["inspect", "cost", path_str]).status.success());
+
+    // Grow rule a by one wait and add rule b.
+    let grown = "rule (\"a\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Wait(0.016);\n        Wait(0.016);\n    }\n}\n\nrule (\"b\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Wait(0.016);\n    }\n}\n";
+    std::fs::write(&path, grown).unwrap();
+    let second = run(&["inspect", "cost", path_str]);
+    let stdout = String::from_utf8_lossy(&second.stdout);
+    assert!(stdout.contains("vs previous run"), "{stdout}");
+    assert!(stdout.contains("a: "), "grown rule a is named: {stdout}");
+    assert!(
+        stdout.contains("b: added"),
+        "added rule b is named: {stdout}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn cost_reports_exact_counts_and_selected_findings() {
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));

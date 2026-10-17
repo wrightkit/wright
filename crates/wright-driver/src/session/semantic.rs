@@ -560,17 +560,36 @@ impl CompilerSession {
     /// `cost` (#429): the `costEstimate` operation's payload; the session's
     /// finding selection applies exactly as on the agent surface, and its
     /// outcome is kept in-process so the verdict reflects the full finding
-    /// set (#635). `rule` selects the per-rule drill-down (#724).
+    /// set (#635). `rule` selects the per-rule drill-down (#724); the
+    /// run-cache comparison and `--max-total` gate apply inside the load,
+    /// before the envelope's verdict (ADR-0027, #723).
     pub fn cost(&mut self, rule: Option<String>) -> Envelope<CostResult> {
         let selection = self.config.selection.clone();
-        self.service_query("cost", move |service| {
-            service
-                .cost_estimate_result(&selection, rule.as_deref())
-                .map(|(result, outcome)| CostResult {
-                    result,
-                    selection: outcome,
-                })
-        })
+        let mut envelope = self.service_query("cost", move |service| {
+            let (mut result, outcome) =
+                service.cost_estimate_result(&selection, rule.as_deref())?;
+            // `--max-total` and the named-baseline usage error are service
+            // errors (exit 1) raised before the verdict; the comparison is
+            // returned in-process and lifted onto the envelope below — it
+            // never joins the JSON payload (ADR-0027 decision 3).
+            let comparison = service.apply_cost_run(&result)?;
+            if let Some(comparison) = comparison {
+                result["__comparison"] = comparison.to_json();
+            }
+            Ok(CostResult {
+                result,
+                selection: outcome,
+            })
+        });
+        if let Some(comparison) = envelope
+            .result
+            .result
+            .as_object_mut()
+            .and_then(|result| result.remove("__comparison"))
+        {
+            envelope.comparison = Some(comparison);
+        }
+        envelope
     }
 
     /// Run one query operation through the session's [`ToolService`] — the
