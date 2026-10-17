@@ -1200,7 +1200,7 @@
             "info"
           ]
         },
-        "rule": { "type": "string" },
+        "rule": { "type": "string", "description": "A declared rule name selects that rule's element-cost drill-down (#724): `rule` (identity, count, span), `statements[]` (direct children ranked by recursive count) and `byNode[]` (each node's own contribution summed per canonical node name, with occurrences) replace the whole-program `elementCount`/`findings` view. The drill-down reports no findings, so `severity`/`file`/`max` do not apply to it." },
         "file": { "type": "string" },
         "max": { "type": "integer", "minimum": 0 },
         "all": { "type": "boolean", "default": false, "description": "Return every list item instead of the default cap; explicit filters and max still apply." }

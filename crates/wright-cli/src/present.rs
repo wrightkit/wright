@@ -1344,6 +1344,15 @@ impl ResultPresentation for CallGraphResult {
 
 impl ResultPresentation for CostResult {
     fn metadata(&self) -> Option<String> {
+        // The `--rule` drill-down (#724) carries no `exact` block; its
+        // metadata is the selected rule's identity and element count.
+        if let Some(rule) = self.result.get("rule").filter(|rule| rule.is_object()) {
+            return Some(format!(
+                "{} · {} element(s)",
+                rule_name(rule),
+                count(rule, "count"),
+            ));
+        }
         let exact = &self.result["exact"];
         Some(format!(
             "{} emitted byte(s), {} action(s), {} rule(s), {} wait(s)",
@@ -1355,7 +1364,14 @@ impl ResultPresentation for CostResult {
     }
     /// Totals lead; findings — the cost-relevant units — sort by severity and
     /// collapse identical repeats, bounded like the other query lists (#446).
-    fn render_body(&self, _ctx: &RenderContext<'_>) {
+    /// With `--rule` the result is the per-rule breakdown instead (#724):
+    /// the rule's identity/location, its statements ranked by recursive
+    /// count, and the per-name own-cost shares reconciling to its total.
+    fn render_body(&self, ctx: &RenderContext<'_>) {
+        if self.result.get("rule").is_some_and(|rule| rule.is_object()) {
+            render_cost_rule_body(&self.result, ctx);
+            return;
+        }
         let exact = &self.result["exact"];
         println!("\nGenerated resources (exact)");
         println!("  emitted bytes: {}", count(exact, "emittedBytes"));
@@ -1366,7 +1382,9 @@ impl ResultPresentation for CostResult {
         // The canonical element count against the client budget (#691),
         // then each rule's share in payload order — ranked by count, largest
         // first, with `index` carrying the canonical rule position — and the
-        // generic truncation note when the list was capped.
+        // generic truncation note when the list was capped. Each rule
+        // prints its source location (#722); a node without a retained
+        // span simply omits it.
         let elements = &self.result["elementCount"];
         if elements.is_object() {
             println!(
@@ -1375,11 +1393,18 @@ impl ResultPresentation for CostResult {
                 count(elements, "budget"),
             );
             for rule in elements["rules"].as_array().into_iter().flatten() {
-                println!(
-                    "    \"{}\": {} element(s)",
-                    rule_name(rule),
-                    count(rule, "count"),
-                );
+                match rule.get("span").and_then(inline_location) {
+                    Some(location) => println!(
+                        "    {} element(s)  {}  {location}",
+                        count(rule, "count"),
+                        rule_name(rule),
+                    ),
+                    None => println!(
+                        "    {} element(s)  {}",
+                        count(rule, "count"),
+                        rule_name(rule),
+                    ),
+                }
             }
             if let Some(note) = elements["truncation"]["rules"].as_object() {
                 println!(
@@ -1409,9 +1434,9 @@ impl ResultPresentation for CostResult {
         if findings.is_empty() {
             println!("  none");
         }
-        // Consecutive findings sharing a rule id and message collapse into one
-        // entry naming its occurrence count — a hot pattern must not dominate
-        // the screen.
+        // Findings sharing a rule id and message collapse into one entry
+        // listing each occurrence's location (#722) — like `lint`, so a
+        // hot pattern stays scannable instead of dominating the screen.
         let mut index = 0;
         while index < findings.len() {
             let first = &findings[index];
@@ -1422,13 +1447,18 @@ impl ResultPresentation for CostResult {
             {
                 end += 1;
             }
-            let count = end - index;
+            let group = &findings[index..end];
             let severity = first["severity"].as_str().unwrap_or("info");
             let code = first["code"].as_str().unwrap_or("finding");
             let message = first["message"].as_str().unwrap_or_default();
-            match count {
+            match group.len() {
                 1 => println!("  {severity}[{code}]: {message}"),
-                _ => println!("  {severity}[{code}] ({count} occurrences): {message}"),
+                count => println!("  {severity}[{code}] ({count} occurrences): {message}"),
+            }
+            for finding in group {
+                if let Some(location) = finding.get("span").and_then(inline_location) {
+                    println!("    --> {location}");
+                }
             }
             index = end;
         }
@@ -1444,6 +1474,94 @@ impl ResultPresentation for CostResult {
     /// findings (#635).
     fn update_summary_status(&self, status: &mut SummaryStatus) {
         findings_summary_status(&self.result["findings"], &self.selection, status);
+    }
+}
+
+/// The `--rule` body (#724): the rule's identity and location, then its
+/// direct statements ranked by recursive count and the per-name
+/// own-cost shares — the two reconciliations the issue fixes.
+fn render_cost_rule_body(result: &serde_json::Value, ctx: &RenderContext<'_>) {
+    let rule = &result["rule"];
+    let marks = ctx.presentation.section_marks();
+    println!("\nElement cost");
+    match rule.get("span").and_then(inline_location) {
+        Some(location) => println!(
+            "{}{} · {} element(s) · {location}",
+            marks.head,
+            rule_name(rule),
+            count(rule, "count"),
+        ),
+        None => println!(
+            "{}{} · {} element(s)",
+            marks.head,
+            rule_name(rule),
+            count(rule, "count"),
+        ),
+    }
+    let statements = result["statements"]
+        .as_array()
+        .map_or(&[][..], Vec::as_slice);
+    let by_node = result["byNode"].as_array().map_or(&[][..], Vec::as_slice);
+    // A `truncation` note carries the pre-cap `total`; the printed line
+    // names both so the withheld count is recoverable without `--all`.
+    let shown = |key: &str| {
+        result["truncation"][key].as_object().map(|note| {
+            (
+                note["shown"].as_u64().unwrap_or(0),
+                note["total"].as_u64().unwrap_or(0),
+            )
+        })
+    };
+    // `Costliest statements` are the rule's direct children ranked by
+    // recursive `count`; each carries its source location when a span
+    // was retained.
+    println!("\nCostliest statements");
+    if statements.is_empty() {
+        println!("  none");
+    }
+    for statement in statements {
+        match statement.get("span").and_then(inline_location) {
+            Some(location) => println!(
+                "{}{} element(s)  {}  {location}",
+                marks.head,
+                count(statement, "count"),
+                statement["name"].as_str().unwrap_or("?"),
+            ),
+            None => println!(
+                "{}{} element(s)  {}",
+                marks.head,
+                count(statement, "count"),
+                statement["name"].as_str().unwrap_or("?"),
+            ),
+        }
+    }
+    if let Some((shown, total)) = shown("statements") {
+        println!("  showing {shown} of {total}; --all to see every item");
+    }
+    // `By node name` sums each node's own (base + adjustment) cost per
+    // canonical name — inclusive counts are not used, so the entries
+    // add up to the rule's total.
+    println!("\nBy node name");
+    if by_node.is_empty() {
+        println!("  none");
+    }
+    for entry in by_node {
+        let occurrences = entry["occurrences"].as_u64().unwrap_or(1);
+        let times = if occurrences > 1 {
+            format!(" ×{occurrences}")
+        } else {
+            String::new()
+        };
+        println!(
+            "{}{} element(s)  {}{}",
+            marks.head,
+            count(entry, "count"),
+            entry["name"].as_str().unwrap_or("?"),
+            times,
+        );
+    }
+    if let Some((shown, total)) = shown("byNode") {
+        println!("  showing {shown} of {total}; --all to see every item");
     }
 }
 

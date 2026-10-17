@@ -164,6 +164,24 @@ pub(crate) struct ReportArgs {
     pub(crate) select: SelectArgs,
 }
 
+/// Arguments of `inspect cost`: the shared report options plus the
+/// per-rule drill-down selector (#724).
+#[derive(Debug, Args)]
+pub(crate) struct CostArgs {
+    /// Return every selected item instead of the default bounded report.
+    #[arg(long)]
+    pub(crate) all: bool,
+    #[command(flatten)]
+    pub(crate) common: CommonArgs,
+    #[command(flatten)]
+    pub(crate) select: SelectArgs,
+    /// Show where one declared rule's element cost goes — its statements
+    /// ranked by recursive count and the per-name shares that reconcile
+    /// to its total.
+    #[arg(long, value_name = "RULE")]
+    pub(crate) rule: Option<String>,
+}
+
 /// Arguments of `analyze`: shared workflow options, finding selection, and
 /// an explicit expansion option.
 #[derive(Debug, Args)]
@@ -367,7 +385,7 @@ pub(crate) enum InspectQuery {
     /// Show the subroutine call graph.
     Callgraph(CallgraphArgs),
     /// Report generated-resource counts and static findings.
-    Cost(ReportArgs),
+    Cost(CostArgs),
 }
 
 /// Arguments of `inspect rules`: shared workflow options plus the rule

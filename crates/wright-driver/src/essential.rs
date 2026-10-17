@@ -249,6 +249,14 @@ pub fn query(result: &Value, all: bool) -> Value {
 /// would otherwise keep twenty.
 pub fn cost(result: &Value, all: bool) -> Value {
     let mut output = result.clone();
+    // The `--rule` drill-down (#724) carries no `elementCount`/`findings`;
+    // bound its two lists and leave the rest of the payload as-is so the
+    // CLI/agent comparison sees exactly the same items.
+    if output.get("rule").is_some_and(|rule| rule.is_object()) {
+        cap(&mut output, "statements", 5, all);
+        cap(&mut output, "byNode", 5, all);
+        return output;
+    }
     cap(&mut output["elementCount"], "rules", 5, all);
     query(&output, all)
 }
