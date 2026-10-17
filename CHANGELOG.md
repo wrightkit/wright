@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.24.0](https://github.com/wrightkit/wright/compare/v0.23.0...v0.24.0) (2026-10-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* restrict --profile to Workshop input and remove aggressive ([#733](https://github.com/wrightkit/wright/issues/733))
+
+### Features
+
+* **cli,driver:** locate inspect cost rules/findings and add per-rule drill-down ([#730](https://github.com/wrightkit/wright/issues/730)) ([a46971c](https://github.com/wrightkit/wright/commit/a46971c70fdf7e183885de0c4ece2aecb2bf8560))
+* **driver,cli:** project run cache and cost comparison against the previous run ([#731](https://github.com/wrightkit/wright/issues/731)) ([cf9f947](https://github.com/wrightkit/wright/commit/cf9f9477fb118d6cdb8d75496846453828b54b8c))
+* restrict --profile to Workshop input and remove aggressive ([#733](https://github.com/wrightkit/wright/issues/733)) ([fba2cd4](https://github.com/wrightkit/wright/commit/fba2cd404f6a7330ec2c66a7b1bcc72624cbdd27)), closes [#725](https://github.com/wrightkit/wright/issues/725)
+
 ## [0.23.0](https://github.com/wrightkit/wright/compare/v0.22.2...v0.23.0) (2026-10-17)
 
 
