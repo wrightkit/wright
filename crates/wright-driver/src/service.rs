@@ -1132,8 +1132,9 @@ impl<'a> ToolService<'a> {
             return error;
         }
         match self.semantic_query(Request::GetFindings) {
-            ToolResponse::Ok { .. } => {
+            ToolResponse::Ok { result } => {
                 let findings = crate::session::prepare_findings(
+                    result,
                     self.semantic(),
                     &self.snapshot().loaded,
                     self.session.catalog(),
@@ -1535,7 +1536,12 @@ impl<'a> ToolService<'a> {
             Response::Ok { result } => result,
             Response::Error { .. } => serde_json::json!({}),
         };
+        let findings = match service.handle(&Request::GetFindings) {
+            Response::Ok { result } => result,
+            Response::Error { .. } => serde_json::json!([]),
+        };
         let findings = crate::session::prepare_findings(
+            findings,
             service,
             &self.snapshot().loaded,
             self.session.catalog(),

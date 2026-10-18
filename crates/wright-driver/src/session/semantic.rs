@@ -335,11 +335,11 @@ pub(crate) fn resolve_span_paths(value: &mut serde_json::Value, loaded: &Loaded)
 }
 
 pub(crate) fn prepare_findings(
+    mut findings: serde_json::Value,
     service: &SemanticService<'_>,
     loaded: &Loaded,
     catalog: &Catalog,
 ) -> Vec<serde_json::Value> {
-    let mut findings = service_response(service, &Request::GetFindings);
     resolve_span_paths(&mut findings, loaded);
     let mut findings = match findings {
         serde_json::Value::Array(findings) => findings,
@@ -708,7 +708,12 @@ impl CompilerSession {
                     lint_rule_count,
                     ProgressUnit::Rules,
                 ));
-                let findings = prepare_findings(service, &loaded, session.catalog());
+                let findings = prepare_findings(
+                    service_response(service, &Request::GetFindings),
+                    service,
+                    &loaded,
+                    session.catalog(),
+                );
                 let (findings, selection) = session
                     .config
                     .selection
