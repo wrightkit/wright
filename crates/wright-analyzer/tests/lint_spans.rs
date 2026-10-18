@@ -117,3 +117,91 @@ fn loop_body_finding_falls_back_to_the_argument_span() {
         "the finding carries the enclosing argument's span"
     );
 }
+
+/// Two distinct duplicated shapes in one loop: each `repeated-value` finding
+/// names its expression in canonical spelling, so the findings are
+/// distinguishable from the message alone (#735).
+const TWO_REPEATED: &str = r#"variables {
+    global:
+        0: index
+        1: other
+}
+rule ("two repeated expressions") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        While(Compare(Global.index, <, 3));
+            Set Global Variable(other, Distance Between(Position Of(Event Player), Vector(0, 0, 0)));
+            Set Global Variable(other, Distance Between(Position Of(Event Player), Vector(0, 0, 0)));
+            Set Global Variable(other, Vector Towards(Position Of(Event Player), Vector(1, 1, 1)));
+            Set Global Variable(other, Vector Towards(Position Of(Event Player), Vector(1, 1, 1)));
+            Wait(0.016, Ignore Condition);
+        End;
+    }
+}
+"#;
+
+#[test]
+fn repeated_value_names_each_repeated_expression() {
+    let program = parse(TWO_REPEATED);
+    let findings = analyze(&program, &LintConfig::default());
+    let repeated = coded(&findings, "repeated-value");
+    let [distance, towards] = repeated[..] else {
+        panic!("one finding per repeated expression: {findings:?}")
+    };
+    assert_eq!(
+        distance.message,
+        "`distance(getPosition(eventPlayer), vector(0, 0, 0))` is evaluated 2 times within the same loop scope"
+    );
+    assert_eq!(
+        towards.message,
+        "`vectorTowards(getPosition(eventPlayer), vector(1, 1, 1))` is evaluated 2 times within the same loop scope"
+    );
+    // Fully spanned Workshop provenance locates each finding on an occurrence
+    // of its expression — never on the enclosing loop header.
+    assert_ne!(distance.span, towards.span);
+    assert!(
+        ![distance.span, towards.span].contains(&program.action_span(0, 0)),
+        "the findings carry expression spans, not the loop action's: {distance:?} {towards:?}"
+    );
+}
+
+/// The provider shape — rule/action-level provenance with no nested value
+/// spans — still names the expression and says the location is the enclosing
+/// loop rather than the expression's own (#735).
+#[test]
+fn repeated_value_without_value_spans_says_the_location_is_the_loop() {
+    let source = r#"variables {
+    global:
+        0: index
+        1: other
+}
+rule ("nested repeat") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        While(Compare(Global.index, <, 3));
+            Set Global Variable(other, Add(Distance Between(Position Of(Event Player), Vector(0, 0, 0)), 1));
+            Set Global Variable(other, Add(Distance Between(Position Of(Event Player), Vector(0, 0, 0)), 2));
+            Wait(0.016, Ignore Condition);
+        End;
+    }
+}
+"#;
+    let program = shallowly_mapped(source);
+    let findings = analyze(&program, &LintConfig::default());
+    let [finding] = coded(&findings, "repeated-value")[..] else {
+        panic!("one repeated-value finding: {findings:?}")
+    };
+    assert_eq!(
+        finding.message,
+        "`distance(getPosition(eventPlayer), vector(0, 0, 0))` is evaluated 2 times within the same loop scope; the expression's own span is not recorded, so the location is the enclosing loop"
+    );
+    assert_eq!(
+        finding.span,
+        program.action_span(0, 0),
+        "with no recorded value span the finding locates the enclosing While"
+    );
+}

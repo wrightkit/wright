@@ -1081,14 +1081,28 @@ fn repeated_value_findings(
         .into_iter()
         .map(|family| {
             let first = family[0];
+            // Every occurrence renders identically; locate the finding at the
+            // first occurrence that carries a recorded span. Provider-compiled
+            // programs record no nested value spans at all, so the location
+            // then falls back to the enclosing loop action — and the finding
+            // says so, or the loop header would be mistaken for the
+            // expression's own position (#735).
+            let member_span = family.iter().find_map(|&member| collected.spans[member]);
+            let mut message = format!(
+                "`{}` is evaluated {} times within the same loop scope",
+                value_text(collected.values[first]),
+                family.len()
+            );
+            if member_span.is_none() {
+                message.push_str(
+                    "; the expression's own span is not recorded, so the location is the enclosing loop",
+                );
+            }
             Finding {
                 code: "repeated-value".into(),
                 severity: Severity::Warning,
-                message: format!(
-                    "this value expression is evaluated {} times within the same loop scope",
-                    family.len()
-                ),
-                span: collected.spans[first].or_else(|| program.action_span(rule_id, loop_action)),
+                message,
+                span: member_span.or_else(|| program.action_span(rule_id, loop_action)),
                 rule: rule_id,
                 action: Some(loop_action),
                 value: value_ids
@@ -1108,6 +1122,57 @@ fn repeated_value_findings(
             }
         })
         .collect()
+}
+
+/// The canonical spelling of a value expression for a finding message
+/// (#735): canonical call ids and declared names in the same shapes the
+/// program dump and rule-content views use — `name(arg, …)`,
+/// `Domain.Member`, `receiver.variable`, `[a, b]` — so findings over
+/// different expressions in one loop are distinguishable from the message
+/// alone.
+fn value_text(value: &Value) -> String {
+    match value {
+        Value::Number(number) => workshop_rs::format::format_number(*number),
+        Value::String(text) => format!("{text:?}"),
+        Value::LocalizedString(id) => format!("localized:{id}"),
+        Value::Bool(value) => (if *value { "true" } else { "false" }).to_string(),
+        Value::Null => "null".to_string(),
+        Value::Array(elements) => format!(
+            "[{}]",
+            elements
+                .iter()
+                .map(value_text)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Value::Vector { x, y, z } => {
+            format!(
+                "vect({}, {}, {})",
+                value_text(x),
+                value_text(y),
+                value_text(z)
+            )
+        }
+        Value::Enum { value_type, value } => format!("{value_type}.{value}"),
+        Value::GlobalVariable(name) | Value::Subroutine(name) => name.clone(),
+        Value::PlayerVariable { player, variable } => {
+            format!("{}.{}", value_text(player), variable)
+        }
+        Value::EventPlayer => "eventPlayer".to_string(),
+        Value::Call { name, args } => {
+            // `__ambiguous_enum` is the workshop-rs sentinel for an unresolved
+            // bare enum spelling; its first argument is the authored phrase.
+            if name == "__ambiguous_enum" {
+                if let Some(Value::String(spelling)) = args.first() {
+                    return spelling.clone();
+                }
+            }
+            format!(
+                "{name}({})",
+                args.iter().map(value_text).collect::<Vec<_>>().join(", ")
+            )
+        }
+    }
 }
 
 /// Collect a value tree for `repeated-value`, treating `Evaluate Once`
