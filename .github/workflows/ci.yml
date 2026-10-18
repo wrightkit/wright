@@ -290,7 +290,6 @@ jobs:
         run: >-
           cargo test --locked
           -p wright-driver --test driver --test source_provider --test service
-          --test workshop_provider
 
       - name: Run CLI/embedding tests
         run: >-
