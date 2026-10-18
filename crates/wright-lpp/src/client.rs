@@ -9,6 +9,13 @@ use serde_json::{Map, Value, json};
 
 use crate::error::{LppError, LppErrorKind, ProviderError};
 
+/// The largest provider line the client reads, not counting the line
+/// terminator. LPP §3.3 requires accepting messages of at least 16 MiB —
+/// an `lpp/compile` response carries a whole Workshop artifact on one
+/// line — and the bound sits at twice that floor, the same bound
+/// `wright-lsp` applies to a frame body.
+pub const MAX_PROVIDER_LINE_BYTES: usize = 32 * 1024 * 1024;
+
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
     pub request_timeout: Duration,
@@ -195,25 +202,62 @@ fn write_line(writer: &mut dyn Write, line: &str) -> std::io::Result<()> {
     writer.flush()
 }
 
+/// One provider line, bounded so an overlong line is detected against
+/// the bound rather than by the allocation it caused. The cap leaves
+/// room for a CRLF terminator past the bound, so a line of exactly
+/// `MAX_PROVIDER_LINE_BYTES` still reads as terminated.
+fn read_provider_line(reader: &mut impl BufRead, buf: &mut Vec<u8>) -> std::io::Result<usize> {
+    reader
+        .by_ref()
+        .take(MAX_PROVIDER_LINE_BYTES as u64 + 2)
+        .read_until(b'\n', buf)
+}
+
 fn reader_loop(reader: Box<dyn Read + Send>, shared: Arc<Mutex<Shared>>) {
     let mut reader = BufReader::new(reader);
-    let mut line = String::new();
+    let mut raw = Vec::new();
     loop {
-        line.clear();
-        match reader.read_line(&mut line) {
-            Ok(0) | Err(_) => {
+        raw.clear();
+        match read_provider_line(&mut reader, &mut raw) {
+            Ok(0) => {
                 terminate_shared(&shared, false, ProviderError::Exited {
                     status: None,
                     message: "the LPP provider closed its output stream (process exited or connection ended)".to_string(),
                 });
                 return;
             }
+            Err(error) => {
+                terminate_shared(
+                    &shared,
+                    false,
+                    ProviderError::Io {
+                        message: format!("cannot read the provider output stream: {error}"),
+                    },
+                );
+                return;
+            }
             Ok(_) => {
-                let msg = line.trim_end_matches(['\r', '\n']);
-                if msg.is_empty() {
+                let line = match std::str::from_utf8(&raw) {
+                    Ok(line) => line.trim_end_matches(['\r', '\n']),
+                    Err(error) => {
+                        protocol_violation(
+                            &shared,
+                            format!("provider line is not valid UTF-8: {error}"),
+                        );
+                        return;
+                    }
+                };
+                if line.len() > MAX_PROVIDER_LINE_BYTES {
+                    protocol_violation(
+                        &shared,
+                        format!("provider line exceeds the {MAX_PROVIDER_LINE_BYTES}-byte limit"),
+                    );
+                    return;
+                }
+                if line.is_empty() {
                     continue;
                 }
-                if !dispatch_line(&shared, msg) {
+                if !dispatch_line(&shared, line) {
                     return;
                 }
             }

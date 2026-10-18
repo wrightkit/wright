@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use wright_lpp::{
     Capabilities, Capability, ClientConfig, ClientPhase, Document, DocumentSet, JsonRpcClient,
-    LppErrorKind, Position, ProviderError,
+    LppErrorKind, MAX_PROVIDER_LINE_BYTES, Position, ProviderError,
 };
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -16,6 +16,8 @@ const TEST_TIMEOUT: Duration = Duration::from_secs(5);
 enum FakeStep {
     Respond(Value),
     RespondRaw(String),
+    /// Response bytes no `String` can hold — the UTF-8 boundary cases.
+    RespondRawBytes(Vec<u8>),
     NoResponse,
     Spontaneous(String),
     Hold(Duration),
@@ -114,6 +116,13 @@ fn run_script(
                     break;
                 }
             }
+            FakeStep::RespondRawBytes(bytes) => {
+                let Some(request) = request else { break };
+                let _ = requests_tx.send(request);
+                if write_bytes(&mut writer, &bytes).is_err() {
+                    break;
+                }
+            }
             FakeStep::NoResponse => {
                 let Some(request) = request else { break };
                 let _ = requests_tx.send(request);
@@ -136,7 +145,11 @@ fn read_request(reader: &mut BufReader<os_pipe::PipeReader>, line: &mut String) 
 }
 
 fn write_line(writer: &mut os_pipe::PipeWriter, line: &str) -> std::io::Result<()> {
-    writer.write_all(line.as_bytes())?;
+    write_bytes(writer, line.as_bytes())
+}
+
+fn write_bytes(writer: &mut os_pipe::PipeWriter, bytes: &[u8]) -> std::io::Result<()> {
+    writer.write_all(bytes)?;
     writer.write_all(b"\n")?;
     writer.flush()
 }
@@ -324,6 +337,58 @@ fn malformed_json_poisons_the_session() {
         .request("lpp/check", json!({ "documents": {} }))
         .expect_err("malformed");
     assert_eq!(error.code(), "provider-malformed");
+    let again = client.request("lpp/check", json!({ "documents": {} }));
+    assert_eq!(
+        again.expect_err("session poisoned").code(),
+        "provider-malformed"
+    );
+    fake.join();
+}
+
+#[test]
+fn non_utf8_line_is_a_protocol_violation_not_eof() {
+    // A line of invalid UTF-8 is a protocol violation, not the clean
+    // stream close `read_line`'s InvalidData error used to be folded
+    // into (#764).
+    let (mut client, fake) = FakeProvider::spawn(vec![
+        FakeStep::Respond(ok_response(init_result_json())),
+        FakeStep::RespondRawBytes(vec![0xff, 0xfe, 0xfd]),
+    ]);
+    client.initialize(json!({})).expect("initialize");
+    let error = client
+        .request("lpp/check", json!({ "documents": {} }))
+        .expect_err("non-UTF-8 line");
+    assert_eq!(error.code(), "provider-malformed");
+    assert!(
+        error.to_string().contains("UTF-8"),
+        "the violation names the cause: {error}"
+    );
+    let again = client.request("lpp/check", json!({ "documents": {} }));
+    assert_eq!(
+        again.expect_err("session poisoned").code(),
+        "provider-malformed"
+    );
+    fake.join();
+}
+
+#[test]
+fn an_overlong_line_is_a_protocol_violation() {
+    // A line past MAX_PROVIDER_LINE_BYTES is refused at the bound: the
+    // reader stops reading there, so the provider's write fails rather
+    // than the client allocating without limit (#764).
+    let (mut client, fake) = FakeProvider::spawn(vec![
+        FakeStep::Respond(ok_response(init_result_json())),
+        FakeStep::RespondRawBytes(vec![b'x'; MAX_PROVIDER_LINE_BYTES + 1]),
+    ]);
+    client.initialize(json!({})).expect("initialize");
+    let error = client
+        .request("lpp/check", json!({ "documents": {} }))
+        .expect_err("overlong line");
+    assert_eq!(error.code(), "provider-malformed");
+    assert!(
+        error.to_string().contains("exceeds the"),
+        "the violation names the bound: {error}"
+    );
     let again = client.request("lpp/check", json!({ "documents": {} }));
     assert_eq!(
         again.expect_err("session poisoned").code(),

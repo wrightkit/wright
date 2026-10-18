@@ -70,7 +70,7 @@ pub const LPP_SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &[
 /// The client name reported in `lpp/initialize` `clientInfo`.
 pub const LPP_CLIENT_NAME: &str = "wright";
 
-pub use client::{ClientConfig, ClientPhase, JsonRpcClient};
+pub use client::{ClientConfig, ClientPhase, JsonRpcClient, MAX_PROVIDER_LINE_BYTES};
 pub use error::{LocalProviderErrorKind, LppError, LppErrorKind, ProviderError};
 pub use process::ChildProcess;
 pub use provider::{LanguageProvider, NegotiatedCapabilities, StdioLanguageProvider};
