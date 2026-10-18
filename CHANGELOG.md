@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.26.0](https://github.com/wrightkit/wright/compare/v0.25.2...v0.26.0) (2026-10-18)
+
+
+### Features
+
+* **compile:** add `--to <LOCALE>` for cross-locale Workshop emission ([#760](https://github.com/wrightkit/wright/issues/760)) ([e958526](https://github.com/wrightkit/wright/commit/e9585265f846a99eb730a8498d975a9ee5dc55ad))
+
+
+### Bug Fixes
+
+* **driver:** honor non-empty semantics for WRIGHT_NO_CACHE ([#767](https://github.com/wrightkit/wright/issues/767)) ([b45cc83](https://github.com/wrightkit/wright/commit/b45cc83df47dffd5867e0d266a303a386ce5ca00))
+* **driver:** validate --to locale before loading the project ([#768](https://github.com/wrightkit/wright/issues/768)) ([74dbb6b](https://github.com/wrightkit/wright/commit/74dbb6bce0b493e42a9f53b9e02fc1d69371b5ab))
+* **lpp:** reject non-UTF-8 and overlong provider lines as protocol violations ([#765](https://github.com/wrightkit/wright/issues/765)) ([bd4084b](https://github.com/wrightkit/wright/commit/bd4084b78d274f057c637c233c472ceb5128bf1c)), closes [#764](https://github.com/wrightkit/wright/issues/764)
+
+
+### Code Refactoring
+
+* retire in-process provider abstraction and reclaim audit entropy ([#763](https://github.com/wrightkit/wright/issues/763)) ([0504086](https://github.com/wrightkit/wright/commit/0504086f01bf362a6351529946c5df749936811b))
+
 ## [0.25.2](https://github.com/wrightkit/wright/compare/v0.25.1...v0.25.2) (2026-10-18)
 
 
