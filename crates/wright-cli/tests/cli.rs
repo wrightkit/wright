@@ -1700,22 +1700,54 @@ fn analyze_github_renderer_emits_risk_annotations() {
 
 #[test]
 fn lint_text_collapses_identical_findings_into_one_entry() {
-    let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
+    // Two loops duplicating the same expression raise two findings that share
+    // their rule id and message (#735 names the expression); they collapse into
+    // one entry listing both locations.
+    let path = temp_file(
+        "collapse.txt",
+        "rule (\"r\") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        While(True);
+            Set Global Variable(A, Distance Between(Position Of(Event Player), Vector(0, 0, 0)));
+            Set Global Variable(B, Distance Between(Position Of(Event Player), Vector(0, 0, 0)));
+            Wait(0.016, Ignore Condition);
+        End;
+        While(True);
+            Set Global Variable(A, Distance Between(Position Of(Event Player), Vector(0, 0, 0)));
+            Set Global Variable(B, Distance Between(Position Of(Event Player), Vector(0, 0, 0)));
+            Wait(0.016, Ignore Condition);
+        End;
+    }
+}
+",
+    );
     let output = run(&["lint", path.to_str().unwrap()]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("10 warning(s)"), "{stdout}");
+    assert!(stdout.contains("4 warning(s)"), "{stdout}");
     assert_eq!(
         stdout.matches("[repeated-value]").count(),
         1,
         "repeated findings collapse into one entry: {stdout}"
     );
+    assert!(
+        stdout.contains(
+            "warning[repeated-value] (2 findings): `distance(getPosition(eventPlayer), vector(0, 0, 0))` is evaluated 2 times"
+        ),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("warning[min-wait-loop] (2 findings)"),
+        "{stdout}"
+    );
     assert_eq!(
         stdout.matches(" --> ").count(),
-        10,
-        "nine grouped locations plus the single min-wait-loop: {stdout}"
+        8,
+        "two grouped locations per warning entry plus four expensive-loop-check locations: {stdout}"
     );
-    assert!(stdout.contains("(9 findings)"), "{stdout}");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -3448,9 +3480,41 @@ fn cost_reports_exact_counts_and_selected_findings() {
     assert!(stdout.contains("WARN cost"), "{stdout}");
     assert!(stdout.contains("3960 emitted byte(s)"), "{stdout}");
     assert!(stdout.contains("29 action(s)"), "{stdout}");
-    // Repeated identical findings collapse into one counted entry (#446).
+    // Each repeated-value finding names its expression (#735), so the nine
+    // cake findings render as nine distinguishable entries.
+    assert_eq!(
+        stdout.matches("warning[repeated-value]").count(),
+        9,
+        "{stdout}"
+    );
     assert!(
-        stdout.contains("repeated-value] (9 occurrences)"),
+        stdout.contains("`add(valueInArray(cakePos, 7), vector(0, i2, 0))` is evaluated"),
+        "{stdout}"
+    );
+    // Repeated identical findings still collapse into one counted entry
+    // (#446): two hot loops raise the same min-wait-loop finding.
+    let identical = temp_file(
+        "identical.txt",
+        "rule (\"r\") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        While(True);
+            Wait(0.016, Ignore Condition);
+        End;
+        While(True);
+            Wait(0.016, Ignore Condition);
+        End;
+    }
+}
+",
+    );
+    let output = run(&["inspect", "cost", identical.to_str().unwrap()]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("min-wait-loop] (2 occurrences)"),
         "{stdout}"
     );
 
@@ -3476,6 +3540,7 @@ fn cost_reports_exact_counts_and_selected_findings() {
     assert_eq!(envelope["result"]["selection"]["total"], 10);
     assert_eq!(envelope["result"]["selection"]["withheld"], 8);
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
+    let _ = std::fs::remove_dir_all(identical.parent().unwrap());
 }
 
 /// #691: text `inspect cost` reports the canonical element count against

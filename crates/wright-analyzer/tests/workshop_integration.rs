@@ -268,12 +268,11 @@ rule ("analysis parity") {
         .iter()
         .find(|finding| finding["code"] == "repeated-value")
         .unwrap();
-    assert!(
-        repeated["message"]
-            .as_str()
-            .unwrap()
-            .contains("evaluated 2 times")
-    );
+    let repeated_message = repeated["message"].as_str().unwrap();
+    assert!(repeated_message.contains("evaluated 2 times"));
+    // The finding names the repeated expression canonically so it is
+    // identifiable from the message alone (#735).
+    assert!(repeated_message.contains("`distance(getPosition(eventPlayer), vector(0, 0, 0))`"));
     assert_eq!(repeated["severity"], "warning");
     assert_eq!(repeated["evidence"], "exact");
 
