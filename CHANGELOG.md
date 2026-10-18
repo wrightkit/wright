@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.2](https://github.com/wrightkit/wright/compare/v0.25.1...v0.25.2) (2026-10-18)
+
+
+### Bug Fixes
+
+* **cli:** locate rejected Workshop setting values and name their locale in the lookup hint ([#757](https://github.com/wrightkit/wright/issues/757)) ([a813597](https://github.com/wrightkit/wright/commit/a8135971d3bb76cc2a0bc4207ba5594048519cbf))
+
 ## [0.25.1](https://github.com/wrightkit/wright/compare/v0.25.0...v0.25.1) (2026-10-18)
 
 
