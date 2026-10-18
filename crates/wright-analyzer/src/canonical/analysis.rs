@@ -12,7 +12,10 @@ use super::traversal::{
     visit_action_roots, visit_value_tree,
 };
 use crate::analysis::{Boundedness, EvidenceClass, Severity};
-use crate::registry::LintConfig;
+use crate::registry::{
+    DUPLICATE_CONDITION, EXPENSIVE_LOOP_CHECK, LintConfig, MIN_WAIT_LOOP, NESTED_BINDER_LAMBDA,
+    ONGOING_CONDITION_HOT_PATH, REPEATED_VALUE, WHILE_WITHOUT_WAIT,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finding {
@@ -54,7 +57,7 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
             continue;
         }
         let dead = dead_actions(&rule.actions);
-        if config.is_enabled("ongoing-condition-hot-path") {
+        if config.is_enabled(ONGOING_CONDITION_HOT_PATH.id) {
             findings.extend(ongoing_condition_findings(
                 program, rule_id, rule, &value_ids,
             ));
@@ -67,12 +70,12 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
                 continue;
             };
             let body = &rule.actions[start..end];
-            if config.is_enabled("min-wait-loop")
+            if config.is_enabled(MIN_WAIT_LOOP.id)
                 && live_actions(body).any(|(_, action)| is_wait(action, true))
             {
-                findings.push(Finding { code: "min-wait-loop".into(), severity: Severity::Warning, message: "loop body waits at the workshop minimum rate; the loop runs at maximum frequency".into(), span: program.action_span(rule_id, action_id), rule: rule_id, action: Some(action_id), value: None, evidence: EvidenceClass::StaticIndicator, boundedness: None, fix: None });
+                findings.push(Finding { code: MIN_WAIT_LOOP.id.into(), severity: MIN_WAIT_LOOP.default_severity, message: "loop body waits at the workshop minimum rate; the loop runs at maximum frequency".into(), span: program.action_span(rule_id, action_id), rule: rule_id, action: Some(action_id), value: None, evidence: MIN_WAIT_LOOP.evidence, boundedness: None, fix: None });
             }
-            if config.is_enabled("expensive-loop-check") {
+            if config.is_enabled(EXPENSIVE_LOOP_CHECK.id) {
                 for (offset, body_action) in live_actions(body) {
                     let body_action_id = start + offset;
                     let mut expensive = Vec::new();
@@ -87,8 +90,8 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
                             "only expensive calls are collected"
                         );
                         findings.push(Finding {
-                            code: "expensive-loop-check".into(),
-                            severity: Severity::Info,
+                            code: EXPENSIVE_LOOP_CHECK.id.into(),
+                            severity: EXPENSIVE_LOOP_CHECK.default_severity,
                             message: "geometry predicate evaluated inside a loop body may be expensive per iteration"
                                 .into(),
                             span: argument_value_or_ancestor_span(
@@ -101,7 +104,7 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
                             rule: rule_id,
                             action: Some(action_id),
                             value: value_ids.get(&(value as *const Value as usize)).copied(),
-                            evidence: EvidenceClass::Heuristic,
+                            evidence: EXPENSIVE_LOOP_CHECK.evidence,
                             boundedness: None,
                             fix: None,
                         });
@@ -109,29 +112,31 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
                 }
             }
             if let Action::While { condition } = action {
-                if config.is_enabled("while-without-wait")
+                if config.is_enabled(WHILE_WITHOUT_WAIT.id)
                     && !live_actions(body).any(|(_, action)| is_wait(action, false))
                 {
                     let boundedness = while_boundedness(condition, body, &dead[start..end]);
                     let severity = match boundedness {
                         Boundedness::StaticallyBounded => Severity::Info,
-                        Boundedness::ObviouslyUnbounded | Boundedness::Unknown => Severity::Warning,
+                        Boundedness::ObviouslyUnbounded | Boundedness::Unknown => {
+                            WHILE_WITHOUT_WAIT.default_severity
+                        }
                     };
                     findings.push(Finding {
-                        code: "while-without-wait".into(),
+                        code: WHILE_WITHOUT_WAIT.id.into(),
                         severity,
                         message: while_without_wait_message(boundedness),
                         span: program.action_span(rule_id, action_id),
                         rule: rule_id,
                         action: Some(action_id),
                         value: None,
-                        evidence: EvidenceClass::StaticIndicator,
+                        evidence: WHILE_WITHOUT_WAIT.evidence,
                         boundedness: Some(boundedness),
                         fix: None,
                     });
                 }
             }
-            if config.is_enabled("repeated-value")
+            if config.is_enabled(REPEATED_VALUE.id)
                 && matches!(
                     action,
                     Action::While { .. }
@@ -150,12 +155,12 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
                 ));
             }
         }
-        if config.is_enabled("duplicate-condition") {
+        if config.is_enabled(DUPLICATE_CONDITION.id) {
             findings.extend(duplicate_condition_findings(
                 program, rule_id, rule, &dead, &value_ids,
             ));
         }
-        if config.is_enabled("nested-binder-lambda") {
+        if config.is_enabled(NESTED_BINDER_LAMBDA.id) {
             findings.extend(nested_binder_findings(
                 program, rule_id, rule, &dead, &value_ids,
             ));
@@ -304,8 +309,8 @@ fn ongoing_condition_findings(
             };
             let span = condition_value_or_ancestor_span(program, rule_id, source_index, &path);
             findings.push(Finding {
-                code: "ongoing-condition-hot-path".into(),
-                severity: Severity::Info,
+                code: ONGOING_CONDITION_HOT_PATH.id.into(),
+                severity: ONGOING_CONDITION_HOT_PATH.default_severity,
                 message: format!(
                     "geometry predicate in an ongoing-rule condition {} of {condition_count} {evaluation}{later_gates}; its cost is heuristic, not measured runtime load",
                     index + 1,
@@ -314,7 +319,7 @@ fn ongoing_condition_findings(
                 rule: rule_id,
                 action: None,
                 value: value_ids.get(&(value as *const Value as usize)).copied(),
-                evidence: EvidenceClass::Heuristic,
+                evidence: ONGOING_CONDITION_HOT_PATH.evidence,
                 boundedness: None,
                 fix: None,
             });
@@ -400,8 +405,8 @@ fn nested_binder_findings(
     }
     hits.into_iter()
         .map(|(span, action, inner, value, outer)| Finding {
-            code: "nested-binder-lambda".into(),
-            severity: Severity::Warning,
+            code: NESTED_BINDER_LAMBDA.id.into(),
+            severity: NESTED_BINDER_LAMBDA.default_severity,
             message: format!(
                 "`{inner}` nested in `{outer}`'s per-element argument binds \
                  `Current Array Element` to the inner array, shadowing the \
@@ -412,7 +417,7 @@ fn nested_binder_findings(
             rule: rule_id,
             action,
             value: value_ids.get(&(value as *const Value as usize)).copied(),
-            evidence: EvidenceClass::StaticIndicator,
+            evidence: NESTED_BINDER_LAMBDA.evidence,
             boundedness: None,
             fix: None,
         })
@@ -485,14 +490,14 @@ fn duplicate_condition_findings(
                 {
                     let span = program.action_argument_span(rule_id, action_id, 0);
                     findings.push(Finding {
-                        code: "duplicate-condition".into(),
-                        severity: Severity::Warning,
+                        code: DUPLICATE_CONDITION.id.into(),
+                        severity: DUPLICATE_CONDITION.default_severity,
                         message: "an Else If condition repeats an earlier branch's condition in the same If/Else If chain; that branch can never be taken".into(),
                         span: span.or_else(|| program.action_span(rule_id, action_id)),
                         rule: rule_id,
                         action: Some(action_id),
                         value: value_ids.get(&(condition as *const Value as usize)).copied(),
-                        evidence: EvidenceClass::Exact,
+                        evidence: DUPLICATE_CONDITION.evidence,
                         boundedness: None,
                         fix: dead_branch_fix(program, rule_id, rule, action_id, condition),
                     });
@@ -1090,8 +1095,8 @@ fn repeated_value_findings(
                 );
             }
             Finding {
-                code: "repeated-value".into(),
-                severity: Severity::Warning,
+                code: REPEATED_VALUE.id.into(),
+                severity: REPEATED_VALUE.default_severity,
                 message,
                 span: member_span.or_else(|| program.action_span(rule_id, loop_action)),
                 rule: rule_id,
@@ -1099,7 +1104,7 @@ fn repeated_value_findings(
                 value: value_ids
                     .get(&(collected.values[first] as *const Value as usize))
                     .copied(),
-                evidence: EvidenceClass::Exact,
+                evidence: REPEATED_VALUE.evidence,
                 boundedness: None,
                 fix: evaluate_once_fix(
                     program,
