@@ -10,7 +10,7 @@ license = "AGPL-3.0-or-later"
 repository = "https://github.com/wrightkit/wright"
 
 [workspace.dependencies]
-workshop-rs = "1.16.0"
+workshop-rs = "1.16.5"
 libc = "0.2"
 serde = "1"
 serde_json = "1"

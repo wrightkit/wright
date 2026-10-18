@@ -4654,6 +4654,39 @@ fn check_text_points_unknown_names_at_lookup() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
+/// wright#753: a rejected value in a non-default Workshop locale names its
+/// file and line, and the hint carries the locale `lookup` needs to resolve it.
+#[test]
+fn check_text_locates_unknown_setting_value_and_names_the_locale() {
+    let path = temp_file(
+        "lookup-hint-zh.ow",
+        "设置\n{\n\t英雄\n\t{\n\t\t队伍1\n\t\t{\n\t\t\t索杰恩\n\t\t\t{\n\t\t\t\t辅助攻击模式: 禁用\n\t\t\t}\n\t\t}\n\t}\n}\n",
+    );
+    let output = run(&[
+        "check",
+        path.to_str().unwrap(),
+        "--kind",
+        "workshop",
+        "--locale",
+        "zh-CN",
+        "--renderer",
+        "plain",
+        "--color",
+        "never",
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("lookup-hint-zh.ow:9:"),
+        "the rejected value carries its file and line: {stderr}"
+    );
+    assert!(
+        stderr.contains("hint: run 'wright lookup --locale zh-CN'"),
+        "the hint names the locale of the rejected name: {stderr}"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
 /// #692: `lookup` defaults to the Workshop vocabulary, so an OPY rejected
 /// name must point at `--language opy`. The provider is a staged LPP script
 /// whose `lpp/check` returns the unknown-action diagnostic an OPY check
