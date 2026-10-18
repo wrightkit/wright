@@ -395,7 +395,12 @@ fn run_compile(args: &cli::CompileArgs) -> ExitCode {
             } else {
                 Overwrite::Refuse
             };
-            let mut envelope = session.compile_to(CompileWrite { dest, overwrite });
+            let to = args.to.clone();
+            let mut envelope = session.compile_to(CompileWrite {
+                dest,
+                overwrite,
+                to,
+            });
             let copied = envelope
                 .result
                 .output

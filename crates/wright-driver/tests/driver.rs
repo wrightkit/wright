@@ -770,6 +770,7 @@ fn compile_to_asks_before_replacing_and_never_replaces_the_input() {
         .compile_to(CompileWrite {
             dest: OutputDest::Path(out.clone()),
             overwrite: Overwrite::Ask(&mut decline),
+            to: None,
         });
     assert_eq!(asked, vec![out.clone()]);
     assert_eq!(declined.exit, 1);
@@ -782,6 +783,7 @@ fn compile_to_asks_before_replacing_and_never_replaces_the_input() {
         .compile_to(CompileWrite {
             dest: OutputDest::Path(out.clone()),
             overwrite: Overwrite::Ask(&mut accept),
+            to: None,
         });
     assert!(accepted.ok, "{:?}", accepted.diagnostics);
     assert_ne!(std::fs::read_to_string(&out).unwrap(), "old");
@@ -792,6 +794,7 @@ fn compile_to_asks_before_replacing_and_never_replaces_the_input() {
         .compile_to(CompileWrite {
             dest: OutputDest::Path(input.clone()),
             overwrite: Overwrite::Ask(&mut never),
+            to: None,
         });
     assert_eq!(refused.exit, 2);
     assert_eq!(std::fs::read_to_string(&input).unwrap(), source);
@@ -816,6 +819,7 @@ fn failed_compile_writes_no_file() {
     .compile_to(CompileWrite {
         dest: OutputDest::Path(explicit.clone()),
         overwrite: Overwrite::Force,
+        to: None,
     });
     assert!(!envelope.ok);
     assert!(envelope.result.output.is_none());

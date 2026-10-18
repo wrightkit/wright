@@ -116,6 +116,12 @@ pub enum ToolRequest {
         output: Option<std::path::PathBuf>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         force: bool,
+        /// Output locale (#759): `wright compile --to`. `None` emits the
+        /// loaded input's locale; a locale the catalog does not declare is
+        /// a structured usage error, and a declared locale missing mappings
+        /// fails explicitly per the workshop-rs emission contract.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to: Option<String>,
     },
     /// Check the loaded project.
     Check {
@@ -851,7 +857,7 @@ impl<'a> ToolService<'a> {
             ToolRequest::Capabilities => ToolResponse::Ok {
                 result: serde_json::to_value(self.capabilities()).expect("capabilities serialize"),
             },
-            ToolRequest::Compile { output, force } => {
+            ToolRequest::Compile { output, force, to } => {
                 let envelope = self.session.compile_to(crate::CompileWrite {
                     dest: output
                         .clone()
@@ -861,6 +867,7 @@ impl<'a> ToolService<'a> {
                     } else {
                         crate::Overwrite::Refuse
                     },
+                    to: to.clone(),
                 });
                 let result = serde_json::to_value(envelope).expect("compile result serializes");
                 ToolResponse::Ok { result }

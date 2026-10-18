@@ -944,14 +944,17 @@ impl CompilerSession {
         self.compile_to(CompileWrite {
             dest: OutputDest::Stdout,
             overwrite: Overwrite::Refuse,
+            to: None,
         })
     }
 
     /// Compile and deliver the program as `write` directs (ADR-0025). A
-    /// failed compile or a refused destination writes nothing.
+    /// failed compile or a refused destination writes nothing. `write.to`
+    /// selects the output locale (#759); `None` emits the loaded input's
+    /// locale.
     pub fn compile_to(&mut self, write: CompileWrite<'_>) -> Envelope<CompileResult> {
         let mut result = CompileResult::default();
-        let (output, entry) = match self.compile_output() {
+        let (output, entry) = match self.compile_output(write.to.as_deref()) {
             Ok(compiled) => compiled,
             Err(diagnostic) => {
                 self.diagnostics.push(diagnostic);
@@ -967,7 +970,9 @@ impl CompilerSession {
         }
         let written = {
             let this = &*self;
-            let CompileWrite { dest, overwrite } = write;
+            let CompileWrite {
+                dest, overwrite, ..
+            } = write;
             let text = output.text.as_str();
             match overwrite {
                 Overwrite::Ask(ask) => {
@@ -981,13 +986,18 @@ impl CompilerSession {
                         CompileWrite {
                             dest,
                             overwrite: Overwrite::Ask(&mut confirm),
+                            to: None,
                         },
                     )
                 }
                 overwrite => crate::output::write_program(
                     text,
                     entry.as_deref(),
-                    CompileWrite { dest, overwrite },
+                    CompileWrite {
+                        dest,
+                        overwrite,
+                        to: None,
+                    },
                 ),
             }
         };
@@ -1026,9 +1036,37 @@ impl CompilerSession {
         envelope
     }
 
-    fn compile_output(&mut self) -> Result<(CompiledOutput, Option<PathBuf>), Diagnostic> {
+    fn compile_output(
+        &mut self,
+        to: Option<&str>,
+    ) -> Result<(CompiledOutput, Option<PathBuf>), Diagnostic> {
         let loaded = self.load_with_operation(ProviderOperation::Compile)?;
-        let locale = Self::locale_for(&loaded);
+        let locale = match to {
+            Some(name) => {
+                // An output locale the catalog does not declare is a usage
+                // error (#759): the emitter's missing-mapping contract
+                // covers undeclared spellings per identity, not an unknown
+                // locale itself.
+                let locale = workshop_rs::catalog::Locale::new(name);
+                if !self.catalog.supports(&locale) {
+                    return Err(Diagnostic::error(
+                        "invalid-locale",
+                        Stage::Discovery,
+                        format!(
+                            "unknown output locale '{name}': declared locales are {}",
+                            self.catalog
+                                .locales()
+                                .iter()
+                                .map(|locale| locale.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                        ),
+                    ));
+                }
+                locale
+            }
+            None => Self::locale_for(&loaded),
+        };
         self.progress(ProgressEvent::new(ProgressPhase::Emission));
         let text = hotpath::measure_block!("compile::emit", {
             workshop_rs::emitter::emit(&loaded.program, &self.catalog, &locale)

@@ -148,7 +148,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         request_def: "CompileRequest",
         drop_fields: &[],
         mcp: false,
-        description: "Compile the loaded project, write the program to a file, and report status, diagnostics, path and digest.",
+        description: "Compile the loaded project, write the program to a file, and report status, diagnostics, path and digest. `to` selects the Workshop output locale (e.g. \"en-US\", \"zh-CN\") to convert client-localized text; the input locale is unchanged.",
         result: "the wright-result/v1 compile envelope",
     },
     ToolSpec {

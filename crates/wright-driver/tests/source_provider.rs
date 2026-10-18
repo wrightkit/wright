@@ -1216,6 +1216,7 @@ fn service_check_and_compile_run_without_a_prewarmed_snapshot() {
     let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile {
         output: None,
         force: false,
+        to: None,
     }) else {
         panic!("compile must return the workflow envelope")
     };
@@ -1256,6 +1257,7 @@ fn service_compile_establishes_the_snapshot_and_recovers_after_reload() {
     let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile {
         output: Some(dir.join("program.ow")),
         force: true,
+        to: None,
     }) else {
         panic!("compile must return the workflow envelope")
     };
@@ -1285,6 +1287,7 @@ fn service_compile_establishes_the_snapshot_and_recovers_after_reload() {
     let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile {
         output: Some(dir.join("program.ow")),
         force: true,
+        to: None,
     }) else {
         panic!("compile must return the workflow envelope")
     };
@@ -1339,6 +1342,7 @@ fn service_check_and_compile_match_the_direct_workflow_methods() {
             let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile {
                 output: Some(dir.join("program.ow")),
                 force: true,
+                to: None,
             }) else {
                 panic!("compile must return the workflow envelope")
             };

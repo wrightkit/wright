@@ -351,6 +351,102 @@ fn compile_o_dash_prints_only_the_program() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// wright#759: `--to` selects the Workshop output locale independently of
+/// `--locale` (the input override) — a zh-CN program re-emits as en-US and
+/// the envelope reports the emitted locale, not the input's.
+#[test]
+fn compile_to_emits_the_target_locale_independently_of_the_input() {
+    let dir = temp_dir();
+    // A program whose locale evidence is unambiguously zh-CN (structural
+    // keywords carry no mapping ambiguity between these two locales).
+    let zh = "变量 {\n    全局:\n        0: index\n}\n\n规则 (\"first\") {\n    事件 {\n        持续 - 全局;\n    }\n    动作 {\n        设置全局变量(index, 1);\n    }\n}\n";
+    std::fs::write(dir.join("mode.ws"), zh).unwrap();
+
+    let output = run_in(
+        &dir,
+        &["compile", "mode.ws", "--to", "en-US", "-o", "en.ow"],
+    );
+    assert_eq!(output.status.code(), Some(0), "{}", command_result(&output));
+    let text = std::fs::read_to_string(dir.join("en.ow")).unwrap();
+    assert!(text.contains("variables"), "en-US output: {text}");
+    assert!(text.contains("Ongoing - Global"), "{text}");
+    assert!(!text.contains('规'), "no zh-CN spellings remain: {text}");
+
+    let json = run_in(
+        &dir,
+        &[
+            "compile", "mode.ws", "--to", "en-US", "-o", "en2.ow", "--force", "-f", "json",
+        ],
+    );
+    let envelope = parse_json(&json.stdout);
+    assert_eq!(envelope["result"]["output"]["locale"], "en-us");
+
+    // `--locale` stays the input override: telling Wright the zh-CN input
+    // is en-US still fails like it did before `--to` existed.
+    let wrong = run_in(
+        &dir,
+        &[
+            "compile", "mode.ws", "--locale", "en-US", "--to", "zh-CN", "-o", "-",
+        ],
+    );
+    assert_eq!(wrong.status.code(), Some(1), "{}", command_result(&wrong));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// wright#759: an undeclared `--to` locale is a usage error naming the
+/// declared locales, and a declared locale missing mappings for the
+/// program fails `missing-mapping` with no partial output file.
+#[test]
+fn compile_to_rejects_unknown_and_unmapped_target_locales() {
+    let dir = temp_dir();
+    std::fs::write(dir.join("mode.ws"), corpus_workshop("synthetic/basic-rule")).unwrap();
+
+    let unknown = run_in(
+        &dir,
+        &["compile", "mode.ws", "--to", "xx-YY", "-o", "out.ow"],
+    );
+    assert_eq!(
+        unknown.status.code(),
+        Some(2),
+        "{}",
+        command_result(&unknown)
+    );
+    assert!(
+        String::from_utf8_lossy(&unknown.stderr).contains("invalid-locale"),
+        "{}",
+        command_result(&unknown)
+    );
+    assert!(!dir.join("out.ow").exists());
+
+    // `EventTeam.ALL` (used by `declarations-rules`) has no tr-TR mapping.
+    std::fs::write(
+        dir.join("teams.ws"),
+        corpus_workshop("synthetic/declarations-rules"),
+    )
+    .unwrap();
+    let missing = run_in(
+        &dir,
+        &["compile", "teams.ws", "--to", "tr-TR", "-o", "teams.ow"],
+    );
+    assert_eq!(
+        missing.status.code(),
+        Some(1),
+        "{}",
+        command_result(&missing)
+    );
+    let stderr = String::from_utf8_lossy(&missing.stderr);
+    assert!(stderr.contains("missing-mapping"), "{stderr}");
+    assert!(
+        stderr.contains("tr-tr"),
+        "the target locale is named: {stderr}"
+    );
+    assert!(
+        !dir.join("teams.ow").exists(),
+        "a missing mapping writes no partial file"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn check_over_clean_input_exits_zero() {
     let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));

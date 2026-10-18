@@ -31,6 +31,9 @@ pub enum Overwrite<'a> {
 pub struct CompileWrite<'a> {
     pub dest: OutputDest,
     pub overwrite: Overwrite<'a>,
+    /// Output locale override (`compile --to`): `None` keeps the loaded
+    /// input's locale.
+    pub to: Option<String>,
 }
 
 /// Resolve and write the program; returns the displayed destination.

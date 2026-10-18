@@ -943,7 +943,8 @@
       "properties": {
         "op": { "const": "compile" },
         "output": { "type": "string", "description": "File to write the program to; default `<entry stem>.ow` in the service's working directory." },
-        "force": { "type": "boolean", "default": false, "description": "Replace an existing output file. The service never prompts, so a repeat compile to the same file needs force: true. The input source file is never overwritten." }
+        "force": { "type": "boolean", "default": false, "description": "Replace an existing output file. The service never prompts, so a repeat compile to the same file needs force: true. The input source file is never overwritten." },
+        "to": { "type": "string", "description": "Output locale for the emitted Workshop text (e.g. \"en-US\", \"zh-CN\"); defaults to the loaded input's locale. Use it to convert Workshop text between client locales independently of the input locale." }
       },
       "required": ["op"],
       "additionalProperties": false

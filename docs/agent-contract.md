@@ -177,7 +177,7 @@ the successful `result` payload.
 | Operation | Request fields | Successful `result` |
 | --- | --- | --- |
 | `capabilities` | none | Service name/version, `wright-agent/v1`, result contract, operation names, `result_schemas` (operation to committed-schema definition), languages, and profiles |
-| `compile` | optional `output` (file path), optional `force` | `wright-result/v1` compile envelope: verdict, diagnostics, `output.written_to` and `output.sha256`; the program text is written to the file and never returned. See [Compile output](#compile-output-adr-0025) |
+| `compile` | optional `output` (file path), optional `force`, optional `to` (output locale) | `wright-result/v1` compile envelope: verdict, diagnostics, `output.written_to` and `output.sha256`; the program text is written to the file and never returned. See [Compile output](#compile-output-adr-0025) |
 | `check` | optional `all` | `wright-result/v1` check envelope |
 | `analyze` | optional selection, optional `all` | `wright-result/v1` essential analysis envelope |
 | `inspect` | optional `all` | `wright-result/v1` overview and rule names |
@@ -217,6 +217,12 @@ and `output.sha256`, without the program text.
 - A failed compile writes no file. The JSON-RPC `compile` alias takes no
   parameters and uses the defaults (no `force`); callers needing `output` or
   `force` use the `request` method.
+- `to` selects the Workshop output locale independently of the input
+  locale, matching `wright compile --to <LOCALE>`: the emitted text uses the
+  target locale's spellings while the loaded input is unchanged. An
+  undeclared locale fails with `invalid-locale` (exit 2); a declared locale
+  missing mappings for the program fails with `missing-mapping` and writes
+  nothing — the workshop-rs explicit-fallback contract is the only fallback.
 
 ### Freshness and id validity (#471, #512)
 
