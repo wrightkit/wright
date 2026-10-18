@@ -1,7 +1,8 @@
 # Wright language services and LSP
 
 Status: current scope, covering document synchronization, diagnostics, raw
-Workshop hover/definition/references, and provider-backed rename
+Workshop hover/definition/references, provider-backed OPY
+diagnostics/symbols/definition/references, and provider-backed rename
 Scope: editor-neutral language services (`wright-language`) and the thin LSP
 adapter (`wright-lsp`)
 
@@ -10,8 +11,9 @@ adapter (`wright-lsp`)
 ```text
 document/workspace model (Document, DocumentStore)
    → LanguageService (editor-neutral, no LSP types)
-       └─ diagnostics + semantic queries (provider refusal for source
-          documents, canonical check/index for raw Workshop)
+       └─ diagnostics + semantic queries (canonical check/index for raw
+          Workshop, the negotiated OPY provider for `.opy`, a provider
+          boundary for the rest)
             ↓
   wright-lsp (thin protocol adapter, Content-Length stdio framing)
 ```
@@ -31,7 +33,9 @@ analyzer contracts.
 - `textDocument/publishDiagnostics`: versioned, grouped by source identity,
   with didClose cleanup;
 - raw Workshop semantic queries (#555): `textDocument/hover`,
-  `textDocument/definition`, `textDocument/references`.
+  `textDocument/definition`, `textDocument/references`;
+- provider-backed OPY services (#738): `textDocument/documentSymbol`,
+  `textDocument/definition`, `textDocument/references`, and diagnostics.
 
 The `initialize` result advertises `textDocumentSync`, the UTF-16 position
 encoding, and `hoverProvider`/`definitionProvider`/`referencesProvider`
@@ -39,20 +43,26 @@ unconditionally, since they are backed for raw Workshop documents, plus
 `renameProvider` when the client negotiates
 `workspace.workspaceEdit.documentChanges` (applied renames are returned as
 versioned `TextDocumentEdit`s, and a client that cannot receive the
-validated document version cannot be handed an edit safely). The result
-contains no provider entry for completion or semantic tokens: those
-capabilities have no backing implementation and are never advertised. A
-request for an unadvertised or unknown method receives a `result: null`
-response and the server keeps running, as does a semantic request on a
-document that is not raw Workshop.
+validated document version cannot be handed an edit safely).
+`documentSymbolProvider` is advertised only when the OPY provider negotiated
+`lpp/symbols`: the provider is spawned and `lpp/initialize` negotiated
+inside the LSP `initialize` handshake so the answer reflects the negotiated
+surface exactly. The result contains no provider entry for completion or
+semantic tokens: those capabilities have no backing implementation and are
+never advertised. A request for an unadvertised or unknown method receives a
+`result: null` response and the server keeps running, as does a request the
+negotiated provider cannot serve.
 
 Diagnostics: opening or changing a raw Workshop document publishes the same
 diagnostics `wright check` reports for the buffer text, with code, severity,
 and span carried through and an empty list for a clean buffer (#555). Opening
-a source-language document (`.opy`, `.del`, `.ostw`) publishes an explicit
-`source-provider-unavailable` error while no provider language-service
-capability is negotiated. A document that is neither publishes no
-diagnostics.
+or changing an `.opy` document publishes the provider's `lpp/check` answer
+over the complete open-buffer overlay — the unsaved text under the client's
+own URI — with the provider's UTF-16 ranges carried through (#738). DEL/OSTW
+documents and OPY documents without a working provider publish an explicit
+`source-provider-unavailable` error, and a failed provider request publishes
+its structured error code on the document. A document that is neither
+publishes no diagnostics.
 
 `textDocument/rename` on a source-language document routes through the same
 provider-owned mutation path as the CLI and agent surfaces (#156): the
@@ -78,12 +88,41 @@ search/replace fallback. `--opy-provider <PATH>` points the session at an
 explicit OPY provider executable; by default the resolver locates or
 downloads the released provider like the CLI does.
 
-For source-language documents, editor capabilities beyond rename, namely
-hover, definition, references, completion, and semantic tokens, are future work
-tracked under #156 and the owning implementations (for example `opy-rs`
-language-service capabilities). They arrive through provider capability
-negotiation, not through Wright-side reimplementation or static fallbacks;
-a source-language document answers `null` to hover/definition/references.
+For source-language documents, remaining editor capabilities — hover,
+completion, and semantic tokens — are future work tracked under the owning
+implementations. They arrive through provider capability negotiation, not
+through Wright-side reimplementation or static fallbacks; a source-language
+document answers `null` to hover, and `.del`/`.ostw` documents answer
+`null` to every navigation request.
+
+## OPY provider-backed services (#738)
+
+`.opy` documents are served by the negotiated OPY provider, never by an
+in-process OPY implementation. The provider session is resolved locally at
+`initialize` — an explicit `--opy-provider <PATH>` executable or the
+already-installed provider store, never a download — and `lpp/initialize`
+runs inside the LSP handshake so the advertised surface is truthful. The
+session is retained and shared by every later request; an unresolvable or
+failed provider latches as unavailable and the LSP session continues without
+OPY backing.
+
+Every provider request sends the open-document overlay: the text the editor
+holds, at the buffer's version, under the URI the client opened — including
+`.opy` files that exist only as unsaved buffers. `#!include` membership and
+any disk reads behind it are the provider's own project semantics, not
+Wright's.
+
+- diagnostics are `lpp/check` over the overlay; the provider's UTF-16
+  ranges refer to the exact text sent, so they publish unchanged and
+  authored positions survive;
+- `textDocument/documentSymbol` is `lpp/symbols`, advertised only when
+  negotiated;
+- `textDocument/definition` on `.opy` is `lpp/definition`, and
+  `textDocument/references` is `lpp/references`; both return provider
+  locations verbatim, including locations inside `#!include`d files;
+- a capability the provider did not negotiate — or a provider refusal
+  such as `definition.noSymbolAtPosition` — answers `null` (or an empty
+  list), never an LSP error.
 
 ## Raw Workshop language services (#555)
 
@@ -168,9 +207,11 @@ suppression is the authoritative contract.
 
 The service produces source-aware `SourceDiagnostic`s. Raw Workshop
 documents publish the session `check` diagnostics for the buffer text
-(#555); source-language documents publish the explicit
-`source-provider-unavailable` refusal, which marks where a negotiated
-provider capability would attach. It is never a static fallback result.
+(#555); `.opy` documents publish the provider's `lpp/check` answer over the
+open-buffer overlay (#738). `.del`/`.ostw` documents — and `.opy` documents
+when no provider can be negotiated — publish the explicit
+`source-provider-unavailable` refusal. It is never a static fallback
+result.
 
 ## DEL/OSTW documents (#120)
 
@@ -196,5 +237,5 @@ unadvertised requests.
 
 VS Code/browser extensions, incremental diff-based reanalysis (full
 recomputation is deterministic and fast enough), client-side behavior
-scenarios, and provider-backed editor features until a provider capability
-exists remain future work.
+scenarios, OPY hover/completion/semantic tokens, and DEL/OSTW editor
+features until a provider capability exists remain future work.

@@ -9,19 +9,20 @@ use lsp_types::notification::{Notification, PublishDiagnostics};
 use lsp_types::{
     AnnotatedTextEdit, Diagnostic as LspDiagnostic, DiagnosticSeverity,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentChanges, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
-    HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, Location,
-    MarkupContent, MarkupKind, OneOf, OptionalVersionedTextDocumentIdentifier,
-    Position as LspPosition, PositionEncodingKind, PublishDiagnosticsParams, Range as LspRange,
-    ReferenceParams, RenameParams, ServerCapabilities, ServerInfo, TextDocumentEdit,
+    DocumentChanges, DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse,
+    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
+    HoverProviderCapability, InitializeParams, InitializeResult, Location, MarkupContent,
+    MarkupKind, OneOf, OptionalVersionedTextDocumentIdentifier, Position as LspPosition,
+    PositionEncodingKind, PublishDiagnosticsParams, Range as LspRange, ReferenceParams,
+    RenameParams, ServerCapabilities, ServerInfo, SymbolKind, TextDocumentEdit,
     TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions, TextEdit, Uri,
     WorkspaceEdit,
 };
 use serde_json::Value;
 
 use wright_language::document::{Document, Position, Range};
-use wright_language::service::{RenameOutcome, SourceTextEdit};
-use wright_language::{LanguageService, OpyProviderConfig, SessionConfig};
+use wright_language::service::{RenameOutcome, SourceSymbol, SourceTextEdit};
+use wright_language::{LanguageService, OpyProviderConfig, OpyProviderSupport, SessionConfig};
 
 type PublicationOwnership = BTreeMap<String, BTreeSet<String>>;
 
@@ -165,11 +166,22 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
                     ownership.clear();
                 }
                 lifecycle = Lifecycle::Running;
+                // Negotiate the OPY provider now (#738): a capability may
+                // only be advertised when the negotiated provider backs it,
+                // and negotiation is what tells us. Spawn plus
+                // `lpp/initialize` run inside the LSP initialize handshake;
+                // an unresolvable provider leaves `OpyProviderSupport`
+                // all-false rather than failing the LSP session.
+                let opy_support = service.opy_provider_support();
                 if id.is_some() {
                     write_response(
                         &mut writer,
                         id,
-                        serde_json::to_value(initialize_result(versioned_workspace_edits)).unwrap(),
+                        serde_json::to_value(initialize_result(
+                            versioned_workspace_edits,
+                            opy_support,
+                        ))
+                        .unwrap(),
                     )?;
                 }
             }
@@ -217,7 +229,7 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
                 )
                 .with_language_id(params.text_document.language_id);
                 service.store.open(document);
-                publish_affected_diagnostics(&mut writer, &service, &mut ownership, &uri)?;
+                publish_affected_diagnostics(&mut writer, &mut service, &mut ownership, &uri)?;
                 if id.is_some() {
                     write_response(&mut writer, id, Value::Null)?;
                 }
@@ -245,7 +257,7 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
                             .change(&uri, &change.text, params.text_document.version)
                     });
                 if applied {
-                    publish_affected_diagnostics(&mut writer, &service, &mut ownership, &uri)?;
+                    publish_affected_diagnostics(&mut writer, &mut service, &mut ownership, &uri)?;
                 }
                 if id.is_some() {
                     write_response(&mut writer, id, Value::Null)?;
@@ -270,7 +282,7 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
                         )?;
                     }
                 }
-                publish_affected_diagnostics(&mut writer, &service, &mut ownership, &uri)?;
+                publish_affected_diagnostics(&mut writer, &mut service, &mut ownership, &uri)?;
                 if id.is_some() {
                     write_response(&mut writer, id, Value::Null)?;
                 }
@@ -322,11 +334,17 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
                             character: position_params.position.character,
                         },
                     )
-                    .map(|location| {
-                        GotoDefinitionResponse::Scalar(Location {
-                            uri: Uri::from_str(&location.uri).unwrap_or_else(|_| fallback_uri()),
-                            range: convert_range(location.range),
-                        })
+                    .map(|locations| {
+                        GotoDefinitionResponse::Array(
+                            locations
+                                .into_iter()
+                                .map(|location| Location {
+                                    uri: Uri::from_str(&location.uri)
+                                        .unwrap_or_else(|_| fallback_uri()),
+                                    range: convert_range(location.range),
+                                })
+                                .collect(),
+                        )
                     });
                 write_response(&mut writer, id, serde_json::to_value(definition).unwrap())?;
             }
@@ -356,6 +374,25 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
                         .collect::<Vec<_>>()
                 });
                 write_response(&mut writer, id, serde_json::to_value(locations).unwrap())?;
+            }
+            "textDocument/documentSymbol" => {
+                let Some(params) = read_params::<DocumentSymbolParams>(&mut writer, &id, params)?
+                else {
+                    continue;
+                };
+                if id.is_none() {
+                    continue;
+                }
+                // OPY-only capability (#738): the answer is `null` for
+                // every document without negotiated provider backing.
+                let symbols = service
+                    .document_symbols(params.text_document.uri.as_str())
+                    .map(|symbols| {
+                        DocumentSymbolResponse::Nested(
+                            symbols.iter().map(lsp_document_symbol).collect(),
+                        )
+                    });
+                write_response(&mut writer, id, serde_json::to_value(symbols).unwrap())?;
             }
             "textDocument/rename" => {
                 let Some(params) = read_params::<RenameParams>(&mut writer, &id, params)? else {
@@ -451,7 +488,10 @@ fn versioned_workspace_edit(edits: Vec<SourceTextEdit>) -> Result<WorkspaceEdit,
     })
 }
 
-fn initialize_result(versioned_workspace_edits: bool) -> InitializeResult {
+fn initialize_result(
+    versioned_workspace_edits: bool,
+    opy_support: OpyProviderSupport,
+) -> InitializeResult {
     InitializeResult {
         capabilities: ServerCapabilities {
             position_encoding: Some(PositionEncodingKind::UTF16),
@@ -472,12 +512,45 @@ fn initialize_result(versioned_workspace_edits: bool) -> InitializeResult {
             hover_provider: Some(HoverProviderCapability::Simple(true)),
             definition_provider: Some(OneOf::Left(true)),
             references_provider: Some(OneOf::Left(true)),
+            // OPY document symbols have no in-process backing, so the
+            // capability is advertised exactly when the negotiated
+            // provider serves `lpp/symbols` (#738).
+            document_symbol_provider: opy_support.symbols.then_some(OneOf::Left(true)),
             ..Default::default()
         },
         server_info: Some(ServerInfo {
             name: "wright-lsp".into(),
             version: Some(env!("CARGO_PKG_VERSION").into()),
         }),
+    }
+}
+
+/// One provider symbol as an LSP `DocumentSymbol` (#738): the authored
+/// range and its selection range fall back to each other, as the spec
+/// requires `selectionRange` to sit inside `range`.
+#[allow(deprecated)]
+fn lsp_document_symbol(symbol: &SourceSymbol) -> DocumentSymbol {
+    let range = convert_range(symbol.range);
+    DocumentSymbol {
+        name: symbol.name.clone(),
+        detail: None,
+        kind: symbol_kind(symbol.kind.as_str()),
+        tags: None,
+        deprecated: None,
+        range,
+        selection_range: symbol.selection_range.map(convert_range).unwrap_or(range),
+        children: None,
+    }
+}
+
+/// The provider's OPY symbol vocabulary maps onto the closest LSP kind;
+/// an unrecognized kind stays a variable — the honest floor for a
+/// program-scope name.
+fn symbol_kind(kind: &str) -> SymbolKind {
+    match kind {
+        "constant" => SymbolKind::CONSTANT,
+        "subroutine" | "def" | "macro" => SymbolKind::FUNCTION,
+        _ => SymbolKind::VARIABLE,
     }
 }
 
@@ -649,7 +722,7 @@ fn read_params<T: serde::de::DeserializeOwned>(
 
 fn publish_affected_diagnostics(
     writer: &mut impl Write,
-    service: &LanguageService,
+    service: &mut LanguageService,
     ownership: &mut PublicationOwnership,
     changed_uri: &str,
 ) -> Result<(), String> {
@@ -661,7 +734,7 @@ fn publish_affected_diagnostics(
 
 fn refresh_root(
     writer: &mut impl Write,
-    service: &LanguageService,
+    service: &mut LanguageService,
     ownership: &mut PublicationOwnership,
     root_uri: &str,
 ) -> Result<(), String> {
@@ -732,9 +805,13 @@ fn convert_diagnostic(diagnostic: wright_language::SourceDiagnostic) -> LspDiagn
         severity: Some(match diagnostic.severity.as_str() {
             "error" => DiagnosticSeverity::ERROR,
             "warning" => DiagnosticSeverity::WARNING,
+            "hint" => DiagnosticSeverity::HINT,
             _ => DiagnosticSeverity::INFORMATION,
         }),
-        code: Some(lsp_types::NumberOrString::String(diagnostic.code)),
+        // A provider diagnostic may carry no code — an empty string is
+        // not a code, so the field drops out entirely (#738).
+        code: (!diagnostic.code.is_empty())
+            .then_some(lsp_types::NumberOrString::String(diagnostic.code)),
         message: diagnostic.message,
         ..Default::default()
     }
@@ -865,17 +942,40 @@ mod tests {
 
     #[test]
     fn rename_is_advertised_only_with_versioned_workspace_edits() {
+        let opy = OpyProviderSupport::default();
         assert!(
-            initialize_result(true)
+            initialize_result(true, opy)
                 .capabilities
                 .rename_provider
                 .is_some()
         );
         assert!(
-            initialize_result(false)
+            initialize_result(false, opy)
                 .capabilities
                 .rename_provider
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn document_symbols_are_advertised_only_with_provider_backing() {
+        let backed = OpyProviderSupport {
+            symbols: true,
+            ..OpyProviderSupport::default()
+        };
+        assert!(
+            initialize_result(true, backed)
+                .capabilities
+                .document_symbol_provider
+                .is_some(),
+            "a provider that serves lpp/symbols backs the advertisement"
+        );
+        assert!(
+            initialize_result(true, OpyProviderSupport::default())
+                .capabilities
+                .document_symbol_provider
+                .is_none(),
+            "without a negotiated provider the capability stays unadvertised"
         );
     }
 }

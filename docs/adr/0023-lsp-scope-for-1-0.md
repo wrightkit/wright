@@ -1,8 +1,8 @@
 # ADR-0023: LSP scope for 1.0
 
-- Status: Accepted
+- Status: Accepted (amended 2026-12 for OPY diagnostics and navigation, #738)
 - Date: 2026-10-06
-- Related: [Issue #421](https://github.com/wrightkit/wright/issues/421), [Issue #429](https://github.com/wrightkit/wright/issues/429), [Product contract](../architecture/product-contract.md), [Language services](../language-services.md)
+- Related: [Issue #421](https://github.com/wrightkit/wright/issues/421), [Issue #429](https://github.com/wrightkit/wright/issues/429), [Issue #738](https://github.com/wrightkit/wright/issues/738), [Product contract](../architecture/product-contract.md), [Language services](../language-services.md)
 
 The decision was made on 2026-09-29 and recorded on `#421` and `#134`; it is moved here because a decision belongs in an ADR and not in an issue thread.
 
@@ -30,3 +30,17 @@ Rationale: `SemanticIndex` already holds symbols, references, and spans, so hove
 ## Consequences
 
 Editor-facing services are a consumer surface over the same Wright and owner capabilities as the CLI. Readers must not take B as implemented: current LSP capability claims are stated in [language services](../language-services.md) and established by the code and its tests.
+
+## Amendment — provider-backed OPY services (#738)
+
+The 1.0 scope now includes OPY diagnostics and navigation, delivered through the negotiated OPY provider rather than an in-process implementation:
+
+- **Diagnostics** are `lpp/check` over the complete open-buffer overlay — every open `.opy` document's current, unsaved text under the client's URI — never a disk read Wright performs itself.
+- **Navigation** is `lpp/symbols` for `textDocument/documentSymbol`, `lpp/definition`, and `lpp/references`, including authored locations inside `#!include`d files.
+
+Two constraints from the original decision still bind:
+
+- The `initialize` result advertises only what the negotiated provider backs, so the provider is spawned and `lpp/initialize` is negotiated **inside the LSP `initialize` handshake** — `documentSymbolProvider` appears only when `lpp/symbols` negotiated. `hoverProvider`, `definitionProvider`, and `referencesProvider` keep their unconditional advertisement because raw Workshop backing is in-process; OPY requests against an unnegotiated provider capability answer `null`/`[]` rather than an error.
+- A session without a resolvable provider still initializes; OPY surfaces degrade to the structured boundary instead of failing the handshake.
+
+Non-goals are unchanged: OPY hover, completion, semantic tokens, and all DEL/OSTW services remain outside 1.0 until the owning implementations negotiate those capabilities.
