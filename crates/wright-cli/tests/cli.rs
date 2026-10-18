@@ -3437,9 +3437,10 @@ fn callgraph_highlight_sections_fold_beyond_the_bound() {
             "rule (\"Subroutine sub{i}\") {{\n    event {{\n        Subroutine;\n        sub{i};\n    }}\n    actions {{\n        Wait(1);\n    }}\n}}\n"
         ));
     }
-    let calls: String = (0..12)
-        .map(|i| format!("        Call Subroutine(sub{i});\n"))
-        .collect();
+    let mut calls = String::new();
+    for i in 0..12 {
+        calls.push_str(&format!("        Call Subroutine(sub{i});\n"));
+    }
     for rule in ["a", "b"] {
         source.push_str(&format!(
             "rule (\"{rule}\") {{\n    event {{\n        Ongoing - Global;\n    }}\n    actions {{\n{calls}    }}\n}}\n"
@@ -4076,9 +4077,12 @@ fn inspect_overview_and_cfg_bound_large_detail() {
     // Text output stays bounded and names the complete-output path (#446).
     let mut source = String::new();
     for i in 0..13 {
-        let branches = (0..4)
-            .map(|b| format!("        If(1 == {b});\n            Wait(1);\n        End;\n"))
-            .collect::<String>();
+        let mut branches = String::new();
+        for b in 0..4 {
+            branches.push_str(&format!(
+                "        If(1 == {b});\n            Wait(1);\n        End;\n"
+            ));
+        }
         source.push_str(&format!(
             "rule (\"r{i}\") {{\n    event {{\n        Ongoing - Global;\n    }}\n    actions {{\n{branches}    }}\n}}\n"
         ));

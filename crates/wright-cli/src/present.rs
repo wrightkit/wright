@@ -242,8 +242,9 @@ impl Presentation {
             ColorArg::Always => renderer != Renderer::GithubActions,
             ColorArg::Never => false,
             ColorArg::Auto => {
-                renderer == Renderer::Terminal && !env.no_color && !env.term_dumb
-                    || env.force_color && renderer == Renderer::Terminal && !env.no_color
+                renderer == Renderer::Terminal
+                    && !env.no_color
+                    && (!env.term_dumb || env.force_color)
             }
         };
         Self {
@@ -1313,8 +1314,9 @@ impl ResultPresentation for CfgResult {
                 array_len(&block["actions"]),
                 flags
             );
-            if let Some(successors) = block["successors"].as_array()
-                && !successors.is_empty()
+            if let Some(successors) = block["successors"]
+                .as_array()
+                .filter(|successors| !successors.is_empty())
             {
                 let successors = successors
                     .iter()

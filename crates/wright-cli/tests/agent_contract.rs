@@ -857,9 +857,10 @@ fn assert_default_surface_parity_on_input(
         assert_eq!(result["ok"], cli["ok"], "{operation} verdict");
         assert_eq!(result["exit"], cli["exit"], "{operation} exit");
         result = result["result"].clone();
-    } else if result.get("ok").is_some()
-        && let Some(object) = result.as_object_mut()
-    {
+    } else if result.get("ok").is_some() {
+        let object = result
+            .as_object_mut()
+            .expect("an 'ok' key implies an object");
         if let Some(ok) = object.remove("ok") {
             assert_eq!(ok, cli["ok"], "{operation} verdict");
         }
