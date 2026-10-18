@@ -1,7 +1,7 @@
 # Vendored agent guide
 
 `wright/` is a verbatim copy of the `wright` skill from
-`https://github.com/wrightkit/skills` at commit `9f6ff31`, embedded in the
+`https://github.com/wrightkit/skills` at commit `7e28d96`, embedded in the
 binary for `wright agent install`. The skills repository is the authoring
 home; never edit this copy. To sync it, clone `wrightkit/skills` and run
 
