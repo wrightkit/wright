@@ -1131,19 +1131,12 @@ impl<'a> ToolService<'a> {
         if let Some(error) = self.selection_error(selection) {
             return error;
         }
-        match self.semantic_query_with_resolved_span_paths(Request::GetFindings) {
-            ToolResponse::Ok { result } => {
-                let mut findings = match result {
-                    serde_json::Value::Array(findings) => findings,
-                    _ => Vec::new(),
-                };
-                let loaded = &self.snapshot().loaded;
-                crate::fix::attach_fixes(
-                    &mut findings,
-                    self.semantic().findings(),
-                    loaded,
+        match self.semantic_query(Request::GetFindings) {
+            ToolResponse::Ok { .. } => {
+                let findings = crate::session::prepare_findings(
+                    self.semantic(),
+                    &self.snapshot().loaded,
                     self.session.catalog(),
-                    &CompilerSession::locale_for(loaded),
                 );
                 let (findings, outcome) = selection.apply_findings(
                     findings,
@@ -1542,22 +1535,10 @@ impl<'a> ToolService<'a> {
             Response::Ok { result } => result,
             Response::Error { .. } => serde_json::json!({}),
         };
-        let mut findings = match service.handle(&Request::GetFindings) {
-            Response::Ok { result } => result,
-            Response::Error { .. } => serde_json::json!([]),
-        };
-        crate::session::resolve_span_paths(&mut findings, &self.snapshot().loaded);
-        let mut findings = match findings {
-            serde_json::Value::Array(findings) => findings,
-            _ => Vec::new(),
-        };
-        let loaded = &self.snapshot().loaded;
-        crate::fix::attach_fixes(
-            &mut findings,
-            service.findings(),
-            loaded,
+        let findings = crate::session::prepare_findings(
+            service,
+            &self.snapshot().loaded,
             self.session.catalog(),
-            &CompilerSession::locale_for(loaded),
         );
         let ok = !findings
             .iter()
@@ -1566,14 +1547,15 @@ impl<'a> ToolService<'a> {
             findings,
             &crate::select::file_bases(&self.snapshot().loaded.input),
         );
+        let (rules, config, skipped) = crate::result::split_lint_rules(&lint_rules);
         let mut result = json!({
             "inputIdentity": self.snapshot().loaded.input.identity,
             "ok": ok,
             "exit": if ok { 0 } else { crate::result::exit::SOURCE_ERROR },
-            "rules": crate::result::compact_lint_rules(lint_rules.get("rules")),
-            "config": lint_rules.get("config").cloned().unwrap_or_else(|| json!({})),
+            "rules": rules,
+            "config": config,
             "findings": findings,
-            "skipped": lint_rules.get("skipped").cloned().unwrap_or_else(|| json!([])),
+            "skipped": skipped,
         });
         if let Some(outcome) = outcome {
             result["selection"] = serde_json::to_value(outcome).expect("selection serializes");

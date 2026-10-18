@@ -286,6 +286,22 @@ pub(crate) fn compact_lint_rules(rules: Option<&serde_json::Value>) -> serde_jso
     )
 }
 
+pub(crate) fn split_lint_rules(
+    lint_rules: &serde_json::Value,
+) -> (serde_json::Value, serde_json::Value, serde_json::Value) {
+    (
+        compact_lint_rules(lint_rules.get("rules")),
+        lint_rules
+            .get("config")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({})),
+        lint_rules
+            .get("skipped")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!([])),
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ConvertTarget {
