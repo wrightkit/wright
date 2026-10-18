@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.25.0](https://github.com/wrightkit/wright/compare/v0.24.0...v0.25.0) (2026-10-18)
+
+
+### Features
+
+* **driver,cli:** rename OPY input through the provider ([#746](https://github.com/wrightkit/wright/issues/746)) ([fba0364](https://github.com/wrightkit/wright/commit/fba0364709018f6f0d41f62134e2862e89d44b4a)), closes [#739](https://github.com/wrightkit/wright/issues/739)
+* **lsp:** provider-backed OPY diagnostics and navigation ([#738](https://github.com/wrightkit/wright/issues/738)) ([#745](https://github.com/wrightkit/wright/issues/745)) ([ccddb4f](https://github.com/wrightkit/wright/commit/ccddb4f07dc2c5c6aa0d09c65c3f8741517bbdc1))
+
+
+### Bug Fixes
+
+* **analyzer:** name the repeated expression in repeated-value findings ([#743](https://github.com/wrightkit/wright/issues/743)) ([e8fc9d3](https://github.com/wrightkit/wright/commit/e8fc9d3346758520d3e30d36a3249a49350f50e1))
+* **driver:** roll back committed writes when a later edit source fails ([#742](https://github.com/wrightkit/wright/issues/742)) ([1488884](https://github.com/wrightkit/wright/commit/1488884ccc6d0e24d35843eda8e8aed7c864f8c9)), closes [#734](https://github.com/wrightkit/wright/issues/734)
+
 ## [0.24.0](https://github.com/wrightkit/wright/compare/v0.23.0...v0.24.0) (2026-10-17)
 
 
