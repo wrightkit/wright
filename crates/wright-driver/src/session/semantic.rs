@@ -334,6 +334,27 @@ pub(crate) fn resolve_span_paths(value: &mut serde_json::Value, loaded: &Loaded)
     }
 }
 
+pub(crate) fn prepare_findings(
+    mut findings: serde_json::Value,
+    service: &SemanticService<'_>,
+    loaded: &Loaded,
+    catalog: &Catalog,
+) -> Vec<serde_json::Value> {
+    resolve_span_paths(&mut findings, loaded);
+    let mut findings = match findings {
+        serde_json::Value::Array(findings) => findings,
+        _ => Vec::new(),
+    };
+    crate::fix::attach_fixes(
+        &mut findings,
+        service.findings(),
+        loaded,
+        catalog,
+        &CompilerSession::locale_for(loaded),
+    );
+    findings
+}
+
 pub(crate) fn span_path(file: Option<u64>, loaded: &Loaded) -> String {
     match loaded.provenance {
         Provenance::Unmapped => "<provider-artifact>".to_string(),
@@ -687,41 +708,17 @@ impl CompilerSession {
                     lint_rule_count,
                     ProgressUnit::Rules,
                 ));
-                let mut findings = service_response(service, &Request::GetFindings);
-                resolve_span_paths(&mut findings, &loaded);
-                let mut findings = match findings {
-                    serde_json::Value::Array(findings) => findings,
-                    _ => Vec::new(),
-                };
-                crate::fix::attach_fixes(
-                    &mut findings,
-                    service.findings(),
+                let findings = prepare_findings(
+                    service_response(service, &Request::GetFindings),
+                    service,
                     &loaded,
                     session.catalog(),
-                    &Self::locale_for(&loaded),
                 );
                 let (findings, selection) = session
                     .config
                     .selection
                     .apply_findings(findings, &crate::select::file_bases(&loaded.input));
-                let (rules, config, skipped) =
-                    if let serde_json::Value::Object(mut object) = lint_rules {
-                        (
-                            crate::result::compact_lint_rules(object.remove("rules").as_ref()),
-                            object
-                                .remove("config")
-                                .unwrap_or_else(|| serde_json::json!({})),
-                            object
-                                .remove("skipped")
-                                .unwrap_or_else(|| serde_json::json!([])),
-                        )
-                    } else {
-                        (
-                            serde_json::json!([]),
-                            serde_json::json!({}),
-                            serde_json::json!([]),
-                        )
-                    };
+                let (rules, config, skipped) = crate::result::split_lint_rules(&lint_rules);
                 LintResult {
                     input_identity: loaded.input.identity.clone(),
                     program,

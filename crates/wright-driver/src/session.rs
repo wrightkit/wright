@@ -6,7 +6,7 @@
 mod edit;
 mod semantic;
 
-pub(crate) use semantic::resolve_span_paths;
+pub(crate) use semantic::{prepare_findings, resolve_span_paths};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
