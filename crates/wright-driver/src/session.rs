@@ -845,8 +845,7 @@ impl CompilerSession {
     /// The element-cost snapshot of the currently loaded program, for the
     /// project run cache (ADR-0027, #723): the canonical total plus each
     /// rule's share, in canonical order. `None` when the count cannot run.
-    pub(crate) fn cost_snapshot(&self) -> Option<cache::CostSnapshot> {
-        let loaded = self.loaded.as_ref()?;
+    pub(crate) fn cost_snapshot(&self, loaded: &Loaded) -> Option<cache::CostSnapshot> {
         let report = loaded.program.element_count(&self.catalog).ok()?;
         Some(cache::CostSnapshot {
             total: report.total,
@@ -863,10 +862,9 @@ impl CompilerSession {
     /// The `CostRun` key material for the loaded input: the resolved input
     /// file, kind, locale, and profile — so runs differing only in those
     /// never compare with each other (ADR-0027 decision 12).
-    pub(crate) fn cost_run(&self) -> Option<cache::CostRun> {
-        let loaded = self.loaded.as_ref()?;
+    pub(crate) fn cost_run(&self, loaded: &Loaded) -> cache::CostRun {
         let run = &self.config.run;
-        Some(cache::CostRun {
+        cache::CostRun {
             no_cache: run.no_cache,
             root: loaded.input.root.clone(),
             input_path: loaded.input.path.clone(),
@@ -875,7 +873,7 @@ impl CompilerSession {
             profile: self.config.profile.as_str().to_string(),
             baseline: run.baseline.clone(),
             save_baseline: run.save_baseline.clone(),
-        })
+        }
     }
 
     /// Compare the current run's element cost against the stored reference
@@ -884,18 +882,19 @@ impl CompilerSession {
     /// available; every cache failure is swallowed (ADR-0027 decision 10).
     /// An explicitly named but absent baseline is a usage error instead.
     pub(crate) fn run_cost_comparison(&self) -> Option<cache::Comparison> {
-        let run = self.cost_run()?;
+        let loaded = self.loaded.as_ref()?;
+        let run = self.cost_run(loaded);
         if run.baseline.is_some() && !cache::baseline_exists(&run) {
             return None;
         }
-        let snapshot = self.cost_snapshot()?;
+        let snapshot = self.cost_snapshot(loaded)?;
         cache::compare_and_record(&run, &snapshot)
     }
 
     /// Whether the explicitly named `--baseline` exists — `compile` turns a
     /// missing one into a usage error like `inspect cost` does (#723).
     pub(crate) fn named_baseline_missing(&self) -> Option<String> {
-        let run = self.cost_run()?;
+        let run = self.cost_run(self.loaded.as_ref()?);
         let name = run.baseline.as_deref()?;
         (!cache::baseline_exists(&run)).then(|| name.to_string())
     }
