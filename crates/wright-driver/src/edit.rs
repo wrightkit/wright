@@ -772,8 +772,11 @@ fn parse_workshop(
 
 /// Apply validated previews to the filesystem (#434): every file's current
 /// bytes must still carry the identity the transaction was validated
-/// against — a stale source refuses with no writes — and each file is
-/// replaced atomically through a sibling temporary file.
+/// against — a stale source refuses with no writes — and the whole set is
+/// atomic (#734). Every replacement is staged as a sibling temporary
+/// before any file is touched, then each temporary replaces its target
+/// atomically; a failure rolls the files already replaced back to the
+/// validated bytes.
 pub fn write_previews(
     previews: &[SourcePreview],
     transaction: &EditTransaction,
@@ -782,6 +785,7 @@ pub fn write_previews(
     for edit in &transaction.edits {
         expected.insert(edit.source.as_str(), edit.source_identity.as_str());
     }
+    let mut writes: Vec<PlannedWrite> = Vec::with_capacity(previews.len());
     for preview in previews {
         // A provider-mapped edit names its source by `file://` URI (#583);
         // `provider_uri_path` also passes plain path spellings through.
@@ -807,29 +811,80 @@ pub fn write_previews(
                 ),
             ));
         }
-    }
-    let mut written = Vec::new();
-    for preview in previews {
-        let path = PathBuf::from(crate::source_provider::provider_uri_path(&preview.source));
         let temporary = temporary_path(&path);
-        std::fs::write(&temporary, &preview.new_text).map_err(|error| {
-            Diagnostic::error(
-                "output-io",
-                Stage::Emission,
-                format!("cannot write '{}': {error}", temporary.display()),
-            )
-        })?;
-        std::fs::rename(&temporary, &path).map_err(|error| {
-            let _ = std::fs::remove_file(&temporary);
-            Diagnostic::error(
-                "output-io",
-                Stage::Emission,
-                format!("cannot replace '{}': {error}", preview.source),
-            )
-        })?;
-        written.push(preview.source.clone());
+        writes.push(PlannedWrite {
+            preview,
+            path,
+            temporary,
+            original: bytes,
+        });
     }
-    Ok(written)
+    for (index, write) in writes.iter().enumerate() {
+        if let Err(error) = std::fs::write(&write.temporary, &write.preview.new_text) {
+            remove_staged(&writes[..=index]);
+            return Err(Diagnostic::error(
+                "output-io",
+                Stage::Emission,
+                format!("cannot write '{}': {error}", write.temporary.display()),
+            ));
+        }
+    }
+    for (index, write) in writes.iter().enumerate() {
+        if let Err(error) = std::fs::rename(&write.temporary, &write.path) {
+            return Err(rollback_write(&writes, index, error));
+        }
+    }
+    Ok(writes
+        .iter()
+        .map(|write| write.preview.source.clone())
+        .collect())
+}
+
+/// One file of a staged write: the file to replace, the sibling temporary
+/// its new content is staged in, and the exact bytes the identity check
+/// captured so a later failure can roll the file back to what was
+/// validated.
+struct PlannedWrite<'a> {
+    preview: &'a SourcePreview,
+    path: PathBuf,
+    temporary: PathBuf,
+    original: Vec<u8>,
+}
+
+fn remove_staged(writes: &[PlannedWrite]) {
+    for write in writes {
+        let _ = std::fs::remove_file(&write.temporary);
+    }
+}
+
+/// Roll back a failed commit: the staged files that were never committed
+/// are removed and every file already replaced is written back to the
+/// bytes the identity check captured. The restore writes those bytes
+/// directly — the file already differs from the validated original, so a
+/// second temporary could only strand another sibling. A file whose
+/// restore fails keeps the new content, so the diagnostic names every
+/// file the caller still has to recover.
+fn rollback_write(writes: &[PlannedWrite], failed: usize, error: std::io::Error) -> Diagnostic {
+    remove_staged(&writes[failed..]);
+    let mut diverged = Vec::new();
+    for write in &writes[..failed] {
+        if std::fs::write(&write.path, &write.original).is_err() {
+            diverged.push(format!("'{}'", write.preview.source));
+        }
+    }
+    let mut message = format!(
+        "cannot replace '{}': {error}",
+        writes[failed].preview.source
+    );
+    if failed > 0 && diverged.is_empty() {
+        message.push_str("; the files already written were restored to their validated content");
+    } else if !diverged.is_empty() {
+        message.push_str(&format!(
+            "; the rollback could not restore {}",
+            diverged.join(", ")
+        ));
+    }
+    Diagnostic::error("output-io", Stage::Emission, message)
 }
 
 /// A sibling temporary file next to `path` — same directory, so the final
@@ -1693,6 +1748,198 @@ mod tests {
             "no temporary file leaks: {leftovers:?}"
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Build a write fixture: one preview per `(path, current, new_text)`
+    /// plus a transaction carrying each source's identity precondition.
+    fn write_fixtures(files: &[(&Path, &str, &str)]) -> (Vec<SourcePreview>, EditTransaction) {
+        let previews = files
+            .iter()
+            .map(|(path, _, new_text)| SourcePreview {
+                source: path.to_string_lossy().into_owned(),
+                new_text: new_text.to_string(),
+                source_identity: crate::input_identity(new_text),
+            })
+            .collect();
+        let edits = files
+            .iter()
+            .map(|(path, current, new_text)| SourceEdit {
+                edit_kind: "edit".to_string(),
+                source: path.to_string_lossy().into_owned(),
+                source_identity: crate::input_identity(current),
+                range: EditRange {
+                    start_line: 1,
+                    start_col: 1,
+                    end_line: 1,
+                    end_col: 1,
+                },
+                new_text: new_text.to_string(),
+            })
+            .collect();
+        let transaction = EditTransaction::new(edits).expect("transaction");
+        (previews, transaction)
+    }
+
+    fn staged_temporaries(dir: &Path) -> Vec<PathBuf> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .is_some_and(|name| name.to_string_lossy().contains(".wright-"))
+            })
+            .collect()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_write_failure_on_a_later_file_leaves_every_source_untouched() {
+        use std::os::unix::fs::PermissionsExt;
+        // #734: a multi-source transaction whose later file cannot be
+        // written must leave every source at the validated bytes — the
+        // write used to keep the earlier files' new content.
+        let dir = std::env::temp_dir().join(format!(
+            "wright-edit-atomic-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::SeqCst)
+        ));
+        let dir_a = dir.join("a");
+        let dir_b = dir.join("b");
+        std::fs::create_dir_all(&dir_a).unwrap();
+        std::fs::create_dir_all(&dir_b).unwrap();
+        let path_a = dir_a.join("one.ws");
+        let path_b = dir_b.join("two.ws");
+        std::fs::write(&path_a, "original a\n").unwrap();
+        std::fs::write(&path_b, "original b\n").unwrap();
+        std::fs::set_permissions(&dir_b, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        let (previews, transaction) = write_fixtures(&[
+            (path_a.as_path(), "original a\n", "new a\n"),
+            (path_b.as_path(), "original b\n", "new b\n"),
+        ]);
+        let error = write_previews(&previews, &transaction).unwrap_err();
+        assert_eq!(error.code, "output-io");
+        assert_eq!(
+            std::fs::read_to_string(&path_a).unwrap(),
+            "original a\n",
+            "the earlier file keeps no new content"
+        );
+        assert_eq!(std::fs::read_to_string(&path_b).unwrap(), "original b\n");
+        assert!(staged_temporaries(&dir_a).is_empty(), "no staged file");
+        assert!(staged_temporaries(&dir_b).is_empty(), "no staged file");
+
+        std::fs::set_permissions(&dir_b, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_failed_replace_rolls_back_the_writes_already_committed() {
+        // #734: a later file's replace fails after an earlier one
+        // committed. The failure is deterministic here because a
+        // `file://` URI and the plain path spell the same file: both
+        // previews stage to one sibling temporary, so the second rename
+        // has nothing to move. The committed file is rolled back to the
+        // validated bytes and no temporary is left behind.
+        let dir = std::env::temp_dir().join(format!(
+            "wright-edit-rollback-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("input.ws");
+        std::fs::write(&path, "original\n").unwrap();
+        let source = path.to_string_lossy().into_owned();
+        let uri = format!("file://{}", path.display());
+        let preview = |source: &str, new_text: &str| SourcePreview {
+            source: source.to_string(),
+            new_text: new_text.to_string(),
+            source_identity: crate::input_identity(new_text),
+        };
+        let edit = |source: &str, new_text: &str| SourceEdit {
+            edit_kind: "edit".to_string(),
+            source: source.to_string(),
+            source_identity: crate::input_identity("original\n"),
+            range: EditRange {
+                start_line: 1,
+                start_col: 1,
+                end_line: 1,
+                end_col: 1,
+            },
+            new_text: new_text.to_string(),
+        };
+        let previews = vec![preview(&source, "new plain\n"), preview(&uri, "new uri\n")];
+        let transaction =
+            EditTransaction::new(vec![edit(&source, "x"), edit(&uri, "y")]).expect("transaction");
+
+        let error = write_previews(&previews, &transaction).unwrap_err();
+        assert_eq!(error.code, "output-io");
+        assert!(
+            error
+                .message
+                .contains("restored to their validated content"),
+            "the rollback is reported: {:?}",
+            error.message
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "original\n",
+            "the committed write is rolled back"
+        );
+        assert!(staged_temporaries(&dir).is_empty(), "no staged file");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_rollback_diagnostic_names_every_source_it_could_not_restore() {
+        // #734: a file whose restore fails still carries the new content,
+        // so the diagnostic names each one the caller has to recover.
+        let dir = std::env::temp_dir().join(format!(
+            "wright-edit-diverged-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::SeqCst)
+        ));
+        let missing = dir.join("missing");
+        let first = SourcePreview {
+            source: "one.ws".to_string(),
+            new_text: "new\n".to_string(),
+            source_identity: String::new(),
+        };
+        let second = SourcePreview {
+            source: "two.ws".to_string(),
+            new_text: "new\n".to_string(),
+            source_identity: String::new(),
+        };
+        let writes = vec![
+            PlannedWrite {
+                preview: &first,
+                path: missing.join("one.ws"),
+                temporary: missing.join("one.ws.wright-tmp"),
+                original: b"original one\n".to_vec(),
+            },
+            PlannedWrite {
+                preview: &second,
+                path: missing.join("two.ws"),
+                temporary: missing.join("two.ws.wright-tmp"),
+                original: b"original two\n".to_vec(),
+            },
+        ];
+        let diagnostic = rollback_write(
+            &writes,
+            1,
+            std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+        );
+        assert_eq!(diagnostic.code, "output-io");
+        assert!(
+            diagnostic.message.contains("cannot replace 'two.ws'"),
+            "{:?}",
+            diagnostic.message
+        );
+        assert!(
+            diagnostic.message.contains("'one.ws'"),
+            "the unrestored file is named: {:?}",
+            diagnostic.message
+        );
     }
 
     #[test]
