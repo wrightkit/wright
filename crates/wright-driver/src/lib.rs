@@ -11,7 +11,6 @@ pub(crate) mod lookup;
 pub mod opy_provider;
 pub mod output;
 pub mod progress;
-pub mod provider;
 pub mod provider_edit;
 pub mod result;
 pub mod select;
@@ -19,10 +18,9 @@ pub mod service;
 pub mod session;
 pub mod source_provider;
 pub mod workshop_compat;
-pub mod workshop_provider;
 
 pub use config::{InputSpec, LintConfig, OutputFormat, RunOptions, SessionConfig, SourceKind};
-pub use diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage};
+pub use diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage, Status};
 pub use input::{InputTarget, ResolvedInput, sha256_hex};
 pub use opy_provider::{
     OpyProviderConfig, OpyProviderError, OpyProviderResolver, ResolvedOpyProvider,
@@ -42,7 +40,6 @@ pub use source_provider::{
 pub use workshop_compat::{
     WorkshopSemanticComparison, WorkshopSemanticSide, compare_workshop_texts,
 };
-pub use workshop_provider::WorkshopProvider;
 pub use wright_transform::Profile;
 
 /// The driver crate name reported in result metadata.
