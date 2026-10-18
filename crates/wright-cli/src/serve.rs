@@ -275,6 +275,7 @@ fn jsonrpc_dispatch_request(service: &mut ToolService<'_>, value: Value) -> Opti
             ToolRequest::Compile {
                 output: None,
                 force: false,
+                to: None,
             },
         ),
         "check" => operation_result(service, ToolRequest::Check { all: false }),

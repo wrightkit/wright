@@ -48,6 +48,7 @@ WORKFLOW OPTIONS:
     --kind <KIND>        Input frontend: auto|opy|ostw|workshop|protocol
     --target <TARGET>    Reconstruction target for convert: opy|ostw
     --locale <LOCALE>    Workshop client locale override
+    --to <LOCALE>        Workshop output locale (compile only)
     --root <DIR>         Include/project root for source inputs
     --opy-provider <PATH> Explicit local first-party OPY provider executable
     --profile <PROFILE>  WIR transformation policy: off|compat (Workshop input only)
@@ -126,6 +127,11 @@ pub(crate) struct CompileArgs {
     /// program to stdout and nothing else.
     #[arg(short = 'o', long, value_name = "PATH")]
     pub(crate) output: Option<PathBuf>,
+    /// Workshop output locale; defaults to the input's locale. Use it to
+    /// convert Workshop text between client locales independently of
+    /// `--locale`, which stays the input locale override.
+    #[arg(long, value_name = "LOCALE")]
+    pub(crate) to: Option<String>,
     /// Replace an existing output file without asking (never the input).
     #[arg(long)]
     pub(crate) force: bool,

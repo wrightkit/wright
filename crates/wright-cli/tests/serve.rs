@@ -472,6 +472,33 @@ fn legacy_jsonrpc_methods_reject_a_params_key() {
 }
 
 #[test]
+fn compile_request_carries_the_output_locale() {
+    // wright#759: `to` on the compile request selects the Workshop output
+    // locale, identical semantics to `wright compile --to`.
+    let responses = run_lines(
+        "stdio",
+        &corpus_workshop("synthetic/basic-rule"),
+        &[
+            r#"{"op":"compile","output":"en.ow","to":"en-US","force":true}"#,
+            r#"{"op":"compile","output":"zh.ow","to":"zh-CN","force":true}"#,
+            r#"{"op":"compile","output":"bad.ow","to":"xx-YY"}"#,
+        ],
+    );
+    assert_eq!(
+        responses[0]["result"]["result"]["output"]["locale"],
+        "en-us"
+    );
+    assert_eq!(
+        responses[1]["result"]["result"]["output"]["locale"],
+        "zh-cn"
+    );
+    let rejected = &responses[2]["result"];
+    assert_eq!(rejected["ok"], false);
+    assert_eq!(rejected["exit"], 2);
+    assert_eq!(rejected["diagnostics"][0]["code"], "invalid-locale");
+}
+
+#[test]
 fn capability_negotiation_is_preserved() {
     let responses = run_lines(
         "stdio",

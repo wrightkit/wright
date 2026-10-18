@@ -31,7 +31,7 @@ result.
 
 | Command | Purpose | Text-mode stdout |
 | --- | --- | --- |
-| `wright compile [INPUT]` | Parse, lower, validate, emit Workshop text; warn on known client import limits | verdict, diagnostics, the written path, and the output SHA-256; the program goes to `<input stem>.ow` (or `-o PATH`; `-o -` prints only the program) |
+| `wright compile [INPUT] [--to LOCALE]` | Parse, lower, validate, emit Workshop text; warn on known client import limits | verdict, diagnostics, the written path, and the output SHA-256; the program goes to `<input stem>.ow` (or `-o PATH`; `-o -` prints only the program); `--to` emits in another Workshop client locale |
 | `wright convert [INPUT] --target opy\|ostw` | Reconstruct validated Workshop input as canonical OPY or OSTW source through a provider that negotiates `reconstruct` (the shipped OPY provider currently does not; no OSTW provider is shipped) | the reconstructed source |
 | `wright check [INPUT]` | Parse, lower, validate, and report correctness diagnostics | verdict and validation diagnostics |
 | `wright analyze [INPUT] [--all]` | Summarize Workshop cost, ranked complexity hotspots, performance/stability risk indicators, and cross-cutting state | overview, cost, top hotspots, complexity, risks, and top variables with exact/static/heuristic evidence labels; `--all` lifts list caps |
@@ -66,7 +66,9 @@ from the source files it contains; mixed source kinds fail with structured
 ambiguity guidance. Stdin content is auto-detected (protocol JSON starts with
 `{`, otherwise Workshop text). Detection can be overridden with
 `--kind auto|opy|ostw|workshop|protocol`. `--locale`
-overrides Workshop client-locale detection; `--root` sets the include/project
+overrides Workshop client-locale detection; `compile --to <LOCALE>` selects
+the Workshop output locale independently of the input locale (default: the
+input's locale); `--root` sets the include/project
 root; `-o/--output` chooses the `compile` output file. `--profile <off|compat>`
 selects the WIR transformation policy (default `off`) and applies to
 **Workshop input only** (ADR-0028, #725): passing it with an OPY or OSTW
@@ -100,6 +102,12 @@ failed compile writes no file.
   replaces it without asking.
 - The input source file is never overwritten, with or without `--force`;
   paths are compared after resolution.
+- `--to <LOCALE>` emits the program in another Workshop client locale, so
+  `wright compile --to en-US zh-input.ow -o en.ow` converts between client
+  locales without changing the input locale or the input file. An undeclared
+  locale is a usage error; a declared locale missing mappings for the
+  program fails explicitly (`missing-mapping`) and writes nothing — there
+  is no silent fallback locale.
 - `--copy` also copies the program to the system clipboard. A clipboard
   failure is reported as a `clipboard-failed` warning and keeps the written
   file. On Linux the clipboard is served by the process through X11, so the

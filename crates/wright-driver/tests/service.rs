@@ -136,6 +136,7 @@ fn compile_request(name: &str) -> ToolRequest {
     ToolRequest::Compile {
         output: Some(std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name)),
         force: true,
+        to: None,
     }
 }
 
@@ -3210,6 +3211,7 @@ fn a_malformed_input_defers_the_load_and_recovers_in_place() {
     let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile {
         output: None,
         force: false,
+        to: None,
     }) else {
         panic!("compile returns the workflow envelope")
     };
@@ -4188,6 +4190,7 @@ fn agent_compile_writes_a_file_and_returns_no_program_text() {
     let request = |force| ToolRequest::Compile {
         output: Some(out.clone()),
         force,
+        to: None,
     };
 
     let first = result_of(&mut service, &request(false));

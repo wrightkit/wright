@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 0 | success | clean check, compiled program written, reconstructed source produced |
 | 1 | source/user error | parse error, validation error, ambiguous input, unknown input kind, unreadable input, refused downgrade, non-Workshop `convert` input, a deliberate LPP provider refusal (`provider-refusal-<refusalCode>`), an owner-side project load failure (`project-load-failed`) |
-| 2 | usage error | unknown command/flag, missing option value, missing/unknown `convert --target`, `compile -o -` with `--format json`, and the `compile` output refusals `output-exists` (existing file without a terminal or `--force`), `output-is-input`, and `output-unnamed` (carried in the envelope) |
+| 2 | usage error | unknown command/flag, missing option value, missing/unknown `convert --target`, `compile -o -` with `--format json`, the undeclared `compile --to` locale refusal `invalid-locale`, and the `compile` output refusals `output-exists` (existing file without a terminal or `--force`), `output-is-input`, and `output-unnamed` (carried in the envelope) |
 | 3 | recognized but unsupported | `.opy` stdin via the explicit adapter fallback (default path is native), package-manager-managed installation for `update self`, unsupported platform for `update self`, a `convert` reconstruction rejection (a construct outside the declared OPY/OSTW reconstruction surface), an LPP capability the provider did not negotiate (`capability-unavailable`) |
 | 4 | internal/environment failure | catalog corruption, adapter bridge missing, I/O failure writing output, `update` network/checksum/extraction failure, provider transport/process failures (`provider-spawn`, `provider-io`, `provider-timeout`, `provider-exited`, `provider-malformed`, `jsonrpc-error`), provider resolution failures (`provider-missing`, `provider-offline`, `provider-download`, `provider-integrity`, `provider-install`, `provider-unsupported-platform`) |
 
@@ -70,7 +70,7 @@ Diagnostic codes are stable per stage: `parse-error`, `unknown-*`,
 `unsupported-construct`, `settings-invalid`, `settings-placement` (frontend),
 `settings-unknown-key`, `settings-unknown-value` (validation), `convert-error`/
 `lower-error` (lowering), `validation-error` (validation), `input-*`/
-`stdin-*` / `profile-workshop-only` (discovery), `output-exists` / `output-is-input` / `output-declined` / `output-unnamed` (discovery, compile destination), `output-io` and the compile-time client-import
+`stdin-*` / `profile-workshop-only` / `invalid-locale` (discovery), `output-exists` / `output-is-input` / `output-declined` / `output-unnamed` (discovery, compile destination), `output-io` and the compile-time client-import
 diagnostics `target-element-limit` / `element-count-unavailable` (emission),
 analysis findings reuse the
 analyzer's codes, including the name-addressing refusals `unknown-symbol`,
