@@ -379,18 +379,23 @@ fn render_report<T: serde::Serialize + ResultPresentation>(
                 .any(|segment| segment.starts_with("unknown-") && segment != "unknown-language")
         {
             // `lookup` answers in the vocabulary of the rejected name's
-            // source (#692): an OPY diagnostic names `--language opy`,
-            // anything else keeps the Workshop default.
-            let hint = if diagnostic
-                .source
-                .as_ref()
-                .is_some_and(|source| source.kind == "opy")
+            // source (#692): an OPY diagnostic names `--language opy`, a
+            // non-default Workshop locale names `--locale`, anything else
+            // keeps the Workshop default.
+            let source = diagnostic.source.as_ref();
+            let hint = if source.is_some_and(|source| source.kind == "opy") {
+                "hint: run 'wright lookup --language opy' with the rejected name to find its spelling and signature".to_string()
+            } else if let Some(locale) = source
+                .and_then(|source| source.locale.as_deref())
+                .filter(|locale| !locale.eq_ignore_ascii_case("en-US"))
             {
-                "hint: run 'wright lookup --language opy' with the rejected name to find its spelling and signature"
+                format!(
+                    "hint: run 'wright lookup --locale {locale}' with the rejected name to find its spelling and signature"
+                )
             } else {
-                "hint: run 'wright lookup' with the rejected name to find its spelling and signature"
+                "hint: run 'wright lookup' with the rejected name to find its spelling and signature".to_string()
             };
-            eprintln!("{}{}", marks.pad, dim(hint, pres.color));
+            eprintln!("{}{}", marks.pad, dim(&hint, pres.color));
         }
     }
     if bounded && !pres.all && diagnostic_total > 20 {
