@@ -404,6 +404,16 @@ pub struct Capabilities {
     pub profiles: Vec<String>,
 }
 
+struct Snapshot {
+    loaded: Loaded,
+    semantic: Arc<SemanticService<'static>>,
+    lint_semantic: Option<SemanticService<'static>>,
+    /// The disk state `loaded` was read from, recomputed before every
+    /// program-reading request so a long-lived session observes edits, file
+    /// additions, and removals (#471).
+    fingerprint: input::DiskFingerprint,
+}
+
 /// The session-aware tool service.
 pub struct ToolService<'a> {
     session: &'a mut CompilerSession,
@@ -412,13 +422,7 @@ pub struct ToolService<'a> {
     /// construction is deferred to the first program-reading request rather
     /// than failing the service, so `None` is the unloaded state — never an
     /// empty placeholder program.
-    loaded: Option<Loaded>,
-    semantic: Option<Arc<SemanticService<'static>>>,
-    lint_semantic: Option<SemanticService<'static>>,
-    /// The disk state `loaded` was read from, recomputed before every
-    /// program-reading request so a long-lived session observes edits, file
-    /// additions, and removals (#471). `None` while no snapshot is held.
-    fingerprint: Option<input::DiskFingerprint>,
+    snapshot: Option<Snapshot>,
     /// Whether the symbol ids a client holds were issued by the current
     /// program (#471): a reload clears it until a `symbols` listing or an
     /// `ambiguous-symbol` refusal names the current space.
@@ -455,10 +459,7 @@ impl<'a> ToolService<'a> {
         session.verify_fixed_config()?;
         let mut service = ToolService {
             session,
-            loaded: None,
-            semantic: None,
-            lint_semantic: None,
-            fingerprint: None,
+            snapshot: None,
             symbol_ids_current: true,
             rule_ids_current: true,
             reloads: 0,
@@ -482,7 +483,7 @@ impl<'a> ToolService<'a> {
     /// program), or `None` while the configured project cannot load (#512).
     /// The first successful program-reading request populates it.
     pub fn loaded(&self) -> Option<&Loaded> {
-        self.loaded.as_ref()
+        self.snapshot.as_ref().map(|snapshot| &snapshot.loaded)
     }
 
     /// Full semantic-service builds behind this service's session (#513) —
@@ -645,7 +646,7 @@ impl<'a> ToolService<'a> {
     /// next request retries the same resolution and a repaired project is
     /// adopted without restarting the service.
     fn refresh(&mut self) -> Result<(), ToolErrorInfo> {
-        let Some(loaded) = &self.loaded else {
+        let Some(snapshot) = &self.snapshot else {
             // The deferred initial load, or recovery after an invalidated
             // snapshot (#512). Recovery counts as a reload — an observed
             // disk change brought the project back — and keeps the dropped
@@ -658,8 +659,8 @@ impl<'a> ToolService<'a> {
             }
             return Ok(());
         };
-        let fingerprint = input::disk_fingerprint(&self.session.config, &loaded.input);
-        if self.fingerprint.as_ref() == Some(&fingerprint) {
+        let fingerprint = input::disk_fingerprint(&self.session.config, &snapshot.loaded.input);
+        if snapshot.fingerprint == fingerprint {
             return Ok(());
         }
         let loaded = match self.session.reload() {
@@ -687,10 +688,7 @@ impl<'a> ToolService<'a> {
     }
 
     fn clear_snapshot(&mut self) {
-        self.loaded = None;
-        self.semantic = None;
-        self.lint_semantic = None;
-        self.fingerprint = None;
+        self.snapshot = None;
         self.symbol_ids_current = false;
         self.rule_ids_current = false;
     }
@@ -703,11 +701,11 @@ impl<'a> ToolService<'a> {
     /// refusal. No snapshot held means there is nothing to invalidate: the
     /// workflow resolves the input itself.
     fn refresh_workflow(&mut self) {
-        let Some(loaded) = &self.loaded else {
+        let Some(snapshot) = &self.snapshot else {
             return;
         };
-        let fingerprint = input::disk_fingerprint(&self.session.config, &loaded.input);
-        if self.fingerprint.as_ref() == Some(&fingerprint) {
+        let fingerprint = input::disk_fingerprint(&self.session.config, &snapshot.loaded.input);
+        if snapshot.fingerprint == fingerprint {
             return;
         }
         self.session.drop_loaded();
@@ -723,7 +721,7 @@ impl<'a> ToolService<'a> {
     /// `None`), so snapshot queries keep refusing `load()`'s explicit
     /// unsupported state rather than inheriting a placeholder program.
     fn adopt_session_snapshot(&mut self) {
-        if self.loaded.is_none() {
+        if self.snapshot.is_none() {
             if let Some(loaded) = self.session.cached_loaded() {
                 self.adopt(loaded);
             }
@@ -739,25 +737,26 @@ impl<'a> ToolService<'a> {
 
     fn adopt(&mut self, loaded: Loaded) {
         let semantic = self.session.shared_semantic(&loaded);
-        self.lint_semantic = (!self.session.config.lint.rules.is_empty())
+        let lint_semantic = (!self.session.config.lint.rules.is_empty())
             .then(|| semantic.with_lint_config(self.session.config.lint.clone()));
-        self.semantic = Some(semantic);
-        self.fingerprint = Some(input::disk_fingerprint(&self.session.config, &loaded.input));
-        self.loaded = Some(loaded);
+        let fingerprint = input::disk_fingerprint(&self.session.config, &loaded.input);
+        self.snapshot = Some(Snapshot {
+            loaded,
+            semantic,
+            lint_semantic,
+            fingerprint,
+        });
     }
 
-    fn snapshot(&self) -> &Loaded {
-        self.loaded
+    fn snapshot(&self) -> &Snapshot {
+        self.snapshot
             .as_ref()
             .expect("the refresh gate guarantees a snapshot")
     }
 
     fn snapshot_and_semantic(&self) -> (Loaded, Arc<SemanticService<'static>>) {
-        let semantic = self
-            .semantic
-            .as_ref()
-            .expect("the refresh gate guarantees a snapshot");
-        (self.snapshot().clone(), Arc::clone(semantic))
+        let snapshot = self.snapshot();
+        (snapshot.loaded.clone(), Arc::clone(&snapshot.semantic))
     }
 
     /// The document set a provider mutation runs against (#548): the
@@ -775,7 +774,7 @@ impl<'a> ToolService<'a> {
         if let Some(documents) = documents {
             return Ok(documents.clone());
         }
-        let loaded = self.snapshot();
+        let loaded = &self.snapshot().loaded;
         // Mapped members are provider-file-table spellings relative to the
         // project root the provider was given; unmapped members are the
         // input's own display spellings, relative to the invocation cwd.
@@ -788,9 +787,7 @@ impl<'a> ToolService<'a> {
     }
 
     fn semantic(&self) -> &SemanticService<'static> {
-        self.semantic
-            .as_deref()
-            .expect("the refresh gate guarantees a snapshot")
+        &self.snapshot().semantic
     }
 
     /// Refuse a numeric id that was issued by an earlier program (#471):
@@ -1140,7 +1137,7 @@ impl<'a> ToolService<'a> {
                     serde_json::Value::Array(findings) => findings,
                     _ => Vec::new(),
                 };
-                let loaded = self.snapshot();
+                let loaded = &self.snapshot().loaded;
                 crate::fix::attach_fixes(
                     &mut findings,
                     self.semantic().findings(),
@@ -1148,8 +1145,10 @@ impl<'a> ToolService<'a> {
                     self.session.catalog(),
                     &CompilerSession::locale_for(loaded),
                 );
-                let (findings, outcome) = selection
-                    .apply_findings(findings, &crate::select::file_bases(&self.snapshot().input));
+                let (findings, outcome) = selection.apply_findings(
+                    findings,
+                    &crate::select::file_bases(&self.snapshot().loaded.input),
+                );
                 match outcome {
                     Some(outcome) => self.ok(json!({ "findings": findings, "selection": outcome })),
                     None => self.ok(serde_json::Value::Array(findings)),
@@ -1187,7 +1186,7 @@ impl<'a> ToolService<'a> {
     fn semantic_query_with_resolved_span_paths(&self, request: Request) -> ToolResponse {
         match self.semantic_query(request) {
             ToolResponse::Ok { mut result } => {
-                crate::session::resolve_span_paths(&mut result, self.snapshot());
+                crate::session::resolve_span_paths(&mut result, &self.snapshot().loaded);
                 ToolResponse::Ok { result }
             }
             other => other,
@@ -1199,9 +1198,11 @@ impl<'a> ToolService<'a> {
     }
 
     fn configured_semantic(&self) -> &SemanticService<'static> {
-        self.lint_semantic
+        let snapshot = self.snapshot();
+        snapshot
+            .lint_semantic
             .as_ref()
-            .unwrap_or_else(|| self.semantic())
+            .unwrap_or(&snapshot.semantic)
     }
 
     /// A selection naming an unknown rule id is a usage error, never a
@@ -1246,7 +1247,7 @@ impl<'a> ToolService<'a> {
         let (kept, outcome) = crate::select::select_list(
             items,
             file,
-            &crate::select::file_bases(&self.snapshot().input),
+            &crate::select::file_bases(&self.snapshot().loaded.input),
             json_span_path,
             keep,
             max,
@@ -1274,6 +1275,7 @@ impl<'a> ToolService<'a> {
         if let Some(name) = name {
             if !self
                 .snapshot()
+                .loaded
                 .program
                 .rules
                 .iter()
@@ -1284,7 +1286,9 @@ impl<'a> ToolService<'a> {
         }
         let rule_id = match rule {
             Some(address) => match self.rule_address(address) {
-                Ok(id) if (id as usize) < self.snapshot().program.rules.len() => Some(id as u64),
+                Ok(id) if (id as usize) < self.snapshot().loaded.program.rules.len() => {
+                    Some(id as u64)
+                }
                 Ok(id) => return invalid_selection(format!("unknown rule {id}")),
                 Err(error) if error.code == "unknown-rule" => {
                     return invalid_selection(error.message);
@@ -1329,7 +1333,7 @@ impl<'a> ToolService<'a> {
         };
         // OverPy spellings for the canonical ids need a provider capability
         // that no provider advertises yet (ADR-0024 decision 4).
-        if self.snapshot().input.kind == crate::config::SourceKind::Opy {
+        if self.snapshot().loaded.input.kind == crate::config::SourceKind::Opy {
             result["unavailable"] = json!({"names": "opy-rs"});
         }
         let Some(rules) = result["rules"].as_array_mut() else {
@@ -1405,7 +1409,7 @@ impl<'a> ToolService<'a> {
         }
         let rule_id = match rule {
             Some(address) => match self.rule_address(address) {
-                Ok(id) if (id as usize) < self.snapshot().program.rules.len() => Some(id),
+                Ok(id) if (id as usize) < self.snapshot().loaded.program.rules.len() => Some(id),
                 Ok(id) => return invalid_selection(format!("unknown rule {id}")),
                 Err(error) => return invalid_selection(error.message),
             },
@@ -1481,7 +1485,7 @@ impl<'a> ToolService<'a> {
         callee: Option<&str>,
         max: Option<usize>,
     ) -> ToolResponse {
-        let program = &self.snapshot().program;
+        let program = &self.snapshot().loaded.program;
         if let Some(caller) = caller {
             if !program.rules.iter().any(|rule| rule.name == caller) {
                 return invalid_selection(format!("unknown caller rule '{caller}'"));
@@ -1542,12 +1546,12 @@ impl<'a> ToolService<'a> {
             Response::Ok { result } => result,
             Response::Error { .. } => serde_json::json!([]),
         };
-        crate::session::resolve_span_paths(&mut findings, self.snapshot());
+        crate::session::resolve_span_paths(&mut findings, &self.snapshot().loaded);
         let mut findings = match findings {
             serde_json::Value::Array(findings) => findings,
             _ => Vec::new(),
         };
-        let loaded = self.snapshot();
+        let loaded = &self.snapshot().loaded;
         crate::fix::attach_fixes(
             &mut findings,
             service.findings(),
@@ -1558,10 +1562,12 @@ impl<'a> ToolService<'a> {
         let ok = !findings
             .iter()
             .any(|finding| finding["severity"] == "error");
-        let (findings, outcome) =
-            selection.apply_findings(findings, &crate::select::file_bases(&self.snapshot().input));
+        let (findings, outcome) = selection.apply_findings(
+            findings,
+            &crate::select::file_bases(&self.snapshot().loaded.input),
+        );
         let mut result = json!({
-            "inputIdentity": self.snapshot().input.identity,
+            "inputIdentity": self.snapshot().loaded.input.identity,
             "ok": ok,
             "exit": if ok { 0 } else { crate::result::exit::SOURCE_ERROR },
             "rules": crate::result::compact_lint_rules(lint_rules.get("rules")),
@@ -1576,7 +1582,7 @@ impl<'a> ToolService<'a> {
     }
 
     fn project(&self) -> serde_json::Value {
-        let loaded = self.snapshot();
+        let loaded = &self.snapshot().loaded;
         let index = SemanticIndex::build(&loaded.program);
         let findings = wright_analyzer::canonical::analyze(
             &loaded.program,
@@ -1622,7 +1628,7 @@ impl<'a> ToolService<'a> {
         rule: Option<&str>,
     ) -> Result<(serde_json::Value, Option<crate::select::SelectionOutcome>), ToolErrorInfo> {
         self.selection_check(selection)?;
-        let loaded = self.snapshot();
+        let loaded = &self.snapshot().loaded;
         if let Some(rule) = rule {
             if selection.is_active() {
                 return Err(ToolErrorInfo {
@@ -1754,7 +1760,7 @@ impl<'a> ToolService<'a> {
         &self,
         result: &serde_json::Value,
     ) -> Result<Option<crate::cache::Comparison>, ToolErrorInfo> {
-        let loaded = self.snapshot();
+        let loaded = &self.snapshot().loaded;
         let run = &self.session.config.run;
         // `--max-total`: exit 1 below the current total, naming the
         // overage; identical with and without a cache (decision 2).
