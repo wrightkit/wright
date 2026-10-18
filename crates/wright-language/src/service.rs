@@ -1,6 +1,6 @@
 //! The editor-neutral language service (#63, #65, #66, #555, #738).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -427,27 +427,11 @@ impl LanguageService {
         // scopes the post-edit check verdict to the documents the provider
         // actually edited (plus the position document), so an unrelated
         // broken open document cannot block a valid rename.
-        let mut documents = wright_lpp::DocumentSet::new();
-        let mut sources = BTreeMap::new();
-        for doc_uri in self.store.uris() {
-            if source_language_id(doc_uri).as_deref() != Some(language_id.as_str()) {
-                continue;
-            }
-            let doc = self
-                .store
-                .document(doc_uri)
-                .expect("uri came from the store");
-            documents.insert(
-                doc_uri.to_string(),
-                wright_lpp::Document {
-                    uri: doc.uri.clone(),
-                    language_id: language_id.clone(),
-                    version: doc.version as i64,
-                    text: doc.text.clone(),
-                },
-            );
-            sources.insert(doc_uri.to_string(), doc.text.clone());
-        }
+        let documents = self.source_document_set(&language_id);
+        let sources = documents
+            .iter()
+            .map(|(uri, doc)| (uri.clone(), doc.text.clone()))
+            .collect();
         let request = wright_driver::provider_edit::ProviderRenameRequest {
             documents,
             position_document_uri: uri.to_string(),
@@ -456,9 +440,7 @@ impl LanguageService {
                 character: position.character,
             },
             new_name: new_name.to_string(),
-            project_root: url::Url::from_directory_path(&self.root)
-                .ok()
-                .map(|u| u.to_string()),
+            project_root: self.project_root_uri(),
             sources,
         };
 
