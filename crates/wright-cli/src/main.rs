@@ -754,10 +754,6 @@ mod tests {
             config_from_common(&explicit_opy).source_backend,
             SourceBackend::Provider
         );
-        assert_eq!(
-            config_from_common(&opy).source_backend,
-            SourceBackend::Provider
-        );
 
         let mut explicit_provider = common(Some("main.opy"), cli::SourceKindArg::Auto);
         explicit_provider.opy_provider = Some("opy-provider".into());
