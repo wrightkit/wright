@@ -5,7 +5,6 @@ Confirm against `wright --help` and the `capabilities` session operation; suppor
 ## Raw Workshop (`.ws`, `.txt`)
 
 - Fully owned by `workshop-rs`. Semantic queries, validated edit transactions, and semantic rename are supported here where the installed version declares them.
-- `compile --to <LOCALE>` re-emits the program in another Workshop client locale (e.g. `en-US`, `zh-CN`) without changing the input; the serve `compile` operation takes the same `to` field. A target locale missing mappings for the program fails explicitly — there is no fallback unless the tool offers one.
 - A semantic rename previews first and refuses on stale source, name collision, or unsupported kind (rules are not rename targets). Treat a refusal as final.
 
 ## OverPy (`.opy`)
