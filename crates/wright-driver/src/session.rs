@@ -17,8 +17,8 @@ use wright_analyzer::registry::{LintConfig, LintRegistry};
 use crate::cache;
 use crate::config::{InputSpec, SessionConfig, SourceKind};
 use crate::diag::{
-    Diagnostic, Origin, Position, Severity, SourceSpan, Stage, Status,
-    source_provider_unavailable, source_span,
+    Diagnostic, Origin, Position, Severity, SourceSpan, Stage, Status, source_provider_unavailable,
+    source_span,
 };
 use crate::input::{self, InputTarget, ResolvedInput};
 use crate::input_identity;
@@ -1502,7 +1502,11 @@ fn provider_error_diagnostic(error: wright_lpp::ProviderError, operation: &str) 
 /// One completeness residual as a session diagnostic: the owner-classified
 /// construct maps onto the `status` output contract, and the owner's spelling
 /// suggestion survives as a did-you-mean.
-fn map_issue(issue: &workshop_rs::rules::SemanticIssue, path: &Path, origin: &Origin) -> Diagnostic {
+fn map_issue(
+    issue: &workshop_rs::rules::SemanticIssue,
+    path: &Path,
+    origin: &Origin,
+) -> Diagnostic {
     let (kind_code, severity) = match issue.kind {
         workshop_rs::rules::IncompletenessKind::RawSetting => ("raw-setting", Severity::Warning),
         workshop_rs::rules::IncompletenessKind::UnknownAction => {
@@ -1532,9 +1536,7 @@ fn map_issue(issue: &workshop_rs::rules::SemanticIssue, path: &Path, origin: &Or
     }
 }
 
-fn status_for_classification(
-    classification: workshop_rs::rules::ResidualClassification,
-) -> Status {
+fn status_for_classification(classification: workshop_rs::rules::ResidualClassification) -> Status {
     match classification {
         workshop_rs::rules::ResidualClassification::ProjectDefinedConstruct
         | workshop_rs::rules::ResidualClassification::SourceDeclaredVariable => Status::Partial,

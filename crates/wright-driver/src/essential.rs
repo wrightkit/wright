@@ -68,6 +68,27 @@ fn cap(result: &mut Value, key: &str, limit: usize, all: bool) {
     }
 }
 
+/// Pop `findings` until the serialized output fits the ~1.5k-token budget,
+/// recording the truncation so `--all` / `all: true` expands the full set.
+fn fit_finding_bytes(output: &mut Value, total: usize) {
+    while serde_json::to_vec(output)
+        .expect("presentation serializes")
+        .len()
+        > DEFAULT_FINDING_BYTES
+    {
+        let shown = {
+            let findings = output["findings"]
+                .as_array_mut()
+                .expect("findings is a list");
+            if findings.pop().is_none() {
+                break;
+            }
+            findings.len()
+        };
+        output["truncation"]["findings"] = json!({"total":total,"shown":shown,"truncated":total-shown,"expand":"--all / all: true"});
+    }
+}
+
 pub fn lint(result: &Value, all: bool) -> Value {
     let items = list(result, "findings");
     let mut output = json!({"counts":{"findings":counts(items)},"findings":findings(items),"expand":"lint --all / all: true; lintRules for effective configuration and rule metadata"});
@@ -84,22 +105,7 @@ pub fn lint(result: &Value, all: bool) -> Value {
     }
     cap(&mut output, "findings", DEFAULT_ITEMS, all);
     if !all {
-        while serde_json::to_vec(&output)
-            .expect("presentation serializes")
-            .len()
-            > DEFAULT_FINDING_BYTES
-        {
-            let shown = {
-                let findings = output["findings"]
-                    .as_array_mut()
-                    .expect("findings is a list");
-                if findings.pop().is_none() {
-                    break;
-                }
-                findings.len()
-            };
-            output["truncation"]["findings"] = json!({"total":items.len(),"shown":shown,"truncated":items.len()-shown,"expand":"--all / all: true"});
-        }
+        fit_finding_bytes(&mut output, items.len());
     }
     output
 }
@@ -261,28 +267,11 @@ pub fn cost(result: &Value, all: bool) -> Value {
     let mut output = query(&output, all);
     // Findings carry resolved span objects (#722), which cost roughly four
     // times the lint `location` string — on a large project the default
-    // payload would exceed the same ~1.5k-token budget `lint` fits. Bound
-    // the findings list by serialized bytes exactly like `lint` does: pop
-    // from the end until the whole output fits, recording the truncation so
-    // `all: true` / `--all` expands the complete set.
+    // payload would exceed the same ~1.5k-token budget `lint` fits, so the
+    // findings list is bounded by serialized bytes exactly like `lint`'s.
     if !all && output["findings"].is_array() {
         let total = output["findings"].as_array().map_or(0, Vec::len);
-        while serde_json::to_vec(&output)
-            .expect("presentation serializes")
-            .len()
-            > DEFAULT_FINDING_BYTES
-        {
-            let shown = {
-                let findings = output["findings"]
-                    .as_array_mut()
-                    .expect("findings is a list");
-                if findings.pop().is_none() {
-                    break;
-                }
-                findings.len()
-            };
-            output["truncation"]["findings"] = json!({"total":total,"shown":shown,"truncated":total-shown,"expand":"--all / all: true"});
-        }
+        fit_finding_bytes(&mut output, total);
     }
     output
 }

@@ -670,9 +670,9 @@ impl fmt::Display for OpyProviderError {
 
 impl std::error::Error for OpyProviderError {}
 
-/// The single `OpyProviderError` → LPP `local` channel mapping: every
-/// consumer (driver source-provider spawn, language-service bootstrap)
-/// classifies a resolution failure identically.
+// The single `OpyProviderError` → LPP `local` channel mapping: every
+// consumer (driver source-provider spawn, language-service bootstrap)
+// classifies a resolution failure identically.
 impl From<OpyProviderError> for wright_lpp::ProviderError {
     fn from(error: OpyProviderError) -> Self {
         let kind = match &error {
