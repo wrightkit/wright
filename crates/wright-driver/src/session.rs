@@ -34,21 +34,6 @@ use crate::source_provider::{
     SourceTarget, provider_uri_path,
 };
 
-fn error_kind(error: &opy_provider::OpyProviderError) -> wright_lpp::LocalProviderErrorKind {
-    match error {
-        opy_provider::OpyProviderError::Missing(_) => wright_lpp::LocalProviderErrorKind::Missing,
-        opy_provider::OpyProviderError::UnsupportedPlatform(_) => {
-            wright_lpp::LocalProviderErrorKind::UnsupportedPlatform
-        }
-        opy_provider::OpyProviderError::Offline(_) => wright_lpp::LocalProviderErrorKind::Offline,
-        opy_provider::OpyProviderError::Download(_) => wright_lpp::LocalProviderErrorKind::Download,
-        opy_provider::OpyProviderError::Integrity(_) => {
-            wright_lpp::LocalProviderErrorKind::Integrity
-        }
-        opy_provider::OpyProviderError::Install(_) => wright_lpp::LocalProviderErrorKind::Install,
-    }
-}
-
 /// A successfully loaded program with its input and origin metadata.
 #[derive(Clone)]
 pub struct Loaded {
@@ -775,12 +760,7 @@ impl CompilerSession {
             ));
         }
         if id == opy_provider::OPY_LANGUAGE_ID && !self.config.providers.contains(id) {
-            let res = self.config.opy_provider.resolve().map_err(|e| {
-                wright_lpp::ProviderError::Local {
-                    kind: error_kind(&e),
-                    message: e.to_string(),
-                }
-            })?;
+            let res = self.config.opy_provider.resolve()?;
             let mut p = self.config.providers.clone();
             p.register(wright_lpp::ProviderConfig::new(
                 opy_provider::OPY_LANGUAGE_ID,
