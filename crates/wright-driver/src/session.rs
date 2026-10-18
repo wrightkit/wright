@@ -1020,13 +1020,12 @@ impl CompilerSession {
         &mut self,
         to: Option<&str>,
     ) -> Result<(CompiledOutput, Option<PathBuf>), Diagnostic> {
-        let loaded = self.load_with_operation(ProviderOperation::Compile)?;
-        let locale = match to {
+        // An output locale the catalog does not declare is a usage
+        // error (#759) and needs nothing from the project: report it
+        // before loading. The emitter's missing-mapping contract covers
+        // undeclared spellings per identity, not an unknown locale itself.
+        let named = match to {
             Some(name) => {
-                // An output locale the catalog does not declare is a usage
-                // error (#759): the emitter's missing-mapping contract
-                // covers undeclared spellings per identity, not an unknown
-                // locale itself.
                 let locale = workshop_rs::catalog::Locale::new(name);
                 if !self.catalog.supports(&locale) {
                     return Err(Diagnostic::error(
@@ -1043,10 +1042,12 @@ impl CompilerSession {
                         ),
                     ));
                 }
-                locale
+                Some(locale)
             }
-            None => Self::locale_for(&loaded),
+            None => None,
         };
+        let loaded = self.load_with_operation(ProviderOperation::Compile)?;
+        let locale = named.unwrap_or_else(|| Self::locale_for(&loaded));
         self.progress(ProgressEvent::new(ProgressPhase::Emission));
         let text = hotpath::measure_block!("compile::emit", {
             workshop_rs::emitter::emit(&loaded.program, &self.catalog, &locale)
