@@ -1,11 +1,15 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct LspClient {
     child: Child,
     stdin: Option<ChildStdin>,
     stdout: BufReader<ChildStdout>,
+    /// The isolated provider data dir this spawn ran with — kept so
+    /// `Drop` can remove it.
+    provider_dir: PathBuf,
 }
 
 impl LspClient {
@@ -13,8 +17,32 @@ impl LspClient {
         Self::launch(Command::new(env!("CARGO_BIN_EXE_wright-lsp")).current_dir(cwd))
     }
 
+    /// A server launched with `--opy-provider` pointing at a staged fake
+    /// provider; `caps` is the comma-separated `FAKE_CAPS` list the fake
+    /// advertises on `lpp/initialize` (#738).
+    #[cfg(unix)]
+    fn spawn_with_provider(cwd: &Path, provider: &Path, caps: &str) -> Self {
+        Self::launch(
+            Command::new(env!("CARGO_BIN_EXE_wright-lsp"))
+                .current_dir(cwd)
+                .arg("--opy-provider")
+                .arg(provider)
+                .env("FAKE_CAPS", caps),
+        )
+    }
+
     fn launch(command: &mut Command) -> Self {
+        // An empty provider data dir keeps a developer's installed OPY
+        // provider out of these tests: provider resolution is either the
+        // explicit `--opy-provider` flag or deterministically absent.
+        let provider_dir = std::env::temp_dir().join(format!(
+            "wright-lsp-test-{}-{}",
+            std::process::id(),
+            SPAWN_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&provider_dir).unwrap();
         let mut child = command
+            .env("WRIGHT_PROVIDER_DATA_DIR", &provider_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -26,6 +54,7 @@ impl LspClient {
             child,
             stdin: Some(stdin),
             stdout,
+            provider_dir,
         }
     }
 
@@ -102,6 +131,18 @@ impl LspClient {
             }
         }
     }
+
+    /// The `publishDiagnostics` notification for `uri` — a set-wide
+    /// provider check can publish several sources per refresh, so the
+    /// test reads until the right document reports (#738).
+    fn read_diagnostics_for(&mut self, uri: &str) -> serde_json::Value {
+        loop {
+            let message = self.read_notification("textDocument/publishDiagnostics");
+            if message["params"]["uri"] == uri {
+                return message;
+            }
+        }
+    }
 }
 
 impl Drop for LspClient {
@@ -110,8 +151,11 @@ impl Drop for LspClient {
         // rather than hang the harness on `wait`.
         let _ = self.child.kill();
         let _ = self.child.wait();
+        let _ = std::fs::remove_dir_all(&self.provider_dir);
     }
 }
+
+static SPAWN_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
@@ -163,7 +207,14 @@ fn initialize_advertises_only_backed_capabilities() {
             "raw-Workshop semantic queries are backed and advertised: {capability}"
         );
     }
-    for capability in ["completionProvider", "semanticTokensProvider"] {
+    for capability in [
+        "completionProvider",
+        "semanticTokensProvider",
+        // OPY document symbols are provider-backed only (#738): no
+        // negotiated provider — the test runs against an isolated empty
+        // provider store — means no advertisement.
+        "documentSymbolProvider",
+    ] {
         assert!(
             !capabilities.contains_key(capability),
             "unbacked capability must not be advertised: {capability}"
@@ -306,10 +357,10 @@ fn workshop_documents_publish_check_diagnostics_and_serve_semantic_queries() {
     let definition = client.request(3, "textDocument/definition", position_request(uri, 24, 25));
     assert_eq!(
         definition["result"],
-        serde_json::json!({
+        serde_json::json!([{
             "uri": uri,
             "range": lsp_range((6, 7), (6, 13)),
-        }),
+        }]),
         "definition targets the declared symbol span: {definition}"
     );
 
@@ -441,8 +492,22 @@ fn opy_lsp_workflow_reports_provider_boundary_without_static_fallback() {
         "an unadvertised request returns a null result: {completion}"
     );
 
-    // Hover/definition/references are advertised for raw Workshop only; a
-    // source-language document still answers null.
+    // With no negotiated provider, OPY document symbols are not backed
+    // (#738): the request answers null rather than an error.
+    let symbols = client.request(
+        6,
+        "textDocument/documentSymbol",
+        serde_json::json!({
+            "textDocument": { "uri": "file:///workspace/main.opy" },
+        }),
+    );
+    assert!(
+        symbols["result"].is_null() && symbols.get("error").is_none(),
+        "document symbols without provider backing answer null: {symbols}"
+    );
+
+    // Hover is raw Workshop only; the provider navigation requests answer
+    // null without negotiated provider backing either.
     for (id, method) in [
         (3, "textDocument/hover"),
         (4, "textDocument/definition"),
@@ -963,4 +1028,448 @@ fn a_notification_method_carrying_an_id_is_answered() {
     assert_eq!(response["id"], 4);
     client.notify("exit", serde_json::json!({}));
     assert_eq!(client.wait_status(), Some(0));
+}
+
+// ── Provider-backed OPY diagnostics and navigation (#738) ─────────────
+//
+// The staged provider is a newline-JSON-RPC script that advertises the
+// `FAKE_CAPS` capability list on `lpp/initialize` and serves `lpp/check`,
+// `lpp/symbols`, `lpp/definition`, and `lpp/references` from the document
+// text it is sent — the editor's overlay — resolving `#!include`/`#include`
+// targets from disk for cross-file answers.
+
+#[cfg(unix)]
+const FAKE_OPY_PROVIDER: &str = r#"#!/usr/bin/env python3
+import json, os, re, sys, urllib.parse
+
+CAPS = {c for c in os.environ.get("FAKE_CAPS", "").split(",") if c}
+CAP_OF = {"lpp/check": "check", "lpp/symbols": "symbols",
+          "lpp/definition": "definition", "lpp/references": "references"}
+IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+DECL = re.compile(r"^\s*(globalvar|playervar|subroutine)\s+([A-Za-z_][A-Za-z0-9_]*)")
+KIND = {"globalvar": "global", "playervar": "player", "subroutine": "subroutine"}
+INCLUDE = re.compile(r"^\s*#!?include\s+[\"']([^\"']+)[\"']")
+
+def reply(id, result=None, error=None):
+    message = {"jsonrpc": "2.0", "id": id}
+    message.update({"error": error} if error else {"result": result})
+    print(json.dumps(message), flush=True)
+
+def lpp_error(id, kind, details, text):
+    reply(id, error={"code": -32000, "message": text,
+                     "data": {"lpp": {"kind": kind, "details": details}}})
+
+def path_of(uri):
+    return urllib.parse.unquote(urllib.parse.urlparse(uri).path)
+
+def uri_of(path):
+    return "file://" + urllib.parse.quote(os.path.abspath(path))
+
+def rng(line, col, end):
+    return {"start": {"line": line, "character": col},
+            "end": {"line": line, "character": end}}
+
+def declarations(text):
+    for i, line in enumerate(text.splitlines()):
+        m = DECL.match(line)
+        if m:
+            yield m.group(2), i, line.index(m.group(2)), m.group(1)
+
+def include_paths(doc):
+    for line in doc["text"].splitlines():
+        m = INCLUDE.match(line)
+        if m:
+            yield os.path.join(os.path.dirname(path_of(doc["uri"])), m.group(1))
+
+def included_texts(doc):
+    for path in include_paths(doc):
+        if os.path.exists(path):
+            yield uri_of(path), open(path).read()
+
+def word_at(text, position):
+    lines = text.splitlines()
+    if position["line"] >= len(lines):
+        return None
+    line = lines[position["line"]]
+    for m in IDENT.finditer(line):
+        if m.start() <= position["character"] < m.end():
+            return m.group(0)
+    return None
+
+def decl_site(doc, name):
+    if name is not None:
+        for decl, i, col, _kw in declarations(doc["text"]):
+            if decl == name:
+                return doc["uri"], rng(i, col, col + len(name))
+        for uri, text in included_texts(doc):
+            for decl, i, col, _kw in declarations(text):
+                if decl == name:
+                    return uri, rng(i, col, col + len(name))
+    return None
+
+def occurrences(doc, name):
+    for i, line in enumerate(doc["text"].splitlines()):
+        for m in re.finditer(r"\b%s\b" % re.escape(name), line):
+            yield doc["uri"], rng(i, m.start(), m.end())
+    for uri, text in included_texts(doc):
+        for i, line in enumerate(text.splitlines()):
+            for m in re.finditer(r"\b%s\b" % re.escape(name), line):
+                yield uri, rng(i, m.start(), m.end())
+
+for line in sys.stdin:
+    request = json.loads(line)
+    id, method = request["id"], request["method"]
+    if method == "lpp/initialize":
+        reply(id, {"protocolVersion": request["params"]["protocolVersion"],
+                   "serverInfo": {"name": "fake-opy-provider", "version": "0"},
+                   "languages": [{"id": "opy", "extensions": ["opy"]}],
+                   "capabilities": {c: (c in CAPS) for c in
+                        ["check", "compile", "reconstruct", "symbols",
+                         "definition", "references", "rename",
+                         "editValidation", "projectLoading"]}})
+    elif method in CAP_OF and CAP_OF[method] not in CAPS:
+        lpp_error(id, "capabilityUnavailable",
+                  {"capability": CAP_OF[method], "method": method},
+                  "capability not negotiated")
+    elif method == "lpp/check":
+        docs = []
+        for uri, doc in request["params"]["documents"].items():
+            diags = [{"range": rng(i, m.start(), m.end()), "severity": "error",
+                      "code": "fake-oops", "message": "invalid token 'oops'"}
+                     for i, l in enumerate(doc["text"].splitlines())
+                     for m in re.finditer(r"\boops\b", l)]
+            docs.append({"uri": uri, "version": doc["version"], "diagnostics": diags})
+        reply(id, {"documents": docs})
+    elif method == "lpp/symbols":
+        docs = []
+        for uri, doc in request["params"]["documents"].items():
+            syms = [{"name": name, "kind": KIND[kw],
+                     "range": rng(i, col, col + len(name)),
+                     "selectionRange": rng(i, col, col + len(name))}
+                    for name, i, col, kw in declarations(doc["text"])]
+            docs.append({"uri": uri, "version": doc["version"], "symbols": syms})
+        reply(id, {"documents": docs})
+    elif method == "lpp/definition":
+        doc, pos = request["params"]["document"], request["params"]["position"]
+        site = decl_site(doc, word_at(doc["text"], pos))
+        if site is None:
+            lpp_error(id, "refusal",
+                      {"refusalCode": "definition.noSymbolAtPosition"},
+                      "no symbol at position")
+        else:
+            reply(id, {"locations": [{"uri": site[0], "range": site[1]}]})
+    elif method == "lpp/references":
+        doc, pos = request["params"]["document"], request["params"]["position"]
+        name = word_at(doc["text"], pos)
+        site = decl_site(doc, name)
+        if site is None:
+            lpp_error(id, "refusal",
+                      {"refusalCode": "references.noSymbolAtPosition"},
+                      "no symbol at position")
+        else:
+            locs = [{"uri": u, "range": r} for u, r in occurrences(doc, name)]
+            if not request["params"].get("includeDeclaration", True):
+                locs = [l for l in locs
+                        if not (l["uri"] == site[0] and l["range"] == site[1])]
+            reply(id, {"locations": locs})
+    elif method == "lpp/shutdown":
+        reply(id)
+        sys.exit(0)
+    else:
+        reply(id, {})
+"#;
+
+/// Stage the fake provider as an executable file and return its path.
+#[cfg(unix)]
+fn stage_fake_provider(dir: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let path = dir.join("fake-opy-provider");
+    std::fs::write(&path, FAKE_OPY_PROVIDER).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    path
+}
+
+/// A real workspace directory under the temp tree — `#!include` targets
+/// the fake provider resolves from disk live here (#738).
+#[cfg(unix)]
+fn opy_workspace(tag: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("wright-lsp-opy-{}-{tag}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+#[cfg(unix)]
+fn file_uri(path: &Path) -> String {
+    format!("file://{}", path.display())
+}
+
+#[cfg(unix)]
+#[test]
+fn opy_capabilities_are_advertised_from_the_negotiated_provider() {
+    let root = workspace_root();
+    let dir = opy_workspace("provider-caps");
+    let provider = stage_fake_provider(&dir);
+    let mut client =
+        LspClient::spawn_with_provider(&root, &provider, "check,symbols,definition,references");
+    let init = initialize(&mut client);
+    let capabilities = init["result"]["capabilities"].as_object().unwrap();
+    assert_eq!(
+        capabilities["documentSymbolProvider"], true,
+        "lpp/symbols was negotiated, so the capability advertises: {init}"
+    );
+    // The session stays up and still serves.
+    let shutdown = client.request(2, "shutdown", serde_json::json!(null));
+    assert!(shutdown["result"].is_null());
+    client.notify("exit", serde_json::json!(null));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn opy_diagnostics_come_from_the_open_buffer_not_the_disk() {
+    let root = workspace_root();
+    let dir = opy_workspace("provider-diag");
+    let provider = stage_fake_provider(&dir);
+    let mut client = LspClient::spawn_with_provider(&root, &provider, "check");
+    initialize(&mut client);
+    client.notify("initialized", serde_json::json!({}));
+
+    // `main.opy` never exists on disk: the only place this text lives is
+    // the open buffer — a diagnostic on `oops` can only come from the
+    // overlay document the provider was sent (#738).
+    let uri = "file:///workspace/main.opy";
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": {
+                "uri": uri,
+                "languageId": "opy",
+                "version": 1,
+                "text": "globalvar score = oops\n",
+            }
+        }),
+    );
+    let published = client.read_diagnostics_for(uri);
+    let diagnostics = published["params"]["diagnostics"].as_array().unwrap();
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0]["code"], "fake-oops");
+    assert_eq!(
+        diagnostics[0]["range"],
+        lsp_range((0, 18), (0, 22)),
+        "the provider's authored range carries through unchanged"
+    );
+
+    // Fixing the buffer republishes an empty set — the stale diagnostic
+    // retires rather than lingering.
+    client.notify(
+        "textDocument/didChange",
+        serde_json::json!({
+            "textDocument": { "uri": uri, "version": 2 },
+            "contentChanges": [{ "text": "globalvar score = 0\n" }],
+        }),
+    );
+    let republished = client.read_diagnostics_for(uri);
+    assert!(
+        republished["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "a clean buffer clears provider diagnostics: {republished}"
+    );
+
+    let shutdown = client.request(2, "shutdown", serde_json::json!(null));
+    assert!(shutdown["result"].is_null());
+    client.notify("exit", serde_json::json!(null));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn opy_navigation_routes_through_the_provider_across_includes() {
+    let workspace = opy_workspace("nav");
+    let provider = stage_fake_provider(&workspace);
+    let mut client = LspClient::spawn_with_provider(
+        &workspace,
+        &provider,
+        "check,symbols,definition,references",
+    );
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": file_uri(&workspace),
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+
+    // `defs.opy` exists only on disk — the provider owns cross-file
+    // project semantics; `main.opy` exists only as an open buffer, so its
+    // text is the overlay the provider was sent.
+    let defs = workspace.join("defs.opy");
+    std::fs::write(&defs, "globalvar included_var = 0\n").unwrap();
+    let defs_uri = file_uri(&defs);
+    let main_uri = file_uri(&workspace.join("main.opy"));
+    let main_text = concat!(
+        "#!include \"defs.opy\"\n",
+        "\n",
+        "rule \"use\":\n",
+        "    @Event global\n",
+        "    included_var = 2\n",
+    );
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": {
+                "uri": main_uri,
+                "languageId": "opy",
+                "version": 1,
+                "text": main_text,
+            }
+        }),
+    );
+    client.read_diagnostics_for(&main_uri);
+
+    // `lpp/symbols` backs textDocument/documentSymbol: `defs.opy` is not
+    // open, so only the symbols the provider declares in `main.opy`'s
+    // buffer arrive — the fake declares none, which is still a real
+    // answer ([]), unlike null.
+    let symbols = client.request(
+        2,
+        "textDocument/documentSymbol",
+        serde_json::json!({ "textDocument": { "uri": main_uri } }),
+    );
+    assert_eq!(
+        symbols["result"],
+        serde_json::json!([]),
+        "the provider answers with its own symbol list: {symbols}"
+    );
+
+    // Definition on the `included_var` use (line 4, chars 4–16) resolves
+    // through the `#!include` into `defs.opy` — a URI this session never
+    // opened.
+    let definition = client.request(
+        3,
+        "textDocument/definition",
+        position_request(&main_uri, 4, 5),
+    );
+    assert_eq!(
+        definition["result"],
+        serde_json::json!([{
+            "uri": defs_uri,
+            "range": lsp_range((0, 10), (0, 22)),
+        }]),
+        "the provider's cross-file location arrives verbatim: {definition}"
+    );
+
+    // References honor `includeDeclaration` and span both files.
+    let references = client.request(
+        4,
+        "textDocument/references",
+        serde_json::json!({
+            "textDocument": { "uri": main_uri },
+            "position": { "line": 4, "character": 5 },
+            "context": { "includeDeclaration": true },
+        }),
+    );
+    assert_eq!(
+        references["result"],
+        serde_json::json!([
+            { "uri": main_uri, "range": lsp_range((4, 4), (4, 16)) },
+            { "uri": defs_uri, "range": lsp_range((0, 10), (0, 22)) },
+        ]),
+        "references span the open buffer and the included file: {references}"
+    );
+    let uses_only = client.request(
+        5,
+        "textDocument/references",
+        serde_json::json!({
+            "textDocument": { "uri": main_uri },
+            "position": { "line": 4, "character": 5 },
+            "context": { "includeDeclaration": false },
+        }),
+    );
+    assert_eq!(
+        uses_only["result"],
+        serde_json::json!([{ "uri": main_uri, "range": lsp_range((4, 4), (4, 16)) }]),
+        "includeDeclaration=false drops the declaration site: {uses_only}"
+    );
+
+    // A position on no identifier is a provider refusal, surfaced as a
+    // null result — never an LSP error.
+    let miss = client.request(
+        6,
+        "textDocument/definition",
+        position_request(&main_uri, 1, 0),
+    );
+    assert!(
+        miss["result"].is_null() && miss.get("error").is_none(),
+        "noSymbolAtPosition answers null: {miss}"
+    );
+
+    let shutdown = client.request(7, "shutdown", serde_json::json!(null));
+    assert!(shutdown["result"].is_null());
+    client.notify("exit", serde_json::json!(null));
+    let _ = std::fs::remove_dir_all(&workspace);
+}
+
+#[cfg(unix)]
+#[test]
+fn opy_navigation_is_unadvertised_and_answers_null_without_provider_capabilities() {
+    let root = workspace_root();
+    let dir = opy_workspace("provider-caps-off");
+    let provider = stage_fake_provider(&dir);
+    // `check` only: the provider negotiates diagnostics but no
+    // navigation, so nothing navigation-shaped may be advertised (#738).
+    let mut client = LspClient::spawn_with_provider(&root, &provider, "check");
+    let init = initialize(&mut client);
+    assert!(
+        init["result"]["capabilities"]
+            .get("documentSymbolProvider")
+            .is_none(),
+        "the provider never negotiated lpp/symbols: {init}"
+    );
+    client.notify("initialized", serde_json::json!({}));
+
+    let uri = "file:///workspace/main.opy";
+    open_document(&mut client, uri, "opy", "globalvar score = 0\n");
+    let published = client.read_diagnostics_for(uri);
+    assert!(
+        published["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "check still serves diagnostics: {published}"
+    );
+
+    for (id, method, params) in [
+        (
+            2,
+            "textDocument/documentSymbol",
+            serde_json::json!({ "textDocument": { "uri": uri } }),
+        ),
+        (3, "textDocument/definition", position_request(uri, 0, 11)),
+        (
+            4,
+            "textDocument/references",
+            serde_json::json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": 0, "character": 11 },
+                "context": { "includeDeclaration": true },
+            }),
+        ),
+    ] {
+        let response = client.request(id, method, params);
+        assert!(
+            response["result"].is_null() && response.get("error").is_none(),
+            "{method} without negotiated provider backing answers null: {response}"
+        );
+    }
+
+    let shutdown = client.request(5, "shutdown", serde_json::json!(null));
+    assert!(shutdown["result"].is_null());
+    client.notify("exit", serde_json::json!(null));
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -4,7 +4,22 @@ use wright_language::document::{Document, Position, line_col_position, uri_to_pa
 use wright_language::{LanguageService, Range};
 
 fn service() -> LanguageService {
-    LanguageService::new(PathBuf::from("."))
+    // An isolated provider store keeps a developer machine's installed
+    // OPY provider from leaking in: `.opy` documents must reach the
+    // structured boundary deterministically (#738).
+    LanguageService::with_config(
+        PathBuf::from("."),
+        wright_language::SessionConfig {
+            opy_provider: wright_language::OpyProviderConfig {
+                executable: None,
+                store_dir: Some(
+                    std::env::temp_dir()
+                        .join(format!("wright-language-test-{}", std::process::id())),
+                ),
+            },
+            ..wright_language::SessionConfig::default()
+        },
+    )
 }
 
 const WORKSHOP_SOURCE: &str = concat!(
@@ -201,9 +216,10 @@ fn workshop_semantic_queries_match_inspect_for_the_same_text() {
             },
         )
         .expect("definition on a call site");
-    assert_eq!(definition.uri, uri);
+    assert_eq!(definition.len(), 1, "one declared span: {definition:?}");
+    assert_eq!(definition[0].uri, uri);
     assert_eq!(
-        definition.range,
+        definition[0].range,
         inspect_span(WORKSHOP_SOURCE, &symbols[shared]["span"])
     );
 
@@ -268,7 +284,7 @@ fn workshop_semantic_queries_match_inspect_for_the_same_text() {
         )
         .expect("definition on a variable write");
     assert_eq!(
-        variable_definition.range,
+        variable_definition[0].range,
         inspect_span(WORKSHOP_SOURCE, &symbols[score]["span"])
     );
     let variable_hover = service

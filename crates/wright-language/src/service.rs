@@ -1,11 +1,14 @@
-//! The editor-neutral language service (#63, #65, #66, #555).
+//! The editor-neutral language service (#63, #65, #66, #555, #738).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::time::Duration;
 
 use serde::Serialize;
 use wright_analyzer::canonical::{PositionResolution, ReferenceKind, SemanticIndex, Symbol};
+use wright_driver::opy_provider::{OPY_LANGUAGE_ID, OpyProviderError, ResolvedOpyProvider};
 use wright_driver::{CompilerSession, InputSpec, SessionConfig, SourceKind};
+use wright_lpp::{Capability, LanguageProvider, ProviderError};
 
 use crate::document::{Document, DocumentStore, Position, Range, line_col_position, uri_to_path};
 
@@ -49,6 +52,35 @@ pub struct SourceLocation {
     pub range: Range,
 }
 
+/// A program-scope symbol the provider declared via `lpp/symbols`
+/// (#738): the provider's own kind vocabulary (`global`, `player`,
+/// `subroutine`, `def`, `constant`, `macro`) with UTF-16 ranges over the
+/// buffer text it was sent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SourceSymbol {
+    pub name: String,
+    pub kind: String,
+    pub range: Range,
+    pub selection_range: Option<Range>,
+}
+
+/// The OPY capabilities negotiated with the provider for this session
+/// (#738). The host consults it while building the `initialize` answer —
+/// a capability is advertised only when the provider actually serves it —
+/// and the service consults it again per request, so a capability the
+/// provider never negotiated degrades to no answer rather than an error.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct OpyProviderSupport {
+    /// `lpp/check` — provider diagnostics for open OPY buffers.
+    pub check: bool,
+    /// `lpp/symbols` — document symbols.
+    pub symbols: bool,
+    /// `lpp/definition` — go-to-definition.
+    pub definition: bool,
+    /// `lpp/references` — find references.
+    pub references: bool,
+}
+
 /// The hover answer for a position: the resolved symbol's identity over the
 /// identifier occurrence that matched.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -57,11 +89,22 @@ pub struct HoverInfo {
     pub range: Range,
 }
 
+/// The resolved OPY provider session (#738): `Pending` until the first
+/// consult — the LSP `initialize` handler forces negotiation so its
+/// capability answer is truthful — and `Unavailable` latches a failed
+/// connection so a dead provider is never retried per request.
+enum OpyProviderState {
+    Pending,
+    Ready(Box<dyn LanguageProvider>),
+    Unavailable(ProviderError),
+}
+
 pub struct LanguageService {
     pub store: DocumentStore,
     pub root: PathBuf,
     config: SessionConfig,
     session: Option<CompilerSession>,
+    opy: OpyProviderState,
 }
 
 impl LanguageService {
@@ -79,32 +122,72 @@ impl LanguageService {
             root,
             config,
             session: None,
+            opy: OpyProviderState::Pending,
         }
     }
 
-    pub fn diagnostics(&self, uri: &str) -> Vec<SourceDiagnostic> {
+    /// The OPY capabilities negotiated with the provider (#738).
+    ///
+    /// Calling this connects the provider session if it has not run yet —
+    /// spawn plus `lpp/initialize` — so the LSP `initialize` answer can
+    /// advertise exactly what the provider serves. Without a resolvable
+    /// provider the answer is "supports nothing" rather than a failure:
+    /// the LSP session itself must always initialize.
+    pub fn opy_provider_support(&mut self) -> OpyProviderSupport {
+        let Ok(provider) = self.opy_provider() else {
+            return OpyProviderSupport::default();
+        };
+        let Ok(capabilities) = provider.capabilities() else {
+            return OpyProviderSupport::default();
+        };
+        OpyProviderSupport {
+            check: capabilities.supports(Capability::Check),
+            symbols: capabilities.supports(Capability::Symbols),
+            definition: capabilities.supports(Capability::Definition),
+            references: capabilities.supports(Capability::References),
+        }
+    }
+
+    /// Diagnostics for the open buffer at `uri`.
+    ///
+    /// Raw Workshop buffers run the session's check pipeline over the
+    /// buffer text (#555). OPY buffers are provider-owned (#738):
+    /// `lpp/check` over the complete open-document overlay — unsaved text
+    /// included — never a disk read. DEL/OSTW stay at the structured
+    /// provider boundary until a provider serves them.
+    pub fn diagnostics(&mut self, uri: &str) -> Vec<SourceDiagnostic> {
+        let Some(language_id) = source_language_id(uri) else {
+            return self.workshop_diagnostics(uri);
+        };
         let Some(document) = self.store.document(uri) else {
             return Vec::new();
         };
-        if is_source_document(uri) {
-            return vec![SourceDiagnostic {
-                source: document.uri.clone(),
-                range: empty_range(),
-                severity: "error".to_string(),
-                code: "source-provider-unavailable".to_string(),
-                message:
-                    "source-language analysis is provider-owned; diagnostics are not yet negotiated"
-                        .to_string(),
-                source_version: document.version,
-                document_version: document.version,
-            }];
+        if language_id == OPY_LANGUAGE_ID {
+            return self.opy_diagnostics(uri);
         }
+        vec![SourceDiagnostic {
+            source: document.uri.clone(),
+            range: empty_range(),
+            severity: "error".to_string(),
+            code: "source-provider-unavailable".to_string(),
+            message:
+                "source-language analysis is provider-owned; diagnostics are not yet negotiated"
+                    .to_string(),
+            source_version: document.version,
+            document_version: document.version,
+        }]
+    }
+
+    /// Raw Workshop diagnostics run the session's check pipeline over the
+    /// open buffer's text — the same diagnostics `wright check` reports
+    /// for that text (#555), including the empty set for a clean buffer.
+    fn workshop_diagnostics(&self, uri: &str) -> Vec<SourceDiagnostic> {
+        let Some(document) = self.store.document(uri) else {
+            return Vec::new();
+        };
         if !is_workshop_document(document) {
             return Vec::new();
         }
-        // Raw Workshop diagnostics run the session's check pipeline over the
-        // open buffer's text — the same diagnostics `wright check` reports
-        // for that text (#555), including the empty set for a clean buffer.
         match self.workshop_session(document) {
             Ok(mut session) => session
                 .check()
@@ -113,6 +196,73 @@ impl LanguageService {
                 .map(|diagnostic| source_diagnostic(document, diagnostic))
                 .collect(),
             Err(diagnostic) => vec![source_diagnostic(document, &diagnostic)],
+        }
+    }
+
+    /// OPY diagnostics come from `lpp/check` over the open-buffer overlay
+    /// (#738): every open `.opy` document with the text the editor holds,
+    /// keyed by the URI the client opened it under. The provider's ranges
+    /// are UTF-16 over that exact text — the document store's own
+    /// coordinates — so they carry through unchanged and authored source
+    /// positions survive.
+    ///
+    /// A provider that cannot be negotiated or does not serve `lpp/check`
+    /// reports the structured boundary on the requesting document; a
+    /// failed check reports the provider's structured error the same way.
+    fn opy_diagnostics(&mut self, uri: &str) -> Vec<SourceDiagnostic> {
+        let documents = self.source_document_set(OPY_LANGUAGE_ID);
+        let root = self.project_root_uri();
+        let version = self
+            .store
+            .document(uri)
+            .map(|document| document.version)
+            .unwrap_or(0);
+        let boundary = |code: &str, message: String| {
+            vec![SourceDiagnostic {
+                source: uri.to_string(),
+                range: empty_range(),
+                severity: "error".to_string(),
+                code: code.to_string(),
+                message,
+                source_version: version,
+                document_version: version,
+            }]
+        };
+        let provider = match self.opy_provider() {
+            Ok(provider) => provider,
+            Err(error) => return boundary("source-provider-unavailable", error.to_string()),
+        };
+        if !provider_supports(provider, Capability::Check) {
+            return boundary(
+                "source-provider-unavailable",
+                "the negotiated OPY provider does not serve lpp/check".to_string(),
+            );
+        }
+        match provider.check(&documents, root.as_deref()) {
+            Ok(result) => result
+                .documents
+                .iter()
+                .flat_map(|document| {
+                    let version = self
+                        .store
+                        .document(&document.uri)
+                        .map(|document| document.version)
+                        .unwrap_or_else(|| i32::try_from(document.version).unwrap_or(i32::MAX));
+                    document
+                        .diagnostics
+                        .iter()
+                        .map(move |diagnostic| SourceDiagnostic {
+                            source: document.uri.clone(),
+                            range: lpp_range(diagnostic.range),
+                            severity: lpp_severity(diagnostic.severity).to_string(),
+                            code: diagnostic.code.clone().unwrap_or_default(),
+                            message: diagnostic.message.clone(),
+                            source_version: version,
+                            document_version: version,
+                        })
+                })
+                .collect(),
+            Err(error) => boundary(provider_failure_code(&error), error.to_string()),
         }
     }
 
@@ -130,30 +280,82 @@ impl LanguageService {
         })
     }
 
-    /// Go-to-definition over an identifier occurrence in a raw Workshop
-    /// document: the resolved symbol's declared span — the location
-    /// `inspect` reports for the symbol.
-    pub fn definition(&self, uri: &str, position: Position) -> Option<SourceLocation> {
+    /// The program-scope symbols an `.opy` buffer declares (#738):
+    /// `lpp/symbols` over the open-document overlay, picking this
+    /// document's entries. `None` — the host's `null` answer — when the
+    /// document is not OPY, no provider negotiated, the provider does not
+    /// serve `lpp/symbols`, or the provider refuses.
+    pub fn document_symbols(&mut self, uri: &str) -> Option<Vec<SourceSymbol>> {
+        let document = self.opy_document(uri)?;
+        let documents = self.source_document_set(OPY_LANGUAGE_ID);
+        let root = self.project_root_uri();
+        let provider = self.opy_provider().ok()?;
+        if !provider_supports(provider, Capability::Symbols) {
+            return None;
+        }
+        let result = provider.symbols(&documents, root.as_deref()).ok()?;
+        Some(
+            result
+                .documents
+                .iter()
+                .find(|entry| entry.uri == document.uri)
+                .map(|entry| entry.symbols.iter().map(source_symbol).collect())
+                .unwrap_or_default(),
+        )
+    }
+
+    /// Go-to-definition over an identifier occurrence. In a raw Workshop
+    /// document this is the resolved symbol's declared span — the location
+    /// `inspect` reports (#555); in an `.opy` buffer it is the provider's
+    /// `lpp/definition` answer, including targets in `#!include`d files
+    /// the provider resolved itself (#738). `None` — the host's `null`
+    /// answer — covers every unbacked case: no provider, an unnegotiated
+    /// capability, or a provider refusal such as
+    /// `definition.noSymbolAtPosition`.
+    pub fn definition(&mut self, uri: &str, position: Position) -> Option<Vec<SourceLocation>> {
+        if let Some(document) = self.opy_document(uri) {
+            let provider = self.opy_provider().ok()?;
+            if !provider_supports(provider, Capability::Definition) {
+                return None;
+            }
+            return provider
+                .definition(&document, lpp_position(position))
+                .ok()
+                .map(|result| result.locations.iter().map(source_location).collect());
+        }
         let document = self.workshop_document(uri)?;
         let index = self.workshop_index(document)?;
         let (symbol, _) = symbol_at(&index, document, position)?;
         let span = symbol.span.or(symbol.occurrence)?;
-        Some(SourceLocation {
+        Some(vec![SourceLocation {
             uri: document.uri.clone(),
             range: document.from_span(&span),
-        })
+        }])
     }
 
-    /// References to the symbol an identifier occurrence resolves to in a
-    /// raw Workshop document — the same occurrence spans `inspect`
-    /// reports for the symbol. `include_declaration` maps the LSP
-    /// `includeDeclaration` flag onto the declaration reference kind.
+    /// References to the symbol an identifier occurrence resolves to —
+    /// for a raw Workshop document the occurrence spans `inspect`
+    /// reports (#555), for an `.opy` buffer the provider's
+    /// `lpp/references` answer across the whole project including
+    /// `#!include`d files (#738). `include_declaration` maps the LSP
+    /// `includeDeclaration` flag. Unbacked requests are `None` — the
+    /// host's `null` answer — never an error.
     pub fn references(
-        &self,
+        &mut self,
         uri: &str,
         position: Position,
         include_declaration: bool,
     ) -> Option<Vec<SourceLocation>> {
+        if let Some(document) = self.opy_document(uri) {
+            let provider = self.opy_provider().ok()?;
+            if !provider_supports(provider, Capability::References) {
+                return None;
+            }
+            return provider
+                .references(&document, lpp_position(position), include_declaration)
+                .ok()
+                .map(|result| result.locations.iter().map(source_location).collect());
+        }
         let document = self.workshop_document(uri)?;
         let index = self.workshop_index(document)?;
         let (symbol, _) = symbol_at(&index, document, position)?;
@@ -360,6 +562,233 @@ impl LanguageService {
         let mut session = self.workshop_session(document).ok()?;
         let loaded = session.load().ok()?;
         Some(SemanticIndex::build(&loaded.program))
+    }
+
+    /// The negotiated OPY provider session (#738), connecting on first
+    /// use and retained thereafter: `initialize`-time negotiation and
+    /// every later request share one provider process. A failed
+    /// connection latches in `Unavailable` and replays its structured
+    /// error — the session keeps running without OPY backing.
+    fn opy_provider(&mut self) -> Result<&mut dyn LanguageProvider, ProviderError> {
+        if matches!(self.opy, OpyProviderState::Pending) {
+            self.opy = match connect_opy_provider(&self.config) {
+                Ok(provider) => OpyProviderState::Ready(provider),
+                Err(error) => OpyProviderState::Unavailable(error),
+            };
+        }
+        match &mut self.opy {
+            OpyProviderState::Ready(provider) => Ok(provider.as_mut()),
+            OpyProviderState::Unavailable(error) => Err(error.clone()),
+            OpyProviderState::Pending => unreachable!("resolved above"),
+        }
+    }
+
+    /// The open `.opy` buffer at `uri` as an LPP document — the client's
+    /// URI spelling, the buffer version, and the unsaved text as the
+    /// editor holds it (#738).
+    fn opy_document(&self, uri: &str) -> Option<wright_lpp::Document> {
+        let document = self.store.document(uri)?;
+        if source_language_id(uri).as_deref() != Some(OPY_LANGUAGE_ID) {
+            return None;
+        }
+        Some(wright_lpp::Document {
+            uri: document.uri.clone(),
+            language_id: OPY_LANGUAGE_ID.to_string(),
+            version: i64::from(document.version),
+            text: document.text.clone(),
+        })
+    }
+
+    /// The provider overlay for `language_id`: every open document of
+    /// that language keyed by the URI the client opened it under. Only
+    /// the provider can compute project membership, so `lpp/check`,
+    /// `lpp/symbols`, and `lpp/rename` all see the full set — an
+    /// `#!include`d file stays current only while it is open, and its
+    /// open buffer text wins over the disk.
+    fn source_document_set(&self, language_id: &str) -> wright_lpp::DocumentSet {
+        let mut documents = wright_lpp::DocumentSet::new();
+        for uri in self.store.uris() {
+            if source_language_id(uri).as_deref() != Some(language_id) {
+                continue;
+            }
+            let document = self.store.document(uri).expect("uri came from the store");
+            documents.insert(
+                uri.to_string(),
+                wright_lpp::Document {
+                    uri: document.uri.clone(),
+                    language_id: language_id.to_string(),
+                    version: i64::from(document.version),
+                    text: document.text.clone(),
+                },
+            );
+        }
+        documents
+    }
+
+    fn project_root_uri(&self) -> Option<String> {
+        url::Url::from_directory_path(&self.root)
+            .ok()
+            .map(|uri| uri.to_string())
+    }
+}
+
+/// The per-request bound the provider registry applies elsewhere —
+/// `StdioLanguageProvider` takes it explicitly.
+const PROVIDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Resolve and negotiate the OPY provider for this session (#738).
+///
+/// Resolution stays purely local — an explicit `--opy-provider`
+/// executable is stat-validated, otherwise the already-installed
+/// provider store is consulted. Editor startup never downloads a
+/// provider. Negotiation follows LPP §19.2 like
+/// `CompilerSession`'s source-provider path (#638): `lpp/initialize` at
+/// the client's base version, then — after a `protocolVersionMismatch`,
+/// which invalidates the session — a restart on a fresh process at the
+/// highest mutually supported version.
+fn connect_opy_provider(
+    config: &SessionConfig,
+) -> Result<Box<dyn LanguageProvider>, ProviderError> {
+    let resolved = if config.opy_provider.executable.is_some() {
+        Some(config.opy_provider.resolve().map_err(opy_provider_error)?)
+    } else {
+        config
+            .opy_provider
+            .installed()
+            .map_err(opy_provider_error)?
+    };
+    let Some(resolved) = resolved else {
+        return Err(ProviderError::NotConfigured {
+            language_id: OPY_LANGUAGE_ID.to_string(),
+        });
+    };
+    let client = wright_lpp::ClientInfo {
+        name: wright_lpp::LPP_CLIENT_NAME.to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    };
+    let spawn = |resolved: &ResolvedOpyProvider| {
+        wright_lpp::StdioLanguageProvider::spawn(
+            &resolved.executable,
+            &[],
+            PROVIDER_REQUEST_TIMEOUT,
+        )
+    };
+    let mut provider = spawn(&resolved)?;
+    let mut initialize = provider.initialize(Some(&client));
+    if initialize
+        .as_ref()
+        .is_err_and(|error| error.code() == "protocol-version-mismatch")
+    {
+        let supported = initialize
+            .as_ref()
+            .err()
+            .map(|error| error.supported_protocol_versions())
+            .unwrap_or_default();
+        let _ = provider.shutdown();
+        provider = spawn(&resolved)?;
+        initialize = match mutual_protocol_version(&supported) {
+            Some(version) => provider.initialize_version(version, Some(&client)),
+            None => Err(ProviderError::ProtocolVersionMismatch {
+                supported,
+                message: "no mutually supported LPP protocol version".to_string(),
+            }),
+        };
+    }
+    initialize.map(|_| Box::new(provider) as Box<dyn LanguageProvider>)
+}
+
+/// The highest protocol version both this client and the provider
+/// declared — `LPP_SUPPORTED_PROTOCOL_VERSIONS` lists them in ascending
+/// order, so the last intersection wins (LPP §19.2, #638).
+fn mutual_protocol_version(supported: &[String]) -> Option<&'static str> {
+    wright_lpp::LPP_SUPPORTED_PROTOCOL_VERSIONS
+        .iter()
+        .rev()
+        .copied()
+        .find(|version| supported.iter().any(|s| s == version))
+}
+
+/// `OpyProviderError` lands on the `ProviderError::Local` channel with the
+/// same kind mapping `CompilerSession::language_provider` applies, so a
+/// missing or unreadable provider reports identically on every surface.
+fn opy_provider_error(error: OpyProviderError) -> ProviderError {
+    let kind = match &error {
+        OpyProviderError::Missing(_) => wright_lpp::LocalProviderErrorKind::Missing,
+        OpyProviderError::UnsupportedPlatform(_) => {
+            wright_lpp::LocalProviderErrorKind::UnsupportedPlatform
+        }
+        OpyProviderError::Offline(_) => wright_lpp::LocalProviderErrorKind::Offline,
+        OpyProviderError::Download(_) => wright_lpp::LocalProviderErrorKind::Download,
+        OpyProviderError::Integrity(_) => wright_lpp::LocalProviderErrorKind::Integrity,
+        OpyProviderError::Install(_) => wright_lpp::LocalProviderErrorKind::Install,
+    };
+    ProviderError::Local {
+        kind,
+        message: error.to_string(),
+    }
+}
+
+/// The negotiated capability check — `false` when the provider never
+/// initialized far enough to answer.
+fn provider_supports(provider: &dyn LanguageProvider, capability: Capability) -> bool {
+    provider
+        .capabilities()
+        .map(|capabilities| capabilities.supports(capability))
+        .unwrap_or(false)
+}
+
+/// The diagnostic code a failed provider request reports under: the
+/// provider's refusal code when it sent one, else the structured error
+/// code — never a fabricated identity.
+fn provider_failure_code(error: &ProviderError) -> &str {
+    error.refusal_code().unwrap_or_else(|| error.code())
+}
+
+/// LPP positions and ranges are UTF-16 over the text the client sent —
+/// the document store's own coordinate space — so they pass through
+/// unchanged (#738).
+fn lpp_position(position: Position) -> wright_lpp::Position {
+    wright_lpp::Position {
+        line: position.line,
+        character: position.character,
+    }
+}
+
+fn lpp_range(range: wright_lpp::Range) -> Range {
+    Range {
+        start: Position {
+            line: range.start.line,
+            character: range.start.character,
+        },
+        end: Position {
+            line: range.end.line,
+            character: range.end.character,
+        },
+    }
+}
+
+fn lpp_severity(severity: wright_lpp::DiagnosticSeverity) -> &'static str {
+    match severity {
+        wright_lpp::DiagnosticSeverity::Error => "error",
+        wright_lpp::DiagnosticSeverity::Warning => "warning",
+        wright_lpp::DiagnosticSeverity::Info => "info",
+        wright_lpp::DiagnosticSeverity::Hint => "hint",
+    }
+}
+
+fn source_location(location: &wright_lpp::Location) -> SourceLocation {
+    SourceLocation {
+        uri: location.uri.clone(),
+        range: lpp_range(location.range),
+    }
+}
+
+fn source_symbol(symbol: &wright_lpp::Symbol) -> SourceSymbol {
+    SourceSymbol {
+        name: symbol.name.clone(),
+        kind: symbol.kind.clone(),
+        range: lpp_range(symbol.range),
+        selection_range: symbol.selection_range.map(lpp_range),
     }
 }
 

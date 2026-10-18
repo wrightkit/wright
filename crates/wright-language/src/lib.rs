@@ -5,6 +5,7 @@ pub mod service;
 
 pub use document::{Document, DocumentStore, Position, Range};
 pub use service::{
-    HoverInfo, LanguageService, RenameOutcome, SourceDiagnostic, SourceLocation, SourceTextEdit,
+    HoverInfo, LanguageService, OpyProviderSupport, RenameOutcome, SourceDiagnostic,
+    SourceLocation, SourceSymbol, SourceTextEdit,
 };
 pub use wright_driver::{OpyProviderConfig, SessionConfig};
