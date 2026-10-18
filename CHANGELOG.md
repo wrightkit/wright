@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.25.1](https://github.com/wrightkit/wright/compare/v0.25.0...v0.25.1) (2026-10-18)
+
+
+### Code Refactoring
+
+* **analyzer:** remove dead reindexing and duplicate rule facts ([#750](https://github.com/wrightkit/wright/issues/750)) ([85db92f](https://github.com/wrightkit/wright/commit/85db92fb003fea1e32747d4077655178de59b691))
+* **cli:** drop dead provider_workflow parameter ([#748](https://github.com/wrightkit/wright/issues/748)) ([3086324](https://github.com/wrightkit/wright/commit/30863245e6662630cdac8a27265853ed48b6356a))
+* **driver:** share cost-cache construction and group snapshot state ([#751](https://github.com/wrightkit/wright/issues/751)) ([a9cb17f](https://github.com/wrightkit/wright/commit/a9cb17f51ce9e28907fc753de5bc119e489b9119))
+* **driver:** share lint findings preparation ([#755](https://github.com/wrightkit/wright/issues/755)) ([2b2b4e4](https://github.com/wrightkit/wright/commit/2b2b4e4cf3c4eed47a85564a08f5106c30452856))
+* reuse source_document_set in rename path ([#749](https://github.com/wrightkit/wright/issues/749)) ([e0468e6](https://github.com/wrightkit/wright/commit/e0468e6a6c37d0f547d8a093e27c4723bc8fb539))
+
 ## [0.25.0](https://github.com/wrightkit/wright/compare/v0.24.0...v0.25.0) (2026-10-18)
 
 
