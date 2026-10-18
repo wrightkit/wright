@@ -271,13 +271,15 @@ pub(crate) struct CommonArgs {
     pub(crate) color: ColorArg,
 }
 
-/// Arguments of `rename` (#434): the declared symbol name and the new
-/// identifier as positionals, then `[INPUT]` through the shared workflow
-/// options. `wright rename` covers raw Workshop input only; source languages
-/// are rename surfaces of their providers.
+/// Arguments of `rename` (#434, #739): the declared symbol name and the
+/// new identifier as positionals, then `[INPUT]` through the shared
+/// workflow options. Raw Workshop input renames through `workshop-rs`;
+/// OPY input resolves `NAME` through the provider's `lpp/symbols` and
+/// renames through `lpp/rename` — the same semantic rename the agent
+/// surface exposes.
 #[derive(Debug, Args)]
 pub(crate) struct RenameArgs {
-    /// The declared name of the variable or subroutine to rename.
+    /// The declared name of the symbol to rename.
     #[arg(value_name = "NAME")]
     pub(crate) name: String,
     /// The new identifier.
