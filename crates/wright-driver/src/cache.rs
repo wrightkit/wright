@@ -81,18 +81,21 @@ fn key_id(input_path: Option<&Path>, kind: &str, locale: &str, profile: &str) ->
 /// Whether the cache is enabled: off under `--no-cache`, a non-empty
 /// `WRIGHT_NO_CACHE`, or a truthy `CI` (the same check the renderer uses).
 pub fn enabled(no_cache_flag: bool) -> bool {
-    if no_cache_flag {
-        return false;
-    }
-    let truthy = |name: &str| {
-        std::env::var(name).is_ok_and(|v| {
-            !matches!(
-                v.trim().to_ascii_lowercase().as_str(),
-                "" | "0" | "false" | "no"
-            )
-        })
+    !no_cache_flag
+        && !disabled_by_env(
+            std::env::var("CI").ok().as_deref(),
+            std::env::var("WRIGHT_NO_CACHE").ok().as_deref(),
+        )
+}
+
+fn disabled_by_env(ci: Option<&str>, no_cache: Option<&str>) -> bool {
+    let truthy = |v: &str| {
+        !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "" | "0" | "false" | "no"
+        )
     };
-    !truthy("CI") && std::env::var("WRIGHT_NO_CACHE").is_err()
+    ci.is_some_and(truthy) || no_cache.is_some_and(|v| !v.is_empty())
 }
 
 /// Read the previous `cost` record for `key`, or a named baseline.
@@ -330,14 +333,6 @@ pub fn baseline_exists(run: &CostRun) -> bool {
     read_record(&dir, &format!("baseline-{name}.json")).is_some()
 }
 
-/// Whether a named baseline exists at all — used to decide if `--baseline`
-/// names a real reference before the comparison is requested.
-pub fn has_baseline_file(root: &Path, name: &str) -> bool {
-    cache_dir(Some(root), root)
-        .join(format!("baseline-{name}.json"))
-        .is_file()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -352,6 +347,18 @@ mod tests {
             std::env::remove_var("CI");
             std::env::remove_var("WRIGHT_NO_CACHE");
         }
+    }
+
+    #[test]
+    fn env_disables_only_on_a_non_empty_no_cache_or_truthy_ci() {
+        assert!(!disabled_by_env(None, None));
+        assert!(disabled_by_env(None, Some("1")));
+        assert!(disabled_by_env(Some("true"), None));
+        // Issue #723 specifies a *non-empty* `WRIGHT_NO_CACHE`: an
+        // exported-but-empty value leaves the cache on.
+        assert!(!disabled_by_env(None, Some("")));
+        assert!(!disabled_by_env(Some("false"), Some("")));
+        assert!(!disabled_by_env(Some(""), None));
     }
 
     fn snap(total: usize, rules: &[(&str, usize)]) -> CostSnapshot {
