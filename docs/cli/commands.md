@@ -13,7 +13,8 @@ CompilerSession (wright-driver)
     ├─ lowering (HIR → WIR)
     ├─ analysis (SemanticService: semantic facts, symbols, references, CFG)
     ├─ emission (Workshop text)
-    └─ reconstruction (WIR → canonical OPY source, #126)
+    └─ reconstruction (Workshop artifact → canonical OPY source through the
+       provider's negotiated `reconstruct` capability, #126)
             ↓
    Envelope<T> (typed result + diagnostics + exit code; finding selection
    narrows reported sets without touching the verdict, #430)
@@ -31,7 +32,7 @@ result.
 | Command | Purpose | Text-mode stdout |
 | --- | --- | --- |
 | `wright compile [INPUT]` | Parse, lower, validate, emit Workshop text; warn on known client import limits | verdict, diagnostics, the written path, and the output SHA-256; the program goes to `<input stem>.ow` (or `-o PATH`; `-o -` prints only the program) |
-| `wright convert [INPUT] --target opy\|ostw` | Reconstruct validated Workshop input as canonical OPY or OSTW source | the reconstructed source |
+| `wright convert [INPUT] --target opy\|ostw` | Reconstruct validated Workshop input as canonical OPY or OSTW source through a provider that negotiates `reconstruct` (the shipped OPY provider currently does not; no OSTW provider is shipped) | the reconstructed source |
 | `wright check [INPUT]` | Parse, lower, validate, and report correctness diagnostics | verdict and validation diagnostics |
 | `wright analyze [INPUT] [--all]` | Summarize Workshop cost, ranked complexity hotspots, performance/stability risk indicators, and cross-cutting state | overview, cost, top hotspots, complexity, risks, and top variables with exact/static/heuristic evidence labels; `--all` lifts list caps |
 | `wright lint [INPUT] [--all] [--fix [--write]]` | Parse, lower, lint; report findings | finding counts by severity and actionable findings; `--all` lifts list caps; `--fix` previews each offered fix's validated diff, `--write` applies them |
@@ -360,27 +361,34 @@ prints a one-line hint after each `unknown-*` diagnostic pointing here
 
 ## `wright convert` and the reconstruction surface (#126)
 
-`wright convert [INPUT] --target opy|ostw` reconstructs **validated Workshop
-input** as canonical OPY source, or refuses the recognized OSTW target because
-DEL/OSTW provider support is not currently shipped, through the shared
-driver/session conversion operation (`CompilerSession::convert`). The CLI is
-a thin passthrough: it parses argv, builds the session, calls the driver
-workflow, and renders the envelope. Reconstruction logic lives in the underlying
-language crates rather than the CLI layer. The driver reuses its own `load()` path (kind detection, Workshop
-parsing, WIR validation) and delegates OPY reconstruction to the language-owned
-reconstructor; OSTW is an explicit provider boundary and never uses a static
-Wright implementation.
+`wright convert [INPUT] --target opy|ostw` converts **validated Workshop
+input** through the configured language provider, or refuses the recognized
+OSTW target because DEL/OSTW provider support is not currently shipped,
+through the shared driver/session conversion operation
+(`CompilerSession::convert`). The CLI is a thin passthrough: it parses argv,
+builds the session, calls the driver workflow, and renders the envelope.
+Reconstruction logic lives in the language provider rather than the CLI
+layer. The driver reuses its own `load()` path (kind detection, Workshop
+parsing, WIR validation), emits the validated program as a canonical
+Workshop artifact, and delegates OPY reconstruction to the provider's
+`lpp/reconstruct`; OSTW is an explicit provider boundary and never uses a
+static Wright implementation.
 
 * The target flag is **required and explicit** (`--target opy|ostw`); a
   missing or unknown target is a usage error (exit 2), and `--target` on any
   other command is a usage error too.
-* Only Workshop input is accepted: the available conversion surface is
-  Workshop to OPY. Workshop to OSTW is recognized but unavailable because no
-  DEL/OSTW provider is shipped, and there is **no direct conversion between
-  OPY and OSTW**.
+* Only Workshop input is accepted, and there is **no direct conversion
+  between OPY and OSTW**.
   A non-Workshop input fails with the structured `convert-input-kind`
   diagnostic (exit 1).
-* The result is **canonical reconstructed source** for the selected target
+* Workshop-to-OPY reconstruction is available only when the provider
+  negotiates `reconstruct`. The shipped first-party `opy-rs` provider
+  currently does not advertise it, so the conversion refuses with
+  `capability-unavailable` (exit 3) and produces no source. Workshop-to-OSTW
+  is recognized but unavailable because no DEL/OSTW provider is shipped
+  (`source-provider-unavailable`).
+* When a provider does negotiate `reconstruct`, the result is **canonical
+  reconstructed source** for the selected target
   (`result.text`) plus its deterministic SHA-256 (`result.sha256`) and the
   target (`result.target`). Reconstruction is semantic, not original-source
   recovery: comments, formatting, macros, functions, and source abstractions
@@ -394,6 +402,6 @@ Wright implementation.
   [`docs/ostw/support-matrix.md`](../ostw/support-matrix.md).
 
 The conversion boundary is covered by the CLI and driver contract tests. They
-assert the available Workshop-to-OPY provider handoff and the explicit
+assert the capability-gated Workshop-to-OPY provider handoff and the explicit
 Workshop-to-OSTW refusal; owner reconstruction semantics are tested in the
 owning language repository.

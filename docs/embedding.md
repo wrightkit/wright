@@ -164,15 +164,21 @@ overlapping/conflicting edits, invalid ranges, and compilation errors, and
 returns the previewed edited sources atomically (any failed validation returns
 `ok = false` and no validated preview). Validation runs through the
 provider-backed project/session semantics where the provider negotiates edit
-validation. OPY edit validation currently refuses explicitly because the
-first-party provider has no edit capability; it never invokes a removed static
-frontend. DEL/OSTW inputs refuse explicitly with
-`source-provider-unavailable`; Workshop and Protocol inputs also refuse
-explicitly. The supported refactoring is semantic
-rename (`semanticRename` above, `ToolRequest::SemanticRename`, or
-[`CompilerSession::semantic_rename`]): on raw Workshop it rewrites exactly
-the identifier spans the parsed program records and revalidates the edited
-project. The deprecated `rename_symbol` helper remains only for
+validation. OPY edit validation and rename are provider-backed: they run
+through `providerValidateEdit` / `providerSemanticRename` against the
+configured provider's negotiated `editValidation` and `rename` capabilities,
+and the shipped first-party provider negotiates both. Only a provider that
+does not negotiate them refuses (`capability-unavailable`); Wright never
+invokes a removed static frontend. The raw edit operations keep their source
+kind gate: OPY input refuses with `edit-requires-provider` naming the
+provider operation, DEL/OSTW input refuses with
+`source-provider-unavailable`, and other non-Workshop kinds refuse with
+`edit-unsupported-kind`. On the provider operations, a `language_id` with no
+configured provider refuses explicitly (`provider-not-configured`). The
+supported refactoring is semantic rename (`semanticRename` above,
+`ToolRequest::SemanticRename`, or [`CompilerSession::semantic_rename`]): on
+raw Workshop it rewrites exactly the identifier spans the parsed program
+records and revalidates the edited project. The deprecated `rename_symbol` helper remains only for
 `wright-embedding/v1` source compatibility. It is a whole-word textual
 proposal with no semantic-identity guarantee and is never a fallback when
 semantic rename is unavailable or refused. Raw HIR/WIR mutation is never public, and
