@@ -138,6 +138,15 @@ pub(super) fn visit_value_tree<'a>(
     visit_value_tree_at(value, parent, &mut path, visit);
 }
 
+pub(super) fn value_children(value: &Value) -> Vec<&Value> {
+    match value {
+        Value::Array(values) | Value::Call { args: values, .. } => values.iter().collect(),
+        Value::Vector { x, y, z } => vec![x, y, z],
+        Value::PlayerVariable { player, .. } => vec![player],
+        _ => Vec::new(),
+    }
+}
+
 fn visit_value_tree_at<'a>(
     value: &'a Value,
     parent: Option<usize>,
@@ -145,23 +154,63 @@ fn visit_value_tree_at<'a>(
     visit: &mut impl FnMut(&'a Value, Option<usize>, &[usize]) -> usize,
 ) {
     let parent = Some(visit(value, parent, path));
-    let mut visit_child = |index: usize, value: &'a Value| {
+    for (index, child) in value_children(value).into_iter().enumerate() {
         path.push(index);
-        visit_value_tree_at(value, parent, path, visit);
+        visit_value_tree_at(child, parent, path, visit);
         path.pop();
-    };
-    match value {
-        Value::Array(values) | Value::Call { args: values, .. } => {
-            for (index, value) in values.iter().enumerate() {
-                visit_child(index, value);
-            }
-        }
-        Value::Vector { x, y, z } => {
-            for (index, value) in [x, y, z].iter().enumerate() {
-                visit_child(index, value);
-            }
-        }
-        Value::PlayerVariable { player, .. } => visit_child(0, player),
-        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn value_tree_keeps_preorder_identities_parents_and_paths() {
+        let value = Value::Array(vec![
+            Value::call(
+                "outer",
+                [
+                    Value::Vector {
+                        x: Box::new(Value::Number(1.0)),
+                        y: Box::new(Value::Number(2.0)),
+                        z: Box::new(Value::Number(3.0)),
+                    },
+                    Value::PlayerVariable {
+                        player: Box::new(Value::EventPlayer),
+                        variable: "state".into(),
+                    },
+                ],
+            ),
+            Value::Number(4.0),
+            Value::Array(Vec::new()),
+            Value::call("empty", []),
+        ]);
+        let mut visits = Vec::new();
+        visit_value_tree(&value, Some(42), &mut |value, parent, path| {
+            let number = match value {
+                Value::Number(number) => Some(*number),
+                _ => None,
+            };
+            let id = visits.len();
+            visits.push((number, parent, path.to_vec()));
+            id
+        });
+        assert_eq!(
+            visits,
+            [
+                (None, Some(42), vec![]),
+                (None, Some(0), vec![0]),
+                (None, Some(1), vec![0, 0]),
+                (Some(1.0), Some(2), vec![0, 0, 0]),
+                (Some(2.0), Some(2), vec![0, 0, 1]),
+                (Some(3.0), Some(2), vec![0, 0, 2]),
+                (None, Some(1), vec![0, 1]),
+                (None, Some(6), vec![0, 1, 0]),
+                (Some(4.0), Some(0), vec![1]),
+                (None, Some(0), vec![2]),
+                (None, Some(0), vec![3]),
+            ]
+        );
     }
 }

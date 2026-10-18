@@ -8,8 +8,8 @@ use workshop_rs::{Action, Event, ModifyOp, Program, Rule, Value};
 use super::cfg::{is_wait, matching_end};
 use super::symbols::{ActionId, RuleId, ValueId, value_identity_map};
 use super::traversal::{
-    dead_actions, live_actions, opens_block, subroutine_callee, unwrapped, visit_action_roots,
-    visit_value_tree,
+    dead_actions, live_actions, opens_block, subroutine_callee, unwrapped, value_children,
+    visit_action_roots, visit_value_tree,
 };
 use crate::analysis::{Boundedness, EvidenceClass, Severity};
 use crate::registry::LintConfig;
@@ -801,15 +801,6 @@ impl<'a> SourceScan<'a> {
 
     fn span(&self, start: usize, end: usize) -> Span {
         Span::new(self.file, self.position(start), self.position(end))
-    }
-}
-
-fn value_children(value: &Value) -> Vec<&Value> {
-    match value {
-        Value::Array(values) | Value::Call { args: values, .. } => values.iter().collect(),
-        Value::Vector { x, y, z } => vec![x, y, z],
-        Value::PlayerVariable { player, .. } => vec![player],
-        _ => Vec::new(),
     }
 }
 
