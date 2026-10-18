@@ -1162,10 +1162,10 @@ fn value_text(value: &Value) -> String {
         Value::Call { name, args } => {
             // `__ambiguous_enum` is the workshop-rs sentinel for an unresolved
             // bare enum spelling; its first argument is the authored phrase.
-            if name == "__ambiguous_enum"
-                && let Some(Value::String(spelling)) = args.first()
-            {
-                return spelling.clone();
+            if name == "__ambiguous_enum" {
+                if let Some(Value::String(spelling)) = args.first() {
+                    return spelling.clone();
+                }
             }
             format!(
                 "{name}({})",
