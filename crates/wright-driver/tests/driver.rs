@@ -55,10 +55,7 @@ fn workshop_check_reports_catalog_residuals() {
         .find(|d| d.code == "workshop.raw-setting.zzwrightsyntheticunknownkey")
         .expect("raw setting residual is reported through check");
     assert_eq!(residual.severity, wright_driver::Severity::Warning);
-    assert_eq!(
-        residual.status,
-        Some(wright_driver::provider::Status::Partial)
-    );
+    assert_eq!(residual.status, Some(wright_driver::Status::Partial));
     assert_eq!(
         residual.span.as_ref().map(|s| (s.start.line, s.start.col)),
         Some((6, 9))
@@ -152,10 +149,7 @@ fn workshop_check_reports_residuals_under_transform_profile() {
                     result.diagnostics
                 )
             });
-        assert_eq!(
-            residual.status,
-            Some(wright_driver::provider::Status::Unsupported)
-        );
+        assert_eq!(residual.status, Some(wright_driver::Status::Unsupported));
     }
 }
 
@@ -352,10 +346,7 @@ fn workshop_check_reports_opaque_residuals_beside_canonical_validation() {
             )
         });
     assert_eq!(residual.severity, wright_driver::Severity::Error);
-    assert_eq!(
-        residual.status,
-        Some(wright_driver::provider::Status::Unsupported)
-    );
+    assert_eq!(residual.status, Some(wright_driver::Status::Unsupported));
     let _ = std::fs::remove_dir_all(&directory);
 }
 

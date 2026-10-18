@@ -5,7 +5,7 @@ use std::process::Command as Process;
 use std::time::Duration;
 
 use clap::{Args, Subcommand, ValueEnum};
-use wright_driver::{OpyProviderError, ResolvedOpyProvider, sha256_hex};
+use wright_driver::{OpyProviderConfig, OpyProviderError, ResolvedOpyProvider, sha256_hex};
 
 const DEFAULT_BASE_URL: &str = "https://releases.wrightkit.dev/wright";
 const USER_AGENT: &str = concat!("wright-update/", env!("CARGO_PKG_VERSION"));
@@ -165,7 +165,7 @@ fn fold(code: u8, next: u8) -> u8 {
 /// `update provider <NAME>` (install or update) from the installed-only
 /// enumeration used by `update` and `update provider`.
 fn provider_target(check_only: bool, requested: Option<&str>, may_install: bool) -> u8 {
-    let installed = match crate::provider::installed() {
+    let installed = match OpyProviderConfig::default().installed() {
         Ok(installed) => installed,
         // A platform without provider artifacts has no provider target; an
         // explicit request still reports the refusal as a failure.
@@ -186,7 +186,7 @@ fn provider_target(check_only: bool, requested: Option<&str>, may_install: bool)
         .as_ref()
         .and_then(|p| p.version.as_deref())
         .map(str::to_string);
-    match crate::provider::update(requested) {
+    match OpyProviderConfig::default().update(requested) {
         Ok(resolved) => {
             provider_report(previous.as_deref(), &resolved);
             exit::SUCCESS
@@ -241,7 +241,7 @@ fn provider_check(
                 return error.exit_code();
             }
         },
-        None => match crate::provider::latest_version() {
+        None => match OpyProviderConfig::default().latest_version() {
             Ok(version) => version,
             Err(error) => return provider_failure(&error),
         },

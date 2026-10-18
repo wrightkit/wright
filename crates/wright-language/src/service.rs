@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 use wright_analyzer::canonical::{PositionResolution, ReferenceKind, SemanticIndex, Symbol};
-use wright_driver::opy_provider::{OPY_LANGUAGE_ID, OpyProviderError, ResolvedOpyProvider};
+use wright_driver::opy_provider::{OPY_LANGUAGE_ID, ResolvedOpyProvider};
 use wright_driver::{CompilerSession, InputSpec, SessionConfig, SourceKind};
 use wright_lpp::{Capability, LanguageProvider, ProviderError};
 
@@ -632,12 +632,9 @@ fn connect_opy_provider(
     config: &SessionConfig,
 ) -> Result<Box<dyn LanguageProvider>, ProviderError> {
     let resolved = if config.opy_provider.executable.is_some() {
-        Some(config.opy_provider.resolve().map_err(opy_provider_error)?)
+        Some(config.opy_provider.resolve()?)
     } else {
-        config
-            .opy_provider
-            .installed()
-            .map_err(opy_provider_error)?
+        config.opy_provider.installed()?
     };
     let Some(resolved) = resolved else {
         return Err(ProviderError::NotConfigured {
@@ -688,26 +685,6 @@ fn mutual_protocol_version(supported: &[String]) -> Option<&'static str> {
         .rev()
         .copied()
         .find(|version| supported.iter().any(|s| s == version))
-}
-
-/// `OpyProviderError` lands on the `ProviderError::Local` channel with the
-/// same kind mapping `CompilerSession::language_provider` applies, so a
-/// missing or unreadable provider reports identically on every surface.
-fn opy_provider_error(error: OpyProviderError) -> ProviderError {
-    let kind = match &error {
-        OpyProviderError::Missing(_) => wright_lpp::LocalProviderErrorKind::Missing,
-        OpyProviderError::UnsupportedPlatform(_) => {
-            wright_lpp::LocalProviderErrorKind::UnsupportedPlatform
-        }
-        OpyProviderError::Offline(_) => wright_lpp::LocalProviderErrorKind::Offline,
-        OpyProviderError::Download(_) => wright_lpp::LocalProviderErrorKind::Download,
-        OpyProviderError::Integrity(_) => wright_lpp::LocalProviderErrorKind::Integrity,
-        OpyProviderError::Install(_) => wright_lpp::LocalProviderErrorKind::Install,
-    };
-    ProviderError::Local {
-        kind,
-        message: error.to_string(),
-    }
 }
 
 /// The negotiated capability check — `false` when the provider never

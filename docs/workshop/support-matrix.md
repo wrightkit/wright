@@ -12,7 +12,7 @@ Wright verifies its integration through these focused tests and CI dogfood:
 | --- | --- |
 | Analyzer | `crates/wright-analyzer/tests/workshop_integration.rs` runs semantic queries, findings, references, and source-span checks on localized Workshop inputs. |
 | CLI | CI downloads the `wright-cli-build` artifact and runs each owner-pinned real project through public `check` and `lint`, asserting the pinned verdict and result contract. |
-| Provider | `crates/wright-driver/tests/workshop_provider.rs` checks successful and malformed Workshop input through the provider boundary. |
+| Driver | `crates/wright-driver/tests/driver.rs` runs `check`/`compile` and completeness-residual diagnostics on Workshop inputs through `CompilerSession`. |
 | Public consumers | `crates/wright-consumer/tests/consumer.rs` exercises the public embedding workflow on representative Workshop inputs. |
 
 The small local inputs used by these tests are listed in

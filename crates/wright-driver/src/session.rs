@@ -17,7 +17,7 @@ use wright_analyzer::registry::{LintConfig, LintRegistry};
 use crate::cache;
 use crate::config::{InputSpec, SessionConfig, SourceKind};
 use crate::diag::{
-    Diagnostic, Origin, Position, Severity, SourceSpan, Stage, source_provider_unavailable,
+    Diagnostic, Origin, Position, Severity, SourceSpan, Stage, Status, source_provider_unavailable,
     source_span,
 };
 use crate::input::{self, InputTarget, ResolvedInput};
@@ -33,21 +33,6 @@ use crate::source_provider::{
     SourceBackend, SourceLanguage, SourceProvenance, SourceProvider, SourceProviderError,
     SourceTarget, provider_uri_path,
 };
-
-fn error_kind(error: &opy_provider::OpyProviderError) -> wright_lpp::LocalProviderErrorKind {
-    match error {
-        opy_provider::OpyProviderError::Missing(_) => wright_lpp::LocalProviderErrorKind::Missing,
-        opy_provider::OpyProviderError::UnsupportedPlatform(_) => {
-            wright_lpp::LocalProviderErrorKind::UnsupportedPlatform
-        }
-        opy_provider::OpyProviderError::Offline(_) => wright_lpp::LocalProviderErrorKind::Offline,
-        opy_provider::OpyProviderError::Download(_) => wright_lpp::LocalProviderErrorKind::Download,
-        opy_provider::OpyProviderError::Integrity(_) => {
-            wright_lpp::LocalProviderErrorKind::Integrity
-        }
-        opy_provider::OpyProviderError::Install(_) => wright_lpp::LocalProviderErrorKind::Install,
-    }
-}
 
 /// A successfully loaded program with its input and origin metadata.
 #[derive(Clone)]
@@ -775,12 +760,7 @@ impl CompilerSession {
             ));
         }
         if id == opy_provider::OPY_LANGUAGE_ID && !self.config.providers.contains(id) {
-            let res = self.config.opy_provider.resolve().map_err(|e| {
-                wright_lpp::ProviderError::Local {
-                    kind: error_kind(&e),
-                    message: e.to_string(),
-                }
-            })?;
+            let res = self.config.opy_provider.resolve()?;
             let mut p = self.config.providers.clone();
             p.register(wright_lpp::ProviderConfig::new(
                 opy_provider::OPY_LANGUAGE_ID,
@@ -1311,27 +1291,8 @@ impl CompilerSession {
             }
         };
         for issue in residuals {
-            let d = crate::workshop_provider::map_issue(issue, path);
-            self.diagnostics.push(Diagnostic {
-                code: d.code,
-                stage: Stage::Analysis,
-                severity: d.severity,
-                message: d.message,
-                span: Some(SourceSpan {
-                    file: 0,
-                    path: d.span.file.display().to_string(),
-                    start: Position {
-                        line: d.span.start_line,
-                        col: d.span.start_col,
-                    },
-                    end: Position {
-                        line: d.span.end_line,
-                        col: d.span.end_col,
-                    },
-                }),
-                status: Some(d.status),
-                source: Some(loaded.origin.clone()),
-            });
+            self.diagnostics
+                .push(map_issue(issue, path, &loaded.origin));
         }
     }
 
@@ -1538,6 +1499,98 @@ fn provider_error_diagnostic(error: wright_lpp::ProviderError, operation: &str) 
     )
 }
 
+/// One completeness residual as a session diagnostic: the owner-classified
+/// construct maps onto the `status` output contract, and the owner's spelling
+/// suggestion survives as a did-you-mean.
+fn map_issue(
+    issue: &workshop_rs::rules::SemanticIssue,
+    path: &Path,
+    origin: &Origin,
+) -> Diagnostic {
+    let (kind_code, severity) = match issue.kind {
+        workshop_rs::rules::IncompletenessKind::RawSetting => ("raw-setting", Severity::Warning),
+        workshop_rs::rules::IncompletenessKind::UnknownAction => {
+            ("unknown-action", Severity::Error)
+        }
+        workshop_rs::rules::IncompletenessKind::UnknownValue => ("unknown-value", Severity::Error),
+        workshop_rs::rules::IncompletenessKind::OpaqueAction => ("opaque-action", Severity::Error),
+    };
+    let status = status_for_classification(issue.classification);
+    let mut message = format!(
+        "Workshop construct '{}' is {} ({})",
+        issue.name,
+        status_name(status),
+        issue.classification.as_str()
+    );
+    if let Some(spelling) = &issue.suggestion {
+        message.push_str(&format!(" (did you mean '{spelling}'?)"));
+    }
+    Diagnostic {
+        code: diagnostic_code(kind_code, &issue.name),
+        stage: Stage::Analysis,
+        severity,
+        message,
+        status: Some(status),
+        span: Some(issue_span(issue.span, path)),
+        source: Some(origin.clone()),
+    }
+}
+
+fn status_for_classification(classification: workshop_rs::rules::ResidualClassification) -> Status {
+    match classification {
+        workshop_rs::rules::ResidualClassification::ProjectDefinedConstruct
+        | workshop_rs::rules::ResidualClassification::SourceDeclaredVariable => Status::Partial,
+        workshop_rs::rules::ResidualClassification::ProducerExtension
+        | workshop_rs::rules::ResidualClassification::LegacyOpaque
+        | workshop_rs::rules::ResidualClassification::UnresolvedIdentifier
+        | workshop_rs::rules::ResidualClassification::CatalogSpellingNearMiss => {
+            Status::Unsupported
+        }
+    }
+}
+
+fn diagnostic_code(kind: &str, identity: &str) -> String {
+    format!(
+        "workshop.{kind}.{}",
+        identity
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() {
+                    character.to_ascii_lowercase()
+                } else {
+                    '-'
+                }
+            })
+            .collect::<String>()
+    )
+}
+
+fn status_name(status: Status) -> &'static str {
+    match status {
+        Status::Supported => "supported",
+        Status::Partial => "partially supported",
+        Status::Unsupported => "unsupported",
+    }
+}
+
+fn issue_span(span: Option<workshop_rs::source::Span>, path: &Path) -> SourceSpan {
+    let (start_line, start_col, end_line, end_col) = span
+        .map(|span| (span.start.line, span.start.col, span.end.line, span.end.col))
+        .unwrap_or((1, 1, 1, 1));
+    SourceSpan {
+        file: 0,
+        path: path.display().to_string(),
+        start: Position {
+            line: start_line,
+            col: start_col,
+        },
+        end: Position {
+            line: end_line,
+            col: end_col,
+        },
+    }
+}
+
 /// The highest LPP version both sides implement, honoring the target's
 /// negotiation floor (LPP §19.2, #638): entry requests cannot drop below
 /// 1.1 project loading, and a directory target cannot drop below the 1.3
@@ -1616,5 +1669,23 @@ mod tests {
             mutual_protocol_version(&supported(&["1.6"]), InputTarget::File),
             None
         );
+    }
+
+    /// Residual classifications map fail-closed onto the `status` contract:
+    /// project-shaped constructs report partial support and every other
+    /// residual reports unsupported.
+    #[test]
+    fn residual_classifications_map_fail_closed() {
+        use workshop_rs::rules::ResidualClassification as C;
+        for (classification, expected) in [
+            (C::ProjectDefinedConstruct, Status::Partial),
+            (C::SourceDeclaredVariable, Status::Partial),
+            (C::ProducerExtension, Status::Unsupported),
+            (C::LegacyOpaque, Status::Unsupported),
+            (C::UnresolvedIdentifier, Status::Unsupported),
+            (C::CatalogSpellingNearMiss, Status::Unsupported),
+        ] {
+            assert_eq!(status_for_classification(classification), expected);
+        }
     }
 }

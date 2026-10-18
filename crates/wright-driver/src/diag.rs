@@ -47,6 +47,16 @@ impl Stage {
     }
 }
 
+/// Semantic support classification carried on a Workshop
+/// completeness-residual diagnostic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Status {
+    Supported,
+    Partial,
+    Unsupported,
+}
+
 /// A 1-based line/column position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Position {
@@ -74,10 +84,10 @@ pub struct Diagnostic {
     pub severity: Severity,
     /// Human-readable message; wording is not part of the machine contract.
     pub message: String,
-    /// Provider semantic support status, when this diagnostic came from an
-    /// in-process language provider.
+    /// The residual's support classification, when this diagnostic reports a
+    /// Workshop completeness residual.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<crate::provider::Status>,
+    pub status: Option<Status>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub span: Option<SourceSpan>,
     #[serde(skip_serializing_if = "Option::is_none")]
