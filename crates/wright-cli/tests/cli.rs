@@ -3443,6 +3443,40 @@ fn cost_run_cache_compares_against_the_previous_run() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn cost_run_cache_is_shared_by_compile_and_inspect() {
+    let dir = temp_dir();
+    let path = dir.join("t.ws");
+    std::fs::write(&path, corpus_workshop("synthetic/control-flow")).unwrap();
+    let path = path.to_str().unwrap();
+
+    let compiled = run(&["compile", path, "-o", "-"]);
+    assert!(compiled.status.success(), "{}", command_result(&compiled));
+    let cache_records = || {
+        std::fs::read_dir(dir.join(".wright"))
+            .unwrap()
+            .map(|entry| {
+                let path = entry.unwrap().path();
+                (
+                    path.file_name().unwrap().to_owned(),
+                    std::fs::read(&path).unwrap(),
+                )
+            })
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    let compiled_records = cache_records();
+    assert_eq!(compiled_records.len(), 1);
+
+    let inspected = run(&["inspect", "cost", path]);
+    assert!(inspected.status.success(), "{}", command_result(&inspected));
+    let stdout = String::from_utf8_lossy(&inspected.stdout);
+    assert!(stdout.contains("vs previous run"), "{stdout}");
+    assert!(stdout.contains("Element cost: 0 "), "{stdout}");
+    assert_eq!(cache_records(), compiled_records);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// #723: a fixture pair where the second run adds one rule and grows
 /// another reports exactly those rules with the correct deltas.
 #[test]

@@ -1770,16 +1770,7 @@ impl<'a> ToolService<'a> {
                 });
             }
         }
-        let cost_run = crate::cache::CostRun {
-            no_cache: run.no_cache,
-            root: loaded.input.root.clone(),
-            input_path: loaded.input.path.clone(),
-            kind: loaded.input.kind.as_str().to_string(),
-            locale: CompilerSession::locale_for(loaded).to_string(),
-            profile: self.session.config.profile.as_str().to_string(),
-            baseline: run.baseline.clone(),
-            save_baseline: run.save_baseline.clone(),
-        };
+        let cost_run = self.session.cost_run(loaded);
         if run.baseline.is_some() && !crate::cache::baseline_exists(&cost_run) {
             return Err(ToolErrorInfo {
                 code: "invalid-selection".to_string(),
@@ -1789,18 +1780,8 @@ impl<'a> ToolService<'a> {
                 ),
             });
         }
-        let Ok(report) = loaded.program.element_count(self.session.catalog()) else {
+        let Some(snapshot) = self.session.cost_snapshot(loaded) else {
             return Ok(None);
-        };
-        let snapshot = crate::cache::CostSnapshot {
-            total: report.total,
-            budget: crate::session::WORKSHOP_CLIENT_ELEMENT_LIMIT,
-            rules: report
-                .rules
-                .iter()
-                .enumerate()
-                .map(|(index, node)| (loaded.program.rules[index].name.clone(), node.count))
-                .collect(),
         };
         Ok(crate::cache::compare_and_record(&cost_run, &snapshot))
     }
