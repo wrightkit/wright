@@ -115,14 +115,14 @@ fn run_workflow(command: Command) -> ExitCode {
                 ConvertTargetArg::Ostw => wright_driver::ConvertTarget::Ostw,
             };
             run_configured(
-                config_from_common(&args.common, false),
+                config_from_common(&args.common),
                 present::Presentation::from_common(&args.common),
                 None,
                 move |session: &mut wright_driver::CompilerSession| session.convert(target),
             )
         }
         Command::Check(args) => {
-            let mut config = config_from_common(&args.common, true);
+            let mut config = config_from_common(&args.common);
             config.selection = selection_from_args(&args.select);
             run_configured(
                 config,
@@ -132,7 +132,7 @@ fn run_workflow(command: Command) -> ExitCode {
             )
         }
         Command::Analyze(args) => {
-            let mut config = config_from_common(&args.common, true);
+            let mut config = config_from_common(&args.common);
             config.selection = selection_from_args(&args.select);
             let presentation = present::Presentation::from_common(&args.common);
             run_configured(config, presentation.with_all(args.all), None, |session| {
@@ -144,13 +144,13 @@ fn run_workflow(command: Command) -> ExitCode {
             })
         }
         Command::Rename(args) => run_configured(
-            config_from_common(&args.common, false),
+            config_from_common(&args.common),
             present::Presentation::from_common(&args.common),
             None,
             move |session| session.rename(&args.name, &args.to, args.write),
         ),
         Command::Lint(args) => {
-            let mut config = config_from_common(&args.common, true);
+            let mut config = config_from_common(&args.common);
             config.selection = selection_from_args(&args.select);
             if let Err(message) = args.policy.apply_to(&mut config) {
                 eprintln!("wright: {message}");
@@ -172,7 +172,7 @@ fn run_workflow(command: Command) -> ExitCode {
         }
         Command::Inspect(args) => match args.query {
             None => run_configured(
-                config_from_common(&args.common, false),
+                config_from_common(&args.common),
                 present::Presentation::from_common(&args.common).with_all(args.all),
                 None,
                 |session| {
@@ -184,7 +184,7 @@ fn run_workflow(command: Command) -> ExitCode {
                 },
             ),
             Some(cli::InspectQuery::Rules(query)) => run_configured(
-                config_from_common(&query.common, false),
+                config_from_common(&query.common),
                 present::Presentation::from_common(&query.common).with_all(query.all),
                 None,
                 move |session| {
@@ -208,7 +208,7 @@ fn run_workflow(command: Command) -> ExitCode {
             Some(cli::InspectQuery::Symbols(query)) => {
                 let kind = query.only.map(|kind| kind.as_str().to_string());
                 run_configured(
-                    config_from_common(&query.common, false),
+                    config_from_common(&query.common),
                     present::Presentation::from_common(&query.common).with_all(query.all),
                     None,
                     move |session| {
@@ -225,7 +225,7 @@ fn run_workflow(command: Command) -> ExitCode {
             Some(cli::InspectQuery::Refs(query)) => {
                 let kind = query.only.map(|kind| kind.as_str().to_string());
                 run_configured(
-                    config_from_common(&query.common, false),
+                    config_from_common(&query.common),
                     present::Presentation::from_common(&query.common).with_all(query.all),
                     None,
                     move |session| {
@@ -245,7 +245,7 @@ fn run_workflow(command: Command) -> ExitCode {
                 let subject = query.rule.clone();
                 let kind = query.only.map(|kind| kind.as_str().to_string());
                 run_configured(
-                    config_from_common(&query.common, false),
+                    config_from_common(&query.common),
                     present::Presentation::from_common(&query.common).with_all(query.all),
                     Some(subject.as_str()),
                     move |session| {
@@ -260,7 +260,7 @@ fn run_workflow(command: Command) -> ExitCode {
                 )
             }
             Some(cli::InspectQuery::Callgraph(query)) => run_configured(
-                config_from_common(&query.common, false),
+                config_from_common(&query.common),
                 present::Presentation::from_common(&query.common).with_all(query.all),
                 None,
                 move |session| {
@@ -289,7 +289,7 @@ fn run_workflow(command: Command) -> ExitCode {
                     );
                     return ExitCode::from(exit::USAGE);
                 }
-                let mut config = config_from_common(&query.common, true);
+                let mut config = config_from_common(&query.common);
                 config.selection = selection_from_args(&query.select);
                 config.run = wright_driver::config::RunOptions {
                     no_cache: query.no_cache,
@@ -369,7 +369,7 @@ fn run_compile(args: &cli::CompileArgs) -> ExitCode {
     let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
     let copy = args.copy;
     let force = args.force;
-    let mut compile_config = config_from_common(&args.common, true);
+    let mut compile_config = config_from_common(&args.common);
     compile_config.run = wright_driver::config::RunOptions {
         no_cache: args.no_cache,
         baseline: args.baseline.clone(),
@@ -587,20 +587,18 @@ fn run_semantic_compare(args: cli::SemanticCompareArgs) -> ExitCode {
     }
 }
 
-fn config_from_common(common: &CommonArgs, provider_workflow: bool) -> SessionConfig {
+fn config_from_common(common: &CommonArgs) -> SessionConfig {
     let input = match &common.input {
         Some(path) if path.as_os_str() != "-" => InputSpec::Path(path.clone()),
         Some(_) => InputSpec::Stdin,
         None => InputSpec::Path(".".into()),
     };
     let directory_target = is_directory_input(common);
-    let provider_requested = provider_workflow || common.opy_provider.is_some() || directory_target;
     SessionConfig {
         input,
         source_backend: if is_opy_input(common) {
             SourceBackend::Provider
-        } else if provider_requested && common.kind == cli::SourceKindArg::Auto && directory_target
-        {
+        } else if common.kind == cli::SourceKindArg::Auto && directory_target {
             SourceBackend::Auto
         } else {
             SourceBackend::Native
@@ -741,30 +739,30 @@ mod tests {
     fn every_opy_workflow_selects_the_provider_backend() {
         let opy = common(Some("main.opy"), cli::SourceKindArg::Auto);
         assert_eq!(
-            config_from_common(&opy, true).source_backend,
+            config_from_common(&opy).source_backend,
             SourceBackend::Provider
         );
 
         let workshop = common(Some("main.txt"), cli::SourceKindArg::Auto);
         assert_eq!(
-            config_from_common(&workshop, true).source_backend,
+            config_from_common(&workshop).source_backend,
             SourceBackend::Native
         );
 
         let explicit_opy = common(None, cli::SourceKindArg::Opy);
         assert_eq!(
-            config_from_common(&explicit_opy, true).source_backend,
+            config_from_common(&explicit_opy).source_backend,
             SourceBackend::Provider
         );
         assert_eq!(
-            config_from_common(&opy, false).source_backend,
+            config_from_common(&opy).source_backend,
             SourceBackend::Provider
         );
 
         let mut explicit_provider = common(Some("main.opy"), cli::SourceKindArg::Auto);
         explicit_provider.opy_provider = Some("opy-provider".into());
         assert_eq!(
-            config_from_common(&explicit_provider, false).source_backend,
+            config_from_common(&explicit_provider).source_backend,
             SourceBackend::Provider
         );
     }
@@ -773,18 +771,18 @@ mod tests {
     fn omitted_input_targets_the_current_directory_and_dash_stays_stdin() {
         let omitted = common(None, cli::SourceKindArg::Auto);
         assert_eq!(
-            config_from_common(&omitted, true).input,
+            config_from_common(&omitted).input,
             InputSpec::Path(".".into())
         );
         assert_eq!(
-            config_from_common(&omitted, true).source_backend,
+            config_from_common(&omitted).source_backend,
             SourceBackend::Auto
         );
 
         let stdin = common(Some("-"), cli::SourceKindArg::Auto);
-        assert_eq!(config_from_common(&stdin, true).input, InputSpec::Stdin);
+        assert_eq!(config_from_common(&stdin).input, InputSpec::Stdin);
         assert_eq!(
-            config_from_common(&stdin, true).source_backend,
+            config_from_common(&stdin).source_backend,
             SourceBackend::Native
         );
     }
