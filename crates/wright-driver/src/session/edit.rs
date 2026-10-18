@@ -3,12 +3,14 @@
 //! input through `workshop-rs` reparse and identifier provenance; other
 //! source languages stay at the provider boundary. `rename` is the
 //! `wright rename` CLI workflow — a validated diff by default, an atomic
-//! filesystem update with `--write`.
+//! filesystem update with `--write` — and on OPY input it routes the same
+//! name addressing through the provider's `lpp/symbols` and `lpp/rename`
+//! (#739).
 
 use std::collections::BTreeMap;
 
-use super::{CompilerSession, Provenance};
-use crate::config::InputSpec;
+use super::{CompilerSession, Provenance, ProviderOperation};
+use crate::config::{InputSpec, SourceKind};
 use crate::diag::{Diagnostic, Stage};
 use crate::edit::{EditTransaction, EditValidation, RenameResult, RenameTarget, SemanticRename};
 use crate::input;
@@ -80,11 +82,12 @@ impl CompilerSession {
         }
     }
 
-    /// `wright rename <NAME> <TO> [INPUT]` (#434): the validated semantic
-    /// rename of a Workshop variable or subroutine — the transaction and a
-    /// source diff by default, an atomic filesystem update with `write`.
-    /// A stale input or an invalid rename refuses with structured
-    /// diagnostics and no partial write.
+    /// `wright rename <NAME> <TO> [INPUT]` (#434, #739): the validated
+    /// semantic rename — a Workshop variable or subroutine through the raw
+    /// Workshop path, an OPY symbol through the provider path. Either way
+    /// the result is the transaction and a source diff by default, an
+    /// atomic filesystem update with `write`. A stale input or an invalid
+    /// rename refuses with structured diagnostics and no partial write.
     pub fn rename(&mut self, name: &str, to: &str, write: bool) -> Envelope<RenameResult> {
         let mut result = RenameResult::default();
         if let Err(diagnostic) = self.verify_fixed_config() {
@@ -93,6 +96,14 @@ impl CompilerSession {
         }
         match crate::edit::resolve_edit_input(&self.config) {
             Ok(resolved) => {
+                // #739: OPY input renames through the provider — the same
+                // `NAME` addressing resolves to a declaration position
+                // through the provider's `lpp/symbols`, never Wright-side
+                // text search, and `lpp/rename` produces the validated
+                // transaction.
+                if resolved.kind == SourceKind::Opy {
+                    return self.provider_rename(name, to, write);
+                }
                 if let Some(diagnostic) =
                     crate::edit::edit_kind_gate(resolved.kind, "providerSemanticRename")
                 {
@@ -147,6 +158,108 @@ impl CompilerSession {
                 },
             }
         }
+        self.finish("rename", result)
+    }
+
+    /// `wright rename <NAME> <TO> [INPUT]` on OPY input (#739): the
+    /// provider-owned rename the agent surface already exposes as
+    /// `providerSemanticRename`, reached through the CLI's `NAME`
+    /// addressing. The loaded project's members build the provider document
+    /// set; [`crate::provider_edit::named_rename`] resolves `NAME` to a
+    /// declaration position through `lpp/symbols` and drives `lpp/rename`
+    /// with `lpp/validateEdits` plus a post-edit project check — the same
+    /// transaction, stale-source, and atomicity contract the Workshop path
+    /// holds. `write` applies the validated previews atomically.
+    fn provider_rename(&mut self, name: &str, to: &str, write: bool) -> Envelope<RenameResult> {
+        let mut result = RenameResult::default();
+        let loaded = match self.load_with_operation(ProviderOperation::Compile) {
+            Ok(loaded) => loaded,
+            Err(diagnostic) => {
+                self.diagnostics.push(diagnostic);
+                return self.finish("rename", result);
+            }
+        };
+        // Mapped members spell their `file://` URIs relative to the project
+        // root the provider compiled under; an unmapped load's members are
+        // the input's own display spellings relative to the invocation cwd —
+        // the same convention `ToolService::provider_documents` applies.
+        let base = if loaded.provenance == Provenance::Mapped {
+            &loaded.input.root
+        } else {
+            &loaded.input.cwd
+        };
+        let documents = match crate::source_provider::provider_document_set(
+            &loaded.source_files,
+            base,
+            crate::opy_provider::OPY_LANGUAGE_ID,
+        ) {
+            Ok(documents) => documents,
+            Err(info) => {
+                self.diagnostics
+                    .push(Diagnostic::error(info.code, Stage::Discovery, info.message));
+                return self.finish("rename", result);
+            }
+        };
+        let sources = crate::source_provider::document_sources(&documents);
+        let request = crate::provider_edit::ProviderNamedRenameRequest {
+            documents,
+            name: name.to_string(),
+            new_name: to.to_string(),
+            project_root: crate::source_provider::provider_project_root(&loaded.input.root),
+            sources,
+        };
+        let mutation = self.run_provider_flow(
+            crate::opy_provider::OPY_LANGUAGE_ID,
+            &wright_lpp::ClientInfo {
+                name: wright_lpp::LPP_CLIENT_NAME.to_string(),
+                version: crate::result::DRIVER_VERSION.to_string(),
+            },
+            |provider| crate::provider_edit::named_rename(provider, &request),
+        );
+        self.diagnostics.extend(mutation.diagnostics);
+        let previews = mutation.preview.unwrap_or_default();
+        result.transaction = mutation.transaction;
+        if !mutation.ok {
+            return self.finish("rename", result);
+        }
+        if write {
+            match write_input_refusal(&self.config.input, "rename --write") {
+                Some(diagnostic) => self.diagnostics.push(diagnostic),
+                None => match crate::edit::write_previews(
+                    &previews,
+                    result
+                        .transaction
+                        .as_ref()
+                        .expect("a successful rename carries its transaction"),
+                ) {
+                    Ok(written) => {
+                        result.written = written
+                            .iter()
+                            .map(|source| crate::source_provider::provider_uri_path(source))
+                            .collect();
+                    }
+                    Err(diagnostic) => self.diagnostics.push(diagnostic),
+                },
+            }
+        }
+        // The transaction and previews name sources by the member `file://`
+        // URIs the provider worked on; the human report and `--write` list
+        // show their disk paths instead, matching the Workshop preview.
+        result.originals = request
+            .sources
+            .iter()
+            .map(|(uri, text)| (crate::source_provider::provider_uri_path(uri), text.clone()))
+            .collect();
+        result.preview = Some(
+            previews
+                .iter()
+                .map(|preview| crate::edit::SourcePreview {
+                    source: crate::source_provider::provider_uri_path(&preview.source),
+                    new_text: preview.new_text.clone(),
+                    source_identity: preview.source_identity.clone(),
+                })
+                .collect(),
+        );
         self.finish("rename", result)
     }
 

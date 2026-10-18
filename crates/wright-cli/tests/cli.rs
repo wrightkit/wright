@@ -4066,9 +4066,11 @@ fn rename_refusals_carry_structured_diagnostics_and_write_nothing() {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
     }
 
-    // OPY input routes to the provider operation rather than renaming
-    // through the Workshop path.
+    // OPY input renames through the provider (#739): without a reachable
+    // provider binary the command refuses as a provider failure, still
+    // writing nothing.
     let opy = temp_file("program.opy", "rule \"r\":\n    pass\n");
+    let missing_provider = opy.parent().unwrap().join("missing-opy-provider");
     let output = run(&[
         "rename",
         "r",
@@ -4076,26 +4078,295 @@ fn rename_refusals_carry_structured_diagnostics_and_write_nothing() {
         opy.to_str().unwrap(),
         "--kind",
         "opy",
+        "--opy-provider",
+        missing_provider.to_str().unwrap(),
         "-f",
         "json",
     ]);
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(4));
     let envelope = parse_json(&output.stdout);
-    assert_eq!(envelope["diagnostics"][0]["code"], "edit-requires-provider");
-    assert!(
-        envelope["diagnostics"][0]["message"]
-            .as_str()
-            .unwrap()
-            .contains("providerSemanticRename"),
-        "{}",
-        envelope["diagnostics"][0]["message"]
-    );
+    assert_eq!(envelope["diagnostics"][0]["code"], "provider-missing");
     assert_eq!(
         std::fs::read_to_string(&opy).unwrap(),
         "rule \"r\":\n    pass\n"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
     let _ = std::fs::remove_dir_all(opy.parent().unwrap());
+}
+
+/// #739: `wright rename` on `.opy` input resolves `NAME` through the
+/// provider's `lpp/symbols`, renames at the declaration position through
+/// `lpp/rename`, and applies the same preview/`--write` contract the raw
+/// Workshop path holds. The provider is a staged LPP script so the test
+/// stays hermetic.
+#[cfg(unix)]
+#[test]
+fn rename_opy_input_runs_the_provider_rename() {
+    use std::os::unix::fs::PermissionsExt;
+
+    const PROVIDER: &str = r#"#!/usr/bin/env python3
+import json, os, sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+def read(name):
+    with open(os.path.join(HERE, name)) as handle:
+        return json.load(handle)
+
+def reply(id, result=None, error=None):
+    message = {"jsonrpc": "2.0", "id": id}
+    message.update({"error": error} if error is not None else {"result": result})
+    print(json.dumps(message), flush=True)
+
+for line in sys.stdin:
+    request = json.loads(line)
+    id, method = request["id"], request["method"]
+    if method == "lpp/initialize":
+        reply(id, {"protocolVersion": request["params"]["protocolVersion"],
+                   "serverInfo": {"name": "fake-opy", "version": "0"},
+                   "languages": [{"id": "opy", "extensions": ["opy"]}],
+                   "capabilities": {"check": True, "compile": True, "reconstruct": False,
+                                    "symbols": True, "definition": False, "references": False,
+                                    "rename": True, "editValidation": True,
+                                    "projectLoading": True, "lookup": False}})
+    elif method == "lpp/compile":
+        reply(id, {"diagnostics": [], "artifact": read("artifact.json")})
+    elif method == "lpp/symbols":
+        reply(id, read("symbols.json"))
+    elif method == "lpp/rename":
+        params = request["params"]
+        with open(os.path.join(HERE, "rename-calls.jsonl"), "a") as calls:
+            calls.write(json.dumps({"uri": params["positionDocumentUri"],
+                                    "position": params["position"]}) + "\n")
+        reply(id, read("rename.json"))
+    elif method == "lpp/validateEdits":
+        reply(id, {"valid": True, "version": request["params"]["document"]["version"]})
+    elif method == "lpp/check":
+        reply(id, {"documents": [{"uri": uri, "version": doc["version"], "diagnostics": []}
+                                 for uri, doc in request["params"]["documents"].items()]})
+    else:
+        reply(id, {})
+"#;
+
+    let dir = temp_dir();
+    let script = dir.join("fake-opy-provider");
+    std::fs::write(&script, PROVIDER).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let source = "def helper():\n    pass\n\nrule \"setup\":\n    helper()\n";
+    let input = dir.join("main.opy");
+    std::fs::write(&input, source).unwrap();
+    let uri = format!("file://{}", input.display());
+    let symbol = |line, character| {
+        serde_json::json!({"name": "helper", "kind": "def",
+            "range": {"start": {"line": line, "character": character},
+                      "end": {"line": line, "character": character + 6}}})
+    };
+    let edit = |line, character| {
+        serde_json::json!({"range": {"start": {"line": line, "character": character},
+                                    "end": {"line": line, "character": character + 6}},
+                          "newText": "assist"})
+    };
+    std::fs::write(
+        dir.join("artifact.json"),
+        serde_json::json!({"format": "workshop-rs/text-v1",
+                           "content": corpus_workshop("synthetic/basic-rule")})
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("symbols.json"),
+        serde_json::json!({"documents": [{"uri": uri, "version": 0,
+                                          "symbols": [symbol(0, 4)]}]})
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("rename.json"),
+        serde_json::json!({"edits": [{"documentUri": uri, "version": 0,
+                                      "textEdits": [edit(0, 4), edit(4, 4)]}]})
+        .to_string(),
+    )
+    .unwrap();
+
+    let provider = script.to_str().unwrap().to_string();
+    let input = input.to_str().unwrap().to_string();
+
+    // The default run previews the provider's validated transaction and
+    // writes nothing; `lpp/rename` was called at the declaration position
+    // `lpp/symbols` reported for `helper`.
+    let output = run(&[
+        "rename",
+        "helper",
+        "assist",
+        &input,
+        "--opy-provider",
+        &provider,
+        "-f",
+        "json",
+    ]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(envelope["ok"], true);
+    assert_eq!(envelope["command"], "rename");
+    let transaction = envelope["result"]["transaction"].as_object().unwrap();
+    assert_eq!(transaction["edits"].as_array().unwrap().len(), 2);
+    let preview = envelope["result"]["preview"].as_array().unwrap();
+    assert_eq!(preview[0]["source"], input.as_str());
+    assert!(
+        preview[0]["new_text"]
+            .as_str()
+            .unwrap()
+            .contains("def assist():")
+    );
+    let calls = std::fs::read_to_string(dir.join("rename-calls.jsonl")).unwrap();
+    let call: serde_json::Value = serde_json::from_str(calls.lines().next().unwrap()).unwrap();
+    assert_eq!(call["uri"], uri);
+    assert_eq!(call["position"]["line"], 0);
+    assert_eq!(call["position"]["character"], 4);
+    assert_eq!(std::fs::read_to_string(&input).unwrap(), source);
+
+    // --write applies the same transaction atomically.
+    let output = run(&[
+        "rename",
+        "helper",
+        "assist",
+        &input,
+        "--opy-provider",
+        &provider,
+        "-f",
+        "json",
+        "--write",
+    ]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(envelope["ok"], true);
+    assert_eq!(
+        envelope["result"]["written"],
+        serde_json::json!([input.as_str()])
+    );
+    assert_eq!(
+        std::fs::read_to_string(&input).unwrap(),
+        "def assist():\n    pass\n\nrule \"setup\":\n    assist()\n"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #739: a name the project does not declare is `unknown-symbol`, and a
+/// provider refusal keeps its `refusalCode` — both write nothing.
+#[cfg(unix)]
+#[test]
+fn rename_opy_input_reports_unknown_names_and_provider_refusals() {
+    use std::os::unix::fs::PermissionsExt;
+
+    const PROVIDER: &str = r#"#!/usr/bin/env python3
+import json, os, sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+def read(name):
+    with open(os.path.join(HERE, name)) as handle:
+        return json.load(handle)
+
+def reply(id, result=None, error=None):
+    message = {"jsonrpc": "2.0", "id": id}
+    message.update({"error": error} if error is not None else {"result": result})
+    print(json.dumps(message), flush=True)
+
+def refusal(id, code, text):
+    reply(id, error={"code": -32000, "message": text,
+                     "data": {"lpp": {"kind": "refusal", "details": {"refusalCode": code}}}})
+
+for line in sys.stdin:
+    request = json.loads(line)
+    id, method = request["id"], request["method"]
+    if method == "lpp/initialize":
+        reply(id, {"protocolVersion": request["params"]["protocolVersion"],
+                   "serverInfo": {"name": "fake-opy", "version": "0"},
+                   "languages": [{"id": "opy", "extensions": ["opy"]}],
+                   "capabilities": {"check": True, "compile": True, "reconstruct": False,
+                                    "symbols": True, "definition": False, "references": False,
+                                    "rename": True, "editValidation": True,
+                                    "projectLoading": True, "lookup": False}})
+    elif method == "lpp/compile":
+        reply(id, {"diagnostics": [], "artifact": read("artifact.json")})
+    elif method == "lpp/symbols":
+        reply(id, read("symbols.json"))
+    elif method == "lpp/rename":
+        refusal(id, "rename.invalidName", "the name is not a valid identifier")
+    elif method == "lpp/validateEdits":
+        reply(id, {"valid": True, "version": request["params"]["document"]["version"]})
+    elif method == "lpp/check":
+        reply(id, {"documents": [{"uri": uri, "version": doc["version"], "diagnostics": []}
+                                 for uri, doc in request["params"]["documents"].items()]})
+    else:
+        reply(id, {})
+"#;
+
+    let dir = temp_dir();
+    let script = dir.join("fake-opy-provider");
+    std::fs::write(&script, PROVIDER).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let source = "def helper():\n    pass\n";
+    let input = dir.join("main.opy");
+    std::fs::write(&input, source).unwrap();
+    let uri = format!("file://{}", input.display());
+    std::fs::write(
+        dir.join("artifact.json"),
+        serde_json::json!({"format": "workshop-rs/text-v1",
+                           "content": corpus_workshop("synthetic/basic-rule")})
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("symbols.json"),
+        serde_json::json!({"documents": [{"uri": uri, "version": 0,
+            "symbols": [{"name": "helper", "kind": "def",
+                "range": {"start": {"line": 0, "character": 4},
+                          "end": {"line": 0, "character": 10}}}]}]})
+        .to_string(),
+    )
+    .unwrap();
+
+    let provider = script.to_str().unwrap().to_string();
+    let input = input.to_str().unwrap().to_string();
+
+    // A name `lpp/symbols` never declared is `unknown-symbol` — exit 1.
+    let output = run(&[
+        "rename",
+        "missing",
+        "assist",
+        &input,
+        "--opy-provider",
+        &provider,
+        "-f",
+        "json",
+    ]);
+    assert_eq!(output.status.code(), Some(1), "{}", command_result(&output));
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(envelope["diagnostics"][0]["code"], "unknown-symbol");
+
+    // A rename the provider declines keeps the provider's refusal code.
+    let output = run(&[
+        "rename",
+        "helper",
+        "not a name",
+        &input,
+        "--opy-provider",
+        &provider,
+        "-f",
+        "json",
+        "--write",
+    ]);
+    assert_eq!(output.status.code(), Some(1), "{}", command_result(&output));
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(
+        envelope["diagnostics"][0]["code"],
+        "provider-refusal-rename.invalidName"
+    );
+    assert_eq!(std::fs::read_to_string(&input).unwrap(), source);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

@@ -43,7 +43,7 @@ result.
 | `wright inspect cfg <RULE> [INPUT] [--only KIND] [--max N]` | Control-flow graph of one rule, addressed by name | block/edge listing |
 | `wright inspect callgraph [INPUT] [--caller RULE] [--callee SUBROUTINE] [--max N]` | Subroutine call graph (caller rules to callee subroutines) | call edges |
 | `wright inspect cost [INPUT] [--rule RULE] [--no-cache] [--baseline NAME] [--save-baseline NAME] [--max-total N]` | Exact generated-resource counts plus static findings; `--rule` drills into one rule's element cost, and by default the run compares against the previous run's element cost | resource counts and findings plus the change against the previous run or named baseline, or the rule's statements and node-name shares |
-| `wright rename <NAME> <NEW_NAME> [INPUT]` | Semantically rename a Workshop variable or subroutine | per-source diff of the validated edits; `--write` applies them |
+| `wright rename <NAME> <NEW_NAME> [INPUT]` | Semantically rename a Workshop variable or subroutine, or an OPY symbol through the provider | per-source diff of the validated edits; `--write` applies them |
 | `wright lookup [QUERY]` | Resolve a Workshop or OverPy display name, near spelling, or guess to the owner-accepted spelling and signature (#529); takes no input | one line per entry: signature or spelling, kind, identity |
 | `wright serve [INPUT] [--transport T] [--kind K] [--profile P] [--lint-config YAML] [--rule PATH] [--disable-rule ID] [--rule-severity ID:SEV]` | Serve `wright-agent/v1` over stdio, JSON-RPC 2.0, or MCP | one structured response per request |
 | `wright completion <SHELL>` | Generate static completion script for bash, zsh, fish, or powershell | the generated completion script |
@@ -299,7 +299,7 @@ block detail for `cfg`, fan-in/fan-out highlights before the edge list for
 first page of 20 entries followed by the total and an expansion hint; `--format json`
 reports the essential result in structured form, with the same list cap as text.
 
-## `wright rename`: semantic rename for raw Workshop (#434)
+## `wright rename`: semantic rename for Workshop and OPY (#434, #739)
 
 `wright rename <NAME> <NEW_NAME> [INPUT]` renames a global variable, player
 variable, or subroutine in raw Workshop input. `NAME` is the declared symbol
@@ -324,9 +324,21 @@ references no longer bind to the renamed symbol, refuses with
   (a sibling temporary file and rename). The write rechecks each source's
   identity hash first; a file that changed since validation refuses with
   `edit-stale-source` and writes nothing.
-* Other source kinds are provider surfaces: OPY input refuses with
-  `edit-requires-provider` naming `providerSemanticRename`, and kinds without
-  a shipped provider keep their `source-provider-unavailable` refusal.
+* OPY input runs the same command through the configured OPY provider
+  (#739) — the rename `wright serve` exposes as `providerSemanticRename`,
+  reached through the CLI's `NAME` addressing. The session loads the
+  project (a single file, a `#!include` graph, or a directory input) and
+  resolves `NAME` to a declaration position through the provider's
+  `lpp/symbols` — never a Wright-side text search — then `lpp/rename`
+  produces the edit set, `lpp/validateEdits` and a post-edit project check
+  validate it, and the same preview/`--write` contract applies. A name the
+  project does not declare is `unknown-symbol`; a name spelling several
+  distinct symbols is `ambiguous-symbol` listing each candidate's
+  `path:line:col`; and a name the provider refuses — an invalid
+  `NEW_NAME`, an unrenamable kind, a collision — reports the provider's own
+  `provider-refusal-<refusalCode>` diagnostic with no partial edit set.
+* Other source kinds stay provider surfaces: kinds without a shipped
+  provider keep their `source-provider-unavailable` refusal.
 
 ## `wright lookup`: owner name and signature lookup (#529)
 
