@@ -4756,11 +4756,13 @@ fn check_text_points_unknown_names_at_lookup() {
 
 /// wright#753: a rejected value in a non-default Workshop locale names its
 /// file and line, and the hint carries the locale `lookup` needs to resolve it.
+/// `无需装弹: 禁用` stays rejected across workshop-rs versions; the
+/// secondary-fire key accepts `禁用` starting with workshop-rs 1.16.9.
 #[test]
 fn check_text_locates_unknown_setting_value_and_names_the_locale() {
     let path = temp_file(
         "lookup-hint-zh.ow",
-        "设置\n{\n\t英雄\n\t{\n\t\t队伍1\n\t\t{\n\t\t\t索杰恩\n\t\t\t{\n\t\t\t\t辅助攻击模式: 禁用\n\t\t\t}\n\t\t}\n\t}\n}\n",
+        "设置\n{\n\t英雄\n\t{\n\t\t队伍1\n\t\t{\n\t\t\t索杰恩\n\t\t\t{\n\t\t\t\t无需装弹: 禁用\n\t\t\t}\n\t\t}\n\t}\n}\n",
     );
     let output = run(&[
         "check",
