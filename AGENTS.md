@@ -19,7 +19,7 @@ Wright is not the durable owner of those language implementations.
 - `opy-rs`: standalone OverPy implementation, covering syntax, preprocessing,
   macros, semantics, diagnostics/provenance, compiler behavior, standalone
   tooling, and Workshop-to-OPY reconstruction.
-- `del-rs`: standalone DEL/OSTW implementation, covering source/project models,
+- `deltin-rs`: standalone DEL/OSTW implementation, covering source/project models,
   semantics/types, runtime lowering, diagnostics/provenance, standalone tooling,
   and Workshop-to-DEL reconstruction.
 - `language-provider-protocol`: versioned LPP process and data contract.
@@ -57,10 +57,10 @@ language/core repository into Wright tooling internals:
 
 ```text
 Wright ─────► LPP provider ─────► opy-rs
-Wright ─────► del-rs
+Wright ─────► deltin-rs
 Wright ─────► workshop-rs
 opy-rs ─────► workshop-rs
-del-rs ─────► workshop-rs
+deltin-rs ─────► workshop-rs
 ```
 
 LPP is a process boundary and does not imply a cross-repository Rust dependency.
