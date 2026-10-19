@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import urllib.request
 from pathlib import Path
 from typing import NoReturn
 
@@ -107,6 +108,39 @@ def main() -> None:
         fail("agent session did not negotiate wright-agent/v1")
     if responses[1].get("result", {}).get("command") != "check":
         fail("agent session did not return the structured check result")
+
+    # `wright ui --no-open` (ADR-0032): the embedded page is served on
+    # loopback behind the session token, whose fragment never reaches the
+    # server — endpoint calls carry it as a bearer token instead. The
+    # proxy-free opener keeps loopback traffic local under CI proxy envs.
+    print("==> native runtime: ui session")
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    ui = subprocess.Popen(
+        [str(wright), "ui", "--no-open", str(args.check)],
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    try:
+        url = ui.stdout.readline().strip() if ui.stdout else ""
+        base, separator, token = url.partition("#")
+        if not base.startswith("http://127.0.0.1:") or not separator or not token:
+            fail(f"ui did not print a loopback session URL: {url!r}")
+        page = opener.open(base, timeout=10).read().decode("utf-8", "replace")
+        if "<html" not in page:
+            fail("ui did not serve the embedded page")
+        request = urllib.request.Request(
+            f"{base}api",
+            data=b'{"op":"capabilities"}',
+            headers={"Authorization": f"Bearer {token}"},
+            method="POST",
+        )
+        body = json.loads(opener.open(request, timeout=10).read())
+        if body.get("result", {}).get("agent_contract") != "wright-agent/v1":
+            fail(f"ui endpoint did not answer wright-agent/v1: {body}")
+    finally:
+        ui.kill()
 
     if args.provider_bootstrap:
         with tempfile.TemporaryDirectory(prefix="wright-provider-smoke-") as store:

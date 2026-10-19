@@ -11,8 +11,7 @@ use std::path::{Path, PathBuf};
 /// can never ship the stub.
 fn main() {
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set")).join("ui_assets.rs");
-    let mut source =
-        String::from("pub(crate) static UI_ASSETS: &[(&str, &str, &[u8])] = &[\n");
+    let mut source = String::from("pub(crate) static UI_ASSETS: &[(&str, &str, &[u8])] = &[\n");
     if env::var_os("CARGO_FEATURE_UI").is_none() {
         source.push_str("];\n");
         fs::write(&out, source).expect("write ui_assets.rs");

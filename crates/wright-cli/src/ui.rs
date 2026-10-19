@@ -14,6 +14,7 @@ use std::process::ExitCode;
 
 use clap::Args;
 use wright_driver::config::SourceKind;
+#[cfg(not(feature = "ui"))]
 use wright_driver::result::exit;
 
 use crate::serve::{LintPolicyArgs, parse_kind, parse_profile};
@@ -85,7 +86,11 @@ mod server {
         /// flags. `-` is refused rather than mapped to stdin: nothing may
         /// block on the terminal before the browser is even open.
         fn session_config(&self) -> Result<SessionConfig, String> {
-            if self.input.as_deref().is_some_and(|input| input == Path::new("-")) {
+            if self
+                .input
+                .as_deref()
+                .is_some_and(|input| input == Path::new("-"))
+            {
                 return Err(
                     "pass a source file or project directory; `ui` does not read the program from stdin"
                         .to_string(),
@@ -247,20 +252,25 @@ mod server {
                 return respond(
                     403,
                     "text/plain; charset=utf-8",
-                    "forbidden: the request origin is not this UI".as_bytes().to_vec(),
+                    "forbidden: the request origin is not this UI"
+                        .as_bytes()
+                        .to_vec(),
                 );
             }
         }
         let path = request.url().split(['?', '#']).next().unwrap_or("/");
+        // An absolute-form request-target (`POST http://host/api`, legal
+        // for proxies) names the path after its authority.
+        let path = path
+            .strip_prefix("http://")
+            .or_else(|| path.strip_prefix("https://"))
+            .and_then(|rest| rest.find('/').map(|index| &rest[index..]))
+            .unwrap_or(path);
         match (request.method().as_str(), path) {
             ("POST", API_PATH) => api(service, request, token),
             ("GET", "/") => asset("index.html"),
             ("GET", name) => asset(name.trim_start_matches('/')),
-            _ => respond(
-                404,
-                "text/plain; charset=utf-8",
-                b"not found".to_vec(),
-            ),
+            _ => respond(404, "text/plain; charset=utf-8", b"not found".to_vec()),
         }
     }
 
@@ -304,10 +314,13 @@ mod server {
                 );
             }
         };
+        // `serve` writes the dispatch result as one newline-terminated
+        // line; the endpoint returns the same bytes, terminator included,
+        // so both transports answer byte-identically (ADR-0032).
         respond(
             200,
             "application/json",
-            serve::dispatch(service, body).into_bytes(),
+            format!("{}\n", serve::dispatch(service, body)).into_bytes(),
         )
     }
 
