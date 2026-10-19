@@ -20,14 +20,14 @@ pub(crate) enum TransportArg {
 /// Parse `--kind` against the same vocabulary the workflow commands accept
 /// — a typo is a usage error naming the accepted spellings, not a silent
 /// `auto` (#593).
-fn parse_kind(value: &str) -> Result<SourceKind, String> {
+pub(crate) fn parse_kind(value: &str) -> Result<SourceKind, String> {
     SourceKind::parse(value)
         .ok_or_else(|| "expected one of: auto, opy, ostw, workshop, protocol".to_string())
 }
 
 /// Parse `--profile` against the workflow vocabulary (#593); profiles
 /// apply to Workshop input only (ADR-0028, #725).
-fn parse_profile(value: &str) -> Result<wright_driver::Profile, String> {
+pub(crate) fn parse_profile(value: &str) -> Result<wright_driver::Profile, String> {
     wright_driver::Profile::parse(value).ok_or_else(|| "expected one of: off, compat".to_string())
 }
 
@@ -306,7 +306,10 @@ fn jsonrpc_error(id: Value, code: i64, message: impl Into<String>) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message.into() } })
 }
 
-fn dispatch(service: &mut ToolService<'_>, line: &str) -> String {
+/// One `wright-agent/v1` request line in, one response line out — the exact
+/// body the stdio transport writes. `ui`'s loopback endpoint calls this so
+/// both transports emit identical bodies for the same request (ADR-0032).
+pub(crate) fn dispatch(service: &mut ToolService<'_>, line: &str) -> String {
     let request: ToolRequest = match serde_json::from_str(line) {
         Ok(request) => request,
         Err(error) => {
