@@ -28,7 +28,15 @@ use crate::present::{
     inline_location, is_real_source_path, query_items, render_node, rule_name, severity_rank,
     summary_status,
 };
-use crate::rail::{Line, Stream, eprintln, println};
+/// One buffered output line tagged with its stream, so diagnostics ride
+/// stderr while the report body stays on stdout.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Stream {
+    Out,
+    Err,
+}
+
+pub(crate) type Line = (Stream, String);
 
 /// Emit the envelope as plain line records.
 pub(crate) fn render<T: serde::Serialize + ResultPresentation + PlainReport>(

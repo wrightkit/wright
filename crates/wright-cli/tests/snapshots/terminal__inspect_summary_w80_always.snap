@@ -1,0 +1,24 @@
+---
+source: crates/wright-cli/tests/terminal.rs
+expression: transcript(&out)
+---
+exit: 0
+--- stdout ---
+<ESC>[46;30m INSPECT <ESC>[0m
+  <ESC>[2m2 rules, 3 symbols, 8 references<ESC>[0m
+
+<ESC>[1mProgram overview<ESC>[0m
+  1 file, 2 rules, 1 global variable, 0 player variables, 0 subroutines
+
+<ESC>[1mRules<ESC>[0m
+  bounded while
+  branch
+  <ESC>[2minspect symbols, refs, cfg, callgraph, cost; --all for all rule names<ESC>[0m
+
+<ESC>[1mNext<ESC>[0m
+  wright inspect symbols
+  wright inspect refs <NAME>
+  wright inspect cfg <RULE>
+  wright inspect callgraph
+  wright inspect cost
+--- stderr ---

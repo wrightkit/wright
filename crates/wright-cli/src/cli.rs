@@ -316,6 +316,12 @@ pub(crate) struct LookupArgs {
     /// Output format.
     #[arg(short = 'f', long, value_enum, default_value_t = OutputFormatArg::Text)]
     pub(crate) format: OutputFormatArg,
+    /// Renderer environment; `auto` detects terminal, CI, and GitHub Actions.
+    #[arg(long, value_enum, default_value_t = RendererArg::Auto)]
+    pub(crate) renderer: RendererArg,
+    /// ANSI color policy.
+    #[arg(long, value_enum, default_value_t = ColorArg::Auto)]
+    pub(crate) color: ColorArg,
 }
 
 /// The language a `lookup` request queries (`capabilities.languages`).

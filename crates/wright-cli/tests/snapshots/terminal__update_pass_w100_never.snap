@@ -1,0 +1,10 @@
+---
+source: crates/wright-cli/tests/terminal.rs
+expression: transcript(&out)
+---
+exit: 0
+--- stdout ---
+skipped wright self-update: standalone self-update is not supported on Windows; upgrade with `winget upgrade WrightKit.Wright` or `scoop update wright`
+opy provider is not installed; skipping
+ PASS  update
+--- stderr ---

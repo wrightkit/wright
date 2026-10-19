@@ -103,6 +103,12 @@ pub(crate) struct UpdateArgs {
     /// the installation.
     #[arg(long)]
     pub(crate) check: bool,
+    /// Renderer environment; `auto` detects terminal, CI, and GitHub Actions.
+    #[arg(long, value_enum, default_value_t = crate::cli::RendererArg::Auto, global = true)]
+    pub(crate) renderer: crate::cli::RendererArg,
+    /// ANSI color policy.
+    #[arg(long, value_enum, default_value_t = crate::cli::ColorArg::Auto, global = true)]
+    pub(crate) color: crate::cli::ColorArg,
     #[command(subcommand)]
     pub(crate) command: Option<UpdateCommand>,
 }
@@ -144,7 +150,10 @@ pub(crate) enum ProviderNameArg {
     Opy,
 }
 
-pub(crate) fn run(args: &UpdateArgs) -> Result<u8, UpdateError> {
+pub(crate) fn run(
+    args: &UpdateArgs,
+    pres: crate::present::Presentation,
+) -> Result<u8, UpdateError> {
     match &args.command {
         Some(UpdateCommand::SelfUpdate(sub)) => {
             self_update(args.check || sub.check, sub.version.as_deref())
@@ -153,15 +162,16 @@ pub(crate) fn run(args: &UpdateArgs) -> Result<u8, UpdateError> {
             args.check || sub.check,
             sub.version.as_deref(),
             sub.provider.is_some(),
+            pres,
         )),
-        None => Ok(update_all(args.check)),
+        None => Ok(update_all(args.check, pres)),
     }
 }
 
 /// Plain `wright update`: every target Wright manages — the standalone
 /// installation plus already-installed first-party providers. A skipped or
 /// failed target never blocks the remaining ones.
-fn update_all(check_only: bool) -> u8 {
+fn update_all(check_only: bool, pres: crate::present::Presentation) -> u8 {
     let mut code = exit::SUCCESS;
     match self_update(check_only, None) {
         Ok(_) => {}
@@ -169,11 +179,16 @@ fn update_all(check_only: bool) -> u8 {
             println!("skipped wright self-update: {}", error.message());
         }
         Err(error) => {
-            eprintln!("{}", error.record());
+            report_update_error(
+                pres,
+                crate::present::terminal::exit_word(error.exit_code()),
+                error.message(),
+                &error.record(),
+            );
             code = fold(code, error.exit_code());
         }
     }
-    code = fold(code, provider_target(check_only, None, false));
+    code = fold(code, provider_target(check_only, None, false, pres));
     code
 }
 
@@ -184,7 +199,12 @@ fn fold(code: u8, next: u8) -> u8 {
 /// The first-party provider update target. `may_install` distinguishes
 /// `update provider <NAME>` (install or update) from the installed-only
 /// enumeration used by `update` and `update provider`.
-fn provider_target(check_only: bool, requested: Option<&str>, may_install: bool) -> u8 {
+fn provider_target(
+    check_only: bool,
+    requested: Option<&str>,
+    may_install: bool,
+    pres: crate::present::Presentation,
+) -> u8 {
     let installed = match OpyProviderConfig::default().installed() {
         Ok(installed) => installed,
         // A platform without provider artifacts has no provider target; an
@@ -193,10 +213,10 @@ fn provider_target(check_only: bool, requested: Option<&str>, may_install: bool)
             println!("skipped opy provider: {error}");
             return exit::SUCCESS;
         }
-        Err(error) => return provider_failure(&error),
+        Err(error) => return provider_failure(&error, pres),
     };
     if check_only {
-        return provider_check(installed.as_ref(), requested, may_install);
+        return provider_check(installed.as_ref(), requested, may_install, pres);
     }
     if installed.is_none() && !may_install {
         println!("opy provider is not installed; skipping");
@@ -211,7 +231,7 @@ fn provider_target(check_only: bool, requested: Option<&str>, may_install: bool)
             provider_report(previous.as_deref(), &resolved);
             exit::SUCCESS
         }
-        Err(error) => provider_failure(&error),
+        Err(error) => provider_failure(&error, pres),
     }
 }
 
@@ -245,6 +265,7 @@ fn provider_check(
     installed: Option<&ResolvedOpyProvider>,
     requested: Option<&str>,
     may_install: bool,
+    pres: crate::present::Presentation,
 ) -> u8 {
     let current = installed.and_then(|p| p.version.as_deref());
     // An absent provider is not a target of `update --check`, so it is skipped
@@ -257,13 +278,18 @@ fn provider_check(
         Some(version) => match parse_version(version) {
             Ok(_) => version.trim_start_matches('v').to_string(),
             Err(error) => {
-                eprintln!("{}", error.record());
+                report_update_error(
+                    pres,
+                    crate::present::terminal::exit_word(error.exit_code()),
+                    error.message(),
+                    &error.record(),
+                );
                 return error.exit_code();
             }
         },
         None => match OpyProviderConfig::default().latest_version() {
             Ok(version) => version,
-            Err(error) => return provider_failure(&error),
+            Err(error) => return provider_failure(&error, pres),
         },
     };
     let Some(current) = current else {
@@ -290,13 +316,33 @@ fn provider_check(
     exit::SUCCESS
 }
 
-fn provider_failure(error: &OpyProviderError) -> u8 {
-    eprintln!(
-        "error: {} {}",
-        error.code(),
-        crate::plain::field("message", &error.to_string())
+fn provider_failure(error: &OpyProviderError, pres: crate::present::Presentation) -> u8 {
+    report_update_error(
+        pres,
+        crate::present::terminal::exit_word(error.exit_code()),
+        &format!("{}: {}", error.code(), error),
+        &format!(
+            "error: {} {}",
+            error.code(),
+            crate::plain::field("message", &error.to_string())
+        ),
     );
     error.exit_code()
+}
+
+/// An update failure is a verdict tag on the terminal renderer and an
+/// `error:` record on the machine-readable surfaces (#793).
+fn report_update_error(
+    pres: crate::present::Presentation,
+    word: &str,
+    message: &str,
+    record: &str,
+) {
+    if pres.is_terminal() {
+        crate::present::terminal::report_error(pres, word, "update", message);
+    } else {
+        eprintln!("{record}");
+    }
 }
 
 fn self_update(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateError> {

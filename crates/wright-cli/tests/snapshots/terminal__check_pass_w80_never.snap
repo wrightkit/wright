@@ -1,0 +1,17 @@
+---
+source: crates/wright-cli/tests/terminal.rs
+expression: transcript(&out)
+---
+exit: 0
+--- stdout ---
+ PASS  check
+  0 diagnostics
+
+Program overview
+  1 file, 1 rule, 0 global variables, 0 player variables, 0 subroutines
+
+Next
+  wright lint
+  wright analyze
+  wright inspect
+--- stderr ---

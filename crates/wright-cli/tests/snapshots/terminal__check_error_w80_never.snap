@@ -1,0 +1,28 @@
+---
+source: crates/wright-cli/tests/terminal.rs
+expression: transcript(&out)
+---
+exit: 1
+--- stdout ---
+ ERROR  check
+  1 error, 2 warnings
+  1 file affected
+--- stderr ---
+error[workshop.unknown-value.futurevaluething]: Workshop construct 'FutureValueThing' is unsupported (truly-unresolved-identifier)
+  --> mixed.ws:13:26
+  | 13 | 		Set Global Variable(B, FutureValueThing(2));
+  |    | 		                       ^
+  = analysis
+  hint: run 'wright lookup' with the rejected name to find its spelling and signature
+
+warning[workshop.raw-setting.mysetting]: Workshop construct 'mySetting' is partially supported (project-defined-construct)
+  --> mixed.ws:3:3
+  | 3 | 		mySetting: 1
+  |   | 		^
+  = analysis
+
+warning[workshop.raw-setting.othersetting]: Workshop construct 'otherSetting' is partially supported (project-defined-construct)
+  --> mixed.ws:4:3
+  | 4 | 		otherSetting: 2
+  |   | 		^
+  = analysis

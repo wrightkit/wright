@@ -1,0 +1,9 @@
+---
+source: crates/wright-cli/tests/terminal.rs
+expression: transcript(&out)
+---
+exit: 0
+--- stdout ---
+ PASS  compile
+  wrote out.ow (sha256 3b0737bb0468d36746566bc7cd7885f62ea421c335210e67801446566254e330)
+--- stderr ---

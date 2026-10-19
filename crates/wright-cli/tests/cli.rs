@@ -460,10 +460,10 @@ fn check_over_clean_input_exits_zero() {
 fn terminal_renderer_uses_command_specific_hierarchy() {
     let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
     for (command, heading, detail) in [
-        ("check", "PASS check", "diagnostic(s)"),
-        ("lint", "WARN lint", "Lint findings"),
-        ("analyze", "WARN analyze", "Program overview"),
-        ("inspect", "PASS inspect", "Detail commands"),
+        ("check", " PASS  check", "0 diagnostics"),
+        ("lint", " WARN  lint", "Lint findings"),
+        ("analyze", " WARN  analyze", "Program overview"),
+        ("inspect", " INSPECT", "Rules"),
     ] {
         let output = run(&[
             command,
@@ -499,14 +499,18 @@ fn analyze_real_project_report_is_bounded_and_ranked() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Program overview"));
     assert!(stdout.contains("Workshop cost"));
-    assert!(stdout.contains("element(s) [exact]"));
+    assert!(stdout.contains("elements [exact]"));
     assert!(stdout.contains("Hotspots"));
     assert!(stdout.contains("Complexity"));
     assert!(stdout.contains("Performance and stability risks"));
     assert!(stdout.contains("State and coupling"));
     assert!(stdout.contains("[static]"));
+    assert!(stdout.contains("Next"));
+    // Bounded means the report does not scale with program size: every
+    // section truncates to a fixed row budget, and `Next` is a constant
+    // follow-up list.
     assert!(
-        stdout.lines().count() <= 40,
+        stdout.lines().count() <= 48,
         "report is not bounded:\n{stdout}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -656,9 +660,9 @@ fn check_text_leads_with_verdict_and_blocking_count() {
 
 #[test]
 fn terminal_renderer_marks_independent_diagnostics() {
-    // The terminal layout hangs the whole report on one rail from the
-    // verdict to the footer (#718); the reported set, order, and content
-    // are unchanged.
+    // The terminal layout leads with the verdict tag, then indents each
+    // diagnostic under it; the reported set, order, and content are
+    // unchanged.
     let path = temp_file("mixed.txt", MIXED_CHECK_SOURCE);
     let output = run(&[
         "check",
@@ -670,30 +674,34 @@ fn terminal_renderer_marks_independent_diagnostics() {
     ]);
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("├─ error["), "{stderr}");
-    assert!(stderr.contains("├─ warning["), "{stderr}");
+    assert!(stderr.contains("error["), "{stderr}");
+    assert!(stderr.contains("warning["), "{stderr}");
     assert!(
-        stderr.contains("│  --> ") && stderr.contains("│  = "),
-        "locations and secondary metadata hang on the rail: {stderr}"
+        stderr.contains(" --> ") && stderr.contains(" = "),
+        "locations and secondary metadata stay under the diagnostic: {stderr}"
     );
+    let error_at = stderr.find("error[").expect("an error diagnostic");
+    let warning_at = stderr.find("warning[").expect("a warning diagnostic");
     assert!(
-        stderr.contains("│\n├─ warning["),
-        "a blank rail line separates independent diagnostics: {stderr}"
+        error_at < warning_at,
+        "blocking errors precede warnings: {stderr}"
     );
     assert!(
         stderr.contains("Set Global Variable(B, FutureValueThing(2));"),
-        "the source context renders inside the rail: {stderr}"
+        "the source context stays with the diagnostic: {stderr}"
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.starts_with("╭─ ERROR check\n│  "), "{stdout}");
     assert!(
-        stdout
-            .trim_end()
-            .rsplit('\n')
-            .next()
-            .unwrap()
-            .starts_with("╰─ "),
-        "the footer closes the rail: {stdout}"
+        stdout.starts_with(" ERROR  check\n"),
+        "the verdict tag leads: {stdout}"
+    );
+    assert!(
+        stdout.contains("  1 error, 2 warnings\n"),
+        "counts carry no (s) suffix: {stdout}"
+    );
+    assert!(
+        !stdout.contains(['╭', '├', '╰', '│']) && !stderr.contains(['╭', '├', '╰', '│']),
+        "no rail frame anywhere: {stdout}{stderr}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -738,28 +746,29 @@ fn terminal_renderer_marks_lint_findings_and_keeps_compact_results_flat() {
     ]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.starts_with("╭─ WARN lint\n"), "{stdout}");
     assert!(
-        stdout.contains("├─ warning["),
-        "the finding block hangs on the rail: {stdout}"
+        stdout.starts_with(" WARN  lint\n"),
+        "the verdict tag leads: {stdout}"
     );
     assert!(
-        stdout.contains("│  --> "),
-        "the location hangs under the finding: {stdout}"
+        stdout.contains("Lint findings (evidence: static-indicator)"),
+        "uniform evidence is stated once in the section heading: {stdout}"
     );
     assert!(
-        stdout
-            .trim_end()
-            .rsplit('\n')
-            .next()
-            .unwrap()
-            .starts_with("╰─ "),
-        "the footer closes the rail: {stdout}"
+        stdout.contains("  warning[min-wait-loop]:"),
+        "the finding indents under its section: {stdout}"
+    );
+    assert!(
+        stdout.contains("    --> "),
+        "the location indents under the finding: {stdout}"
+    );
+    assert!(
+        !stdout.contains("(s)"),
+        "counts carry no (s) suffix: {stdout}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 
-    // A bare verdict with nothing to group stays flat — no decorative rail
-    // is forced onto compact output.
+    // A bare verdict with nothing to group stays flat.
     let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
     let output = run(&[
         "check",
@@ -771,19 +780,28 @@ fn terminal_renderer_marks_lint_findings_and_keeps_compact_results_flat() {
     ]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(stdout, "PASS check\n  0 diagnostic(s)\n", "{stdout}");
+    // The verdict stays flat — no findings group — while the shared
+    // program summary and follow-ups (#821) still report.
+    assert_eq!(
+        stdout,
+        " PASS  check\n  0 diagnostics\n\nProgram overview\n  1 file, 1 rule, \
+         0 global variables, 0 player variables, 0 subroutines\n\nNext\n  \
+         wright lint\n  wright analyze\n  wright inspect\n",
+        "{stdout}"
+    );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[test]
-fn only_the_terminal_renderer_draws_the_rail() {
-    // The rail is a terminal detail (#718): plain, CI, GitHub Actions, and
-    // JSON keep their undecorated layout for a shape the terminal frames.
+fn only_the_terminal_renderer_draws_the_verdict_tag() {
+    // The filled verdict tag is a terminal detail: plain, CI, GitHub
+    // Actions, and JSON keep their undecorated layout for the same run,
+    // and no surface draws the retired rail frame.
     let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
     let path = path.to_str().unwrap();
     let terminal = run(&["lint", path, "--renderer", "terminal", "--color", "never"]);
     let terminal = String::from_utf8_lossy(&terminal.stdout).into_owned();
-    assert!(terminal.contains('╭'), "{terminal}");
+    assert!(terminal.starts_with(" WARN  lint\n"), "{terminal}");
 
     type Env<'a> = &'a [(&'a str, &'a str)];
     let undecorated: [(&[&str], Env); 5] = [
@@ -806,15 +824,19 @@ fn only_the_terminal_renderer_draws_the_rail() {
             !text.contains(['╭', '├', '╰', '│', '\u{1}', '\u{2}', '\u{3}']),
             "{flags:?} {env:?} is decorated: {text}"
         );
+        assert!(
+            !text.contains(" WARN  lint"),
+            "{flags:?} {env:?} draws the tag: {text}"
+        );
     }
     let _ = std::fs::remove_dir_all(std::path::Path::new(path).parent().unwrap());
 }
 
 #[test]
-fn terminal_renderer_never_leaks_rail_markers() {
-    // An artifact-stream command prints its diagnostics outside the framed
-    // report (#718); no internal marker byte may reach either stream, for
-    // any decorated shape.
+fn terminal_renderer_never_leaks_frame_markers() {
+    // An artifact-stream command prints its diagnostics outside the
+    // verdict-tag report; no internal marker byte or retired rail
+    // character may reach either stream, for any report shape.
     let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
     let path = path.to_str().unwrap();
     let invocations: [&[&str]; 4] = [
@@ -834,7 +856,11 @@ fn terminal_renderer_never_leaks_rail_markers() {
         );
         assert!(
             !text.contains(['\u{1}', '\u{2}', '\u{3}']),
-            "{args:?} leaked a rail marker: {text:?}"
+            "{args:?} leaked a control marker: {text:?}"
+        );
+        assert!(
+            !text.contains(['╭', '├', '╰', '│']),
+            "{args:?} drew the retired rail: {text:?}"
         );
     }
     let _ = std::fs::remove_dir_all(std::path::Path::new(path).parent().unwrap());
@@ -854,10 +880,13 @@ fn terminal_renderer_marks_analyze_risks_and_cfg_blocks() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("├─ warning[min-wait-loop]"),
-        "the risk item hangs on the rail inside its section: {stdout}"
+        stdout.contains("Performance and stability risks (evidence: static-indicator)"),
+        "the risk section states its evidence once: {stdout}"
     );
-    assert!(stdout.ends_with("╰─\n"), "{stdout}");
+    assert!(
+        stdout.contains("warning[min-wait-loop]"),
+        "the risk item sits inside its section: {stdout}"
+    );
 
     let output = run(&[
         "inspect",
@@ -871,11 +900,14 @@ fn terminal_renderer_marks_analyze_risks_and_cfg_blocks() {
     ]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.starts_with("╭─ PASS cfg\n"), "{stdout}");
-    assert!(stdout.contains("├─ block "), "{stdout}");
     assert!(
-        stdout.contains("│  -> "),
-        "successors hang under their block: {stdout}"
+        stdout.starts_with(" CFG\n"),
+        "a query command's tag is its own name: {stdout}"
+    );
+    assert!(stdout.contains("  block "), "{stdout}");
+    assert!(
+        stdout.contains("    -> "),
+        "successors indent under their block: {stdout}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -974,7 +1006,7 @@ fn check_tty_clears_progress_then_renders_verdict_and_elapsed() {
     transcript.extend_from_slice(&output.stderr);
     let transcript = String::from_utf8_lossy(&transcript);
     let verdict = transcript
-        .find("PASS check")
+        .find(" PASS  check")
         .expect("the final verdict renders");
     assert!(
         transcript[..verdict].contains("\x1b[2K"),
@@ -1580,7 +1612,7 @@ fn fail_on_raises_warn_to_fail_on_every_renderer() {
     ]);
     assert_eq!(terminal.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&terminal.stdout);
-    assert!(stdout.contains("FAIL lint"), "{stdout}");
+    assert!(stdout.contains(" FAIL  lint"), "{stdout}");
 
     // GitHub Actions: the log group and the step-summary line carry the
     // same FAIL verdict and exit code.
@@ -1606,10 +1638,20 @@ fn fail_on_raises_warn_to_fail_on_every_renderer() {
     assert!(envelope.get("gated").is_none());
 
     // `inspect cost` gates on the same finding severities.
-    let cost = run(&["inspect", "cost", path, "--fail-on", "warning"]);
+    let cost = run(&[
+        "inspect",
+        "cost",
+        path,
+        "--fail-on",
+        "warning",
+        "--renderer",
+        "terminal",
+        "--color",
+        "never",
+    ]);
     assert_eq!(cost.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&cost.stdout);
-    assert!(stdout.contains("FAIL cost"), "{stdout}");
+    assert!(stdout.contains(" FAIL  cost"), "{stdout}");
 
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
@@ -2025,7 +2067,7 @@ fn lint_text_collapses_identical_findings_into_one_entry() {
     ]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("4 warning(s)"), "{stdout}");
+    assert!(stdout.contains("4 warnings"), "{stdout}");
     assert_eq!(
         stdout.matches("[repeated-value]").count(),
         1,
@@ -2085,9 +2127,9 @@ fn lint_text_leads_with_the_verdict_and_orders_by_action_priority() {
     ]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let verdict = stdout.find("ERROR lint").expect("verdict: {stdout}");
+    let verdict = stdout.find(" ERROR  lint").expect("verdict: {stdout}");
     let counts = stdout
-        .find("1 error(s), 9 warning(s)")
+        .find("1 error, 9 warnings")
         .expect("severity counts: {stdout}");
     let findings = stdout.find("Lint findings").expect("section: {stdout}");
     let error = stdout
@@ -2149,7 +2191,7 @@ fn lint_text_orders_all_severity_bands_by_action_priority() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("1 error(s), 1 warning(s), 1 info finding(s)"),
+        stdout.contains("1 error, 1 warning, 1 info finding"),
         "{stdout}"
     );
     let error = stdout
@@ -2555,7 +2597,7 @@ fn tty_progress_stops_and_clears_before_final_render() {
     transcript.extend_from_slice(&output.stderr);
     let transcript = String::from_utf8_lossy(&transcript);
     let final_render = transcript
-        .find("PASS analyze")
+        .find(" PASS  analyze")
         .expect("final analyze render is present");
     let before_final = &transcript[..final_render];
     assert!(before_final.contains("Starting workflow"));

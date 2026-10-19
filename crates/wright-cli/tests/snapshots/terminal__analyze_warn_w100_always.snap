@@ -1,0 +1,43 @@
+---
+source: crates/wright-cli/tests/terminal.rs
+expression: transcript(&out)
+---
+exit: 0
+--- stdout ---
+<ESC>[43;30m WARN <ESC>[0m analyze
+  <ESC>[2m1 warning, 0 persistent objects<ESC>[0m
+
+<ESC>[1mProgram overview<ESC>[0m
+  1 file, 2 rules, 1 global variable, 0 player variables, 0 subroutines, 0 persistent objects
+  <ESC>[2mevidence: [static] parsed program inventory<ESC>[0m
+
+<ESC>[1mWorkshop cost<ESC>[0m
+  21 elements [exact] — canonical element count; structural size, not runtime cost
+  7 actions, 0 conditions, 1 wait [static]
+
+<ESC>[1mHotspots<ESC>[0m
+  <ESC>[2mranked by Workshop element count [exact counts; the ranking itself is a heuristic]<ESC>[0m
+    "bounded while": 12 elements (57.1%), 5 blocks, 5 edges, 1 risk at flow.ws:6:1
+    "branch": 9 elements (42.9%), 5 blocks, 5 edges, 0 risks at flow.ws:18:1
+
+<ESC>[1mComplexity<ESC>[0m
+  10 blocks, 10 edges, 1 loop block, 1 wait block [static]
+
+<ESC>[1mPerformance and stability risks (evidence: static-indicator)<ESC>[0m
+  <ESC>[2mheuristic/static indicators — not measured runtime cost or behavior<ESC>[0m
+    <ESC>[33mwarning<ESC>[0m[min-wait-loop]: loop body waits at the workshop minimum rate; the loop runs at maximum frequency
+      --> flow.ws:11:9
+
+<ESC>[1mState and coupling<ESC>[0m
+  <ESC>[2mTop variables (heuristic ranking: rules touched, then reads + writes)<ESC>[0m
+    globalVariable index: 2 rules, 3 reads, 2 writes [static]
+  <ESC>[2m--all; inspect symbols, refs, cfg, callgraph, cost for detail<ESC>[0m
+
+<ESC>[1mNext<ESC>[0m
+  wright lint
+  wright inspect symbols
+  wright inspect refs <NAME>
+  wright inspect cfg <RULE>
+  wright inspect callgraph
+  wright inspect cost
+--- stderr ---

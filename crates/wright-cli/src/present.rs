@@ -19,8 +19,17 @@ use wright_driver::result::{
 };
 
 use crate::cli::{ColorArg, CommonArgs, OutputFormatArg, RendererArg};
+
+pub(crate) mod terminal;
+
 use crate::plain;
-use crate::rail::{self, eprintln, println};
+
+/// The report's layout width ceiling: a terminal wider than this still gets
+/// the 100-column layout (ADR-0030 decision 4).
+const MAX_WIDTH: u16 = 100;
+/// Below this width the terminal report switches to its compact layout:
+/// children of a section item align at the item's column.
+const COMPACT_BELOW: u16 = 90;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct Presentation {
@@ -29,6 +38,7 @@ pub(crate) struct Presentation {
     pub(crate) color: bool,
     pub(crate) interactive: bool,
     pub(crate) all: bool,
+    pub(crate) width: u16,
 }
 
 pub(crate) struct Activity {
@@ -185,6 +195,9 @@ struct RuntimeEnvironment {
     no_color: bool,
     force_color: bool,
     term_dumb: bool,
+    /// The `COLUMNS` environment variable when it parses to a nonzero
+    /// column count — the explicit width override.
+    columns: Option<u16>,
 }
 
 impl RuntimeEnvironment {
@@ -196,8 +209,29 @@ impl RuntimeEnvironment {
             no_color: std::env::var_os("NO_COLOR").is_some(),
             force_color: env_truthy("FORCE_COLOR"),
             term_dumb: std::env::var("TERM").is_ok_and(|t| t == "dumb"),
+            columns: std::env::var("COLUMNS")
+                .ok()
+                .and_then(|v| v.trim().parse::<u16>().ok())
+                .filter(|c| *c > 0),
         }
     }
+}
+
+/// The terminal's actual column count via `TIOCGWINSZ`; `None` when stdout
+/// is not a terminal or the platform cannot answer. `COLUMNS` is checked
+/// separately — it doubles as the test override.
+#[cfg(unix)]
+fn terminal_columns() -> Option<u16> {
+    unsafe {
+        let mut size: libc::winsize = std::mem::zeroed();
+        (libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut size) == 0 && size.ws_col > 0)
+            .then_some(size.ws_col)
+    }
+}
+
+#[cfg(not(unix))]
+fn terminal_columns() -> Option<u16> {
+    None
 }
 
 impl Presentation {
@@ -216,6 +250,20 @@ impl Presentation {
             common.color,
             RuntimeEnvironment::process(),
         )
+    }
+
+    /// Presentation for the commands that carry their own output flags
+    /// rather than [`CommonArgs`] (`lookup`, `update`).
+    pub(crate) fn from_output(
+        format: OutputFormatArg,
+        renderer: RendererArg,
+        color: ColorArg,
+    ) -> Self {
+        let format = match format {
+            OutputFormatArg::Text => OutputFormat::Text,
+            OutputFormatArg::Json => OutputFormat::Json,
+        };
+        Self::resolve(format, renderer, color, RuntimeEnvironment::process())
     }
 
     fn resolve(
@@ -247,13 +295,35 @@ impl Presentation {
                     && (!env.term_dumb || env.force_color)
             }
         };
+        // The explicit `COLUMNS` override beats the detected width; absent
+        // both, the report assumes the widest allowed layout.
+        let columns = env.columns.or_else(|| {
+            if env.stdout_terminal {
+                terminal_columns()
+            } else {
+                None
+            }
+        });
         Self {
             format,
             renderer,
             color,
             all: false,
             interactive: renderer == Renderer::Terminal && env.stdout_terminal && !env.term_dumb,
+            width: columns.unwrap_or(MAX_WIDTH).clamp(1, MAX_WIDTH),
         }
+    }
+
+    /// Whether the terminal report (verdict tag, hierarchy, semantic
+    /// colour) renders — the only caller-facing renderer question.
+    pub(crate) fn is_terminal(&self) -> bool {
+        self.renderer == Renderer::Terminal
+    }
+
+    /// The compact layout below 90 columns: children of a section item
+    /// align at the item's column instead of indenting deeper.
+    fn compact(&self) -> bool {
+        self.width < COMPACT_BELOW
     }
 
     pub(crate) fn activity(&self) -> Activity {
@@ -274,7 +344,9 @@ fn env_truthy(name: &str) -> bool {
     })
 }
 
-pub(crate) fn render<T: serde::Serialize + ResultPresentation + plain::PlainReport>(
+pub(crate) fn render<
+    T: serde::Serialize + ResultPresentation + plain::PlainReport + terminal::TerminalReport,
+>(
     envelope: &Envelope<T>,
     pres: Presentation,
     elapsed: Duration,
@@ -301,9 +373,9 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation + plain::PlainRepo
     match pres.renderer {
         Renderer::GithubActions => render_github(envelope, &ctx),
         // Plain is the agent-facing line-record surface (#793); terminal
-        // keeps the human report.
+        // renders the verdict-tag report.
         Renderer::Plain => plain::render(envelope, &ctx),
-        Renderer::Terminal => render_text(envelope, pres, elapsed, source_base, subject),
+        Renderer::Terminal => terminal::render(envelope, pres, elapsed, source_base, subject),
     }
 }
 
@@ -319,120 +391,6 @@ pub(crate) struct RenderContext<'a> {
     pub(crate) subject: Option<&'a str>,
 }
 
-/// The terminal renderer captures the whole report and frames it on one
-/// rail (#718). An artifact stream is the payload itself and prints
-/// directly, so its diagnostics keep the flat layout instead of carrying
-/// rail markers nothing would frame.
-fn render_text<T: serde::Serialize + ResultPresentation>(
-    envelope: &Envelope<T>,
-    pres: Presentation,
-    elapsed: Duration,
-    source_base: Option<&Path>,
-    subject: Option<&str>,
-) {
-    if !envelope.result.is_artifact_stream() {
-        let lines = rail::capture(|| render_report(envelope, pres, elapsed, source_base, subject));
-        rail::emit(rail::frame(lines, pres.color));
-    } else {
-        let flat = Presentation {
-            renderer: Renderer::Plain,
-            ..pres
-        };
-        render_report(envelope, flat, elapsed, source_base, subject);
-    }
-}
-
-/// The human-first result hierarchy (#443): the verdict leads, blocking
-/// errors come before non-blocking diagnostics, secondary metadata trails
-/// each diagnostic, and execution metadata (affected files, elapsed) closes
-/// the report.
-fn render_report<T: serde::Serialize + ResultPresentation>(
-    envelope: &Envelope<T>,
-    pres: Presentation,
-    elapsed: Duration,
-    source_base: Option<&Path>,
-    subject: Option<&str>,
-) {
-    let ctx = RenderContext {
-        presentation: pres,
-        elapsed,
-        source_base,
-        subject,
-    };
-    if !envelope.result.is_artifact_stream() {
-        render_verdict(envelope, pres.color);
-    }
-    let mut ordered: Vec<&wright_driver::Diagnostic> = envelope.diagnostics.iter().collect();
-    ordered.sort_by_key(|diagnostic| severity_rank(diagnostic.severity));
-    let diagnostic_total = ordered.len();
-    let bounded = !matches!(envelope.command.as_str(), "compile" | "convert");
-    let limit = if pres.all || !bounded { usize::MAX } else { 20 };
-    for diagnostic in ordered.into_iter().take(limit) {
-        let marks = pres.marks();
-        render_diagnostic(diagnostic, pres.color, &marks);
-        // ADR-0021 decision 6: text `check`/`compile` points an agent at
-        // `wright lookup` after a rejected-name diagnostic. Owner codes are
-        // namespaced (`workshop.unknown-value.futurevaluething`), so any
-        // code segment carrying the `unknown-` kind qualifies. The
-        // structured result is unchanged; the pointer lives in text only.
-        // `unknown-language` is `WorkshopError::NotDetected` — detection
-        // found no markers and rejected no name, so there is nothing
-        // `wright lookup` could resolve; skip the hint.
-        if matches!(envelope.command.as_str(), "check" | "compile")
-            && diagnostic
-                .code
-                .split('.')
-                .any(|segment| segment.starts_with("unknown-") && segment != "unknown-language")
-        {
-            // `lookup` answers in the vocabulary of the rejected name's
-            // source (#692): an OPY diagnostic names `--language opy`, a
-            // non-default Workshop locale names `--locale`, anything else
-            // keeps the Workshop default.
-            let source = diagnostic.source.as_ref();
-            let hint = if source.is_some_and(|source| source.kind == "opy") {
-                "hint: run 'wright lookup --language opy' with the rejected name to find its spelling and signature".to_string()
-            } else if let Some(locale) = source
-                .and_then(|source| source.locale.as_deref())
-                .filter(|locale| !locale.eq_ignore_ascii_case("en-US"))
-            {
-                format!(
-                    "hint: run 'wright lookup --locale {locale}' with the rejected name to find its spelling and signature"
-                )
-            } else {
-                "hint: run 'wright lookup' with the rejected name to find its spelling and signature".to_string()
-            };
-            eprintln!("{}{}", marks.pad, dim(&hint, pres.color));
-        }
-    }
-    if bounded && !pres.all && diagnostic_total > 20 {
-        eprintln!("  diagnostics: showing 20 of {diagnostic_total}; --all to see every item");
-    }
-    if let Some(selection) = &envelope.selection {
-        if selection.withheld > 0 {
-            eprintln!(
-                "  ... {} diagnostic(s) withheld (--max)",
-                selection.withheld
-            );
-        }
-    }
-    // A gated result is a raised verdict, not a failed command: its real
-    // result body still renders — the findings are the reason it failed.
-    if envelope.ok || envelope.gated {
-        envelope.result.render_body(&ctx);
-        // The run-cache comparison (ADR-0027, #723) rides the envelope
-        // in-process — shown on every renderer, never in the JSON result,
-        // and never after an artifact stream where it would corrupt bytes.
-        if !envelope.result.is_artifact_stream() {
-            render_comparison(envelope.comparison.as_ref());
-        }
-    } else if envelope.diagnostics.is_empty() {
-        eprintln!("{}: failed", envelope.command);
-    }
-    if envelope.command == "check" {
-        render_check_footer(envelope, pres, elapsed);
-    }
-}
-
 /// Diagnostics render in action order — errors first — without changing the
 /// reported set or the driver's production order (#443).
 pub(crate) fn severity_rank(severity: Severity) -> u8 {
@@ -440,91 +398,6 @@ pub(crate) fn severity_rank(severity: Severity) -> u8 {
         Severity::Error => 0,
         Severity::Warning => 1,
         Severity::Info => 2,
-    }
-}
-
-fn render_verdict<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>, color: bool) {
-    let status = summary_status(envelope);
-    let label = if color {
-        let code = match status {
-            "PASS" => "32",
-            "WARN" => "33",
-            _ => "31",
-        };
-        format!("\x1b[{code}m{status}\x1b[0m")
-    } else {
-        status.to_string()
-    };
-    println!("{label} {}", envelope.command);
-    // A failed command reports its diagnostics, not the default result's
-    // metadata — a default `RefsResult` would print `<unknown>` usage counts
-    // that look like real answers (#446).
-    let metadata = match envelope.command.as_str() {
-        "check" => check_metadata(envelope),
-        _ if !envelope.ok && !envelope.gated => String::new(),
-        _ => envelope.result.metadata().unwrap_or_default(),
-    };
-    if !metadata.is_empty() {
-        println!("  {}", dim(&metadata, color));
-    }
-}
-
-/// The check verdict names the blocking error count first, then the
-/// non-blocking severities (#443). Under a finding selection the envelope
-/// keeps only the true total, so the count line falls back to it.
-fn check_metadata<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) -> String {
-    if let Some(selection) = &envelope.selection {
-        return format!("{} diagnostic(s)", selection.total);
-    }
-    let mut counts = [0usize; 3];
-    for diagnostic in &envelope.diagnostics {
-        counts[severity_rank(diagnostic.severity) as usize] += 1;
-    }
-    let mut parts = Vec::new();
-    if counts[0] > 0 {
-        parts.push(format!("{} error(s)", counts[0]));
-    }
-    if counts[1] > 0 {
-        parts.push(format!("{} warning(s)", counts[1]));
-    }
-    if counts[2] > 0 {
-        parts.push(format!("{} info diagnostic(s)", counts[2]));
-    }
-    if parts.is_empty() {
-        "0 diagnostic(s)".to_string()
-    } else {
-        parts.join(", ")
-    }
-}
-
-/// The closing check summary carries only execution metadata: files the
-/// reported diagnostics point at, plus elapsed time on the interactive
-/// terminal (kept off plain output so it stays deterministic) (#443).
-fn render_check_footer<T: serde::Serialize + ResultPresentation>(
-    envelope: &Envelope<T>,
-    pres: Presentation,
-    elapsed: Duration,
-) {
-    let files: BTreeSet<String> = envelope
-        .diagnostics
-        .iter()
-        .filter_map(|diagnostic| diagnostic.span.as_ref())
-        .filter(|span| is_real_source_path(&span.path))
-        .map(|span| display_location_path(&span.path))
-        .collect();
-    let mut parts = Vec::new();
-    if !files.is_empty() {
-        parts.push(format!("{} file(s) affected", files.len()));
-    }
-    if pres.interactive {
-        parts.push(format!("{} ms", elapsed.as_millis()));
-    }
-    if !parts.is_empty() {
-        println!(
-            "{}{}",
-            pres.footer_head(),
-            dim(&parts.join(" · "), pres.color)
-        );
     }
 }
 
@@ -536,24 +409,15 @@ fn dim(value: &str, color: bool) -> String {
     }
 }
 
-/// The markers for one item inside a grouped block (#703, #718): `head`
-/// starts the item's first line and `pad` prefixes each of its child lines.
-/// The terminal renderer emits the rail's marker characters and leaves the
-/// drawing to `rail::frame`, which sees the whole report; plain output keeps
-/// its flat deterministic contract, so the parts collapse to the existing
-/// indentation there.
+/// The markers for one item inside a grouped block (#703): `head` starts
+/// the item's first line and `pad` prefixes each of its child lines. The
+/// plain renderer's flat deterministic contract keeps both as indentation.
 struct Marks {
     head: String,
     pad: String,
 }
 
 impl Presentation {
-    /// Marks for a block hung directly under the verdict (envelope
-    /// diagnostics).
-    fn marks(&self) -> Marks {
-        self.connector("")
-    }
-
     /// Marks for an item under a section header's two-space indent.
     fn section_marks(&self) -> Marks {
         self.connector("  ")
@@ -562,26 +426,15 @@ impl Presentation {
     /// `base` is the item's own indent; its child lines sit two spaces
     /// deeper.
     fn connector(&self, base: &str) -> Marks {
-        if self.renderer != Renderer::Terminal {
-            return Marks {
-                head: base.to_string(),
-                pad: format!("{base}  "),
-            };
-        }
         Marks {
-            head: rail::BRANCH.to_string(),
-            pad: rail::CHILD.to_string(),
+            head: base.to_string(),
+            pad: format!("{base}  "),
         }
     }
 
-    /// The prefix of the closing metadata line: the rail's end on the
-    /// terminal, a plain indent elsewhere.
+    /// The prefix of the closing metadata line: a plain indent.
     fn footer_head(&self) -> &'static str {
-        if self.renderer == Renderer::Terminal {
-            rail::END
-        } else {
-            "  "
-        }
+        "  "
     }
 }
 
@@ -716,6 +569,7 @@ fn github_context(subject: Option<&str>) -> RenderContext<'_> {
             color: false,
             all: false,
             interactive: false,
+            width: MAX_WIDTH,
         },
         elapsed: Duration::ZERO,
         source_base: None,
@@ -948,44 +802,6 @@ impl ResultPresentation for CompileResult {
     }
     fn render_body(&self, _ctx: &RenderContext<'_>) {
         render_compile(self);
-    }
-}
-
-/// The run-cache comparison line (ADR-0027, #723): the delta against the
-/// previous run or named baseline, plus the rules whose counts changed.
-/// Absent entirely when no reference existed — never an error line.
-fn render_comparison(comparison: Option<&serde_json::Value>) {
-    let Some(comparison) = comparison.filter(|c| c.is_object()) else {
-        return;
-    };
-    let delta = comparison["totalDelta"].as_i64().unwrap_or(0);
-    let sign = if delta > 0 { "+" } else { "" };
-    let reference = comparison["reference"].as_str().unwrap_or("previous");
-    println!(
-        "\nElement cost: {sign}{delta} vs {reference} run ({} total)",
-        comparison["previousTotal"].as_u64().unwrap_or(0)
-    );
-    let mut lines = Vec::new();
-    for change in comparison["changed"].as_array().into_iter().flatten() {
-        let name = change["name"].as_str().unwrap_or("?");
-        let d = change["delta"].as_i64().unwrap_or(0);
-        let s = if d > 0 { "+" } else { "" };
-        lines.push(format!(
-            "  {name}: {} -> {} ({s}{d})",
-            change["before"], change["after"]
-        ));
-    }
-    for name in comparison["added"].as_array().into_iter().flatten() {
-        lines.push(format!("  {}: added", name.as_str().unwrap_or("?")));
-    }
-    for name in comparison["removed"].as_array().into_iter().flatten() {
-        lines.push(format!("  {}: removed", name.as_str().unwrap_or("?")));
-    }
-    for line in lines.iter().take(5) {
-        println!("{line}");
-    }
-    if lines.len() > 5 {
-        println!("  ... {} more changed rule(s)", lines.len() - 5);
     }
 }
 
@@ -2464,14 +2280,7 @@ fn render_essential_analyze(value: &serde_json::Value, ctx: &RenderContext<'_>) 
             risk["message"].as_str().unwrap_or_default()
         );
         if let Some(span) = finding_location_span(risk) {
-            // The terminal rail already aligns children under the item text;
-            // plain keeps its deeper hang.
-            let hang = if ctx.presentation.renderer == Renderer::Terminal {
-                ""
-            } else {
-                "  "
-            };
-            print_location(&span, &format!("{}{hang}", marks.pad));
+            print_location(&span, &format!("{}  ", marks.pad));
         }
     }
     if count(&value["persistentObjects"], "total") > 0 {
@@ -2685,66 +2494,6 @@ fn finding_severity_label(finding: &serde_json::Value, color: bool) -> String {
     }
 }
 
-/// The bare `inspect` overview (#446): the program inventory and a bounded
-/// rule preview answer "what is this", and the detail commands route the
-/// reader to the query that owns each full answer — the overview never dumps
-/// the symbol or reference lists those queries serve.
-fn render_diagnostic(diagnostic: &wright_driver::Diagnostic, color: bool, marks: &Marks) {
-    let sev = diagnostic.severity.as_str();
-    let label = if color {
-        let code = match diagnostic.severity {
-            Severity::Error => "31",
-            Severity::Warning => "33",
-            Severity::Info => "36",
-        };
-        format!("\x1b[{code}m{sev}\x1b[0m")
-    } else {
-        sev.to_string()
-    };
-    eprintln!(
-        "{}{label}[{}]: {}",
-        marks.head, diagnostic.code, diagnostic.message
-    );
-    // Secondary notes — locations without a mapped source file, the owning
-    // stage, and non-native input origins — render dimmed under the problem
-    // line rather than competing with it (#443).
-    let mut notes = Vec::new();
-    if let Some(span) = &diagnostic.span {
-        if is_real_source_path(&span.path) {
-            eprintln!(
-                "{}--> {}:{}:{}",
-                marks.pad,
-                display_location_path(&span.path),
-                span.start.line,
-                span.start.col
-            );
-            // The source frame stays on the diagnostic stream so the context
-            // is emitted directly with the diagnostic it explains (#443).
-            if let Some(context) =
-                source_context(&span.path, span.start.line, span.start.col, &marks.pad)
-            {
-                eprintln!("{context}");
-            }
-        } else {
-            notes.push(format!(
-                "at {}:{}:{} (no source file)",
-                span.path, span.start.line, span.start.col
-            ));
-        }
-    }
-    notes.push(diagnostic.stage.as_str().to_string());
-    if let Some(source) = &diagnostic.source {
-        if source.kind != "workshop" {
-            notes.push(format!("{kind} source", kind = source.kind));
-        }
-    }
-    eprintln!(
-        "{}{}",
-        marks.pad,
-        dim(&format!("= {}", notes.join(" · ")), color)
-    );
-}
-
 /// The user-facing spelling of a reported path: cwd-relative when possible so
 /// locations read the same regardless of which stage produced them (#443).
 pub(crate) fn display_location_path(path: &str) -> String {
@@ -2788,6 +2537,7 @@ mod tests {
             no_color: false,
             force_color: false,
             term_dumb: false,
+            columns: None,
         }
     }
 
@@ -3157,39 +2907,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn check_metadata_counts_errors_first() {
-        let envelope = check_envelope(
-            vec![
-                diagnostic(Severity::Warning),
-                diagnostic(Severity::Error),
-                diagnostic(Severity::Warning),
-                diagnostic(Severity::Info),
-            ],
-            None,
-        );
-        assert_eq!(
-            check_metadata(&envelope),
-            "1 error(s), 2 warning(s), 1 info diagnostic(s)"
-        );
-        let clean = check_envelope(Vec::new(), None);
-        assert_eq!(check_metadata(&clean), "0 diagnostic(s)");
-    }
-
-    #[test]
-    fn check_metadata_under_selection_reports_the_true_total() {
-        let envelope = check_envelope(
-            vec![diagnostic(Severity::Error)],
-            Some(wright_driver::SelectionOutcome {
-                total: 5,
-                withheld: 2,
-                by_code: Default::default(),
-                max_severity: Some(Severity::Error),
-            }),
-        );
-        assert_eq!(check_metadata(&envelope), "5 diagnostic(s)");
-    }
-
     fn lint_result(
         findings: serde_json::Value,
         selection: Option<wright_driver::SelectionOutcome>,
@@ -3261,6 +2978,7 @@ mod tests {
                 color: false,
                 interactive,
                 all: false,
+                width: MAX_WIDTH,
             },
             elapsed: Duration::from_millis(42),
             source_base: None,

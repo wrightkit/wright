@@ -1,0 +1,22 @@
+---
+source: crates/wright-cli/tests/terminal.rs
+expression: transcript(&out)
+---
+exit: 1
+--- stdout ---
+ FAIL  lint
+  1 warning
+
+Lint findings (evidence: static-indicator)
+  warning[min-wait-loop]: loop body waits at the workshop minimum rate; the loop runs at maximum frequency
+    --> flow.ws:11:9
+    | 11 |         While(Compare(Global.index, <, 3));
+    |    |         ^
+  1 file affected
+  lint --all; lintRules for effective configuration and rule metadata
+
+Next
+  wright lint --fix
+  wright analyze
+  wright inspect cost
+--- stderr ---

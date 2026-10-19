@@ -191,7 +191,7 @@ short anti-flicker threshold; phase output is transient and is fully cleared
 before the final verdict, diagnostics, report, or source artifact is rendered.
 Completed `check`, `lint`, `analyze`, `inspect`, and the `inspect` query
 subcommands (`symbols`, `refs`, `cfg`, `callgraph`, `cost`) print a
-command-specific PASS/WARN/FAIL/ERROR verdict and compact summary before details;
+command-specific verdict tag and compact summary before details;
 diagnostics and findings include a one-line source context when the reported
 provenance path is readable. The driver exposes typed progress events through
 `ProgressObserver`; no terminal strings, spinner frames, ANSI sequence, or
@@ -199,22 +199,35 @@ source context enters the driver envelope or JSON. Plain output,
 redirected/piped output, `TERM=dumb`, CI, GitHub Actions, and explicit JSON
 rendering remain static and deterministic.
 
-On the terminal renderer only, a report with independent multi-line items
-is drawn on one continuous rail (#703, #718). The verdict line opens it with
-`╭─`, every section heading, count, and child line continues it with `│`,
-each item (envelope diagnostic, lint finding or fix entry, analyze risk
-item, `inspect cfg` block, `inspect rules --content` entry) branches off with
-`├─`, and the footer closes it with `╰─`, even when a trailing detail hint follows
-it in the flat layout; a report without a footer ends on a bare `╰─`. A blank rail line separates independent blocks, except
-between a one-line section heading and its first item. Content sits on one
-column, so locations, source frames, and secondary notes align under the item
-text. Rail glyphs draw dim when color is on, so severity labels and messages
-keep prominence. A report with no multi-line item, such as a clean `check`
-(two undecorated lines), stays flat. The rail is a terminal detail: lines keep
-the stdout/stderr stream they use elsewhere, `plain`, GitHub Actions, CI, and
-JSON keep their existing undecorated layout byte-for-byte, and the reported
-findings, verdicts, exit codes, caps, and `--all` expansion are identical
-across renderers.
+On the terminal renderer only, a report leads with one filled element —
+the verdict tag (#795, ADR-0030 decision 4). The tag word maps to the exit
+code: `PASS` or `WARN` for clean results, `FAIL` for a `--fail-on`-gated
+result, `USAGE` for exit 2, `UNSUPPORTED` for exit 3, and `ERROR` for
+other failures; a successful query command shows its own name (`INSPECT`,
+`SYMBOLS`, `CFG`, `COST`, `LOOKUP`, …) rather than a judging word. A
+status word names the command after it (` WARN  lint`); a query tag
+stands alone. Colour is semantic and drawn from the eight ANSI hues only —
+green pass, yellow warn, red error class, cyan neutral — but the word
+alone carries the status, so the report reads identically with
+`--color never` and under `NO_COLOR`. Sections then group the report:
+headings name each area (stating uniform evidence once, such as
+`Lint findings (evidence: static-indicator)`, instead of repeating it per
+item), items indent under their section, and locations, source frames,
+and secondary notes indent under their item. Counts are plain plurals —
+`1 error, 2 warnings` — never `(s)` suffixes, and a failed computation
+reports unavailable with its reason rather than a fabricated value.
+The layout caps at 100 columns regardless of terminal width; below 90
+columns it switches to the compact layout where children of a section
+item align at the item's column instead of indenting deeper, and
+`COLUMNS` overrides the detected width. Commands that stream an operation
+rather than produce a report (`update`) close their lines with the tag
+instead of leading with it, and artifact commands (`convert`,
+`compile -o -`) keep stdout pure, letting the tag and diagnostics ride
+stderr only when there is something to report. The tag is a terminal
+detail: lines keep the stdout/stderr stream they use elsewhere, `plain`,
+GitHub Actions, CI, and JSON keep their existing undecorated layout, and
+the reported findings, verdicts, exit codes, caps, and `--all` expansion
+are identical across renderers.
 
 The `check` report follows a human-first hierarchy (#443): the verdict line
 leads with the blocking error count before the non-blocking severities, and

@@ -992,3 +992,99 @@ fn help_documents_the_update_command() {
         "help documents --version"
     );
 }
+
+#[test]
+fn terminal_update_closes_with_the_verdict_tag() {
+    // `update` streams operation lines, so the terminal tag closes the
+    // output instead of leading it (#795); the operation lines and exit
+    // code are unchanged.
+    let dir = install_dir("terminal-close");
+    let server = MockServer::new(release(RELEASE).files);
+    let output = run_update(
+        &dir,
+        &[
+            "update",
+            "--check",
+            "--renderer",
+            "terminal",
+            "--color",
+            "never",
+        ],
+        &provider_env(&server),
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("update available"),
+        "the operation lines still stream: {stdout}"
+    );
+    assert!(
+        stdout.ends_with(" PASS  update\n"),
+        "the verdict tag closes the stream: {stdout}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn terminal_update_reports_failures_under_the_tag() {
+    // A rejected self-update names the tag word for its exit class and
+    // carries the reason under it (#795).
+    let dir = install_dir("terminal-error");
+    let output = run_update(
+        &dir,
+        &[
+            "update",
+            "self",
+            "--version",
+            "0.0.1",
+            "--renderer",
+            "terminal",
+            "--color",
+            "never",
+        ],
+        &[("WRIGHT_INSTALL_BASE_URL", "http://127.0.0.1:1".to_string())],
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.starts_with(" ERROR  update\n"),
+        "the error tag leads: {stderr}"
+    );
+    assert!(
+        stderr.contains("refusing to downgrade"),
+        "the rejection reason hangs under it: {stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn terminal_update_reports_unsupported_platforms() {
+    // `update self` on Windows is UNSUPPORTED (exit 3) and reports under
+    // the tag (#795).
+    let dir = install_dir("terminal-unsupported");
+    let output = run_update(
+        &dir,
+        &[
+            "update",
+            "self",
+            "--renderer",
+            "terminal",
+            "--color",
+            "never",
+        ],
+        &[("WRIGHT_INSTALL_OS", "windows".to_string())],
+    );
+    assert_eq!(output.status.code(), Some(3));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.starts_with(" UNSUPPORTED  update\n"),
+        "the unsupported tag leads: {stderr}"
+    );
+    assert!(stderr.contains("not supported on Windows"), "{stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

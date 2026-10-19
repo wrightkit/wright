@@ -1,0 +1,22 @@
+---
+source: crates/wright-cli/tests/terminal.rs
+expression: transcript(&out)
+---
+exit: 0
+--- stdout ---
+<ESC>[43;30m WARN <ESC>[0m lint
+  <ESC>[2m1 warning<ESC>[0m
+
+<ESC>[1mLint findings (evidence: static-indicator)<ESC>[0m
+  <ESC>[33mwarning<ESC>[0m[min-wait-loop]: loop body waits at the workshop minimum rate; the loop runs at maximum frequency
+    --> flow.ws:11:9
+    | 11 |         While(Compare(Global.index, <, 3));
+    |    |         ^
+  <ESC>[2m1 file affected<ESC>[0m
+  <ESC>[2mlint --all; lintRules for effective configuration and rule metadata<ESC>[0m
+
+<ESC>[1mNext<ESC>[0m
+  wright lint --fix
+  wright analyze
+  wright inspect cost
+--- stderr ---

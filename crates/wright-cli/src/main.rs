@@ -5,7 +5,6 @@ mod completion;
 mod mcp;
 mod plain;
 mod present;
-mod rail;
 mod serve;
 mod tooldefs;
 mod ui;
@@ -34,6 +33,21 @@ fn version_banner() -> String {
     )
 }
 
+/// The command a usage error names: the first argument that is a real
+/// subcommand, else the CLI name itself.
+fn usage_subject(args: &[std::ffi::OsString]) -> String {
+    let names: Vec<String> = Cli::command()
+        .get_subcommands()
+        .map(|command| command.get_name().to_string())
+        .collect();
+    args.iter()
+        .skip(1)
+        .filter_map(|arg| arg.to_str())
+        .find(|arg| names.iter().any(|name| name == arg))
+        .unwrap_or(CLI_NAME)
+        .to_string()
+}
+
 fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().collect();
     if args.len() == 2 && args[1] == "--version" {
@@ -41,10 +55,22 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    let cli = match Cli::try_parse_from(args) {
+    let cli = match Cli::try_parse_from(args.clone()) {
         Ok(cli) => cli,
         Err(error) => {
             let code = error.exit_code();
+            let pres = present::Presentation::from_output(
+                cli::OutputFormatArg::Text,
+                cli::RendererArg::Auto,
+                cli::ColorArg::Auto,
+            );
+            if pres.is_terminal() {
+                eprintln!(
+                    "{} {}",
+                    present::terminal::tag("USAGE", pres.color),
+                    usage_subject(&args)
+                );
+            }
             let _ = error.print();
             return ExitCode::from(code as u8);
         }
@@ -83,20 +109,53 @@ fn main() -> ExitCode {
                     ExitCode::SUCCESS
                 }
                 None => {
-                    eprintln!(
-                        "wright: specify a shell (bash, zsh, fish, powershell) or 'install' (run 'wright completion --help' for details)"
+                    let pres = present::Presentation::from_output(
+                        cli::OutputFormatArg::Text,
+                        cli::RendererArg::Auto,
+                        cli::ColorArg::Auto,
+                    );
+                    present::terminal::report_error(
+                        pres,
+                        "USAGE",
+                        "completion",
+                        "specify a shell (bash, zsh, fish, powershell) or 'install' (run 'wright completion --help' for details)",
                     );
                     ExitCode::from(exit::USAGE)
                 }
             },
         },
-        Some(Command::Update(args)) => match update::run(&args) {
-            Ok(code) => ExitCode::from(code),
-            Err(error) => {
-                eprintln!("{}", error.record());
-                ExitCode::from(error.exit_code())
+        // `update` streams its operation lines; the terminal report's
+        // verdict tag closes them instead of leading (ADR-0030 decision 4).
+        Some(Command::Update(args)) => {
+            let pres = present::Presentation::from_output(
+                cli::OutputFormatArg::Text,
+                args.renderer,
+                args.color,
+            );
+            match update::run(&args, pres) {
+                // A nonzero code was already reported at its source; only a
+                // clean operation closes with the PASS tag.
+                Ok(code) => {
+                    if code == exit::SUCCESS {
+                        present::terminal::report_close(pres, "update", "PASS");
+                    }
+                    ExitCode::from(code)
+                }
+                Err(error) => {
+                    if pres.is_terminal() {
+                        present::terminal::report_error(
+                            pres,
+                            present::terminal::exit_word(error.exit_code()),
+                            "update",
+                            error.message(),
+                        );
+                    } else {
+                        eprintln!("{}", error.record());
+                    }
+                    ExitCode::from(error.exit_code())
+                }
             }
-        },
+        }
         Some(Command::Agent(args)) => match agent::run(&args) {
             Ok(code) => ExitCode::from(code),
             Err(error) => {
@@ -117,6 +176,7 @@ fn run_workflow(command: Command) -> ExitCode {
                 ConvertTargetArg::Ostw => wright_driver::ConvertTarget::Ostw,
             };
             run_configured(
+                "convert",
                 config_from_common(&args.common),
                 present::Presentation::from_common(&args.common),
                 fail_on(&args.common),
@@ -128,6 +188,7 @@ fn run_workflow(command: Command) -> ExitCode {
             let mut config = config_from_common(&args.common);
             config.selection = selection_from_args(&args.select);
             run_configured(
+                "check",
                 config,
                 present::Presentation::from_common(&args.common).with_all(args.all),
                 fail_on(&args.common),
@@ -140,6 +201,7 @@ fn run_workflow(command: Command) -> ExitCode {
             config.selection = selection_from_args(&args.select);
             let presentation = present::Presentation::from_common(&args.common);
             run_configured(
+                "analyze",
                 config,
                 presentation.with_all(args.all),
                 fail_on(&args.common),
@@ -157,12 +219,18 @@ fn run_workflow(command: Command) -> ExitCode {
             let mut config = config_from_common(&args.common);
             config.selection = selection_from_args(&args.select);
             if let Err(message) = args.policy.apply_to(&mut config) {
-                eprintln!("wright: {message}");
+                present::terminal::report_error(
+                    present::Presentation::from_common(&args.common),
+                    "USAGE",
+                    "lint",
+                    &message,
+                );
                 return ExitCode::from(exit::USAGE);
             }
             let presentation = present::Presentation::from_common(&args.common);
             if args.fix {
                 return run_configured(
+                    "lint",
                     config,
                     presentation,
                     fail_on(&args.common),
@@ -171,6 +239,7 @@ fn run_workflow(command: Command) -> ExitCode {
                 );
             }
             run_configured(
+                "lint",
                 config,
                 presentation.with_all(args.all),
                 fail_on(&args.common),
@@ -186,6 +255,7 @@ fn run_workflow(command: Command) -> ExitCode {
         }
         Command::Inspect(args) => match args.query {
             None => run_configured(
+                "inspect",
                 config_from_common(&args.common),
                 present::Presentation::from_common(&args.common).with_all(args.all),
                 fail_on(&args.common),
@@ -199,6 +269,7 @@ fn run_workflow(command: Command) -> ExitCode {
                 },
             ),
             Some(cli::InspectQuery::Rules(query)) => run_configured(
+                "rules",
                 config_from_common(&query.common),
                 present::Presentation::from_common(&query.common).with_all(query.all),
                 fail_on(&query.common),
@@ -224,6 +295,7 @@ fn run_workflow(command: Command) -> ExitCode {
             Some(cli::InspectQuery::Symbols(query)) => {
                 let kind = query.only.map(|kind| kind.as_str().to_string());
                 run_configured(
+                    "symbols",
                     config_from_common(&query.common),
                     present::Presentation::from_common(&query.common).with_all(query.all),
                     fail_on(&query.common),
@@ -242,6 +314,7 @@ fn run_workflow(command: Command) -> ExitCode {
             Some(cli::InspectQuery::Refs(query)) => {
                 let kind = query.only.map(|kind| kind.as_str().to_string());
                 run_configured(
+                    "refs",
                     config_from_common(&query.common),
                     present::Presentation::from_common(&query.common).with_all(query.all),
                     fail_on(&query.common),
@@ -263,6 +336,7 @@ fn run_workflow(command: Command) -> ExitCode {
                 let subject = query.rule.clone();
                 let kind = query.only.map(|kind| kind.as_str().to_string());
                 run_configured(
+                    "cfg",
                     config_from_common(&query.common),
                     present::Presentation::from_common(&query.common).with_all(query.all),
                     fail_on(&query.common),
@@ -279,6 +353,7 @@ fn run_workflow(command: Command) -> ExitCode {
                 )
             }
             Some(cli::InspectQuery::Callgraph(query)) => run_configured(
+                "callgraph",
                 config_from_common(&query.common),
                 present::Presentation::from_common(&query.common).with_all(query.all),
                 fail_on(&query.common),
@@ -304,8 +379,11 @@ fn run_workflow(command: Command) -> ExitCode {
                         || query.select.max.is_some()
                         || query.select.file.is_some())
                 {
-                    eprintln!(
-                        "wright: 'inspect cost --rule' reports one rule's element cost; finding selection (--severity/--rule-id/--max/--file) does not apply"
+                    present::terminal::report_error(
+                        present::Presentation::from_common(&query.common),
+                        "USAGE",
+                        "inspect cost",
+                        "'inspect cost --rule' reports one rule's element cost; finding selection (--severity/--rule-id/--max/--file) does not apply",
                     );
                     return ExitCode::from(exit::USAGE);
                 }
@@ -318,6 +396,7 @@ fn run_workflow(command: Command) -> ExitCode {
                     max_total: query.max_total,
                 };
                 run_configured(
+                    "cost",
                     config,
                     present::Presentation::from_common(&query.common).with_all(query.all),
                     fail_on(&query.common),
@@ -356,7 +435,13 @@ fn essential_envelope<T: serde::Serialize>(
     })
 }
 
-fn run_configured<T: serde::Serialize + present::ResultPresentation + plain::PlainReport>(
+fn run_configured<
+    T: serde::Serialize
+        + present::ResultPresentation
+        + plain::PlainReport
+        + present::terminal::TerminalReport,
+>(
+    name: &'static str,
     config: SessionConfig,
     presentation: present::Presentation,
     fail_on: Option<wright_driver::Severity>,
@@ -366,7 +451,7 @@ fn run_configured<T: serde::Serialize + present::ResultPresentation + plain::Pla
     let mut session = match wright_driver::CompilerSession::new(config) {
         Ok(session) => session,
         Err(diagnostic) => {
-            eprintln!("wright: {}", diagnostic.message);
+            present::terminal::report_error(presentation, "USAGE", name, &diagnostic.message);
             return ExitCode::from(exit::USAGE);
         }
     };
@@ -385,8 +470,11 @@ fn run_configured<T: serde::Serialize + present::ResultPresentation + plain::Pla
 fn run_compile(args: &cli::CompileArgs) -> ExitCode {
     let to_stdout = args.output.as_deref().is_some_and(|p| p.as_os_str() == "-");
     if to_stdout && args.common.format == OutputFormatArg::Json {
-        eprintln!(
-            "wright: -o - prints the program to stdout and cannot be combined with --format json"
+        present::terminal::report_error(
+            present::Presentation::from_common(&args.common),
+            "USAGE",
+            "compile",
+            "-o - prints the program to stdout and cannot be combined with --format json",
         );
         return ExitCode::from(exit::USAGE);
     }
@@ -406,6 +494,7 @@ fn run_compile(args: &cli::CompileArgs) -> ExitCode {
         max_total: None,
     };
     run_configured(
+        "compile",
         compile_config,
         present::Presentation::from_common(&args.common),
         fail_on(&args.common),
@@ -481,6 +570,7 @@ fn copy_to_clipboard(text: &str) -> Result<(), arboard::Error> {
 /// with its kind and identity; JSON mode prints the result `wright serve`
 /// returns for the same request.
 fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
+    let pres = present::Presentation::from_output(args.format, args.renderer, args.color);
     let config = SessionConfig {
         input: InputSpec::Text {
             text: String::new(),
@@ -495,14 +585,14 @@ fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
     let mut session = match wright_driver::CompilerSession::new(config) {
         Ok(session) => session,
         Err(diagnostic) => {
-            eprintln!("wright: {}", diagnostic.message);
+            present::terminal::report_error(pres, "USAGE", "lookup", &diagnostic.message);
             return ExitCode::from(exit::USAGE);
         }
     };
     let mut service = match wright_driver::service::ToolService::new(&mut session) {
         Ok(service) => service,
         Err(diagnostic) => {
-            eprintln!("wright: {}", diagnostic.message);
+            present::terminal::report_error(pres, "USAGE", "lookup", &diagnostic.message);
             return ExitCode::from(exit::USAGE);
         }
     };
@@ -521,13 +611,34 @@ fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
                     "{}",
                     serde_json::to_string(&result).expect("result serializes")
                 ),
+                OutputFormatArg::Text if pres.is_terminal() => {
+                    // An unavailable or empty answer reports on the
+                    // diagnostic stream; `lookup` renders on stdout only
+                    // when there are entries to list.
+                    if result.get("unavailable").is_some()
+                        || result["entries"]
+                            .as_array()
+                            .is_some_and(|entries| !entries.is_empty())
+                    {
+                        present::terminal::lookup(&result, pres);
+                    }
+                }
                 OutputFormatArg::Text => print_lookup_text(&result, args.language.as_str()),
             }
             if result.get("unavailable").is_some() {
                 return ExitCode::from(exit::UNSUPPORTED);
             }
             if result["entries"].as_array().is_none_or(Vec::is_empty) {
-                eprintln!("error: no-entries message=\"lookup returned no entries\"");
+                if pres.is_terminal() {
+                    present::terminal::report_error(
+                        pres,
+                        "ERROR",
+                        "lookup",
+                        "lookup returned no entries",
+                    );
+                } else {
+                    eprintln!("error: no-entries message=\"lookup returned no entries\"");
+                }
                 return ExitCode::from(exit::SOURCE_ERROR);
             }
             ExitCode::SUCCESS
@@ -540,22 +651,35 @@ fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
                         .expect("error serializes")
                 ),
                 OutputFormatArg::Text => {
-                    // `invalid-*` request errors are the CLI's usage
-                    // failures; anything else is a source error (exit 1/2).
-                    let word = if error.code.starts_with("invalid-") {
-                        "USAGE"
+                    if pres.is_terminal() {
+                        present::terminal::lookup_error(
+                            pres,
+                            if error.code.starts_with("invalid-") {
+                                "USAGE"
+                            } else {
+                                "ERROR"
+                            },
+                            &error.code,
+                            &error.message,
+                        );
                     } else {
-                        "ERROR"
-                    };
-                    println!(
-                        "{word} lookup {}",
-                        plain::field("language", args.language.as_str())
-                    );
-                    eprintln!(
-                        "error: {} {}",
-                        error.code,
-                        plain::field("message", &error.message)
-                    );
+                        // `invalid-*` request errors are the CLI's usage
+                        // failures; anything else is a source error.
+                        let word = if error.code.starts_with("invalid-") {
+                            "USAGE"
+                        } else {
+                            "ERROR"
+                        };
+                        println!(
+                            "{word} lookup {}",
+                            plain::field("language", args.language.as_str())
+                        );
+                        eprintln!(
+                            "error: {} {}",
+                            error.code,
+                            plain::field("message", &error.message)
+                        );
+                    }
                 }
             }
             if error.code.starts_with("invalid-") {
@@ -734,7 +858,12 @@ fn is_directory_input(common: &CommonArgs) -> bool {
 }
 
 /// Run one driver workflow and render its envelope in the CLI presentation.
-fn run_command<T: serde::Serialize + present::ResultPresentation + plain::PlainReport>(
+fn run_command<
+    T: serde::Serialize
+        + present::ResultPresentation
+        + plain::PlainReport
+        + present::terminal::TerminalReport,
+>(
     session: &mut wright_driver::CompilerSession,
     run: impl FnOnce(&mut wright_driver::CompilerSession) -> wright_driver::Envelope<T>,
     presentation: present::Presentation,
