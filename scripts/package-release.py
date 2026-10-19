@@ -34,6 +34,11 @@ def main() -> int:
     parser.add_argument("--extension", choices=("tar.gz", "zip"), required=True)
     parser.add_argument("--commit", required=True)
     parser.add_argument("--runner-os", required=True)
+    parser.add_argument(
+        "--features",
+        default="",
+        help="Cargo feature spec the binaries were built with, recorded verbatim",
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("dist"))
     args = parser.parse_args()
     version = args.version.removeprefix("v")
@@ -92,7 +97,7 @@ def main() -> int:
         "toolchain": "stable",
         "profile": "release",
         "packages": ["wright-cli", "wright-lsp"],
-        "features": [],
+        "features": args.features.split(),
     }
     archive.with_name(f"{archive.name}.build.json").write_text(
         json.dumps(identity, separators=(",", ":")) + "\n"

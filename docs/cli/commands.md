@@ -45,6 +45,7 @@ result.
 | `wright inspect cost [INPUT] [--rule RULE] [--no-cache] [--baseline NAME] [--save-baseline NAME] [--max-total N]` | Exact generated-resource counts plus static findings; `--rule` drills into one rule's element cost, and by default the run compares against the previous run's element cost | resource counts and findings plus the change against the previous run or named baseline, or the rule's statements and node-name shares |
 | `wright lookup [QUERY]` | Resolve a Workshop or OverPy display name, near spelling, or guess to the owner-accepted spelling and signature (#529); takes no input | one line per entry: signature or spelling, kind, identity |
 | `wright serve [INPUT] [--transport T] [--kind K] [--profile P] [--lint-config YAML] [--rule PATH] [--disable-rule ID] [--rule-severity ID:SEV]` | Serve `wright-agent/v1` over stdio, JSON-RPC 2.0, or MCP | one structured response per request |
+| `wright ui [INPUT] [--kind K] [--locale L] [--profile P] [--lint-config YAML] [--rule PATH] [--disable-rule ID] [--rule-severity ID:SEV] [--no-open]` | Serve the local read-only Workshop project view on loopback and open it in the default browser (ADR-0032); `--no-open` prints the URL only | the session URL on stdout |
 | `wright completion <SHELL>` | Generate static completion script for bash, zsh, fish, or powershell | the generated completion script |
 | `wright completion install [SHELL]` | Install generated completion into standard user-local directory | installation progress and guidance |
 | `wright update [self\|provider [NAME]]` | Update Wright-managed components: a standalone installation and installed first-party providers | update progress (text only) |
@@ -360,6 +361,35 @@ prints a one-line hint after each `unknown-*` diagnostic pointing here
   callable or otherwise the accepted spelling, with its kind and owner identity.
   `-f json` prints the same `result` payload `serve` returns
   (`language`, `owner`, `entries[]`, or `unavailable`).
+
+## `wright ui`: the local Workshop project view (ADR-0032)
+
+`wright ui [INPUT]` binds one project exactly like `wright serve` — the
+same input default (the current directory), `--kind`, `--locale`,
+`--profile`, and lint-policy flags — then serves a read-only browser view
+of it on a loopback address until interrupted. The view is raw Workshop
+only: OPY and OSTW inputs are refused at startup with the owning
+implementation named (opy-rs, deltin-rs), and `-` is refused because the
+command does not read a program from stdin.
+
+The server binds `127.0.0.1` on an ephemeral port, prints the session URL
+on stdout — the per-session token rides the URL fragment, which browsers
+never send — and opens it in the default browser. `--no-open` prints the
+URL without opening anything, for tests and headless use.
+
+* The single endpoint, `POST /api`, takes a `wright-agent/v1` request body
+  and returns the `ToolService` response body unchanged — byte-identical
+  to what `wright serve` writes for the same request (ADR-0032 decision 3).
+* Every request must name the bound loopback authority in `Host` and, when
+  a browser `Origin` is present, the server's own origin; endpoint
+  requests additionally carry the session token as
+  `Authorization: Bearer <token>`. Refusals answer `403`, and the server
+  sends no CORS headers (ADR-0032 decision 4).
+
+The page ships embedded in the binary: release builds compile `ui/` and
+enable the `ui` Cargo feature. Builds without the feature — a plain
+`cargo build`, which needs no Node toolchain — compile the command as a
+stub that prints `this build does not include \`wright ui\`` and exits 2.
 
 ## `wright convert` and the reconstruction surface (#126)
 
