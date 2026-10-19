@@ -25,3 +25,15 @@ Short review queue of reusable failure classes from merged Wright work. Each ent
 - **Why:** Two PRs written under a newer local toolchain shipped let-chains; each needed a pushed fix after the MSRV job failed. `workshop-rs` already carried the same rule in its `AGENTS.md` since 2026-10-15, but the rule had not propagated to sibling repositories.
 - **Prevention home:** the `cargo +1.85.0` pre-push gate now stated in `AGENTS.md` (ported from workshop-rs#457); the `Rust (1.85.0)` CI job remains the backstop.
 - **Incidents:** [wright#743](https://github.com/wrightkit/wright/pull/743), observed 2026-10-18; same class in [opy-rs#574](https://github.com/wrightkit/opy-rs/pull/574) the same day, recorded in opy-rs's `docs/LESSONS.md` and the escalation issue.
+
+### Usage validation that needs no loaded state runs before project load
+- **Rule:** A new flag's or argument's usage-error check must run where its inputs exist. When the verdict needs only session-construction fields (catalog, declared locales), gate before `load_with_operation`, not after.
+- **Why:** `compile --to <bad-locale>` spawned the provider and loaded the project before reporting `invalid-locale`; a review follow-up moved the gate first.
+- **Prevention home:** CLI review judgment plus the landed ordering test — a bad `--to` on an unloadable source reports `invalid-locale` (landed in #768).
+- **Incidents:** [wright#760](https://github.com/wrightkit/wright/pull/760), fixed by [wright#768](https://github.com/wrightkit/wright/pull/768) — observed 2026-10-18
+
+### A rejection fixture must pin to a key the owner guarantees stays rejected
+- **Rule:** When a fixture asserts a value is rejected, choose a key the owning repository's own tests assert remains rejected — not a key that merely happens to be rejected today.
+- **Why:** The zh-CN rejected-value fixture keyed on a spelling workshop-rs#479 then legitimately accepted as the secondary-fire switch's off spelling; the fixture would have broken on the next dependency bump.
+- **Prevention home:** fixture-authoring review plus the re-pinned fixture keyed on an owner-guaranteed rejection (landed in #766).
+- **Incidents:** [wright#757](https://github.com/wrightkit/wright/pull/757), fixed by [wright#766](https://github.com/wrightkit/wright/pull/766) — observed 2026-10-18
