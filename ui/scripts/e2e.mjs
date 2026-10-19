@@ -114,14 +114,15 @@ function nextLine(stream) {
 async function waitLine(read, predicate, what, timeoutMs = 15_000) {
   const deadline = Date.now() + timeoutMs
   for (;;) {
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) throw new Error(`timed out waiting for ${what}`)
     const line = await Promise.race([
       read(),
       new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`timed out waiting for ${what}`)), 5_000),
+        setTimeout(() => reject(new Error(`timed out waiting for ${what}`)), remaining),
       ),
     ])
     if (predicate(line)) return line
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`)
   }
 }
 
@@ -273,6 +274,7 @@ async function main() {
       nextLine(chrome.stderr),
       (line) => line.startsWith('DevTools listening on ws://'),
       'the browser DevTools endpoint',
+      30_000,
     )
     const wsUrl = wsLine.trim().replace(/^DevTools listening on\s*/, '')
 
