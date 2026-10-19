@@ -7,6 +7,7 @@ exit 0
 WARN lint root=. kind=workshop locale=en-us
 summary: findings=1 errors=0 warnings=1 notes=0 rules=7 fixes=1 applied=0 previewed=1 refused=0 affected=1
 finding: warning duplicate-condition at=fixable.ws:13:33 action=2 evidence=exact rule=0 value=4 message="an Else If condition repeats an earlier branch's condition in the same If/Else If chain; that branch can never be taken"
+program: files=1 rules=1 globalVariables=2 playerVariables=0 subroutines=0
 fix: preview duplicate-condition at=fixable.ws:13:33 summary="remove the unreachable Else If branch, keeping the rest of the chain"
 patch: source=fixable.ws
 patch:   13 - 		Else If(Compare(Global.index, ==, 0));
