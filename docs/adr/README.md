@@ -49,4 +49,5 @@ its audit date.
 * [ADR-0027: Project run cache and comparison against the previous run](0027-project-run-cache.md)
 * [ADR-0028: Transformation profiles apply to Workshop input only](0028-profile-applies-to-workshop-input-only.md)
 * [ADR-0029: Structured statement edits for raw Workshop](0029-structured-statement-edits.md)
+* [ADR-0030: One result model, three renderers, and the CLI/action boundary](0030-renderers-and-the-cli-action-boundary.md)
 * [Post-ADR-0010 decision inventory](post-0010-inventory.md)
