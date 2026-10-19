@@ -102,7 +102,8 @@ if ($OsArchitecture -ne "AMD64") {
 
 $BaseUrl = Resolve-Setting $BaseUrl "WRIGHT_INSTALL_BASE_URL" "https://install.wrightkit.dev/wright"
 $Version = Get-Version $Version $BaseUrl
-if (-not $InstallDir) {
+$DefaultInstallDir = -not $InstallDir
+if ($DefaultInstallDir) {
     $InstallRoot = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { $env:USERPROFILE }
     if (-not $InstallRoot) { Fail "could not determine a user-writable install directory; pass -InstallDir" }
     $InstallDir = Join-Path $InstallRoot "Programs\Wright\bin"
@@ -175,10 +176,17 @@ try {
         $_.Trim().TrimEnd("\") -ieq $PathEntry
     }).Count -gt 0
     if (-not $PathContainsInstallDir) {
-        $DisplayPath = $InstallDir.Replace("'", "''")
-        Write-Host "note: '$InstallDir' is not on your user PATH; add it and open a new terminal to use wright by name:"
-        Write-Host "  `$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')"
-        Write-Host "  [Environment]::SetEnvironmentVariable('Path', (`$userPath.TrimEnd(';') + ';$DisplayPath'), 'User')"
+        if ($DefaultInstallDir) {
+            $NewUserPath = (@($PathEntries | Where-Object { $_.Trim() }) + $PathEntry) -join ";"
+            [Environment]::SetEnvironmentVariable("Path", $NewUserPath, "User")
+            $env:Path = "$env:Path;$PathEntry"
+            Write-Host "==> added '$PathEntry' to your user PATH; terminals opened from now on can run wright"
+        } else {
+            $DisplayPath = $InstallDir.Replace("'", "''")
+            Write-Host "note: '$InstallDir' is not on your user PATH; add it and open a new terminal to use wright by name:"
+            Write-Host "  `$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')"
+            Write-Host "  [Environment]::SetEnvironmentVariable('Path', (`$userPath.TrimEnd(';') + ';$DisplayPath'), 'User')"
+        }
     }
     Write-Host "==> done: wright and wright-lsp $Version installed in $InstallDir"
 } finally {
