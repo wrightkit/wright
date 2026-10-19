@@ -13,12 +13,12 @@ Program overview
 Rules
   bounded while
   branch
+  inspect symbols, refs, cfg, callgraph, cost; --all for all rule names
 
-Detail commands
+Next
   wright inspect symbols
   wright inspect refs <NAME>
   wright inspect cfg <RULE>
   wright inspect callgraph
   wright inspect cost
-  inspect symbols, refs, cfg, callgraph, cost; --all for all rule names
 --- stderr ---

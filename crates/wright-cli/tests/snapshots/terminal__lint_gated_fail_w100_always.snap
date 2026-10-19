@@ -14,4 +14,9 @@ exit: 1
     |    |         ^
   <ESC>[2m1 file affected<ESC>[0m
   <ESC>[2mlint --all; lintRules for effective configuration and rule metadata<ESC>[0m
+
+<ESC>[1mNext<ESC>[0m
+  wright lint --fix
+  wright analyze
+  wright inspect cost
 --- stderr ---

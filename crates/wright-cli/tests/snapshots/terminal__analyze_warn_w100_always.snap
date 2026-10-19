@@ -32,4 +32,12 @@ exit: 0
   <ESC>[2mTop variables (heuristic ranking: rules touched, then reads + writes)<ESC>[0m
     globalVariable index: 2 rules, 3 reads, 2 writes [static]
   <ESC>[2m--all; inspect symbols, refs, cfg, callgraph, cost for detail<ESC>[0m
+
+<ESC>[1mNext<ESC>[0m
+  wright lint
+  wright inspect symbols
+  wright inspect refs <NAME>
+  wright inspect cfg <RULE>
+  wright inspect callgraph
+  wright inspect cost
 --- stderr ---

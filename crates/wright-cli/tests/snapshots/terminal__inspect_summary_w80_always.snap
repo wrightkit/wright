@@ -13,12 +13,12 @@ exit: 0
 <ESC>[1mRules<ESC>[0m
   bounded while
   branch
+  <ESC>[2minspect symbols, refs, cfg, callgraph, cost; --all for all rule names<ESC>[0m
 
-<ESC>[1mDetail commands<ESC>[0m
+<ESC>[1mNext<ESC>[0m
   wright inspect symbols
   wright inspect refs <NAME>
   wright inspect cfg <RULE>
   wright inspect callgraph
   wright inspect cost
-  <ESC>[2minspect symbols, refs, cfg, callgraph, cost; --all for all rule names<ESC>[0m
 --- stderr ---

@@ -16,7 +16,7 @@ exit: 0
     12 elements  bounded while  flow.ws:6:1
     9 elements  branch  flow.ws:18:1
 
-<ESC>[1mStatic findings (evidence: exact)<ESC>[0m
+<ESC>[1mStatic findings (evidence: static-indicator)<ESC>[0m
   <ESC>[33mwarning<ESC>[0m[min-wait-loop]: loop body waits at the workshop minimum rate; the loop runs at maximum frequency
     --> flow.ws:11:9
     | 11 |         While(Compare(Global.index, <, 3));

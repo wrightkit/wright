@@ -32,4 +32,12 @@ State and coupling
   Top variables (heuristic ranking: rules touched, then reads + writes)
   globalVariable index: 2 rules, 3 reads, 2 writes [static]
   --all; inspect symbols, refs, cfg, callgraph, cost for detail
+
+Next
+  wright lint
+  wright inspect symbols
+  wright inspect refs <NAME>
+  wright inspect cfg <RULE>
+  wright inspect callgraph
+  wright inspect cost
 --- stderr ---

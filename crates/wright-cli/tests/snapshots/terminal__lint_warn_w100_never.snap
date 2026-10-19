@@ -14,4 +14,9 @@ Lint findings (evidence: static-indicator)
     |    |         ^
   1 file affected
   lint --all; lintRules for effective configuration and rule metadata
+
+Next
+  wright lint --fix
+  wright analyze
+  wright inspect cost
 --- stderr ---

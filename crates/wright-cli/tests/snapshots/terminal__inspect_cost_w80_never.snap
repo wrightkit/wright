@@ -16,7 +16,7 @@ Generated resources (exact)
   12 elements  bounded while  flow.ws:6:1
   9 elements  branch  flow.ws:18:1
 
-Static findings (evidence: exact)
+Static findings (evidence: static-indicator)
   warning[min-wait-loop]: loop body waits at the workshop minimum rate; the loop runs at maximum frequency
   --> flow.ws:11:9
   | 11 |         While(Compare(Global.index, <, 3));
