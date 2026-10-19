@@ -349,11 +349,19 @@ mod server {
         content_type: &str,
         body: Vec<u8>,
     ) -> tiny_http::Response<Cursor<Vec<u8>>> {
+        // `Connection: close` on every answer: the server loop handles one
+        // request at a time, and a browser keep-alive or preconnect socket
+        // would otherwise stall every later request waiting on its first
+        // request line.
         tiny_http::Response::empty(status)
             .with_data(Cursor::new(body.clone()), Some(body.len()))
             .with_header(
                 tiny_http::Header::from_bytes("Content-Type".as_bytes(), content_type.as_bytes())
                     .expect("content types are ASCII"),
+            )
+            .with_header(
+                tiny_http::Header::from_bytes("Connection".as_bytes(), "close".as_bytes())
+                    .expect("Connection: close is ASCII"),
             )
     }
 

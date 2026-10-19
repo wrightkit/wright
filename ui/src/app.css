@@ -1,15 +1,321 @@
+/* Read-only Workshop rule view (#804): a dark, editor-like surface. The
+   eight token classes carry the issue's palette. */
 :root {
-  color-scheme: light dark;
-  font-family:
-    system-ui, 'Segoe UI', Roboto, sans-serif;
+  color-scheme: dark;
+  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --bg: #1b1d21;
+  --panel: #22252b;
+  --panel-2: #282c33;
+  --line: #363b44;
+  --text: #d8dce3;
+  --muted: #8a919d;
+  --accent: #d9a62e;
 }
 
 body {
   margin: 0;
+  background: var(--bg);
+  color: var(--text);
 }
 
 #app {
-  max-width: 72rem;
-  margin: 0 auto;
-  padding: 2rem;
+  height: 100vh;
+}
+
+.layout {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  grid-template-columns: 16rem 1fr;
+  grid-template-areas:
+    'top top'
+    'list view';
+  height: 100vh;
+}
+
+.top {
+  grid-area: top;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 1rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.top h1 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+  color: var(--accent);
+}
+
+.top .filter {
+  flex: 1;
+  max-width: 22rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 0.3rem 0.6rem;
+}
+
+.top button,
+.dialog button {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 0.3rem 0.8rem;
+  cursor: pointer;
+}
+
+.top button:hover,
+.dialog button:hover {
+  border-color: var(--accent);
+}
+
+.rule-list {
+  grid-area: list;
+  overflow-y: auto;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  padding: 0.5rem 0;
+}
+
+.rule-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  width: 100%;
+  border: 0;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  padding: 0.45rem 1rem;
+  cursor: pointer;
+  font: inherit;
+}
+
+.rule-item:hover {
+  background: var(--panel-2);
+}
+
+.rule-item.selected {
+  background: var(--panel-2);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.rule-item.disabled .rule-name {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.view {
+  grid-area: view;
+  overflow-y: auto;
+  padding: 1rem 1.5rem;
+}
+
+.rule-title {
+  font-size: 1.1rem;
+  margin: 0 0 0.75rem;
+}
+
+.event {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.event .filter {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.rule-view h3 {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 1.25rem 0 0.4rem;
+}
+
+.statements {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.88rem;
+}
+
+.statement {
+  padding: 0.22rem 0.5rem 0.22rem calc(0.5rem + var(--depth, 0) * 1.6rem);
+  border-radius: 3px;
+  white-space: pre-wrap;
+}
+
+.statement:nth-child(odd) {
+  background: rgb(255 255 255 / 0.025);
+}
+
+.statement.disabled {
+  opacity: 0.55;
+}
+
+.disabled-badge {
+  font-family: system-ui, sans-serif;
+  font-size: 0.7rem;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 0.35rem;
+  margin-left: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.refusal {
+  border: 1px solid #7d4040;
+  background: #341f1f;
+  border-radius: 4px;
+  padding: 0.75rem 1rem;
+}
+
+.refusal code {
+  color: #e0a0a0;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+/* Syntax classes (#804): action, value, enum, number, string, variable,
+   operator, literal. */
+.tok {
+  white-space: pre-wrap;
+}
+
+.tok.action {
+  color: #f0c674;
+}
+
+.tok.value {
+  color: #81a2be;
+}
+
+.tok.enum {
+  color: #8abeb7;
+}
+
+.tok.number {
+  color: #de935f;
+}
+
+.tok.string {
+  color: #b5bd68;
+}
+
+.tok.variable {
+  color: #cc6666;
+}
+
+.tok.operator {
+  color: #b294bb;
+}
+
+.tok.literal {
+  color: #b294bb;
+  font-style: italic;
+}
+
+.debug {
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin-left: 0.6rem;
+}
+
+details.debug {
+  display: inline-block;
+}
+
+details.debug pre {
+  margin: 0.3rem 0;
+  font-size: 0.7rem;
+}
+
+.dialog {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+  min-width: 24rem;
+  max-width: 42rem;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.dialog::backdrop {
+  background: rgb(0 0 0 / 0.5);
+}
+
+.dialog h2 {
+  margin-top: 0;
+  font-size: 1rem;
+}
+
+.symbol-kind {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0.9rem 0 0.2rem;
+}
+
+.symbol-list,
+.finding-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.symbol-list li {
+  padding: 0.15rem 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+.finding {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 0.5rem;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.85rem;
+}
+
+.finding .sev {
+  text-transform: uppercase;
+  font-size: 0.7rem;
+}
+
+.finding.severity-error .sev {
+  color: #cc6666;
+}
+
+.finding.severity-warning .sev {
+  color: #de935f;
+}
+
+.finding.severity-info .sev {
+  color: #81a2be;
+}
+
+.finding .loc {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.75rem;
 }

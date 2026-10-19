@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
     "test": "vitest run",
+    "test:e2e": "node scripts/e2e.mjs",
     "generate-types": "node scripts/generate-types.mjs",
     "check-types": "node scripts/generate-types.mjs --check",
     "check:size": "node scripts/check-bundle-size.mjs"
