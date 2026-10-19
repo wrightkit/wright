@@ -31,12 +31,14 @@ const WRIGHT_CANDIDATES = [
 ].filter(Boolean)
 
 const BROWSER_COMMANDS = [
+  // google-chrome before chromium: Ubuntu's `chromium` is often the snap
+  // shim, which exits without a DevTools endpoint instead of launching.
+  'google-chrome',
+  'google-chrome-stable',
   'brave',
   'brave-browser',
   'chromium',
   'chromium-browser',
-  'google-chrome',
-  'google-chrome-stable',
   'microsoft-edge',
   'headless_shell',
 ]
@@ -65,6 +67,8 @@ function findWright() {
 
 function findBrowser() {
   if (process.env.WRIGHT_UI_BROWSER) {
+    const command = which(process.env.WRIGHT_UI_BROWSER)
+    if (command) return command
     if (existsSync(process.env.WRIGHT_UI_BROWSER)) return process.env.WRIGHT_UI_BROWSER
     fail(`WRIGHT_UI_BROWSER does not exist: ${process.env.WRIGHT_UI_BROWSER}`)
   }

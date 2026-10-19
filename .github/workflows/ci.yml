@@ -723,12 +723,13 @@ jobs:
       - name: Build CLI with embedded UI
         run: cargo build --locked -p wright-cli --features ui
 
-      # ubuntu-latest ships google-chrome; the harness also accepts
-      # chromium-family browsers via WRIGHT_UI_BROWSER.
+      # ubuntu-latest ships google-chrome; `chromium` there is the snap
+      # shim, which never opens a DevTools endpoint, so pin the browser.
       - name: Browser E2E
         working-directory: ui
         env:
           WRIGHT_BIN: ${{ github.workspace }}/target/debug/wright
+          WRIGHT_UI_BROWSER: google-chrome
         run: npm run test:e2e
 
   # Fails when any gating job failed or was cancelled, and when a job whose
