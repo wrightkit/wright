@@ -19,15 +19,24 @@ use wright_driver::result::{
 };
 
 use crate::cli::{ColorArg, CommonArgs, OutputFormatArg, RendererArg};
-use crate::rail::{self, eprintln, println};
+
+pub(crate) mod terminal;
+
+/// The report's layout width ceiling: a terminal wider than this still gets
+/// the 100-column layout (ADR-0030 decision 4).
+const MAX_WIDTH: u16 = 100;
+/// Below this width the terminal report switches to its compact layout:
+/// children of a section item align at the item's column.
+const COMPACT_BELOW: u16 = 90;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct Presentation {
     format: OutputFormat,
     renderer: Renderer,
-    color: bool,
+    pub(crate) color: bool,
     interactive: bool,
     all: bool,
+    width: u16,
 }
 
 pub(crate) struct Activity {
@@ -170,7 +179,7 @@ fn clear_activity_line(writer: &mut impl Write) {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Renderer {
+pub(crate) enum Renderer {
     Terminal,
     Plain,
     GithubActions,
@@ -184,6 +193,9 @@ struct RuntimeEnvironment {
     no_color: bool,
     force_color: bool,
     term_dumb: bool,
+    /// The `COLUMNS` environment variable when it parses to a nonzero
+    /// column count — the explicit width override.
+    columns: Option<u16>,
 }
 
 impl RuntimeEnvironment {
@@ -195,8 +207,29 @@ impl RuntimeEnvironment {
             no_color: std::env::var_os("NO_COLOR").is_some(),
             force_color: env_truthy("FORCE_COLOR"),
             term_dumb: std::env::var("TERM").is_ok_and(|t| t == "dumb"),
+            columns: std::env::var("COLUMNS")
+                .ok()
+                .and_then(|v| v.trim().parse::<u16>().ok())
+                .filter(|c| *c > 0),
         }
     }
+}
+
+/// The terminal's actual column count via `TIOCGWINSZ`; `None` when stdout
+/// is not a terminal or the platform cannot answer. `COLUMNS` is checked
+/// separately — it doubles as the test override.
+#[cfg(unix)]
+fn terminal_columns() -> Option<u16> {
+    unsafe {
+        let mut size: libc::winsize = std::mem::zeroed();
+        (libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut size) == 0 && size.ws_col > 0)
+            .then_some(size.ws_col)
+    }
+}
+
+#[cfg(not(unix))]
+fn terminal_columns() -> Option<u16> {
+    None
 }
 
 impl Presentation {
@@ -215,6 +248,20 @@ impl Presentation {
             common.color,
             RuntimeEnvironment::process(),
         )
+    }
+
+    /// Presentation for the commands that carry their own output flags
+    /// rather than [`CommonArgs`] (`lookup`, `update`).
+    pub(crate) fn from_output(
+        format: OutputFormatArg,
+        renderer: RendererArg,
+        color: ColorArg,
+    ) -> Self {
+        let format = match format {
+            OutputFormatArg::Text => OutputFormat::Text,
+            OutputFormatArg::Json => OutputFormat::Json,
+        };
+        Self::resolve(format, renderer, color, RuntimeEnvironment::process())
     }
 
     fn resolve(
@@ -246,13 +293,35 @@ impl Presentation {
                     && (!env.term_dumb || env.force_color)
             }
         };
+        // The explicit `COLUMNS` override beats the detected width; absent
+        // both, the report assumes the widest allowed layout.
+        let columns = env.columns.or_else(|| {
+            if env.stdout_terminal {
+                terminal_columns()
+            } else {
+                None
+            }
+        });
         Self {
             format,
             renderer,
             color,
             all: false,
             interactive: renderer == Renderer::Terminal && env.stdout_terminal && !env.term_dumb,
+            width: columns.unwrap_or(MAX_WIDTH).clamp(1, MAX_WIDTH),
         }
+    }
+
+    /// Whether the terminal report (verdict tag, hierarchy, semantic
+    /// colour) renders — the only caller-facing renderer question.
+    pub(crate) fn is_terminal(&self) -> bool {
+        self.renderer == Renderer::Terminal
+    }
+
+    /// The compact layout below 90 columns: children of a section item
+    /// align at the item's column instead of indenting deeper.
+    fn compact(&self) -> bool {
+        self.width < COMPACT_BELOW
     }
 
     pub(crate) fn activity(&self) -> Activity {
@@ -273,7 +342,7 @@ fn env_truthy(name: &str) -> bool {
     })
 }
 
-pub(crate) fn render<T: serde::Serialize + ResultPresentation>(
+pub(crate) fn render<T: serde::Serialize + ResultPresentation + terminal::TerminalReport>(
     envelope: &Envelope<T>,
     pres: Presentation,
     elapsed: Duration,
@@ -293,9 +362,8 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation>(
     }
     match pres.renderer {
         Renderer::GithubActions => render_github(envelope, subject),
-        Renderer::Terminal | Renderer::Plain => {
-            render_text(envelope, pres, elapsed, source_base, subject)
-        }
+        Renderer::Terminal => terminal::render(envelope, pres, elapsed, source_base, subject),
+        Renderer::Plain => render_report(envelope, pres, elapsed, source_base, subject),
     }
 }
 
@@ -309,31 +377,6 @@ pub(crate) struct RenderContext<'a> {
     pub(crate) elapsed: Duration,
     pub(crate) source_base: Option<&'a Path>,
     pub(crate) subject: Option<&'a str>,
-}
-
-/// The terminal renderer captures the whole report and frames it on one
-/// rail (#718). An artifact stream is the payload itself and prints
-/// directly, so its diagnostics keep the flat layout instead of carrying
-/// rail markers nothing would frame.
-fn render_text<T: serde::Serialize + ResultPresentation>(
-    envelope: &Envelope<T>,
-    pres: Presentation,
-    elapsed: Duration,
-    source_base: Option<&Path>,
-    subject: Option<&str>,
-) {
-    if pres.renderer == Renderer::Terminal && !envelope.result.is_artifact_stream() {
-        let lines = rail::capture(|| render_report(envelope, pres, elapsed, source_base, subject));
-        rail::emit(rail::frame(lines, pres.color));
-    } else if pres.renderer == Renderer::Terminal {
-        let flat = Presentation {
-            renderer: Renderer::Plain,
-            ..pres
-        };
-        render_report(envelope, flat, elapsed, source_base, subject);
-    } else {
-        render_report(envelope, pres, elapsed, source_base, subject);
-    }
 }
 
 /// The human-first result hierarchy (#443): the verdict leads, blocking
@@ -530,12 +573,9 @@ fn dim(value: &str, color: bool) -> String {
     }
 }
 
-/// The markers for one item inside a grouped block (#703, #718): `head`
-/// starts the item's first line and `pad` prefixes each of its child lines.
-/// The terminal renderer emits the rail's marker characters and leaves the
-/// drawing to `rail::frame`, which sees the whole report; plain output keeps
-/// its flat deterministic contract, so the parts collapse to the existing
-/// indentation there.
+/// The markers for one item inside a grouped block (#703): `head` starts
+/// the item's first line and `pad` prefixes each of its child lines. The
+/// plain renderer's flat deterministic contract keeps both as indentation.
 struct Marks {
     head: String,
     pad: String,
@@ -556,26 +596,15 @@ impl Presentation {
     /// `base` is the item's own indent; its child lines sit two spaces
     /// deeper.
     fn connector(&self, base: &str) -> Marks {
-        if self.renderer != Renderer::Terminal {
-            return Marks {
-                head: base.to_string(),
-                pad: format!("{base}  "),
-            };
-        }
         Marks {
-            head: rail::BRANCH.to_string(),
-            pad: rail::CHILD.to_string(),
+            head: base.to_string(),
+            pad: format!("{base}  "),
         }
     }
 
-    /// The prefix of the closing metadata line: the rail's end on the
-    /// terminal, a plain indent elsewhere.
+    /// The prefix of the closing metadata line: a plain indent.
     fn footer_head(&self) -> &'static str {
-        if self.renderer == Renderer::Terminal {
-            rail::END
-        } else {
-            "  "
-        }
+        "  "
     }
 }
 
@@ -616,6 +645,7 @@ fn github_context(subject: Option<&str>) -> RenderContext<'_> {
             color: false,
             all: false,
             interactive: false,
+            width: MAX_WIDTH,
         },
         elapsed: Duration::ZERO,
         source_base: None,
@@ -2205,14 +2235,7 @@ fn render_essential_analyze(value: &serde_json::Value, ctx: &RenderContext<'_>) 
             risk["message"].as_str().unwrap_or_default()
         );
         if let Some(span) = finding_location_span(risk) {
-            // The terminal rail already aligns children under the item text;
-            // plain keeps its deeper hang.
-            let hang = if ctx.presentation.renderer == Renderer::Terminal {
-                ""
-            } else {
-                "  "
-            };
-            print_location(&span, &format!("{}{hang}", marks.pad));
+            print_location(&span, &format!("{}  ", marks.pad));
         }
     }
     if count(&value["persistentObjects"], "total") > 0 {
@@ -2529,6 +2552,7 @@ mod tests {
             no_color: false,
             force_color: false,
             term_dumb: false,
+            columns: None,
         }
     }
 
@@ -3001,6 +3025,7 @@ mod tests {
                 color: false,
                 interactive,
                 all: false,
+                width: MAX_WIDTH,
             },
             elapsed: Duration::from_millis(42),
             source_base: None,

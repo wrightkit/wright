@@ -1,0 +1,11 @@
+---
+source: crates/wright-cli/tests/terminal.rs
+expression: transcript(&out)
+---
+exit: 2
+--- stdout ---
+<ESC>[41;37m USAGE <ESC>[0m compile
+  <ESC>[2m1 error<ESC>[0m
+--- stderr ---
+<ESC>[31merror<ESC>[0m[output-exists]: 'out.ow' already exists; pass --force (agent request: force) to overwrite it, or choose another path with -o
+  <ESC>[2m= discovery<ESC>[0m

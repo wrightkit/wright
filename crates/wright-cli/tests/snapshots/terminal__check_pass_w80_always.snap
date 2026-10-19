@@ -1,0 +1,9 @@
+---
+source: crates/wright-cli/tests/terminal.rs
+expression: transcript(&out)
+---
+exit: 0
+--- stdout ---
+<ESC>[42;30m PASS <ESC>[0m check
+  <ESC>[2m0 diagnostics<ESC>[0m
+--- stderr ---

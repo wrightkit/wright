@@ -1,0 +1,9 @@
+---
+source: crates/wright-cli/tests/terminal.rs
+expression: transcript(&out)
+---
+exit: 3
+--- stdout ---
+--- stderr ---
+ UNSUPPORTED  update
+  standalone self-update is not supported on Windows; upgrade with `winget upgrade WrightKit.Wright` or `scoop update wright`

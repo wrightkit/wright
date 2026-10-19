@@ -1,0 +1,11 @@
+---
+source: crates/wright-cli/tests/terminal.rs
+expression: transcript(&out)
+---
+exit: 0
+--- stdout ---
+<ESC>[46;30m LOOKUP <ESC>[0m
+  2 entries
+  Stop All Damage Over Time(player: Player|Array) [action]  stopAllDamageOverTime
+  Stop All Damage Modifications() [action]  stopAllDamageModifications
+--- stderr ---
