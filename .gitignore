@@ -34,5 +34,9 @@ target/
 # Metrics corpus external-project cache
 benchmarks/metrics/.cache/
 
+# UI toolchain: npm installs and the build output `wright ui` embeds
+ui/node_modules/
+ui/dist/
+
 # Wright run cache (ADR-0027): project-local, never committed
 .wright/

@@ -11,3 +11,9 @@ updates:
     directory: /
     schedule:
       interval: monthly
+
+  # The UI project: npm with a committed lockfile (ADR-0032).
+  - package-ecosystem: npm
+    directory: /ui
+    schedule:
+      interval: monthly
