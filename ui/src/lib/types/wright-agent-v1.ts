@@ -1135,12 +1135,26 @@ export interface CallGraphSelectionResult {
  */
 export interface CostEstimateResult {
   exact: {
-    emittedBytes: number
+    /**
+     * Emitted artifact size in bytes; null when emission fails — emittedBytesUnavailable names the reason (ADR-0030 decision 3: unknown is not a value).
+     */
+    emittedBytes: number | null
+    emittedBytesUnavailable?: string
     programActions: number
     programRules: number
     waitActions: number
     [k: string]: unknown
   }
+  elementCount?: {
+    /**
+     * Canonical element total; absent when the count cannot run — elementCountUnavailable names the reason. The budget still reports even when the count is unavailable.
+     */
+    total?: number
+    budget: number
+    rules?: unknown[]
+    [k: string]: unknown
+  }
+  elementCountUnavailable?: string
   findings: {
     code: string
     severity: string
@@ -1153,6 +1167,10 @@ export interface CostEstimateResult {
     performance: string
     [k: string]: unknown
   }
+  /**
+   * Rule evaluations the configured registry skipped (canonical CFG unavailable) — the same disclosure `lint` carries (#788).
+   */
+  skipped?: SkippedRule[]
   selection?: SelectionSummary
   [k: string]: unknown
 }
