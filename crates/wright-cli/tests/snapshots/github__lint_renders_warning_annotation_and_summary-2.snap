@@ -1,0 +1,22 @@
+---
+source: crates/wright-cli/tests/github.rs
+expression: "std::fs::read_to_string(&summary).unwrap()"
+---
+## Wright `lint .` — **WARN** (exit 0)
+
+1 warning(s)
+
+- `min-wait-loop` `flow.ws:11:9` — loop body waits at the workshop minimum rate; the loop runs at maximum frequency
+
+<details><summary>Full report</summary>
+
+```text
+WARN lint root=.
+summary: findings=1 errors=0 warnings=1 notes=0 affected=1
+finding: warning min-wait-loop at=flow.ws:11:9 evidence=static-indicator message="loop body waits at the workshop minimum rate; the loop runs at maximum frequency"
+next: wright lint --fix
+next: wright analyze
+next: wright inspect cost
+```
+
+</details>

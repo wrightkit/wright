@@ -1,0 +1,17 @@
+---
+source: crates/wright-cli/tests/github.rs
+expression: transcript(&output)
+---
+exit 0
+== stdout
+
+== stderr
+::warning file=flow.ws,line=11,col=9,endLine=11,endColumn=9,title=min-wait-loop::loop body waits at the workshop minimum rate; the loop runs at maximum frequency
+::group::wright lint — WARN 1 warning(s)
+WARN lint root=.
+summary: findings=1 errors=0 warnings=1 notes=0 affected=1
+finding: warning min-wait-loop at=flow.ws:11:9 evidence=static-indicator message="loop body waits at the workshop minimum rate; the loop runs at maximum frequency"
+next: wright lint --fix
+next: wright analyze
+next: wright inspect cost
+::endgroup::
