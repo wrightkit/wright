@@ -873,7 +873,9 @@ impl ResultPresentation for LintResult {
     /// breakdown of the full set is unknown, so the verdict reports the true
     /// total instead of counting the selected remainder.
     fn metadata(&self) -> Option<String> {
-        let rules = array_len(&self.rules);
+        // The same program inventory `analyze`/`inspect cost` report: every
+        // declared rule, disabled included — not the lint-rule count (#788).
+        let rules = count(&self.program, "rules");
         if let Some(selection) = &self.selection {
             return Some(format!(
                 "{} finding(s) across {} rule(s)",
@@ -952,7 +954,10 @@ impl ResultPresentation for LintResult {
 fn essential_metadata(value: &serde_json::Value) -> String {
     let counts = &value["counts"];
     let mut parts = Vec::new();
-    for key in ["findings", "risks"] {
+    // `analyze` reports the performance/stability risk subset — naming the
+    // group states the documented difference from `lint`/`inspect cost`,
+    // which report the full finding set (#788).
+    for (key, noun) in [("findings", "finding(s)"), ("risks", "risk(s)")] {
         if let Some(group) = counts.get(key) {
             let total = group["total"].as_u64().unwrap_or(0);
             let error = group["error"].as_u64().unwrap_or(0);
@@ -966,10 +971,10 @@ fn essential_metadata(value: &serde_json::Value) -> String {
                 severities.push(format!("{warning} warning(s)"));
             }
             if info > 0 {
-                severities.push(format!("{info} info finding(s)"));
+                severities.push(format!("{info} info {noun}"));
             }
             parts.push(if severities.is_empty() {
-                format!("{total} finding(s)")
+                format!("{total} {noun}")
             } else {
                 severities.join(", ")
             });
@@ -1005,7 +1010,14 @@ impl ResultPresentation for EssentialResult {
 
     fn metadata(&self) -> Option<String> {
         Some(if let Some(selection) = &self.selection {
-            format!("{} finding(s)", selection.total)
+            // `analyze` selects the risk subset; `lint` selects findings
+            // (#788).
+            let noun = if self.result["counts"].get("risks").is_some() {
+                "risk(s)"
+            } else {
+                "finding(s)"
+            };
+            format!("{} {noun}", selection.total)
         } else {
             essential_metadata(&self.result)
         })
@@ -1523,6 +1535,13 @@ impl ResultPresentation for CostResult {
             .filter(|withheld| *withheld > 0)
         {
             println!("  ... {withheld} finding(s) withheld (--max)");
+        }
+        // Skipped rule evaluations are disclosed exactly like `lint`'s —
+        // the finding set above cannot cover rules whose canonical CFG was
+        // unavailable (#788).
+        let skipped = array_len(&self.result["skipped"]);
+        if skipped > 0 {
+            println!("  {skipped} rule evaluation(s) skipped");
         }
     }
     /// Static findings carry severities, so `cost` judges them like lint
@@ -2915,6 +2934,7 @@ mod tests {
         selection: Option<wright_driver::SelectionOutcome>,
     ) -> LintResult {
         LintResult {
+            program: serde_json::json!({"rules": 2}),
             rules: serde_json::json!([
                 {"id": "a", "effectiveSeverity": "warning"},
                 {"id": "b", "effectiveSeverity": "error"},

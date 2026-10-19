@@ -3823,8 +3823,15 @@ fn cost_reports_exact_counts_and_selected_findings() {
     assert!(stdout.contains("WARN cost"), "{stdout}");
     assert!(stdout.contains("3960 emitted byte(s)"), "{stdout}");
     assert!(stdout.contains("29 action(s)"), "{stdout}");
-    // Each repeated-value finding names its expression (#735), so the nine
-    // cake findings render as nine distinguishable entries.
+    // The findings are the same objects `lint` serves (#788) — resolved span
+    // and fix affordances included — so the default view is byte-bounded and
+    // names the true total rather than listing every entry.
+    assert!(stdout.contains("of 10"), "{stdout}");
+    // Each repeated-value finding names its expression (#735): `--all`
+    // renders the nine cake findings as nine distinguishable entries.
+    let output = run(&["inspect", "cost", path, "--all"]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert_eq!(
         stdout.matches("warning[repeated-value]").count(),
         9,
@@ -3870,6 +3877,12 @@ fn cost_reports_exact_counts_and_selected_findings() {
     assert_eq!(exact["programActions"], 29);
     assert_eq!(exact["programRules"], 2);
     assert_eq!(exact["waitActions"], 1);
+    // The default payload bounds the finding list by serialized bytes and
+    // records the true total; `--all` lists the same set `lint` reports.
+    assert_eq!(envelope["result"]["truncation"]["findings"]["total"], 10);
+    let output = run(&["inspect", "cost", path, "--all", "-f", "json"]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let envelope = parse_json(&output.stdout);
     assert_eq!(
         envelope["result"]["findings"].as_array().unwrap().len(),
         10,
@@ -4116,6 +4129,84 @@ fn cost_rule_drilldown_reconciles_to_the_rule_total() {
     assert_eq!(bad.status.code(), Some(1));
     let bad = parse_json(&bad.stdout);
     assert_eq!(bad["diagnostics"][0]["code"], "invalid-selection");
+
+    let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
+}
+
+/// #788: `analyze`, `inspect cost` and `lint` serve the same facts for one
+/// input — every declared rule (disabled included) counts toward the program
+/// inventory, and the finding set comes from the one configured semantic
+/// service, so the totals agree on every surface.
+#[test]
+fn analyze_lint_and_cost_report_the_same_rule_and_finding_totals() {
+    // A disabled rule is the case that split the counters: it belongs to the
+    // program inventory `analyze`/`inspect cost` report and to
+    // `elementCount.rules`, but generates no actions.
+    let path = temp_file(
+        "mixed.txt",
+        "rule (\"live one\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Wait(1, Ignore Condition);\n    }\n}\n\ndisabled rule (\"disabled one\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Wait(0.016, Ignore Condition);\n    }\n}\n\nrule (\"waitless\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Global.A = 0;\n        While(Global.A < 10);\n            Global.A += 1;\n        End;\n    }\n}\n",
+    );
+    let path = path.to_str().unwrap();
+
+    let analyze = run(&["analyze", path, "-f", "json"]);
+    assert!(analyze.status.success(), "{}", command_result(&analyze));
+    let analyze = parse_json(&analyze.stdout);
+    let cost = run(&["inspect", "cost", path, "--no-cache", "-f", "json"]);
+    assert!(cost.status.success(), "{}", command_result(&cost));
+    let cost = parse_json(&cost.stdout);
+    let lint = run(&["lint", path, "-f", "json"]);
+    assert!(lint.status.success(), "{}", command_result(&lint));
+    let lint = parse_json(&lint.stdout);
+
+    // Rule totals: three declared rules on every surface that reports them.
+    let rules = analyze["result"]["program"]["rules"].as_u64().unwrap();
+    assert_eq!(rules, 3, "fixture declares three rules");
+    assert_eq!(
+        cost["result"]["exact"]["programRules"].as_u64().unwrap(),
+        rules,
+        "inspect cost reports the same program inventory as analyze"
+    );
+    assert_eq!(
+        cost["result"]["elementCount"]["rules"]
+            .as_array()
+            .unwrap()
+            .len() as u64,
+        rules,
+        "elementCount.rules enumerates the same declared rules"
+    );
+    // `lint`'s verdict names the same inventory rather than its own
+    // lint-rule count.
+    let fix = run(&["lint", path, "--fix"]);
+    assert!(fix.status.success(), "{}", command_result(&fix));
+    let stdout = String::from_utf8_lossy(&fix.stdout);
+    assert!(stdout.contains("across 3 rule(s)"), "{stdout}");
+
+    // Finding totals: one `while-without-wait` info finding — lint's whole
+    // set, cost's whole set, and analyze's risk subset all report it with
+    // the same code and severity.
+    let lint_total = lint["result"]["counts"]["findings"]["total"]
+        .as_u64()
+        .unwrap();
+    assert_eq!(lint_total, 1, "fixture raises one finding");
+    assert_eq!(
+        analyze["result"]["counts"]["risks"]["total"]
+            .as_u64()
+            .unwrap(),
+        lint_total,
+        "analyze's risk total matches lint's finding total on this input"
+    );
+    assert_eq!(
+        analyze["result"]["counts"]["risks"]["info"], lint["result"]["counts"]["findings"]["info"],
+        "severity split agrees"
+    );
+    let cost_findings = cost["result"]["findings"].as_array().unwrap();
+    assert_eq!(cost_findings.len() as u64, lint_total);
+    assert_eq!(cost_findings[0]["code"], "while-without-wait");
+    assert_eq!(cost_findings[0]["severity"], "info");
+    assert_eq!(
+        lint["result"]["findings"][0]["code"], cost_findings[0]["code"],
+        "cost serves the same finding set as lint"
+    );
 
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }

@@ -180,12 +180,14 @@ subcommand leads with its subject and summary before its detail:
 * `inspect callgraph` prints the edge shape first, then notable fan-in and
   fan-out, that is, subroutines with more than one caller and rules calling
   more than one subroutine, then the edge list.
-* `inspect cost` prints exact generated-resource totals, the canonical
+* `inspect cost` prints exact generated-resource totals — the declared
+  program rule count `analyze` reports among them — the canonical
   element count against the client element budget with each rule's share
   ranked by count and located in source (`path:line:col`), then static
   findings
   ordered by severity with consecutive identical findings collapsed into one
-  counted entry that lists every occurrence's location (#722). With
+  counted entry that lists every occurrence's location (#722). Skipped rule
+  evaluations are disclosed like `lint`'s (#788). With
   `--rule`, `inspect cost` instead prints that rule's identity and
   location, its `Costliest statements` ranked by recursive count, and the
   `By node name` own-cost shares that reconcile to the rule's total (#724).

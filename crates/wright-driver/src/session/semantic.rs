@@ -155,11 +155,8 @@ fn cost_facts(
 ) -> serde_json::Value {
     let mut actions = 0usize;
     let mut waits = 0usize;
-    let live_rules = program.rules.iter().filter(|rule| !rule.disabled);
-    let mut rules = 0usize;
     let mut conditions = 0usize;
-    for rule in live_rules {
-        rules += 1;
+    for rule in program.rules.iter().filter(|rule| !rule.disabled) {
         conditions += rule
             .conditions
             .iter()
@@ -173,7 +170,10 @@ fn cost_facts(
         }
     }
     let counts = serde_json::json!({
-        "rules": rules,
+        // `rules` is the declared program inventory `analyze`/`inspect cost`
+        // report — disabled rules included (#788); `conditions`/`actions`/
+        // `waits` stay live statement counts (#633).
+        "rules": program.rules.len(),
         "conditions": conditions,
         "actions": actions,
         "waits": waits,

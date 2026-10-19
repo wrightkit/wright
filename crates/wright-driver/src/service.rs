@@ -1490,10 +1490,12 @@ impl<'a> ToolService<'a> {
     }
 
     /// `costEstimate`: exact generated-resource counts plus static findings.
-    /// The findings subset honors the shared selection (#430); findings
-    /// carry resolved span paths like `lint` (#722), so a `file` selection
-    /// can match them. The `rule` selector (#724) reports one declared
-    /// rule's element-cost breakdown instead of the whole-program view.
+    /// Findings and skipped rule evaluations come from the same configured
+    /// semantic service `lint` serves (#788); the findings subset honors
+    /// the shared selection (#430) and findings carry resolved span paths
+    /// like `lint` (#722), so a `file` selection can match them. The `rule`
+    /// selector (#724) reports one declared rule's element-cost breakdown
+    /// instead of the whole-program view.
     fn cost_estimate(
         &self,
         selection: &crate::select::FindingSelection,
@@ -1546,42 +1548,39 @@ impl<'a> ToolService<'a> {
                 waits += 1;
             }
         }
-        let findings = wright_analyzer::canonical::analyze(
-            &loaded.program,
-            &wright_analyzer::registry::LintConfig::default(),
-        );
-        let mut findings = findings
-            .iter()
-            .map(|f| {
-                json!({
-                    "code": f.code,
-                    "severity": f.severity.as_str(),
-                    "message": f.message,
-                    "span": wright_analyzer::canonical::span_json(f.span),
-                })
-            })
-            .collect::<Vec<_>>();
-        // Findings resolve `span.path` exactly like `lint` does (#722); a
-        // node without a retained span serializes `null` and keeps no
-        // location — never an error.
-        for finding in findings.iter_mut() {
-            crate::session::resolve_span_paths(finding, loaded);
-        }
+        // The same finding set `lint`/`analyze` serve for this input, kind,
+        // locale and lint configuration — the configured semantic service's
+        // registry run, resolved span paths included (#722, #788) — never a
+        // second analyzer pass that could disagree with them.
+        let service = self.configured_semantic();
+        let findings = match service.handle(&Request::GetFindings) {
+            Response::Ok { result } => result,
+            Response::Error { .. } => serde_json::json!([]),
+        };
+        let findings =
+            crate::session::prepare_findings(findings, service, loaded, self.session.catalog());
+        // Rule evaluations skipped because a rule's canonical CFG is
+        // unavailable are disclosed exactly like `lint` reports them —
+        // findings the registry could not run stay accounted for (#788).
+        let lint_rules = match service.handle(&Request::LintRules) {
+            Response::Ok { result } => result,
+            Response::Error { .. } => serde_json::json!({}),
+        };
+        let (_, _, skipped) = crate::result::split_lint_rules(&lint_rules);
         let (findings, outcome) =
             selection.apply_findings(findings, &crate::select::file_bases(&loaded.input));
         let mut result = json!({
             "exact": {
                 "emittedBytes": text.len(),
                 "programActions": program_actions,
-                "programRules": loaded
-                    .program
-                    .rules
-                    .iter()
-                    .filter(|rule| !rule.disabled)
-                    .count(),
+                // Every declared rule, disabled included — the same program
+                // inventory `analyze`/`inspect` report and the same set
+                // `elementCount.rules` enumerates (#788).
+                "programRules": loaded.program.rules.len(),
                 "waitActions": waits,
             },
             "findings": findings,
+            "skipped": skipped,
             "kind": {
                 "exact": "exact target-resource counts",
                 "elementCount": "canonical Workshop structure counted against the client element budget; not a statement of client importability",
