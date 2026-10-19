@@ -57,8 +57,8 @@ fn workshop_service_from_text(text: &str) -> SemanticService<'static> {
     // The catalog supplies the canonical expected enum domains (e.g. Create
     // HUD Text's Reevaluation argument is HudReeval), resolving bare members
     // that are ambiguous across the catalog's enum domains (#118).
-    let catalog = wright_analyzer::catalog::builtin().unwrap();
-    let program = parser::parse_with_context(text, &catalog, &Locale::new("en-US"), &*catalog)
+    let catalog = workshop_rs::catalog::Catalog::builtin_ref().unwrap();
+    let program = parser::parse_with_context(text, catalog, &Locale::new("en-US"), catalog)
         .unwrap_or_else(|error| panic!("Workshop source must parse: {error}"));
     SemanticService::with_shared_program(
         Arc::new(program),
@@ -920,8 +920,8 @@ rule ("severity override") {
     }
 }
 "#;
-    let catalog = wright_analyzer::catalog::builtin().unwrap();
-    let program = parser::parse_with_context(source, &catalog, &Locale::new("en-US"), &*catalog)
+    let catalog = workshop_rs::catalog::Catalog::builtin_ref().unwrap();
+    let program = parser::parse_with_context(source, catalog, &Locale::new("en-US"), catalog)
         .expect("Workshop source parses");
     let mut config = LintConfig::default();
     config.set_severity("while-without-wait", Severity::Error);
@@ -1065,9 +1065,9 @@ rule ("condition nesting") {
 
 #[test]
 fn nested_binder_lambda_respects_disable() {
-    let catalog = wright_analyzer::catalog::builtin().unwrap();
+    let catalog = workshop_rs::catalog::Catalog::builtin_ref().unwrap();
     let program =
-        parser::parse_with_context(NESTED_BINDERS, &catalog, &Locale::new("en-US"), &*catalog)
+        parser::parse_with_context(NESTED_BINDERS, catalog, &Locale::new("en-US"), catalog)
             .expect("Workshop source parses");
     let mut config = LintConfig::default();
     config.disable("nested-binder-lambda");

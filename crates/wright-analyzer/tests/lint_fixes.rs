@@ -10,8 +10,8 @@ use wright_analyzer::canonical::{Finding, LintFix, analyze};
 use wright_analyzer::registry::LintConfig;
 
 fn analyze_source(source: &str) -> (workshop_rs::Program, Vec<Finding>) {
-    let catalog = wright_analyzer::catalog::builtin().unwrap();
-    let program = parser::parse_with_context(source, &catalog, &Locale::new("en-US"), &*catalog)
+    let catalog = workshop_rs::catalog::Catalog::builtin_ref().unwrap();
+    let program = parser::parse_with_context(source, catalog, &Locale::new("en-US"), catalog)
         .unwrap_or_else(|error| panic!("Workshop source must parse: {error}"));
     let findings = analyze(&program, &LintConfig::default());
     (program, findings)
@@ -200,8 +200,8 @@ fn duplicate_condition_fix_materializes_for_a_localized_source() {
     }
 }
 "#;
-    let catalog = wright_analyzer::catalog::builtin().unwrap();
-    let program = parser::parse_with_context(localized, &catalog, &Locale::new("zh-CN"), &*catalog)
+    let catalog = workshop_rs::catalog::Catalog::builtin_ref().unwrap();
+    let program = parser::parse_with_context(localized, catalog, &Locale::new("zh-CN"), catalog)
         .unwrap_or_else(|error| panic!("zh-CN source must parse: {error}"));
     let findings = analyze(&program, &LintConfig::default());
     let [finding] = coded(&findings, "duplicate-condition")[..] else {

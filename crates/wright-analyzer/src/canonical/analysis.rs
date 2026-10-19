@@ -1241,7 +1241,7 @@ fn evaluate_once_fix(
     collected: &Collected,
     family: &[usize],
 ) -> Option<LintFix> {
-    let catalog = crate::catalog::builtin().ok()?;
+    let catalog = Catalog::builtin_ref().ok()?;
     let mut occurrences = Vec::new();
     let mut unwrappable = 0usize;
     for &member in family {
@@ -1251,7 +1251,7 @@ fn evaluate_once_fix(
             }
             OccurrenceOrigin::BodyAction(index) => (
                 body_start + index,
-                !action_argument_reevaluates(&catalog, &body[index], collected.arguments[member])
+                !action_argument_reevaluates(catalog, &body[index], collected.arguments[member])
                     && !contains_update_every_frame(collected.values[member]),
             ),
         };

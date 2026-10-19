@@ -919,11 +919,10 @@ fn compile_artifact(member_uris: Option<Vec<String>>) -> serde_json::Value {
     match member_uris {
         None => serde_json::json!({"format": "workshop-rs/text-v1", "content": text}),
         Some(files) => {
-            let catalog = wright_analyzer::catalog::builtin().expect("catalog");
+            let catalog = workshop_rs::catalog::Catalog::builtin_ref().expect("catalog");
             let locale = workshop_rs::catalog::Locale::new("en-US");
-            let program =
-                workshop_rs::parser::parse_with_context(&text, &catalog, &locale, &*catalog)
-                    .expect("workshop fixture parses");
+            let program = workshop_rs::parser::parse_with_context(&text, catalog, &locale, catalog)
+                .expect("workshop fixture parses");
             let map = workshop_rs::program::SourceMap::extract(&program);
             let mut artifact: serde_json::Value =
                 serde_json::from_str(&workshop_rs::program::MappedText::new(&text, map).to_json())

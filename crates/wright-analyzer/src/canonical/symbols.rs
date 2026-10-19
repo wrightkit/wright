@@ -549,12 +549,12 @@ mod tests {
     use super::*;
 
     fn index(text: &str) -> (Program, SemanticIndex) {
-        let catalog = crate::catalog::builtin().expect("builtin catalog");
+        let catalog = workshop_rs::catalog::Catalog::builtin_ref().expect("builtin catalog");
         let program = workshop_rs::parser::parse_with_context(
             text,
-            &catalog,
+            catalog,
             &workshop_rs::catalog::Locale::new("en-US"),
-            &*catalog,
+            catalog,
         )
         .expect("Workshop source must parse");
         let index = SemanticIndex::build(&program);

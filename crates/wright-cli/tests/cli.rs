@@ -3113,11 +3113,11 @@ for line in sys.stdin:
     let output = run(&["compile", input, "--opy-provider", provider, "-o", "-"]);
     assert!(output.status.success(), "{}", command_result(&output));
     let compiled = String::from_utf8_lossy(&output.stdout);
-    let catalog = wright_analyzer::catalog::builtin().expect("catalog");
+    let catalog = workshop_rs::catalog::Catalog::builtin_ref().expect("catalog");
     let locale = workshop_rs::catalog::Locale::new("en-US");
-    let program = workshop_rs::parser::parse_with_context(&compiled, &catalog, &locale, &*catalog)
+    let program = workshop_rs::parser::parse_with_context(&compiled, catalog, &locale, catalog)
         .expect("compiled artifact parses");
-    let report = program.element_count(&catalog).expect("artifact counts");
+    let report = program.element_count(catalog).expect("artifact counts");
 
     let output = run(&[
         "inspect",
@@ -3759,11 +3759,11 @@ fn cost_rule_shares_rank_and_cap_at_five_by_default() {
     let path = path.to_str().unwrap();
 
     // The expected ranking is workshop-rs' own report, not the CLI output.
-    let catalog = wright_analyzer::catalog::builtin().expect("catalog");
+    let catalog = workshop_rs::catalog::Catalog::builtin_ref().expect("catalog");
     let locale = workshop_rs::catalog::Locale::new("en-US");
-    let program = workshop_rs::parser::parse_with_context(&source, &catalog, &locale, &*catalog)
+    let program = workshop_rs::parser::parse_with_context(&source, catalog, &locale, catalog)
         .expect("generated program parses");
-    let report = program.element_count(&catalog).expect("program counts");
+    let report = program.element_count(catalog).expect("program counts");
     let mut expected: Vec<usize> = (0..report.rules.len()).collect();
     expected.sort_by_key(|index| (std::cmp::Reverse(report.rules[*index].count), *index));
 
