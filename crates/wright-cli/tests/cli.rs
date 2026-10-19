@@ -1472,6 +1472,130 @@ fn selection_never_changes_the_verdict_or_exit_code() {
 }
 
 #[test]
+fn fail_on_raises_warn_to_fail_on_every_renderer() {
+    // ADR-0030 decision 13: `--fail-on <severity>` makes a result at or
+    // above the threshold exit 1 with a FAIL verdict, off by default. The
+    // wait-less loop produces a warning finding, so `lint` and `inspect
+    // cost` report WARN.
+    let path = temp_file("waitless.txt", WAITLESS_LOOP);
+    let path = path.to_str().unwrap();
+
+    // Default behavior is unchanged: WARN still exits 0.
+    let default = run(&["lint", path]);
+    assert_eq!(default.status.code(), Some(0));
+    assert!(
+        String::from_utf8_lossy(&default.stdout).contains("WARN lint"),
+        "{}",
+        String::from_utf8_lossy(&default.stdout)
+    );
+
+    // Plain (the non-TTY default): FAIL verdict, exit 1, and the result
+    // body still renders — the findings are the reason it failed.
+    let gated = run(&["lint", path, "--fail-on", "warning"]);
+    assert_eq!(gated.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&gated.stdout);
+    assert!(stdout.contains("FAIL lint"), "{stdout}");
+    assert!(stdout.contains("Lint findings"), "{stdout}");
+    assert!(stdout.contains("warning[while-without-wait]"), "{stdout}");
+
+    // Terminal.
+    let terminal = run(&[
+        "lint",
+        path,
+        "--fail-on",
+        "warning",
+        "--renderer",
+        "terminal",
+        "--color",
+        "never",
+    ]);
+    assert_eq!(terminal.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&terminal.stdout);
+    assert!(stdout.contains("FAIL lint"), "{stdout}");
+
+    // GitHub Actions: the log group and the step-summary line carry the
+    // same FAIL verdict and exit code.
+    let gha = run(&[
+        "lint",
+        path,
+        "--fail-on",
+        "warning",
+        "--renderer",
+        "github-actions",
+    ]);
+    assert_eq!(gha.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&gha.stderr);
+    assert!(stderr.contains("FAIL lint"), "{stderr}");
+    assert!(stderr.contains("**FAIL** (exit 1)"), "{stderr}");
+
+    // JSON: the envelope carries the raised verdict as ok/exit.
+    let json = run(&["lint", path, "--fail-on", "warning", "-f", "json"]);
+    assert_eq!(json.status.code(), Some(1));
+    let envelope = parse_json(&json.stdout);
+    assert_eq!(envelope["ok"], false);
+    assert_eq!(envelope["exit"], 1);
+    assert!(envelope.get("gated").is_none());
+
+    // `inspect cost` gates on the same finding severities.
+    let cost = run(&["inspect", "cost", path, "--fail-on", "warning"]);
+    assert_eq!(cost.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&cost.stdout);
+    assert!(stdout.contains("FAIL cost"), "{stdout}");
+
+    let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
+}
+
+#[test]
+fn fail_on_can_only_raise_a_verdict() {
+    // A genuine failure keeps its verdict and exit code even at the lowest
+    // threshold — the gate never turns a failing command into a passing
+    // one or an ERROR into a FAIL.
+    let broken = temp_file(
+        "broken.txt",
+        "rule (\"x\") { event { Ongoing - Global; } actions { If(True); }",
+    );
+    let output = run(&["check", broken.to_str().unwrap(), "--fail-on", "info"]);
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ERROR check"), "{stdout}");
+
+    // A result below the threshold is untouched: WARN + `--fail-on error`
+    // stays WARN and exits 0.
+    let waitless = temp_file("waitless.txt", WAITLESS_LOOP);
+    let output = run(&["lint", waitless.to_str().unwrap(), "--fail-on", "error"]);
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("WARN lint"), "{stdout}");
+
+    // A clean result has nothing at the threshold and stays PASS.
+    let clean = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
+    let output = run(&["check", clean.to_str().unwrap(), "--fail-on", "warning"]);
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("PASS check"), "{stdout}");
+
+    // Error-severity findings are at the threshold: today they exit 0, so
+    // `--fail-on error` raises them to FAIL.
+    let cake = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
+    let output = run(&[
+        "lint",
+        cake.to_str().unwrap(),
+        "--rule-severity",
+        "min-wait-loop:error",
+        "--fail-on",
+        "error",
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("FAIL lint"), "{stdout}");
+
+    let _ = std::fs::remove_dir_all(broken.parent().unwrap());
+    let _ = std::fs::remove_dir_all(waitless.parent().unwrap());
+    let _ = std::fs::remove_dir_all(clean.parent().unwrap());
+    let _ = std::fs::remove_dir_all(cake.parent().unwrap());
+}
+
+#[test]
 fn lint_max_reports_the_withheld_count_in_text_and_json() {
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
     let output = run(&["lint", path.to_str().unwrap(), "--max", "3"]);
