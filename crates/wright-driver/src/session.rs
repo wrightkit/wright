@@ -1345,6 +1345,7 @@ impl CompilerSession {
             exit,
             diagnostics,
             selection,
+            gated: false,
             result,
             comparison: None,
         }

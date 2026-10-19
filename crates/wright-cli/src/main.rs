@@ -116,6 +116,7 @@ fn run_workflow(command: Command) -> ExitCode {
             run_configured(
                 config_from_common(&args.common),
                 present::Presentation::from_common(&args.common),
+                fail_on(&args.common),
                 None,
                 move |session: &mut wright_driver::CompilerSession| session.convert(target),
             )
@@ -126,6 +127,7 @@ fn run_workflow(command: Command) -> ExitCode {
             run_configured(
                 config,
                 present::Presentation::from_common(&args.common).with_all(args.all),
+                fail_on(&args.common),
                 None,
                 wright_driver::CompilerSession::check,
             )
@@ -134,17 +136,24 @@ fn run_workflow(command: Command) -> ExitCode {
             let mut config = config_from_common(&args.common);
             config.selection = selection_from_args(&args.select);
             let presentation = present::Presentation::from_common(&args.common);
-            run_configured(config, presentation.with_all(args.all), None, |session| {
-                essential_envelope(
-                    session.analyze(),
-                    |value| wright_driver::essential::analyze(value, args.all),
-                    |result| result.selection.clone(),
-                )
-            })
+            run_configured(
+                config,
+                presentation.with_all(args.all),
+                fail_on(&args.common),
+                None,
+                |session| {
+                    essential_envelope(
+                        session.analyze(),
+                        |value| wright_driver::essential::analyze(value, args.all),
+                        |result| result.selection.clone(),
+                    )
+                },
+            )
         }
         Command::Rename(args) => run_configured(
             config_from_common(&args.common),
             present::Presentation::from_common(&args.common),
+            fail_on(&args.common),
             None,
             move |session| session.rename(&args.name, &args.to, args.write),
         ),
@@ -157,22 +166,33 @@ fn run_workflow(command: Command) -> ExitCode {
             }
             let presentation = present::Presentation::from_common(&args.common);
             if args.fix {
-                return run_configured(config, presentation, None, move |session| {
-                    session.lint_fix(args.write)
-                });
+                return run_configured(
+                    config,
+                    presentation,
+                    fail_on(&args.common),
+                    None,
+                    move |session| session.lint_fix(args.write),
+                );
             }
-            run_configured(config, presentation.with_all(args.all), None, |session| {
-                essential_envelope(
-                    session.lint(),
-                    |value| wright_driver::essential::lint(value, args.all),
-                    |result| result.selection.clone(),
-                )
-            })
+            run_configured(
+                config,
+                presentation.with_all(args.all),
+                fail_on(&args.common),
+                None,
+                |session| {
+                    essential_envelope(
+                        session.lint(),
+                        |value| wright_driver::essential::lint(value, args.all),
+                        |result| result.selection.clone(),
+                    )
+                },
+            )
         }
         Command::Inspect(args) => match args.query {
             None => run_configured(
                 config_from_common(&args.common),
                 present::Presentation::from_common(&args.common).with_all(args.all),
+                fail_on(&args.common),
                 None,
                 |session| {
                     essential_envelope(
@@ -185,6 +205,7 @@ fn run_workflow(command: Command) -> ExitCode {
             Some(cli::InspectQuery::Rules(query)) => run_configured(
                 config_from_common(&query.common),
                 present::Presentation::from_common(&query.common).with_all(query.all),
+                fail_on(&query.common),
                 None,
                 move |session| {
                     session
@@ -209,6 +230,7 @@ fn run_workflow(command: Command) -> ExitCode {
                 run_configured(
                     config_from_common(&query.common),
                     present::Presentation::from_common(&query.common).with_all(query.all),
+                    fail_on(&query.common),
                     None,
                     move |session| {
                         session
@@ -226,6 +248,7 @@ fn run_workflow(command: Command) -> ExitCode {
                 run_configured(
                     config_from_common(&query.common),
                     present::Presentation::from_common(&query.common).with_all(query.all),
+                    fail_on(&query.common),
                     None,
                     move |session| {
                         session
@@ -246,6 +269,7 @@ fn run_workflow(command: Command) -> ExitCode {
                 run_configured(
                     config_from_common(&query.common),
                     present::Presentation::from_common(&query.common).with_all(query.all),
+                    fail_on(&query.common),
                     Some(subject.as_str()),
                     move |session| {
                         session
@@ -261,6 +285,7 @@ fn run_workflow(command: Command) -> ExitCode {
             Some(cli::InspectQuery::Callgraph(query)) => run_configured(
                 config_from_common(&query.common),
                 present::Presentation::from_common(&query.common).with_all(query.all),
+                fail_on(&query.common),
                 None,
                 move |session| {
                     session
@@ -299,6 +324,7 @@ fn run_workflow(command: Command) -> ExitCode {
                 run_configured(
                     config,
                     present::Presentation::from_common(&query.common).with_all(query.all),
+                    fail_on(&query.common),
                     None,
                     |session| {
                         session.cost(query.rule.clone()).map_result(|mut result| {
@@ -336,6 +362,7 @@ fn essential_envelope<T: serde::Serialize>(
 fn run_configured<T: serde::Serialize + present::ResultPresentation>(
     config: SessionConfig,
     presentation: present::Presentation,
+    fail_on: Option<wright_driver::Severity>,
     subject: Option<&str>,
     run: impl FnOnce(&mut wright_driver::CompilerSession) -> wright_driver::Envelope<T>,
 ) -> ExitCode {
@@ -347,7 +374,13 @@ fn run_configured<T: serde::Serialize + present::ResultPresentation>(
         }
     };
 
-    ExitCode::from(run_command(&mut session, run, presentation, subject))
+    ExitCode::from(run_command(
+        &mut session,
+        run,
+        presentation,
+        fail_on,
+        subject,
+    ))
 }
 
 /// Run `wright compile` (ADR-0025): the program goes to a file (or stdout
@@ -378,6 +411,7 @@ fn run_compile(args: &cli::CompileArgs) -> ExitCode {
     run_configured(
         compile_config,
         present::Presentation::from_common(&args.common),
+        fail_on(&args.common),
         None,
         move |session: &mut wright_driver::CompilerSession| {
             let mut confirm = |path: &std::path::Path| {
@@ -632,15 +666,17 @@ fn config_from_common(common: &CommonArgs) -> SessionConfig {
     }
 }
 
+/// `--fail-on` (ADR-0030 decision 13): the CLI gating threshold applied to
+/// the finished envelope — `None` leaves the default exit codes untouched.
+fn fail_on(common: &CommonArgs) -> Option<wright_driver::Severity> {
+    common.fail_on.map(cli::SeverityArg::as_severity)
+}
+
 /// Map the CLI finding-selection flags onto the shared driver selection
 /// model; the driver applies it to diagnostics and lint findings alike (#430).
 fn selection_from_args(select: &cli::SelectArgs) -> wright_driver::FindingSelection {
     wright_driver::FindingSelection {
-        severity: select.severity.map(|severity| match severity {
-            cli::SeverityArg::Error => wright_driver::Severity::Error,
-            cli::SeverityArg::Warning => wright_driver::Severity::Warning,
-            cli::SeverityArg::Info => wright_driver::Severity::Info,
-        }),
+        severity: select.severity.map(cli::SeverityArg::as_severity),
         rule: select.rule_id.clone(),
         file: select.file.clone(),
         max: select.max,
@@ -674,17 +710,24 @@ fn run_command<T: serde::Serialize + present::ResultPresentation>(
     session: &mut wright_driver::CompilerSession,
     run: impl FnOnce(&mut wright_driver::CompilerSession) -> wright_driver::Envelope<T>,
     presentation: present::Presentation,
+    fail_on: Option<wright_driver::Severity>,
     subject: Option<&str>,
 ) -> u8 {
     let activity = Arc::new(presentation.activity());
     session.set_progress_observer(activity.clone());
     let started = std::time::Instant::now();
-    let envelope = run(session);
+    let mut envelope = run(session);
     let elapsed = started.elapsed();
     session.clear_progress_observer();
     // The transient activity line is fully cleared before the final result
     // renders, so progress text never competes with the verdict (#443).
     drop(activity);
+    // `--fail-on` raises the verdict on the finished envelope, after the
+    // result is fixed on the complete finding/diagnostic set (ADR-0030
+    // decision 13); every renderer and JSON then read the raised verdict.
+    if let Some(threshold) = fail_on {
+        present::gate(&mut envelope, threshold);
+    }
     let code = envelope.exit;
     let source_base = session.input_root();
     present::render(
@@ -712,6 +755,7 @@ mod tests {
             format: cli::OutputFormatArg::Json,
             renderer: cli::RendererArg::Plain,
             color: cli::ColorArg::Never,
+            fail_on: None,
         }
     }
 
