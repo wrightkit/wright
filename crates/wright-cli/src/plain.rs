@@ -799,6 +799,11 @@ impl PlainReport for LintResult {
                 "lint",
             ));
         }
+        // `lint` carries the same program summary `analyze` reports (#792):
+        // the `rules=` summary field counts lint rules, not program rules.
+        if let Some(program) = program_record(&self.program, None) {
+            out.push(program);
+        }
         for fix in self.fixes.iter().flatten() {
             let status = match fix.status {
                 wright_driver::result::LintFixStatus::Preview => "preview",

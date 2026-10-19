@@ -245,8 +245,9 @@ subcommand leads with its subject and summary before its detail:
 * `inspect callgraph` prints the edge shape first, then notable fan-in and
   fan-out, that is, subroutines with more than one caller and rules calling
   more than one subroutine, then the edge list (`fan-in:`/`fan-out:`/`edge:`
-  records).
-* `inspect cost` prints exact generated-resource totals, the canonical
+  records on the plain renderer).
+* `inspect cost` prints exact generated-resource totals — the declared
+  program rule count `analyze` reports among them — the canonical
   element count against the client element budget with each rule's share
   ranked by count and located in source (`path:line:col`; `share:` records),
   then static
@@ -254,12 +255,12 @@ subcommand leads with its subject and summary before its detail:
   ordered by severity with consecutive identical findings collapsed into one
   counted entry that lists every occurrence's location on the terminal
   renderer (#722). A failed
-  computation is never a zero: a failed element count reports `unavailable`
-  with its reason and the known 32768-element budget, and failed emission
-  reports `emitted bytes: unavailable — <reason>` (`elements=unavailable`/
-  `emittedBytes=unavailable` plus the `elementCountUnavailable`/
-  `emittedBytesUnavailable` reason fields on the plain renderer)
-  (ADR-0030 decision 3). Skipped rule
+  computation is never a zero: a failed element count prints
+  `element count unavailable: <reason> — the 32768-element budget still
+  applies`, and failed emission prints `emitted bytes: unavailable —
+  <reason>` (`elements=unavailable`/`emittedBytes=unavailable` plus the
+  `elementCountUnavailable`/`emittedBytesUnavailable` reason fields on the
+  plain renderer) (ADR-0030 decision 3). Skipped rule
   evaluations are disclosed like `lint`'s (#788 — `skipped=` on the plain
   `summary:`). With
   `--rule`, `inspect cost` instead prints that rule's identity and
