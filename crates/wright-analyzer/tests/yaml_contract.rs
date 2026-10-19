@@ -31,7 +31,7 @@ rules:
 
 #[test]
 fn declarative_rule_ids_keep_the_namespace_slash_contract() {
-    let catalog = wright_analyzer::catalog::builtin().unwrap();
+    let catalog = workshop_rs::catalog::Catalog::builtin_ref().unwrap();
     let definition = RuleDefinition::from_yaml_str(
         r#"
 id: Community_Name/Rule.Name
@@ -45,7 +45,7 @@ matcher: {}
 "#,
     )
     .unwrap();
-    let rule = DeclarativeRule::from_definition(definition, &catalog)
+    let rule = DeclarativeRule::from_definition(definition, catalog)
         .expect("the existing namespace/id contract accepts non-kebab-case components");
     assert_eq!(rule.id(), "Community_Name/Rule.Name");
 
@@ -62,12 +62,12 @@ matcher: {}
 "#,
     )
     .unwrap();
-    assert!(DeclarativeRule::from_definition(reserved, &catalog).is_err());
+    assert!(DeclarativeRule::from_definition(reserved, catalog).is_err());
 }
 
 #[test]
 fn declarative_scopes_match_all_requested_public_control_flow_regions() {
-    let catalog = wright_analyzer::catalog::builtin().unwrap();
+    let catalog = workshop_rs::catalog::Catalog::builtin_ref().unwrap();
     let mut program = Program::new();
     program.rule(
         Rule::new("scopes", Event::Global)
@@ -110,7 +110,7 @@ fn declarative_scopes_match_all_requested_public_control_flow_regions() {
     );
 
     let while_findings =
-        scoped_call_rule(&catalog, "community/while", "while", false).run(&program, 0, None, None);
+        scoped_call_rule(catalog, "community/while", "while", false).run(&program, 0, None, None);
     assert_eq!(
         while_findings
             .iter()
@@ -122,7 +122,7 @@ fn declarative_scopes_match_all_requested_public_control_flow_regions() {
     assert!(while_findings[1].message.contains("matched 1 node"));
 
     let if_findings =
-        scoped_call_rule(&catalog, "community/if", "if", true).run(&program, 0, None, None);
+        scoped_call_rule(catalog, "community/if", "if", true).run(&program, 0, None, None);
     assert_eq!(
         if_findings
             .iter()
@@ -134,7 +134,7 @@ fn declarative_scopes_match_all_requested_public_control_flow_regions() {
     assert!(if_findings[1].message.contains("matched 3 nodes"));
 
     let rule_findings =
-        scoped_call_rule(&catalog, "community/rule", "rule", false).run(&program, 0, None, None);
+        scoped_call_rule(catalog, "community/rule", "rule", false).run(&program, 0, None, None);
     assert_eq!(rule_findings.len(), 1);
     assert_eq!(rule_findings[0].action, None);
     assert!(rule_findings[0].message.contains("matched 9 nodes"));

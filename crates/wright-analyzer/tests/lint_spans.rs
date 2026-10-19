@@ -11,8 +11,8 @@ use wright_analyzer::canonical::{Finding, analyze};
 use wright_analyzer::registry::LintConfig;
 
 fn parse(source: &str) -> Program {
-    let catalog = wright_analyzer::catalog::builtin().unwrap();
-    parser::parse_with_context(source, &catalog, &Locale::new("en-US"), &*catalog)
+    let catalog = workshop_rs::catalog::Catalog::builtin_ref().unwrap();
+    parser::parse_with_context(source, catalog, &Locale::new("en-US"), catalog)
         .unwrap_or_else(|error| panic!("Workshop source must parse: {error}"))
 }
 

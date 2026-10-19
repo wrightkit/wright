@@ -582,11 +582,11 @@ fn cost_estimate_reports_the_canonical_element_count() {
         },
     );
 
-    let catalog = wright_analyzer::catalog::builtin().expect("catalog");
+    let catalog = workshop_rs::catalog::Catalog::builtin_ref().expect("catalog");
     let locale = workshop_rs::catalog::Locale::new("en-US");
-    let program = workshop_rs::parser::parse_with_context(&source, &catalog, &locale, &*catalog)
+    let program = workshop_rs::parser::parse_with_context(&source, catalog, &locale, catalog)
         .expect("fixture parses");
-    let report = program.element_count(&catalog).expect("fixture counts");
+    let report = program.element_count(catalog).expect("fixture counts");
 
     let elements = &cost["elementCount"];
     assert_eq!(

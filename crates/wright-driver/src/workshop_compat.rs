@@ -21,13 +21,13 @@ pub struct WorkshopSemanticSide {
 }
 
 pub fn compare_workshop_texts(expected: &str, actual: &str) -> WorkshopSemanticComparison {
-    let catalog = match wright_analyzer::catalog::builtin() {
+    let catalog = match workshop_rs::catalog::Catalog::builtin_ref() {
         Ok(c) => c,
         Err(e) => return catalog_failure(e.to_string()),
     };
     let locale = workshop_rs::catalog::Locale::new("en-US");
-    let exp = parse_side(expected, &catalog, &locale);
-    let act = parse_side(actual, &catalog, &locale);
+    let exp = parse_side(expected, catalog, &locale);
+    let act = parse_side(actual, catalog, &locale);
     let equivalent = matches!((&exp.program, &act.program), (Some(e), Some(a)) if workshop_rs::roundtrip::equivalent(e, a));
     WorkshopSemanticComparison {
         equivalent,

@@ -41,7 +41,7 @@ impl CompilerSession {
                 preview: None,
             };
         }
-        crate::edit::validate_transaction(&self.config, &self.catalog, sources, transaction)
+        crate::edit::validate_transaction(&self.config, self.catalog, sources, transaction)
     }
 
     /// `semanticRename` (#434): resolve `target` against the loaded
@@ -77,7 +77,7 @@ impl CompilerSession {
             Err(diagnostic) => return refuse(vec![diagnostic]),
         }
         match self.load() {
-            Ok(loaded) => crate::edit::semantic_rename(&loaded, &self.catalog, sources, target),
+            Ok(loaded) => crate::edit::semantic_rename(&loaded, self.catalog, sources, target),
             Err(diagnostic) => refuse(vec![diagnostic]),
         }
     }
@@ -126,7 +126,7 @@ impl CompilerSession {
         let sources = BTreeMap::from([(loaded.input.display.clone(), loaded.input.text.clone())]);
         let rename = crate::edit::semantic_rename(
             &loaded,
-            &self.catalog,
+            self.catalog,
             Some(&sources),
             &RenameTarget {
                 symbol: Some(Address::Name(name.to_string())),
@@ -503,7 +503,7 @@ impl CompilerSession {
             None => {
                 let validation = crate::edit::validate_transaction(
                     &self.config,
-                    &self.catalog,
+                    self.catalog,
                     sources,
                     &transaction,
                 );

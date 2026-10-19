@@ -1150,7 +1150,6 @@ fn rename_in_line(line: &str, from: &str, to: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -1172,8 +1171,8 @@ mod tests {
         .unwrap()
     }
 
-    fn catalog() -> Arc<Catalog> {
-        wright_analyzer::catalog::builtin().expect("builtin catalog")
+    fn catalog() -> &'static Catalog {
+        workshop_rs::catalog::Catalog::builtin_ref().expect("builtin catalog")
     }
 
     #[test]
@@ -1273,7 +1272,7 @@ mod tests {
                 kind: SourceKind::Workshop,
                 ..SessionConfig::default()
             },
-            &catalog(),
+            catalog(),
             Some(&sources),
             &EditTransaction::new(vec![edit]).unwrap(),
         );
@@ -1303,7 +1302,7 @@ mod tests {
                 kind: SourceKind::Workshop,
                 ..SessionConfig::default()
             },
-            &catalog(),
+            catalog(),
             Some(&BTreeMap::new()),
             &EditTransaction::new(vec![edit]).unwrap(),
         );

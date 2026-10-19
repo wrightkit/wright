@@ -389,13 +389,13 @@ mod tests {
 
     #[test]
     fn unchanged_queries_reuse_serialized_surfaces_and_reconfiguration_is_fresh() {
-        let catalog = crate::catalog::builtin().unwrap();
+        let catalog = workshop_rs::catalog::Catalog::builtin_ref().unwrap();
         let text = include_str!("../../../../tests/fixtures/workshop/synthetic/control-flow.ws");
         let program = workshop_rs::parser::parse_with_context(
             text,
-            &catalog,
+            catalog,
             &workshop_rs::catalog::Locale::new("en-US"),
-            &*catalog,
+            catalog,
         )
         .unwrap();
         let service = SemanticService::new(&program);

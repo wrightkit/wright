@@ -113,7 +113,7 @@ pub struct CompilerSession {
     /// The construction-time snapshot `config` is verified against before
     /// every workflow (#511).
     fixed_config: SessionConfig,
-    catalog: Arc<workshop_rs::catalog::Catalog>,
+    catalog: &'static workshop_rs::catalog::Catalog,
     lint_registry: Arc<LintRegistry>,
     loaded: Option<Loaded>,
     loaded_operation: Option<ProviderOperation>,
@@ -136,7 +136,7 @@ struct SessionSemantic {
 impl CompilerSession {
     /// Build a session from a configuration.
     pub fn new(config: SessionConfig) -> Result<CompilerSession, Diagnostic> {
-        let catalog = wright_analyzer::catalog::builtin().map_err(|error| {
+        let catalog = workshop_rs::catalog::Catalog::builtin_ref().map_err(|error| {
             Diagnostic::error(
                 "catalog-error",
                 Stage::Internal,
@@ -231,7 +231,7 @@ impl CompilerSession {
     }
 
     pub(crate) fn catalog(&self) -> &workshop_rs::catalog::Catalog {
-        &self.catalog
+        self.catalog
     }
 
     fn progress(&self, event: ProgressEvent) {
@@ -407,7 +407,7 @@ impl CompilerSession {
             && self.config.profile != wright_transform::Profile::Off)
             .then(|| {
                 hotpath::measure_block!("load::semantic_issues", {
-                    program.semantic_issues(&self.catalog)
+                    program.semantic_issues(self.catalog)
                 })
             });
         apply_profile(&mut program, self.config.profile)?;
@@ -640,9 +640,9 @@ impl CompilerSession {
         self.progress(ProgressEvent::new(ProgressPhase::Parsing));
         let mut program = workshop_rs::parser::parse_with_context(
             &workshop_text,
-            &self.catalog,
+            self.catalog,
             &locale,
-            &*self.catalog,
+            self.catalog,
         )
         .map_err(|error| workshop_diag_for_provider_artifact(error, resolved, &[]))?;
         let mut provenance = Provenance::Unmapped;
@@ -826,7 +826,7 @@ impl CompilerSession {
     /// project run cache (ADR-0027, #723): the canonical total plus each
     /// rule's share, in canonical order. `None` when the count cannot run.
     pub(crate) fn cost_snapshot(&self, loaded: &Loaded) -> Option<cache::CostSnapshot> {
-        let report = loaded.program.element_count(&self.catalog).ok()?;
+        let report = loaded.program.element_count(self.catalog).ok()?;
         Some(cache::CostSnapshot {
             total: report.total,
             budget: WORKSHOP_CLIENT_ELEMENT_LIMIT,
@@ -888,7 +888,7 @@ impl CompilerSession {
         let locale = hotpath::measure_block!("load::detect_locale", {
             workshop_rs::detect::resolve_locale(
                 &resolved.text,
-                &self.catalog,
+                self.catalog,
                 override_locale.as_ref(),
             )
         })
@@ -896,9 +896,9 @@ impl CompilerSession {
         let program = hotpath::measure_block!("load::parse", {
             workshop_rs::parser::parse_with_context(
                 &resolved.text,
-                &self.catalog,
+                self.catalog,
                 &locale,
-                &*self.catalog,
+                self.catalog,
             )
         })
         .map_err(|error| workshop_diag(error, resolved))?;
@@ -909,7 +909,7 @@ impl CompilerSession {
             "load::validate_canonical",
             workshop_rs::validate::validate_canonical_ids_tolerating_residuals(
                 &program,
-                &self.catalog
+                self.catalog
             )
         )
         .map_err(|error| workshop_diag(error, resolved))?;
@@ -1050,7 +1050,7 @@ impl CompilerSession {
         let locale = named.unwrap_or_else(|| Self::locale_for(&loaded));
         self.progress(ProgressEvent::new(ProgressPhase::Emission));
         let text = hotpath::measure_block!("compile::emit", {
-            workshop_rs::emitter::emit(&loaded.program, &self.catalog, &locale)
+            workshop_rs::emitter::emit(&loaded.program, self.catalog, &locale)
         })
         .map_err(|error| workshop_diag(error, &loaded.input))?;
         self.attach_target_limits(&loaded);
@@ -1116,8 +1116,8 @@ impl CompilerSession {
 
     fn convert_opy(&mut self, loaded: &Loaded) -> Result<String, ()> {
         let locale = Self::locale_for(loaded);
-        let artifact = workshop_rs::emitter::emit(&loaded.program, &self.catalog, &locale)
-            .map_err(|e| {
+        let artifact =
+            workshop_rs::emitter::emit(&loaded.program, self.catalog, &locale).map_err(|e| {
                 self.diagnostics.push(Diagnostic::error(
                     "workshop-emission",
                     Stage::Emission,
@@ -1218,7 +1218,7 @@ impl CompilerSession {
     /// this: it is a source-correctness workflow, not a client-import gate.
     fn attach_target_limits(&mut self, loaded: &Loaded) {
         let report = match hotpath::measure_block!("compile::element_count", {
-            loaded.program.element_count(&self.catalog)
+            loaded.program.element_count(self.catalog)
         }) {
             Ok(report) => report,
             Err(error) => {
@@ -1287,7 +1287,7 @@ impl CompilerSession {
         let residuals = match &loaded.completeness_issues {
             Some(residuals) => residuals.as_slice(),
             None => {
-                computed = loaded.program.semantic_issues(&self.catalog);
+                computed = loaded.program.semantic_issues(self.catalog);
                 &computed
             }
         };
