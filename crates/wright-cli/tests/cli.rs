@@ -4023,6 +4023,84 @@ fn cost_text_reports_the_element_budget_and_rule_shares() {
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
 
+/// #790 (ADR-0030 decision 3): a failed element count reports unavailable
+/// with its reason and the known client budget — never `0 element(s) of the
+/// 0-element budget` — and failed emission reports `emitted bytes:
+/// unavailable`, never `0`; a program whose count succeeds reports the real
+/// total and emitted size.
+#[test]
+fn cost_reports_unavailable_element_count_with_budget_and_reason() {
+    // A stray `End;` is preserved as an opaque `rawWorkshopAction`, so the
+    // program loads but the emitter and the element counter cannot model it.
+    let failing = temp_file(
+        "opaque.ws",
+        "variables {\n    global:\n        0: x\n}\nrule (\"test\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Wait(1);\n        End;\n    }\n}\n",
+    );
+    let failing = failing.to_str().unwrap();
+
+    let output = run(&["inspect", "cost", failing]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("emitted byte(s) unavailable"), "{stdout}");
+    assert!(
+        stdout.contains("emitted bytes: unavailable — unknown action spelling 'rawWorkshopAction'"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains(
+            "element count unavailable: invalid program: unknown action spelling 'rawWorkshopAction' for locale 'en-us' — the 32768-element budget still applies"
+        ),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("0 element(s)"), "{stdout}");
+    assert!(!stdout.contains("emitted bytes: 0"), "{stdout}");
+
+    let json = run(&["inspect", "cost", failing, "-f", "json", "--all"]);
+    assert!(json.status.success(), "{}", command_result(&json));
+    let result = parse_json(&json.stdout)["result"].clone();
+    assert_eq!(result["elementCount"]["budget"], 32768);
+    assert!(
+        result["elementCount"].get("total").is_none(),
+        "the count is absent, not zero: {result}"
+    );
+    assert!(
+        result["elementCount"].get("rules").is_none(),
+        "no fabricated shares list: {result}"
+    );
+    assert!(
+        result["elementCountUnavailable"]
+            .as_str()
+            .unwrap()
+            .contains("rawWorkshopAction"),
+        "{result}"
+    );
+    assert!(result["exact"]["emittedBytes"].is_null());
+    assert!(
+        result["exact"]["emittedBytesUnavailable"]
+            .as_str()
+            .unwrap()
+            .contains("rawWorkshopAction"),
+        "{result}"
+    );
+
+    // The succeeding path keeps reporting the real total, the same budget,
+    // and a real emitted size.
+    let ok = temp_file("ok.ws", &corpus_workshop("synthetic/basic-rule"));
+    let ok = ok.to_str().unwrap();
+    let json = run(&["inspect", "cost", ok, "-f", "json"]);
+    assert!(json.status.success(), "{}", command_result(&json));
+    let result = parse_json(&json.stdout)["result"].clone();
+    assert!(result["elementCount"]["total"].as_u64().unwrap() > 0);
+    assert_eq!(result["elementCount"]["budget"], 32768);
+    assert!(result["elementCount"]["rules"].is_array());
+    assert!(result["exact"]["emittedBytes"].as_u64().unwrap() > 0);
+    assert!(result.get("elementCountUnavailable").is_none());
+    assert!(result["exact"].get("emittedBytesUnavailable").is_none());
+
+    let _ = std::fs::remove_dir_all(Path::new(failing).parent().unwrap());
+    let _ = std::fs::remove_dir_all(Path::new(ok).parent().unwrap());
+}
+
 /// The default `inspect cost` view keeps the 5 largest rules — payload
 /// order is the ranking, so the cap keeps the head of it — and
 /// reports the cut through `elementCount.truncation.rules`.
