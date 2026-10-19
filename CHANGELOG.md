@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.1](https://github.com/wrightkit/wright/compare/v0.26.0...v0.26.1) (2026-10-19)
+
+
+### Dependencies
+
+* adopt workshop-rs shared built-in catalog cache ([#771](https://github.com/wrightkit/wright/issues/771)) ([e36bba6](https://github.com/wrightkit/wright/commit/e36bba6ebebe6b088463273d9452440b95ffd550))
+
 ## [0.26.0](https://github.com/wrightkit/wright/compare/v0.25.2...v0.26.0) (2026-10-18)
 
 
