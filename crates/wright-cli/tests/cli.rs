@@ -3265,11 +3265,63 @@ for line in sys.stdin:
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A staged OPY provider for `convert` tests: `reconstruct` toggles the one
+/// capability under test. The ambient provider release decides which
+/// capabilities it advertises — `opy-provider` 0.3.19 added `reconstruct` —
+/// so a test that asserts wright's response to a negotiated (or absent)
+/// capability stages its own provider rather than depending on today's
+/// release contents.
+#[cfg(unix)]
+fn write_convert_provider(dir: &std::path::Path, reconstruct: bool) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    const PROVIDER: &str = r##"#!/usr/bin/env python3
+import json, sys
+def reply(id, result=None, error=None):
+    message = {"jsonrpc": "2.0", "id": id}
+    message.update({"error": error} if error else {"result": result})
+    print(json.dumps(message), flush=True)
+for line in sys.stdin:
+    request = json.loads(line)
+    id, method = request["id"], request["method"]
+    if method == "lpp/initialize":
+        reply(id, {"protocolVersion": request["params"]["protocolVersion"], "serverInfo": {"name": "fake", "version": "0"},
+                   "languages": [{"id": "opy", "extensions": ["opy"]}],
+                   "capabilities": {"check": True, "compile": True, "reconstruct": RECONSTRUCT, "symbols": False, "definition": False, "references": False, "rename": False, "editValidation": False, "projectLoading": True}})
+    elif method == "lpp/reconstruct":
+        reply(id, {"source": "# reconstructed opy source\n"})
+    else:
+        reply(id, {})
+"##;
+
+    let script = dir.join("fake-convert-provider");
+    std::fs::write(
+        &script,
+        PROVIDER.replace("RECONSTRUCT", if reconstruct { "True" } else { "False" }),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    script
+}
+
+/// `convert --target opy` refuses `capability-unavailable` when the
+/// negotiated provider lacks `reconstruct` — regardless of what the
+/// ambient release happens to advertise.
+#[cfg(unix)]
 #[test]
 fn convert_workshop_input_to_opy_requires_provider_reconstruct_capability() {
     let path = temp_file("convert.txt", &corpus_workshop("synthetic/basic-rule"));
-    let path = path.to_str().unwrap();
-    let output = run(&["convert", "--target", "opy", path, "-f", "json"]);
+    let provider = write_convert_provider(path.parent().unwrap(), false);
+    let output = run(&[
+        "convert",
+        "--target",
+        "opy",
+        path.to_str().unwrap(),
+        "--opy-provider",
+        provider.to_str().unwrap(),
+        "-f",
+        "json",
+    ]);
     let envelope = parse_json(&output.stdout);
     assert_eq!(envelope["ok"], false);
     assert_eq!(envelope["command"], "convert");
@@ -3282,6 +3334,7 @@ fn convert_workshop_input_to_opy_requires_provider_reconstruct_capability() {
         envelope["diagnostics"][0]
     );
     assert!(envelope["result"]["text"].as_str().unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[test]
@@ -3307,18 +3360,35 @@ fn convert_workshop_input_to_ostw_reports_provider_unavailable() {
     assert!(envelope["result"]["text"].as_str().unwrap().is_empty());
 }
 
+/// The success envelope: a staged provider that negotiates `reconstruct`
+/// keeps the assertion independent of the ambient provider release.
+#[cfg(unix)]
 #[test]
 fn convert_json_envelope_reports_command_result_and_target() {
     let path = temp_file("convert.txt", &corpus_workshop("synthetic/basic-rule"));
-    let path = path.to_str().unwrap();
-    let output = run(&["convert", "--target", "opy", path, "-f", "json"]);
+    let provider = write_convert_provider(path.parent().unwrap(), true);
+    let output = run(&[
+        "convert",
+        "--target",
+        "opy",
+        path.to_str().unwrap(),
+        "--opy-provider",
+        provider.to_str().unwrap(),
+        "-f",
+        "json",
+    ]);
     assert!(output.stderr.is_empty(), "JSON mode keeps stderr clean");
     let envelope = parse_json(&output.stdout);
-    assert_eq!(envelope["ok"], false);
-    assert_ne!(envelope["exit"], 0);
+    assert_eq!(envelope["ok"], true);
+    assert_eq!(envelope["exit"], 0);
     assert_eq!(envelope["command"], "convert");
     assert_eq!(envelope["wright"]["contract"], "wright-result/v1");
     assert_eq!(envelope["result"]["target"], "opy");
+    assert_eq!(
+        envelope["result"]["text"].as_str().unwrap(),
+        "# reconstructed opy source\n"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[test]

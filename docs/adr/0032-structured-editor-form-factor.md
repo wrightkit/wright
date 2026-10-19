@@ -20,7 +20,7 @@ The prototype is about 1,200 lines of plain JavaScript behind a Python bridge to
 - Several defects came from untyped nodes. One built `{"call":"true"}` for a literal. Another treated a catalog default string as a call id. The `wright-agent/v1` and `rule-content-v1` schemas are committed, but the prototype cannot use them.
 - A browser cannot speak to `wright serve` over stdio, so something has to carry requests and write accepted edits to disk.
 
-Goal principle 1 makes `wright` the product the user runs. The goal's non-goals exclude a full IDE or a heavy UI product, and principle 10 asks for a small, predictable core.
+Goal principle 1 makes `wright` the product the user runs. The goal keeps a general-purpose IDE out of scope and places UI in `wright`, and principle 10 asks for a small, predictable core.
 
 ## Decision
 
