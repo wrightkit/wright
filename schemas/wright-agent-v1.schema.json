@@ -214,13 +214,14 @@
     },
     "Reference": {
       "type": "object",
-      "required": ["kind", "span", "rule", "action", "value"],
+      "required": ["kind", "span", "rule", "action", "value", "owningRule"],
       "properties": {
         "kind": { "enum": ["declaration", "definition", "read", "write", "call"] },
         "span": { "$ref": "#/$defs/Span" },
         "rule": { "type": ["integer", "null"], "minimum": 0 },
         "action": { "type": ["integer", "null"], "minimum": 0 },
-        "value": { "type": ["integer", "null"], "minimum": 0 }
+        "value": { "type": ["integer", "null"], "minimum": 0 },
+        "owningRule": { "type": ["object", "null"], "description": "The owning rule's identity — `{id, name, span}` like a `rules` list entry — so a consumer renders a rule location without a second lookup (#792); null when the reference has no owning rule." }
       },
       "additionalProperties": true
     },
@@ -594,7 +595,8 @@
       "required": [
         "counts",
         "findings",
-        "expand"
+        "expand",
+        "next"
       ],
       "properties": {
         "ok": { "type": "boolean" },
@@ -607,6 +609,7 @@
           "items": { "$ref": "#/$defs/ActionableFinding" }
         },
         "expand": { "type": "string" },
+        "next": { "type": "array", "items": { "type": "string" }, "description": "Shared follow-up commands rendered as `next:` records (#792); each entry is a complete `wright` command line." },
         "truncation": { "$ref": "#/$defs/Truncation" },
         "selection": { "$ref": "#/$defs/SelectionSummary" }
       },
@@ -708,6 +711,7 @@
         "elementCountUnavailable": { "type": "string" },
         "findings": { "type": "array", "items": { "type": "object", "required": ["code", "severity", "message"], "properties": { "code": { "type": "string" }, "severity": { "type": "string" }, "message": { "type": "string" } }, "additionalProperties": true } },
         "kind": { "type": "object", "required": ["exact", "findings", "performance"], "properties": { "exact": { "type": "string" }, "findings": { "type": "string" }, "performance": { "type": "string" } }, "additionalProperties": true },
+        "skipped": { "type": "array", "items": { "$ref": "#/$defs/SkippedRule" }, "description": "Rule evaluations the configured registry skipped (canonical CFG unavailable) — the same disclosure `lint` carries (#788)." },
         "selection": { "$ref": "#/$defs/SelectionSummary" }
       },
       "additionalProperties": true
@@ -790,7 +794,15 @@
       },
       "additionalProperties": true
     },
-    "CheckPayload": { "type": "object", "additionalProperties": true },
+    "CheckPayload": {
+      "type": "object",
+      "required": ["program", "next"],
+      "properties": {
+        "program": { "$ref": "#/$defs/AnalyzedProgramSummary", "description": "The loaded program's summary — the same members `analyze`'s `program` reports (#792)." },
+        "next": { "type": "array", "items": { "type": "string" }, "description": "Shared follow-up commands rendered as `next:` records (#792); each entry is a complete `wright` command line." }
+      },
+      "additionalProperties": true
+    },
     "AnalyzePayload": {
       "type": "object",
       "required": [
@@ -803,7 +815,8 @@
         "variables",
         "persistentObjects",
         "counts",
-        "expand"
+        "expand",
+        "next"
       ],
       "properties": {
         "program": { "$ref": "#/$defs/AnalyzedProgramSummary" },
@@ -819,6 +832,7 @@
         "persistentObjects": { "type": "object" },
         "counts": { "type": "object" },
         "expand": { "type": "string" },
+        "next": { "type": "array", "items": { "type": "string" }, "description": "Shared follow-up commands rendered as `next:` records (#792); each entry is a complete `wright` command line." },
         "truncation": { "$ref": "#/$defs/Truncation" },
         "selection": { "$ref": "#/$defs/SelectionSummary" }
       },
@@ -830,7 +844,8 @@
         "program",
         "counts",
         "rules",
-        "expand"
+        "expand",
+        "next"
       ],
       "properties": {
         "program": { "$ref": "#/$defs/ProgramSummary" },
@@ -850,6 +865,7 @@
           }
         },
         "expand": { "type": "string" },
+        "next": { "type": "array", "items": { "type": "string" }, "description": "Shared follow-up commands rendered as `next:` records (#792); each entry is a complete `wright` command line." },
         "truncation": { "$ref": "#/$defs/Truncation" },
         "selection": { "$ref": "#/$defs/SelectionSummary" }
       },

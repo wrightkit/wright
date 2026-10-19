@@ -7,7 +7,24 @@ expression: snapshot_value
   "diagnostics": [],
   "exit": 0,
   "ok": true,
-  "result": {},
+  "result": {
+    "next": [
+      "wright lint",
+      "wright analyze",
+      "wright inspect"
+    ],
+    "program": {
+      "files": 1,
+      "globalVariables": 0,
+      "origin": {
+        "kind": "workshop",
+        "locale": "en-us"
+      },
+      "playerVariables": 0,
+      "rules": 1,
+      "subroutines": 0
+    }
+  },
   "schema_version": "1",
   "wright": {
     "contract": "wright-result/v1",

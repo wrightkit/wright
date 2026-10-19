@@ -67,13 +67,20 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation + PlainReport>(
             for diagnostic in &envelope.diagnostics {
                 counts[severity_rank(diagnostic.severity) as usize] += 1;
             }
-            out.push((
-                Stream::Out,
-                format!(
-                    "summary: {}",
-                    severity_fields(counts[0], counts[1], counts[2]).join(" ")
-                ),
-            ));
+            let mut fields = severity_fields(counts[0], counts[1], counts[2]);
+            // The affected-file count is envelope data, not result data —
+            // a failure reports it exactly like a clean `check` does.
+            let affected: BTreeSet<String> = envelope
+                .diagnostics
+                .iter()
+                .filter_map(|diagnostic| diagnostic.span.as_ref())
+                .filter(|span| is_real_source_path(&span.path))
+                .map(|span| display_location_path(&span.path))
+                .collect();
+            if !affected.is_empty() {
+                fields.push(format!("affected={}", affected.len()));
+            }
+            out.push((Stream::Out, format!("summary: {}", fields.join(" "))));
         }
     } else {
         envelope.result.plain_report(envelope, ctx, &mut out);
@@ -87,15 +94,18 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation + PlainReport>(
     emit(&mut err);
 }
 
-/// The verdict word maps to the exit code (ADR-0030 decision 4 shares the
-/// tag set across renderers): FAIL is a source error, USAGE a flag error,
-/// UNSUPPORTED a recognized-but-unsupported operation, ERROR anything else.
-/// A clean query command (`rules`, `symbols`, `refs`, `cfg`, `callgraph`,
-/// `inspect`, `lookup`) shows its own name instead of a vacuous PASS.
+/// The verdict word shares the renderers' tag set (ADR-0030 decision 4):
+/// FAIL is the `--fail-on` gate's raised verdict, ERROR a genuine failure,
+/// USAGE a flag error (exit 2), UNSUPPORTED a recognized-but-unsupported
+/// operation (exit 3). A clean query command (`rules`, `symbols`, `refs`,
+/// `cfg`, `callgraph`, `cost`, `inspect`, `lookup`) shows its own name
+/// instead of a vacuous PASS.
 fn verdict_word<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) -> String {
     if envelope.exit != 0 || !envelope.ok {
+        if envelope.gated {
+            return "FAIL".to_string();
+        }
         return match envelope.exit {
-            1 => "FAIL",
             2 => "USAGE",
             3 => "UNSUPPORTED",
             _ => "ERROR",
@@ -105,8 +115,9 @@ fn verdict_word<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>
     match summary_status(envelope) {
         "WARN" => "WARN".to_string(),
         _ => match envelope.command.as_str() {
-            "rules" | "symbols" | "refs" | "cfg" | "callgraph" | "cost" | "inspect"
-            | "lookup" => envelope.command.to_uppercase(),
+            "rules" | "symbols" | "refs" | "cfg" | "callgraph" | "cost" | "inspect" | "lookup" => {
+                envelope.command.to_uppercase()
+            }
             _ => "PASS".to_string(),
         },
     }
@@ -232,13 +243,17 @@ fn status_label(status: Status) -> &'static str {
     }
 }
 
-/// Follow-up commands as `next:` records (decision 2): the command's known
-/// follow-ups. A driver-provided list (#792) has not landed yet; when it
-/// does it wins over this table.
+/// Follow-up commands as `next:` records (decision 2): the result's
+/// driver-provided list (#792) when it carries one, else the command's
+/// known follow-ups; the rejected-name lookup hints are additive.
 fn next_commands<T: serde::Serialize>(envelope: &Envelope<T>) -> Vec<String> {
     let mut commands = Vec::new();
+    let result = serde_json::to_value(&envelope.result).unwrap_or_default();
+    if let Some(next) = result.get("next").and_then(Value::as_array) {
+        commands.extend(next.iter().filter_map(Value::as_str).map(str::to_string));
+    }
     match envelope.command.as_str() {
-        "inspect" | "analyze" => {
+        "inspect" | "analyze" if commands.is_empty() => {
             for cmd in [
                 "wright inspect symbols",
                 "wright inspect refs <NAME>",
@@ -450,13 +465,7 @@ fn finding_record(finding: &Value) -> String {
     // already carries (severity, code, message, span, location, repeated)
     // are skipped.
     const CARRIED: &[&str] = &[
-        "code",
-        "severity",
-        "message",
-        "span",
-        "location",
-        "fix",
-        "repeated",
+        "code", "severity", "message", "span", "location", "fix", "repeated",
     ];
     if let Some(object) = finding.as_object() {
         for (key, value) in object {
@@ -567,10 +576,11 @@ fn program_record(program: &Value, persistent_objects: Option<u64>) -> Option<Li
 }
 
 /// `cost:` record for the canonical element count — `unavailable` with its
-/// reason when the computation failed, and the client budget either way
-/// (ADR-0030 decision 3: a known limit is reported even when the count is
-/// not).
-fn cost_record(elements: Option<u64>, reason: Option<&str>, extra: Vec<String>) -> Line {
+/// reason under the payload's own member name (`elementCountUnavailable`,
+/// `unavailableReason`) when the computation failed, and the client budget
+/// either way (ADR-0030 decision 3: a known limit is reported even when the
+/// count is not).
+fn cost_record(elements: Option<u64>, reason: Option<(&str, &str)>, extra: Vec<String>) -> Line {
     let mut fields = vec![match elements {
         Some(elements) => format!("elements={elements}"),
         None => "elements=unavailable".to_string(),
@@ -580,8 +590,8 @@ fn cost_record(elements: Option<u64>, reason: Option<&str>, extra: Vec<String>) 
         wright_driver::WORKSHOP_CLIENT_ELEMENT_LIMIT
     ));
     fields.extend(extra);
-    if let Some(reason) = reason {
-        fields.push(field("reason", reason));
+    if let Some((key, reason)) = reason {
+        fields.push(field(key, reason));
     }
     (Stream::Out, format!("cost: {}", fields.join(" ")))
 }
@@ -615,6 +625,12 @@ fn origin_from_program(program: &Value) -> Vec<(&'static str, String)> {
 }
 
 impl PlainReport for CheckResult {
+    fn origin_fields(&self) -> Vec<(&'static str, String)> {
+        self.program
+            .as_ref()
+            .map(|program| origin_from_program(program))
+            .unwrap_or_default()
+    }
     fn plain_report(
         &self,
         envelope: &Envelope<Self>,
@@ -644,6 +660,14 @@ impl PlainReport for CheckResult {
             fields.push(format!("affected={}", affected.len()));
         }
         out.push((Stream::Out, format!("summary: {}", fields.join(" "))));
+        // `check` carries the same program summary `analyze` reports (#792).
+        if let Some(program) = self
+            .program
+            .as_ref()
+            .and_then(|program| program_record(program, None))
+        {
+            out.push(program);
+        }
     }
 }
 
@@ -768,7 +792,12 @@ impl PlainReport for LintResult {
             out.push((Stream::Out, finding_record(finding)));
         }
         if let Some(selection) = &self.selection {
-            out.push(selected_record("findings", findings.len(), selection, "lint"));
+            out.push(selected_record(
+                "findings",
+                findings.len(),
+                selection,
+                "lint",
+            ));
         }
         for fix in self.fixes.iter().flatten() {
             let status = match fix.status {
@@ -839,10 +868,10 @@ fn essential_lint(result: &EssentialResult, out: &mut Vec<Line>) {
     let findings = result.result["findings"]
         .as_array()
         .map_or(&[][..], Vec::as_slice);
-    let total = result
-        .selection
-        .as_ref()
-        .map_or_else(|| counts["total"].as_u64().unwrap_or(0) as usize, |s| s.total);
+    let total = result.selection.as_ref().map_or_else(
+        || counts["total"].as_u64().unwrap_or(0) as usize,
+        |s| s.total,
+    );
     let mut fields = vec![format!("findings={total}")];
     if result.selection.is_none() {
         fields.extend(severity_fields(
@@ -888,7 +917,12 @@ fn essential_lint(result: &EssentialResult, out: &mut Vec<Line>) {
     }
     truncation_records(&result.result, "lint", out);
     if let Some(selection) = &result.selection {
-        out.push(selected_record("findings", findings.len(), selection, "lint"));
+        out.push(selected_record(
+            "findings",
+            findings.len(),
+            selection,
+            "lint",
+        ));
     }
     for fix in fixes {
         let mut items = vec![
@@ -983,10 +1017,7 @@ fn essential_analyze(result: &EssentialResult, out: &mut Vec<Line>) {
             "playerVariables={}",
             count(&value["program"], "playerVariables")
         ),
-        format!(
-            "subroutines={}",
-            count(&value["program"], "subroutines")
-        ),
+        format!("subroutines={}", count(&value["program"], "subroutines")),
     ];
     fields.extend(severity_fields(
         risk_counts["error"].as_u64().unwrap_or(0) as usize,
@@ -1002,7 +1033,9 @@ fn essential_analyze(result: &EssentialResult, out: &mut Vec<Line>) {
     let cost_counts = &cost["counts"];
     out.push(cost_record(
         elements,
-        cost["unavailableReason"].as_str(),
+        cost["unavailableReason"]
+            .as_str()
+            .map(|reason| ("unavailableReason", reason)),
         vec![
             format!("actions={}", count(cost_counts, "actions")),
             format!("conditions={}", count(cost_counts, "conditions")),
@@ -1186,10 +1219,7 @@ impl PlainReport for SymbolsResult {
         out: &mut Vec<Line>,
     ) {
         let symbols = query_items(&self.0, "symbols");
-        out.push((
-            Stream::Out,
-            format!("summary: symbols={}", symbols.len()),
-        ));
+        out.push((Stream::Out, format!("summary: symbols={}", symbols.len())));
         for symbol in symbols {
             let mut items = vec![
                 symbol["kind"].as_str().unwrap_or("symbol").to_string(),
@@ -1234,14 +1264,21 @@ impl PlainReport for RefsResult {
             .as_array()
             .map_or(&[][..], Vec::as_slice);
         for reference in references {
-            let mut items = vec![reference["kind"]
-                .as_str()
-                .unwrap_or("reference")
-                .to_string()];
+            let mut items = vec![
+                reference["kind"]
+                    .as_str()
+                    .unwrap_or("reference")
+                    .to_string(),
+            ];
             if let Some(at) = reference.get("span").and_then(at_field) {
                 items.push(at);
             }
-            if let Some(rule) = reference["rule"].as_u64() {
+            // `owningRule` (#792) names the rule the reference belongs to —
+            // the identity `inspect cfg <RULE>` consumes; the numeric `rule`
+            // id is the fallback when the driver reports no owning rule.
+            if let Some(name) = reference["owningRule"]["name"].as_str() {
+                items.push(field("rule", name));
+            } else if let Some(rule) = reference["rule"].as_u64() {
                 items.push(format!("rule={rule}"));
             }
             if let Some(action) = reference["action"].as_u64() {
@@ -1308,7 +1345,10 @@ impl PlainReport for CfgResult {
             if block["waits"].as_bool().unwrap_or(false) {
                 flags.push("waits");
             }
-            if block["calls"].as_array().is_some_and(|calls| !calls.is_empty()) {
+            if block["calls"]
+                .as_array()
+                .is_some_and(|calls| !calls.is_empty())
+            {
                 flags.push("calls");
             }
             if !flags.is_empty() {
@@ -1347,7 +1387,8 @@ impl PlainReport for CallGraphResult {
     ) {
         let edges = query_items(&self.0, "edges");
         let mut fan_in: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
-        let mut fan_out: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+        let mut fan_out: std::collections::BTreeMap<&str, usize> =
+            std::collections::BTreeMap::new();
         for edge in edges {
             *fan_in
                 .entry(edge["callee"].as_str().unwrap_or("<unnamed>"))
@@ -1468,27 +1509,36 @@ impl PlainReport for CostResult {
         }
         let exact = &result["exact"];
         // A failed emission reports `null` plus `emittedBytesUnavailable` —
-        // `unavailable`, never a fabricated zero (ADR-0030 decision 3).
-        let emitted = match exact["emittedBytes"].as_u64() {
+        // `unavailable` and the reason under the payload's own member name,
+        // never a fabricated zero (ADR-0030 decision 3).
+        let mut fields = vec![match exact["emittedBytes"].as_u64() {
             Some(bytes) => format!("emittedBytes={bytes}"),
             None => "emittedBytes=unavailable".to_string(),
-        };
-        out.push((
-            Stream::Out,
-            format!(
-                "summary: {emitted} actions={} rules={} waits={}",
-                count(exact, "programActions"),
-                count(exact, "programRules"),
-                count(exact, "waitActions")
-            ),
-        ));
+        }];
+        if let Some(reason) = exact["emittedBytesUnavailable"].as_str() {
+            fields.push(field("emittedBytesUnavailable", reason));
+        }
+        fields.extend([
+            format!("actions={}", count(exact, "programActions")),
+            format!("rules={}", count(exact, "programRules")),
+            format!("waits={}", count(exact, "waitActions")),
+        ]);
+        // Skipped rule evaluations are disclosed like `lint`'s (#788).
+        let skipped = result["skipped"].as_array().map_or(0, Vec::len);
+        if skipped > 0 {
+            fields.push(format!("skipped={skipped}"));
+        }
+        out.push((Stream::Out, format!("summary: {}", fields.join(" "))));
         let elements = &result["elementCount"];
         // The count is `Some(total)` or absent — unavailable, never zero —
         // while the known budget still reports (ADR-0030 decision 3).
         if let Some(total) = elements["total"].as_u64() {
             out.push((
                 Stream::Out,
-                format!("cost: elements={total} budget={}", count(elements, "budget")),
+                format!(
+                    "cost: elements={total} budget={}",
+                    count(elements, "budget")
+                ),
             ));
             for rule in elements["rules"].as_array().into_iter().flatten() {
                 let mut items = vec![
@@ -1517,9 +1567,12 @@ impl PlainReport for CostResult {
         } else {
             out.push(cost_record(
                 None,
-                result["elementCountUnavailable"]
-                    .as_str()
-                    .or(Some("counter does not model this program")),
+                Some((
+                    "elementCountUnavailable",
+                    result["elementCountUnavailable"]
+                        .as_str()
+                        .unwrap_or("counter does not model this program"),
+                )),
                 Vec::new(),
             ));
         }
@@ -1530,7 +1583,12 @@ impl PlainReport for CostResult {
         }
         truncation_records(result, "inspect cost", out);
         if let Some(selection) = &self.selection {
-            out.push(selected_record("findings", findings.len(), selection, "inspect cost"));
+            out.push(selected_record(
+                "findings",
+                findings.len(),
+                selection,
+                "inspect cost",
+            ));
         }
     }
 }
@@ -1576,7 +1634,7 @@ mod tests {
         );
         assert_eq!(
             verdict_word(&envelope("check", 1, CheckResult::default())),
-            "FAIL"
+            "ERROR"
         );
         assert_eq!(
             verdict_word(&envelope("check", 2, CheckResult::default())),
@@ -1590,6 +1648,15 @@ mod tests {
             verdict_word(&envelope("check", 4, CheckResult::default())),
             "ERROR"
         );
+    }
+
+    #[test]
+    fn a_gated_result_reports_fail_like_every_renderer() {
+        // `--fail-on` raised a WARN result to exit 1: the verdict is FAIL
+        // (the gate's word), not the ERROR a genuine failure reports.
+        let mut envelope = envelope("lint", 1, LintResult::default());
+        envelope.gated = true;
+        assert_eq!(verdict_word(&envelope), "FAIL");
     }
 
     #[test]

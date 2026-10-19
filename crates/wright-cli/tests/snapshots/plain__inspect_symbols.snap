@@ -1,0 +1,15 @@
+---
+source: crates/wright-cli/tests/plain.rs
+expression: "transcript(&run_in(&dir, &[\"inspect\", \"symbols\", \"cake.ws\"]))"
+---
+exit 0
+== stdout
+SYMBOLS symbols root=.
+summary: symbols=5
+symbol: globalVariable name=cakePos at=cake.ws:3:14
+symbol: globalVariable name=i2 at=cake.ws:4:14
+symbol: globalVariable name=candlePos at=cake.ws:5:14
+symbol: rule name=cake at=cake.ws:8:1
+symbol: rule name=candles at=cake.ws:41:1
+
+== stderr

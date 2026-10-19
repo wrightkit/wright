@@ -542,9 +542,12 @@ fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
                     let word = if error.code.starts_with("invalid-") {
                         "USAGE"
                     } else {
-                        "FAIL"
+                        "ERROR"
                     };
-                    println!("{word} lookup {}", plain::field("language", args.language.as_str()));
+                    println!(
+                        "{word} lookup {}",
+                        plain::field("language", args.language.as_str())
+                    );
                     eprintln!(
                         "error: {} {}",
                         error.code,
@@ -563,7 +566,7 @@ fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
 
 /// Lookup's text output is the line-record surface (#793): the verdict
 /// names the command (`LOOKUP` on success, `UNSUPPORTED` when the owner
-/// cannot answer, `FAIL` on an empty result), `summary:` reports the entry
+/// cannot answer, `ERROR` on an empty result), `summary:` reports the entry
 /// count, and one `entry:` record per match carries the rendered signature
 /// for a callable, else the accepted spelling, with its kind, the owner
 /// identity when it differs from the spelling, and the display name when
@@ -582,7 +585,11 @@ fn print_lookup_text(result: &serde_json::Value, language: &str) {
         return;
     }
     let entries = result["entries"].as_array().map_or(&[][..], Vec::as_slice);
-    let word = if entries.is_empty() { "FAIL" } else { "LOOKUP" };
+    let word = if entries.is_empty() {
+        "ERROR"
+    } else {
+        "LOOKUP"
+    };
     println!(
         "{word} lookup {} {}",
         plain::field("language", language),

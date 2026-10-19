@@ -1,0 +1,14 @@
+---
+source: crates/wright-cli/tests/plain.rs
+expression: "transcript(&run_in(&dir, &[\"lint\", \"flow.ws\"]))"
+---
+exit 0
+== stdout
+WARN lint root=.
+summary: findings=1 errors=0 warnings=1 notes=0 affected=1
+finding: warning min-wait-loop at=flow.ws:11:9 evidence=static-indicator message="loop body waits at the workshop minimum rate; the loop runs at maximum frequency"
+next: wright lint --fix
+next: wright analyze
+next: wright inspect cost
+
+== stderr

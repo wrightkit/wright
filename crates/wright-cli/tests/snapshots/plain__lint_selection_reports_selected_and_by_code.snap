@@ -1,0 +1,17 @@
+---
+source: crates/wright-cli/tests/plain.rs
+expression: "transcript(&run_in(&dir, &[\"lint\", \"cake.ws\", \"--max\", \"3\"]))"
+---
+exit 0
+== stdout
+WARN lint root=.
+summary: findings=10 affected=1
+finding: warning repeated-value count=2 at=cake.ws:22:67 spanKind=expression expression="add(firstOf(cakePos), vector(0, i2, 0))" evidence=exact message="`add(firstOf(cakePos), vector(0, i2, 0))` is evaluated 2 times within the same loop scope"
+finding: warning repeated-value count=2 at=cake.ws:22:123 spanKind=expression expression="add(valueInArray(cakePos, 1), vector(0, i2, 0))" evidence=exact message="`add(valueInArray(cakePos, 1), vector(0, i2, 0))` is evaluated 2 times within the same loop scope"
+finding: warning repeated-value count=2 at=cake.ws:23:132 spanKind=expression expression="add(valueInArray(cakePos, 2), vector(0, i2, 0))" evidence=exact message="`add(valueInArray(cakePos, 2), vector(0, i2, 0))` is evaluated 2 times within the same loop scope"
+selected: findings=3/10 byCode=min-wait-loop:1,repeated-value:9 withheld=7 expand="wright lint --max 10"
+next: wright lint --fix
+next: wright analyze
+next: wright inspect cost
+
+== stderr

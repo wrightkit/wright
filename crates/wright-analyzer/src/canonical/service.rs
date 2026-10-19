@@ -183,7 +183,12 @@ impl<'a> SemanticService<'a> {
                 .references_for_all_symbols()
                 .into_iter()
                 .map(|references| {
-                    JsonValue::Array(references.into_iter().map(reference_json).collect())
+                    JsonValue::Array(
+                        references
+                            .into_iter()
+                            .map(|reference| reference_json(self.program.as_ref(), reference))
+                            .collect(),
+                    )
                 })
                 .collect()
         })
@@ -360,13 +365,25 @@ fn finding_json(finding: &Finding) -> JsonValue {
     tests::BUILDS.with(|count| count.set(count.get() + 1));
     json!({"code": finding.code, "severity": finding.severity.as_str(), "message": finding.message, "span": span_json(finding.span), "rule": finding.rule, "action": finding.action, "value": finding.value, "evidence": finding.evidence.as_str(), "boundedness": finding.boundedness.map(Boundedness::as_str), "repeated": finding.repeated})
 }
-fn reference_json(reference: &Reference) -> JsonValue {
+fn reference_json(program: &Program, reference: &Reference) -> JsonValue {
     #[cfg(test)]
     tests::BUILDS.with(|count| count.set(count.get() + 1));
+    // #792: a consumer joining on `rule` (the numeric id) needs the owning
+    // rule's identity to render a location — the same `{id, name, span}`
+    // shape `Request::ListRules` reports, `null` when the reference has no
+    // owning rule.
+    let owning_rule = reference.rule.map_or(JsonValue::Null, |id| {
+        json!({
+            "id": id,
+            "name": program.rules.get(id).map(|rule| rule.name.as_str()),
+            "span": span_json(program.rule_span(id)),
+        })
+    });
     json!({
         "kind": reference.kind.as_str(),
         "span": span_json(reference.span),
         "rule": reference.rule,
+        "owningRule": owning_rule,
         "action": reference.action,
         "value": reference.value,
     })

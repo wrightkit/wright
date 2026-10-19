@@ -48,7 +48,9 @@ JSON envelope adds a `selection` member `{"total": <findings before selection>,
 "withheld": <dropped by --max>}` beside the filtered `findings`/`diagnostics`
 arrays, and text output prints a `... N finding(s) withheld` line. The verdict
 metadata keeps reporting the true total (for example `10 finding(s) across
-6 rule(s)`), so a selected result is never presented as complete.
+6 rule(s)` — the declared program rule inventory `analyze`/`inspect`
+report, not the lint-rule registry size), so a selected result is never
+presented as complete.
 
 On the terminal/plain text surface the lint report follows the human-first
 hierarchy: the verdict leads with finding counts by severity (for

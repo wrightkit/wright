@@ -1,0 +1,11 @@
+---
+source: crates/wright-cli/tests/plain.rs
+expression: "transcript(&run_in(&dir, &[\"compile\", \"mode.ws\"]))"
+---
+exit 0
+== stdout
+PASS compile root=. locale=en-us
+summary: errors=0 warnings=0 notes=0
+output: path=mode.ow sha256=79568ca181d27e8801df50b51b98b0191b0b21e7bd586684322686b31514bca4 locale=en-us
+
+== stderr

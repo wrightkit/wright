@@ -142,8 +142,8 @@ fn fit_finding_bytes(output: &mut Value, total: usize) {
 
 pub fn lint(result: &Value, all: bool) -> Value {
     let items = list(result, "findings");
-    let mut output = json!({"counts":{"findings":counts(items)},"findings":findings(items),"expand":"lint --all / all: true; lintRules for effective configuration and rule metadata"});
-    for key in ["ok", "exit", "selection", "fixes"] {
+    let mut output = json!({"counts":{"findings":counts(items)},"findings":findings(items),"expand":"lint --all / all: true; lintRules for effective configuration and rule metadata","next":crate::result::next::LINT});
+    for key in ["ok", "exit", "selection", "fixes", "next"] {
         if let Some(value) = result.get(key) {
             output[key] = value.clone();
         }
@@ -162,7 +162,7 @@ pub fn lint(result: &Value, all: bool) -> Value {
 }
 
 pub fn inspect(result: &Value, all: bool) -> Value {
-    let mut output = json!({"program":result["program"],"counts":{"rules":list(result,"rules").len(),"symbols":list(result,"symbols").len(),"references":list(result,"references").iter().map(|v|v.as_array().map_or(0,Vec::len)).sum::<usize>()},"rules":list(result,"rules").iter().map(|v|fields(v,&["id","name"])).collect::<Vec<_>>(),"expand":"inspect symbols, refs, cfg, callgraph, cost; --all / all: true for all rule names"});
+    let mut output = json!({"program":result["program"],"counts":{"rules":list(result,"rules").len(),"symbols":list(result,"symbols").len(),"references":list(result,"references").iter().map(|v|v.as_array().map_or(0,Vec::len)).sum::<usize>()},"rules":list(result,"rules").iter().map(|v|fields(v,&["id","name"])).collect::<Vec<_>>(),"expand":"inspect symbols, refs, cfg, callgraph, cost; --all / all: true for all rule names","next":crate::result::next::INSPECT});
     cap(&mut output, "rules", DEFAULT_ITEMS, all);
     output
 }
@@ -246,7 +246,7 @@ pub fn analyze(result: &Value, all: bool) -> Value {
             .or_default() += 1;
     }
     let object_summary = json!({"total":objects.len(),"byKind":by_kind,"withoutRetainedIdentity":objects.iter().filter(|object|object["identityRetained"]==false).count(),"visibleToAllPlayers":objects.iter().filter(|object|object["visibility"]=="all-players").count()});
-    let mut output = json!({"program":result["program"],"cost":facts["cost"],"complexity":complexity,"hotspots":hotspots,"conditionTrees":trees,"risks":findings(risks),"variables":variables,"persistentObjects":object_summary,"counts":{"risks":counts(risks),"persistentObjects":list(facts,"persistentObjects").len()},"expand":"--all / all: true; inspect symbols, refs, cfg, callgraph, cost for detail"});
+    let mut output = json!({"program":result["program"],"cost":facts["cost"],"complexity":complexity,"hotspots":hotspots,"conditionTrees":trees,"risks":findings(risks),"variables":variables,"persistentObjects":object_summary,"counts":{"risks":counts(risks),"persistentObjects":list(facts,"persistentObjects").len()},"expand":"--all / all: true; inspect symbols, refs, cfg, callgraph, cost for detail","next":crate::result::next::ANALYZE});
     if let Some(selection) = result.get("selection") {
         output["selection"] = selection.clone();
     }
