@@ -224,6 +224,16 @@
       },
       "additionalProperties": true
     },
+    "RepeatedValue": {
+      "type": "object",
+      "required": ["expression", "count", "spanKind"],
+      "properties": {
+        "expression": { "type": "string", "description": "The canonical spelling of the repeated expression." },
+        "count": { "type": "integer", "minimum": 2, "description": "How many times the expression is evaluated." },
+        "spanKind": { "enum": ["expression", "enclosing-loop"], "description": "Whether the finding's `span` is the expression's own span or the enclosing loop action's span (#791)." }
+      },
+      "additionalProperties": false
+    },
     "ActionableFinding": {
       "type": "object",
       "required": ["code", "severity", "message", "evidence"],
@@ -233,13 +243,14 @@
         "message": { "type": "string" },
         "location": { "type": "string", "description": "Source path and 1-based line/column; full spans are available through findings." },
         "evidence": { "type": "string" },
-        "boundedness": { "type": "string" }
+        "boundedness": { "type": "string" },
+        "repeated": { "$ref": "#/$defs/RepeatedValue", "description": "Present on `repeated-value` findings only (#791)." }
       },
       "additionalProperties": false
     },
     "Finding": {
       "type": "object",
-      "required": ["code", "severity", "message", "span", "rule", "action", "value", "evidence", "boundedness"],
+      "required": ["code", "severity", "message", "span", "rule", "action", "value", "evidence", "boundedness", "repeated"],
       "properties": {
         "code": { "type": "string" },
         "severity": { "enum": ["error", "warning", "info"] },
@@ -249,7 +260,8 @@
         "action": { "type": ["integer", "null"], "minimum": 0 },
         "value": { "type": ["integer", "null"], "minimum": 0 },
         "evidence": { "type": "string" },
-        "boundedness": { "type": ["string", "null"] }
+        "boundedness": { "type": ["string", "null"] },
+        "repeated": { "type": ["object", "null"], "description": "The `RepeatedValue` facts on a `repeated-value` finding; null otherwise (#791)." }
       },
       "additionalProperties": true
     },
@@ -502,7 +514,8 @@
       "required": ["total", "withheld"],
       "properties": {
         "total": { "type": "integer", "minimum": 0 },
-        "withheld": { "type": "integer", "minimum": 0 }
+        "withheld": { "type": "integer", "minimum": 0 },
+        "byCode": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 }, "description": "Per-code finding counts over the filtered set before `max` truncation (#791); omitted when the set has no coded findings." }
       },
       "additionalProperties": true
     },
@@ -613,7 +626,8 @@
           "total": { "type": "integer", "minimum": 0 },
           "shown": { "type": "integer", "minimum": 0 },
           "truncated": { "type": "integer", "minimum": 0 },
-          "expand": { "type": "string" }
+          "expand": { "type": "string" },
+          "byCode": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 }, "description": "Per-code counts over the full list before this cap (#791); omitted for lists whose items carry no `code`." }
         },
         "additionalProperties": false
       }

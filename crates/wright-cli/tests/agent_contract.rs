@@ -515,7 +515,10 @@ fn cli_and_agent_selections_return_the_same_set() {
     let cli = serde_json::from_slice::<Value>(&output.stdout).unwrap()["result"].clone();
     assert_eq!(cli["findings"], agent["findings"], "same selected set");
     assert_eq!(cli["selection"], agent["selection"], "same truncation");
-    assert_eq!(agent["selection"], json!({"total": 10, "withheld": 7}));
+    assert_eq!(
+        agent["selection"],
+        json!({"total": 10, "withheld": 7, "byCode": {"repeated-value": 9}})
+    );
 
     // #531: the semantic-query flags select the same set the agent request
     // fields do, through the same driver-side selection.

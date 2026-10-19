@@ -6,7 +6,7 @@ mod service;
 mod symbols;
 mod traversal;
 
-pub use analysis::{Finding, LintFix, analyze};
+pub use analysis::{Finding, LintFix, RepeatedValue, RepeatedValueSpan, analyze};
 pub use cfg::BLOCK_KINDS;
 pub(crate) use cfg::matching_end;
 pub use service::{SemanticService, span_json};
