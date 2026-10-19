@@ -37,7 +37,7 @@ Either may carry `"disabled": true`. Spans are output-only and are rejected on i
 
 | Owner | Responsibility |
 | --- | --- |
-| `workshop-rs` | Converts a `rule-content-v1` statement into the public model. Unknown ids, wrong argument counts, internal sentinels, and nodes that cannot form a statement fail with a structured error. Produces the checked `SourceEdit` that inserts, replaces, or deletes one condition or action of a parsed program at a statement address. That includes the statement's canonical text in the source file's Workshop locale and its indentation relative to the surrounding source. Owns the round-trip contract in decision 5. |
+| `workshop-rs` | Converts a `rule-content-v1` statement into the public model. Unknown ids, wrong argument counts, internal sentinels, and nodes that cannot form a statement fail with a structured error. Produces the checked `SourceEdit` that inserts, replaces, or deletes one condition or action of a parsed program at a statement address. That includes the statement's canonical text in the session's resolved Workshop locale (decision 3), its indentation relative to the surrounding source, statement comments (decision 3), and creating a missing section. Owns the round-trip contract in decision 5. |
 | Wright | Owns the operation, addressing and freshness, the transaction it assembles from owner edits, its validation through the existing `validateEditTransaction` path, refusals, and presentation in `serve` and MCP. |
 
 Wright composes no Workshop text and reads no catalog spellings to build it. Locale, spelling, literal formatting, variable syntax, operator layout, and indentation are decided only by `workshop-rs`.
@@ -71,6 +71,19 @@ Wright composes no Workshop text and reads no catalog spellings to build it. Loc
 
 **Freshness.** `inputIdentity` must equal the current `project.inputIdentity`. Otherwise the request refuses with `edit-stale-source` and edits nothing, so a client cannot address statements in a program it has not read.
 
+**Unsaved buffers.** The request takes the same optional `sources` as `validateEditTransaction` (#472). When it is omitted or null, the program is loaded from the files on disk. When it is supplied, the program is loaded from those texts, which are also the precondition texts, and `inputIdentity` is checked against the identity of that loaded program. A client holding unsaved editor buffers can therefore address statements in the text it shows.
+
+**Locale.** An emitted statement uses the session's resolved Workshop locale for its source: the `--locale` override when the session has one, otherwise the locale detected for that source. This is the same resolution that reading uses, so a statement is written in the locale its neighbours were read in.
+
+**Statement comments.** A Workshop statement can carry a leading comment string, such as `"BOTTOM LINE"` before an action. `rule-content-v1` has no comment field, so:
+- `replace` keeps the replaced statement's comment and changes only the statement;
+- `delete` removes the statement together with its comment;
+- `insert` writes no comment.
+
+Creating or editing a comment is out of scope (see Scope boundaries).
+
+**Empty lists.** A rule can have no conditions section at all. An `insert` into a list whose section is absent creates the section. After a `delete` of the last statement, the rule must reparse with an empty list; whether the empty section stays in the text is a `workshop-rs` layout decision.
+
 **Result.** The result has the `validateEditTransaction` payload (`ok`, `exit`, `diagnostics`, and `preview` when valid) plus the assembled `transaction`. A client holding editor buffers can apply the transaction itself; other clients write the preview. Nothing is written by the operation: as with every Wright edit, applying it is the caller's write path.
 
 **Validity.** Whether the edited program is valid is decided by revalidation, not by the operation. An `If` without an `End`, or a value of the wrong type, comes back as `ok: false` with owner diagnostics. The operation adds no pairing, typing, or normalization rules of its own.
@@ -93,6 +106,8 @@ content(parse(emit(statement_from_content(c)))) == c
 
 This is checked over the owner's corpora in every supported Workshop locale. The guarantee lets a client read a statement, change one argument, and write it back without any other change to the meaning of that statement. It does not promise byte-identical text: an edited statement is emitted canonically, even if the replaced text was spelled differently.
 
+**Canonical form is visible.** A replaced statement is emitted in its canonical spelling, not in the spelling it was authored in. An alternative spelling the parser accepts, number formatting, and line wrapping all come back the way the canonical emitter writes them. Only the replaced statement changes, but a user who edits one argument can see the whole line respelled. This is accepted: it keeps emission in one place. Preserving the authored spelling would need a spelling-aware edit that the owner does not have.
+
 ## Alternatives considered
 
 - **The client composes text from `lookup` spellings and validates it with `validateEditTransaction`:** rejected. Every client, including agents, an editing view, and the benchmark, would carry its own copy of Workshop emission. Validation would catch invalid text, but not a valid statement emitted differently from canonical output.
@@ -108,8 +123,14 @@ This is checked over the owner's corpora in every supported Workshop locale. The
 - A structured editing view can write what its forms build without owning any Workshop syntax. Where that view lives and what it looks like is a separate decision.
 - `rule-content-v1` becomes an input format as well as an output format. Its stability now affects writers, and an incompatible change needs a new format id under the rules ADR-0024 set.
 - Follow-up work:
-  - `workshop-rs`: content-to-model conversion, statement-level edits with locale and indentation, structured errors, and round-trip tests over its corpora.
-  - Wright: `editStatements` in `wright-driver`, the schema `$defs`, the agent contract, the MCP tool, driver tests on a real raw Workshop project in at least `en-US` and `zh-CN`, and refusal tests for stale input, conflicts, and source-language input.
+  - `workshop-rs`:
+    - content-to-model conversion and structured errors;
+    - statement-level edits with locale, indentation, comment preservation, and section creation;
+    - round-trip tests over its corpora, including statements with comments and rules without a conditions section.
+  - Wright:
+    - `editStatements` in `wright-driver`, the schema `$defs`, the agent contract, and the MCP tool;
+    - driver tests on a real raw Workshop project in at least `en-US` and `zh-CN`, including a `--locale` override and supplied `sources`;
+    - refusal tests for stale input, conflicts, and source-language input.
 - Authoring is limited by what `lookup` describes. Gaps found by the editing prototype are tracked as separate `lookup` and `rule-content-v1` work, outside this decision. They include missing value return types, missing signatures for structural actions such as `Set Global Variable`, partial parameter defaults, and unlocalized parameter names.
 
 ## Compatibility impact
@@ -127,6 +148,7 @@ This is checked over the owner's corpora in every supported Workshop locale. The
   - workshop settings, which `SettingSourceEdit` already covers;
   - a CLI command.
   Each needs its own decision when a consumer needs it.
+- Not decided: creating or editing statement comments. That needs a comment field in a future `rule-content` format version, which `workshop-rs` owns.
 - Not decided: source-language authoring for OverPy or OSTW (decision 4).
 - Not decided: the form factor of a local editing view.
 - The exact Rust API, error ids, and indentation rules belong to `workshop-rs`. The request field spellings above are illustrative until the Wright schema is written, but the addressing, atomicity, freshness, and write-path rules are decided here.
