@@ -242,6 +242,22 @@ fn program_summary(service: &SemanticService<'_>, loaded: &Loaded) -> serde_json
     program
 }
 
+/// `check`'s program summary (#792): the same members `analyze`'s `program`
+/// reports — origin, file count, and declaration counts — computed from
+/// `loaded` alone. `Request::Program`'s only other member is the lint
+/// `findings` count, which `analyze` strips and which would force a
+/// semantic-service build `check` otherwise never performs.
+pub(crate) fn check_program_summary(loaded: &Loaded) -> serde_json::Value {
+    serde_json::json!({
+        "origin": super::loaded_origin(loaded),
+        "files": loaded.source_files.len().max(1),
+        "globalVariables": loaded.program.global_variables.len(),
+        "playerVariables": loaded.program.player_variables.len(),
+        "subroutines": loaded.program.subroutines.len(),
+        "rules": loaded.program.rules.len(),
+    })
+}
+
 /// `inspect`: the structural/semantic program model. Every member's spans
 /// resolve to `path` like `analyze`/`lint` findings do — a bare
 /// `{file: <index>}` is unusable outside the session (#635).
@@ -258,6 +274,7 @@ fn inspect_result(service: &SemanticService<'_>, loaded: &Loaded) -> InspectResu
         rules,
         symbols,
         references,
+        next: crate::result::next::list(crate::result::next::INSPECT),
     }
 }
 
@@ -294,6 +311,7 @@ fn analyze_result(
         program,
         facts,
         selection: outcome,
+        next: crate::result::next::list(crate::result::next::ANALYZE),
     }
 }
 
@@ -728,6 +746,7 @@ impl CompilerSession {
                     skipped,
                     selection,
                     fixes: None,
+                    next: crate::result::next::list(crate::result::next::LINT),
                 }
             },
         )

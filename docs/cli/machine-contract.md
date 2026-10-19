@@ -137,6 +137,13 @@ same per-code totals appear where a list is truncated: a `truncation`
 record's `byCode` counts the capped list's full set, and a `counts` group's
 `byCode` counts the set the group totals — both computed before truncation.
 
+Three more additive members serve the renderers (#792): `check`'s `result`
+carries `program`, the same summary members `analyze`'s `program` reports;
+`check`, `lint`, `analyze`, and `inspect` carry `next`, complete `wright`
+command lines a renderer prints as `next:` records or a summary footer; and
+each reference in `inspect`/`refs` results carries `owningRule` — `{id,
+name, span}` or null — the owning rule's identity without a `rules` lookup.
+
 ## Determinism
 
 For identical inputs and configuration, JSON output is byte-deterministic

@@ -182,7 +182,7 @@ the successful `result` payload.
 | `project` | none | Loaded program origin, files, counts, and findings summary |
 | `rules` | optional selection, optional `content` | Canonical Workshop rules. Each entry carries `id`, `name`, `event` (the rule's event binding, `subroutine:<name>` for subroutine rules), and `span`; `{"rules": [...], "selection": {...}}` when a selection is applied. See [Rule content](#rule-content-adr-0024) |
 | `symbols` | optional selection, optional `all` | Symbols; `{"symbols": [...], "selection": {...}}` when `file`/`max` is applied (a `kind`-only request keeps the bare array) |
-| `references` | required `symbol` (id or name), optional selection and `all` | Usage header and references for the symbol; `{"references": [...], "selection": {...}}` when a selection is applied |
+| `references` | required `symbol` (id or name), optional selection and `all` | Usage header and references for the symbol; `{"references": [...], "selection": {...}}` when a selection is applied. Each reference carries `owningRule` — the owning rule's `{id, name, span}` — so a consumer renders a rule location without a `rules` lookup (#792) |
 | `usage` | required `symbol` (id or name) | Usage counts for the symbol, plus its resolved `id` and `kind` |
 | `cfg` | required `rule` (index or name), optional selection and `all` | Control-flow graph for the rule, plus `selection` when a selection is applied |
 | `findings` | optional selection, optional `all` | Wright static-analysis findings; `{"findings": [...], "selection": {...}}` when a selection is applied |
@@ -419,6 +419,15 @@ carries `repeated` — `{expression, count, spanKind}` where `spanKind` is
 prose (#791). Full spans and fix transactions
 are available from `findings`; lint policy is available from `lintRules`.
 Persistent-object details are queried through `persistentObjects`.
+
+Two ADR-0030 prerequisites add shared members (#792): `check`'s result now
+carries `program`, the same summary members `analyze`'s `program` reports —
+origin, files, and declaration counts — and `check`, `lint`, `analyze`, and
+`inspect` carry `next`, a list of complete `wright` command lines a renderer
+prints as `next:` records or a summary footer. A `references`/`inspect`
+reference also carries `owningRule` — `{id, name, span}` like a `rules` list
+entry, or null when nothing owns it — so a consumer renders the owning rule's
+location without a second lookup.
 
 Full fact dumps are available only through the in-process `CompilerSession`
 API; external callers use the narrower semantic operations.
