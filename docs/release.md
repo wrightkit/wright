@@ -257,8 +257,9 @@ For a pinned version or custom user-writable directory:
 
 The installer verifies the published `.zip.sha256` before extraction, installs
 both `wright.exe` and `wright-lsp.exe`, and runs both binaries directly for a
-version smoke check. If the install directory is not already on the user
-`PATH`, it prints a copyable PowerShell command and asks you to open a new
+version smoke check. If the default install directory is not already on the
+user `PATH`, it adds it and updates the current session; with a custom
+`-InstallDir` it prints a copyable PowerShell command and asks you to open a new
 terminal. It does not require Cargo, npm, or a source checkout.
 
 ### Release smoke test
@@ -336,8 +337,9 @@ by `scripts/test-install.sh` against a mock R2 route on Linux and macOS CI.
 stable release by default or an exact `-Version`, downloads the canonical ZIP
 and matching `.sha256`, verifies the checksum before extraction, installs both
 executables into the user-writable default directory or `-InstallDir`, and
-runs a direct native version smoke check. When needed, it prints an actionable
-user `PATH` update instruction. Its functional behavior is covered by
+runs a direct native version smoke check. When needed, it adds the default
+directory to the user `PATH`, or prints an actionable update instruction for a
+custom `-InstallDir`. Its functional behavior is covered by
 `scripts/test-install.ps1` against a local test release server on Windows.
 
 
