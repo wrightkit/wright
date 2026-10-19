@@ -19,7 +19,7 @@ use crate::session::{Loaded, Provenance};
 /// A finding's materialized fix as it appears in the structured result:
 /// a stable `kind`, a one-line `summary`, and the validated-edit
 /// `transaction` a consumer previews through `validateEditTransaction` and
-/// applies through the same source-edit path as a semantic rename.
+/// applies through the same validated source-edit path.
 #[derive(Debug, Clone, Serialize)]
 pub struct LintFixProposal {
     pub kind: &'static str,

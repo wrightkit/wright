@@ -49,7 +49,7 @@ re-check / re-analyze
 
 Normal source tooling does not require full-file regeneration. Preserve comments/trivia/formatting/unchanged structure where practical. Unsupported or unsafe edits fail explicitly; do not silently degrade to textual search/replace when semantic correctness is required.
 
-For raw Workshop input this model runs through `workshop-rs` itself (#434): `validateEditTransaction` applies a caller's transaction to the current sources and reparses/revalidates the edited project, and `semanticRename` resolves a symbol- or position-addressed target against the loaded program's semantic index and rewrites exactly the identifier spans the parsed program records, never a textual search. `wright rename <NAME> <NEW_NAME> [INPUT]` exposes the same validated rename to users (a diff by default, an atomic write with `--write`). OPY and other source languages remain provider-owned edit surfaces: the raw operations refuse them by naming the `providerValidateEdit`/`providerSemanticRename` operations rather than guessing at source semantics Wright does not own.
+For raw Workshop input this model runs through `workshop-rs` itself (#434): `validateEditTransaction` applies a caller's transaction to the current sources and reparses/revalidates the edited project. Agents and users propose edits directly — there is no Wright-side semantic rename operation — and `lint --fix` uses the same validated transaction machinery for its offered fixes. OPY and other source languages remain provider-owned edit surfaces: the raw operation refuses them by naming `providerValidateEdit`, and editor rename stays provider-owned through the LSP `textDocument/rename` path, rather than guessing at source semantics Wright does not own.
 
 ## Shared services
 

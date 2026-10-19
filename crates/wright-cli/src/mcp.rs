@@ -213,32 +213,30 @@ mod tests {
             "wright_lint_rules",
             "wright_cost_estimate",
             "wright_target_metadata",
-            "wright_semantic_rename",
             "wright_validate_edit_transaction",
-            "wright_provider_semantic_rename",
             "wright_provider_validate_edit",
             "wright_lookup",
         ] {
             assert!(names.iter().any(|n| n == name), "missing {name}");
         }
-        assert_eq!(names.len(), 21);
+        assert_eq!(names.len(), 19);
         assert!(names.iter().all(|name| name.starts_with("wright_")));
     }
 
     #[test]
     fn input_schemas_drop_op_and_edit_sources() {
         let defs = crate::tooldefs::schema_defs();
-        let rename = TOOL_SPECS
+        let edit = TOOL_SPECS
             .iter()
-            .find(|spec| spec.op == "semanticRename")
+            .find(|spec| spec.op == "validateEditTransaction")
             .unwrap();
-        let input = input_schema(&defs, rename, rename.drop_fields);
+        let input = input_schema(&defs, edit, edit.drop_fields);
         assert_eq!(input["type"], "object");
         assert!(input["properties"].get("op").is_none());
         assert!(input["properties"].get("sources").is_none());
-        assert!(input["properties"].get("target").is_some());
-        assert_eq!(input["required"], json!(["target"]));
-        assert!(input["$defs"].get("RenameTarget").is_some());
+        assert!(input["properties"].get("transaction").is_some());
+        assert_eq!(input["required"], json!(["transaction"]));
+        assert!(input["$defs"].get("EditTransaction").is_some());
         let project = TOOL_SPECS.iter().find(|spec| spec.op == "project").unwrap();
         let input = input_schema(&defs, project, &[]);
         assert!(input["required"].is_null());

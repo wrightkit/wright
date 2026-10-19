@@ -229,8 +229,8 @@ fn fold_value_once(value: &mut workshop_rs::Value, nodes: &mut usize) -> bool {
                     // The short-circuit folds discard the other operand
                     // entirely — apply them only when that operand is
                     // literal-only, so a folded `Or(True, Global.g)` cannot
-                    // drop the identifier occurrence `references` and
-                    // `semanticRename` index (#639).
+                    // drop the identifier occurrence `references` indexes
+                    // (#639).
                     let boolean_result = match (&args[0], &args[1]) {
                         (Value::Bool(left), Value::Bool(right)) if name == "and" => {
                             Some(*left && *right)

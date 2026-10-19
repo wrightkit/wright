@@ -54,7 +54,6 @@ wright check [INPUT]            # correctness diagnostics
 wright lint [INPUT]             # lint findings
 wright analyze [INPUT]          # cost, hotspots, and risk indicators
 wright inspect [INPUT]          # semantic summary
-wright rename OLD NEW [INPUT]   # preview a diff; --write applies it
 wright compile [INPUT]          # write <input>.ow; --to LOCALE selects the output locale
 wright serve [INPUT]            # agent session over stdio or MCP
 ```

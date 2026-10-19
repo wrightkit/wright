@@ -256,25 +256,4 @@ fn lint_fix_write_refuses_a_caller_held_text_input() {
         SOURCE,
         "the refusal writes nothing"
     );
-
-    let mut session = CompilerSession::new(SessionConfig {
-        input: InputSpec::Text {
-            text: SOURCE.to_string(),
-            path: Some(path.clone()),
-        },
-        kind: SourceKind::Workshop,
-        ..SessionConfig::default()
-    })
-    .unwrap();
-    let renamed = session.rename("index", "renamed", true);
-    assert!(
-        renamed
-            .diagnostics
-            .iter()
-            .any(|d| d.code == "edit-input-stdin"),
-        "rename --write refuses a non-path input: {:?}",
-        renamed.diagnostics
-    );
-    assert!(renamed.result.written.is_empty(), "nothing is written");
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), SOURCE);
 }
