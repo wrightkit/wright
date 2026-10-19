@@ -70,7 +70,7 @@ REQUEST_TIMEOUT_S = 180.0
 METRICS_DIR = Path(__file__).resolve().parent
 CACHE_DIR = METRICS_DIR / ".cache"
 
-# Mutation operations (semanticRename, validateEditTransaction, provider*)
+# Mutation operations (validateEditTransaction and the provider* ops)
 # are absent: they need caller-supplied transactions and are not measured.
 AGENT_OPS = [
     "capabilities",

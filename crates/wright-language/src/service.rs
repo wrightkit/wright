@@ -788,7 +788,7 @@ fn is_workshop_document(document: &Document) -> bool {
 
 /// The symbol whose identifier occurrence covers `position`, and that
 /// occurrence — resolved through the index's shared `symbol_at` rule, the
-/// same addressability `semanticRename` applies (#434, #555). A miss and an
+/// same addressability editor rename applies (#434, #555). A miss and an
 /// ambiguous position both map to `None`: the editor surfaces only a
 /// resolved symbol.
 fn symbol_at<'index>(

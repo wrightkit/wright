@@ -64,8 +64,8 @@ documents and OPY documents without a working provider publish an explicit
 its structured error code on the document. A document that is neither
 publishes no diagnostics.
 
-`textDocument/rename` on a source-language document routes through the same
-provider-owned mutation path as the CLI and agent surfaces (#156): the
+`textDocument/rename` on a source-language document routes through the
+provider-owned mutation path (#156): the
 provider computes edits over the open document set (only the provider can
 compute project membership, so the set stays language-wide), Wright verifies
 document versions and source preconditions, asks the provider to validate

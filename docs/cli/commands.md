@@ -43,7 +43,6 @@ result.
 | `wright inspect cfg <RULE> [INPUT] [--only KIND] [--max N]` | Control-flow graph of one rule, addressed by name | block/edge listing |
 | `wright inspect callgraph [INPUT] [--caller RULE] [--callee SUBROUTINE] [--max N]` | Subroutine call graph (caller rules to callee subroutines) | call edges |
 | `wright inspect cost [INPUT] [--rule RULE] [--no-cache] [--baseline NAME] [--save-baseline NAME] [--max-total N]` | Exact generated-resource counts plus static findings; `--rule` drills into one rule's element cost, and by default the run compares against the previous run's element cost | resource counts and findings plus the change against the previous run or named baseline, or the rule's statements and node-name shares |
-| `wright rename <NAME> <NEW_NAME> [INPUT]` | Semantically rename a Workshop variable or subroutine, or an OPY symbol through the provider | per-source diff of the validated edits; `--write` applies them |
 | `wright lookup [QUERY]` | Resolve a Workshop or OverPy display name, near spelling, or guess to the owner-accepted spelling and signature (#529); takes no input | one line per entry: signature or spelling, kind, identity |
 | `wright serve [INPUT] [--transport T] [--kind K] [--profile P] [--lint-config YAML] [--rule PATH] [--disable-rule ID] [--rule-severity ID:SEV]` | Serve `wright-agent/v1` over stdio, JSON-RPC 2.0, or MCP | one structured response per request |
 | `wright completion <SHELL>` | Generate static completion script for bash, zsh, fish, or powershell | the generated completion script |
@@ -292,11 +291,20 @@ Resolution never guesses.
   (an unknown name is a usage error) and `--save-baseline <name>` records
   the current run under a name. `--max-total <N>` is an explicit gate on
   `inspect cost`: exit 1 naming the overage when the element total exceeds
-  N, identical with and without a cache. `--no-cache`, a non-empty
-  `WRIGHT_NO_CACHE`, or a truthy `CI` disable reading and writing `.wright/`;
-  add it to your `.gitignore` — Wright does not edit it for you. A failing
-  run never replaces the previous reference, and cache failures never fail
-  a command.
+  N, identical with and without a cache. `--no-cache` or a non-empty
+  `WRIGHT_NO_CACHE` disable reading and writing `.wright/`; add it to your
+  `.gitignore` — Wright does not edit it for you. A failing run never
+  replaces the previous reference, and cache failures never fail a
+  command.
+
+  Under a truthy `CI` the implicit previous-run comparison stays off, but
+  the explicit baseline flags still read and write `.wright/` so a CI
+  cache can carry it between runs (ADR-0030): `--save-baseline` records
+  the run and `--baseline` compares against it only when a usable record
+  exists. A missing cache, an unknown name, or a record that is
+  unreadable, incompatible, or keyed to a different input, kind, locale
+  or profile turns the comparison off with no error, warning or output —
+  the verdict and exit code are unchanged.
 * `inspect cost --rule <NAME>` shows where one declared rule's element cost
   goes (#724): the rule's `Costliest statements` (its direct conditions and
   actions ranked by recursive `count`) and `By node name` (each node's own
@@ -317,47 +325,6 @@ block detail for `cfg`, fan-in/fan-out highlights before the edge list for
 `callgraph`, and exact totals before findings for `cost`. Long lists show a
 first page of 20 entries followed by the total and an expansion hint; `--format json`
 reports the essential result in structured form, with the same list cap as text.
-
-## `wright rename`: semantic rename for Workshop and OPY (#434, #739)
-
-`wright rename <NAME> <NEW_NAME> [INPUT]` renames a global variable, player
-variable, or subroutine in raw Workshop input. `NAME` is the declared symbol
-name, the same addressing `inspect refs` uses, resolved against the loaded
-program's semantic index; an unmatched name is `unknown-symbol` and a name
-shared by several symbols is `ambiguous-symbol` (exit 1).
-
-The rename is semantic, not textual: every edit rewrites exactly the
-identifier span `workshop-rs` records for one declaration or reference, so
-`Global.score` rewrites `score` and leaves the `Global.` prefix, and comments
-or string literals containing the name stay untouched. The proposed
-transaction is validated by reparsing the edited source through the session's
-own `workshop-rs` path; a name that does not survive reparsing, or one whose
-references no longer bind to the renamed symbol, refuses with
-`rename-mismatch` and no partial edit set.
-
-* Default is **preview only**: text mode prints the diff as `-`/`+` line
-  pairs, and JSON mode returns the validated `transaction` and per-source
-  `preview` inside the `wright-result/v1` envelope. Callers (and agents via
-  `semanticRename`) carry the same atomic edit set.
-* `--write` applies the validated transaction to the input file atomically
-  (a sibling temporary file and rename). The write rechecks each source's
-  identity hash first; a file that changed since validation refuses with
-  `edit-stale-source` and writes nothing.
-* OPY input runs the same command through the configured OPY provider
-  (#739) — the rename `wright serve` exposes as `providerSemanticRename`,
-  reached through the CLI's `NAME` addressing. The session loads the
-  project (a single file, a `#!include` graph, or a directory input) and
-  resolves `NAME` to a declaration position through the provider's
-  `lpp/symbols` — never a Wright-side text search — then `lpp/rename`
-  produces the edit set, `lpp/validateEdits` and a post-edit project check
-  validate it, and the same preview/`--write` contract applies. A name the
-  project does not declare is `unknown-symbol`; a name spelling several
-  distinct symbols is `ambiguous-symbol` listing each candidate's
-  `path:line:col`; and a name the provider refuses — an invalid
-  `NEW_NAME`, an unrenamable kind, a collision — reports the provider's own
-  `provider-refusal-<refusalCode>` diagnostic with no partial edit set.
-* Other source kinds stay provider surfaces: kinds without a shipped
-  provider keep their `source-provider-unavailable` refusal.
 
 ## `wright lookup`: owner name and signature lookup (#529)
 

@@ -150,13 +150,6 @@ fn run_workflow(command: Command) -> ExitCode {
                 },
             )
         }
-        Command::Rename(args) => run_configured(
-            config_from_common(&args.common),
-            present::Presentation::from_common(&args.common),
-            fail_on(&args.common),
-            None,
-            move |session| session.rename(&args.name, &args.to, args.write),
-        ),
         Command::Lint(args) => {
             let mut config = config_from_common(&args.common);
             config.selection = selection_from_args(&args.select);

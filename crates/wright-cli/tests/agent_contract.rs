@@ -28,8 +28,6 @@ const EXPECTED_V1_OPERATIONS: &[&str] = &[
     "costEstimate",
     "targetMetadata",
     "validateEditTransaction",
-    "semanticRename",
-    "providerSemanticRename",
     "providerValidateEdit",
     "lookup",
 ];
@@ -92,23 +90,6 @@ fn requests() -> Vec<Value> {
                 "range":{"start_line":1,"start_col":1,"end_line":1,"end_col":1},
                 "new_text":""
             }]}
-        }),
-        json!({
-            "op":"semanticRename",
-            "sources":{"file:///project.ws":"rule(\"Example\") {}"},
-            "target":{"source":"file:///project.ws","line":1,"col":1,"to":"Renamed"}
-        }),
-        json!({
-            "op":"providerSemanticRename",
-            "language_id":"opy",
-            "documents":{"file:///project.opy":{
-                "uri":"file:///project.opy","languageId":"opy","version":1,"text":"rule(\"Example\") {}"
-            }},
-            "position_document_uri":"file:///project.opy",
-            "position":{"line":0,"character":0},
-            "new_name":"Renamed",
-            "project_root":null,
-            "sources":{"file:///project.opy":"rule(\"Example\") {}"}
         }),
         json!({
             "op":"providerValidateEdit",
@@ -295,30 +276,6 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
         );
     }
 
-    // #434: `semanticRename` targets address a symbol by id or name, or by a
-    // position inside one identifier occurrence; both forms validate and
-    // deserialize.
-    for request in [
-        json!({"op":"semanticRename","sources":{},"target":{"symbol":0,"to":"renamed"}}),
-        json!({"op":"semanticRename","sources":{},"target":{"symbol":"score","to":"renamed"}}),
-        json!({"op":"semanticRename","sources":{},"target":{"source":"a.ws","line":1,"col":3,"to":"renamed"}}),
-    ] {
-        assert!(
-            request_schema.is_valid(&request),
-            "invalid request: {request}"
-        );
-        serde_json::from_value::<ToolRequest>(request).expect("request deserializes");
-    }
-    for request in [
-        json!({"op":"semanticRename","sources":{},"target":{"symbol":true,"to":"x"}}),
-        json!({"op":"semanticRename","sources":{},"target":{"to":"x","extra":1}}),
-    ] {
-        assert!(
-            !request_schema.is_valid(&request),
-            "schema accepted an invalid rename target: {request}"
-        );
-    }
-
     // #472: `sources` is optional on the raw edit operations — a request
     // without it, or with an explicit null, validates and deserializes; the
     // service then reads the files the request names from disk.
@@ -331,9 +288,6 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
             "kind":"edit","source":"a.ws","source_identity":"sha256:x",
             "range":{"start_line":1,"start_col":1,"end_line":1,"end_col":1},
             "new_text":"x"}]}}),
-        json!({"op":"semanticRename","target":{"symbol":"score","to":"renamed"}}),
-        json!({"op":"semanticRename","sources":null,"target":{"source":"a.ws","line":1,"col":3,"to":"renamed"}}),
-        json!({"op":"semanticRename","target":{"source":"a.ws","line":1,"col":3,"to":"renamed"}}),
     ] {
         assert!(
             request_schema.is_valid(&request),
@@ -346,12 +300,6 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
     // a request without them, or with explicit nulls, validates and
     // deserializes; the service then derives the set from the loaded project.
     for request in [
-        json!({"op":"providerSemanticRename","language_id":"opy",
-            "position_document_uri":"file:///main.opy",
-            "position":{"line":0,"character":0},"new_name":"Renamed"}),
-        json!({"op":"providerSemanticRename","language_id":"opy","documents":null,"sources":null,
-            "position_document_uri":"file:///main.opy",
-            "position":{"line":0,"character":0},"new_name":"Renamed"}),
         json!({"op":"providerValidateEdit","language_id":"opy","transaction":{"edits":[{
             "kind":"edit","source":"file:///main.opy","source_identity":"sha256:x",
             "range":{"start_line":1,"start_col":1,"end_line":1,"end_col":1},
@@ -461,6 +409,43 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
             "EditRange accepted 0 for {coordinate}"
         );
     }
+}
+
+#[test]
+fn lookup_result_schema_covers_callable_returns_and_variadic() {
+    // #781/#798: `returns` and `variadic` are additive optional members of
+    // a `callable` fact; a live result that carries them must validate
+    // against the committed schema.
+    let schema: Value = serde_json::from_str(
+        &std::fs::read_to_string(workspace_root().join("schemas/wright-agent-v1.schema.json"))
+            .unwrap(),
+    )
+    .unwrap();
+    let mut document = schema.clone();
+    document["$ref"] = Value::String("#/$defs/LookupResult".to_string());
+    let result_schema = JSONSchema::compile(&document).expect("result schema compiles");
+
+    let ToolResponse::Ok { result } = service_response(&ToolRequest::Lookup {
+        language: "workshop".to_string(),
+        query: Some("array".to_string()),
+        kind: None,
+        within: None,
+        locale: None,
+        limit: Some(10),
+    }) else {
+        panic!("lookup failed");
+    };
+    let entries = result["entries"].as_array().unwrap();
+    let array = entries
+        .iter()
+        .find(|entry| entry["identity"] == "array")
+        .expect("the array value");
+    assert_eq!(array["callable"]["variadic"], true);
+    assert_eq!(array["callable"]["returns"], "Array");
+    assert!(
+        result_schema.is_valid(&result),
+        "LookupResult rejected a callable carrying returns/variadic: {result}"
+    );
 }
 
 #[test]

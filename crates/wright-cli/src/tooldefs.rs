@@ -184,27 +184,11 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         result: "the transaction's validation status, diagnostics, and previews when valid",
     },
     ToolSpec {
-        op: "semanticRename",
-        request_def: "SemanticRenameRequest",
-        drop_fields: &["sources"],
-        mcp: true,
-        description: "Propose a semantic rename: returns the validated transaction or structured refusal diagnostics. The target is a symbol id or declared name, or a source/line/col position. Sources default to the on-disk text.",
-        result: "the validated rename transaction or a structured refusal",
-    },
-    ToolSpec {
-        op: "providerSemanticRename",
-        request_def: "ProviderSemanticRenameRequest",
-        drop_fields: &["documents", "sources"],
-        mcp: true,
-        description: "Provider-owned rename for source-language projects (e.g. OverPy): the configured provider computes the edits, Wright verifies document versions and source preconditions, the provider validates the transaction, and the edited project is rechecked — returning validated edits or a structured refusal. The document set defaults to the session's loaded project (every member's disk text at version 0, keyed by `file://` URI); `position_document_uri` must be one of those URIs. `position` is 0-based line/UTF-16-character.",
-        result: "the provider-resolved rename transaction or a structured refusal",
-    },
-    ToolSpec {
         op: "providerValidateEdit",
         request_def: "ProviderValidateEditRequest",
         drop_fields: &["documents", "sources"],
         mcp: true,
-        description: "Validate a caller-proposed source-edit transaction for a provider-owned language through the same provider-backed pipeline as providerSemanticRename; no filesystem writes. The document set defaults to the session's loaded project (every member's disk text at version 0, keyed by `file://` URI), so every `edits[].source` must be one of those URIs and each `source_identity` verifies against the member's disk text — errors in any member document block the transaction.",
+        description: "Validate a caller-proposed source-edit transaction for a provider-owned language through the provider-backed pipeline: the provider validates each edited document and the edited project is rechecked; no filesystem writes. The document set defaults to the session's loaded project (every member's disk text at version 0, keyed by `file://` URI), so every `edits[].source` must be one of those URIs and each `source_identity` verifies against the member's disk text — errors in any member document block the transaction.",
         result: "the provider-validated transaction or a structured refusal",
     },
     ToolSpec {

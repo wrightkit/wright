@@ -111,9 +111,7 @@ plus the operation in snake case:
 | `lintRules` | `wright_lint_rules` |
 | `costEstimate` | `wright_cost_estimate` |
 | `targetMetadata` | `wright_target_metadata` |
-| `semanticRename` | `wright_semantic_rename` |
 | `validateEditTransaction` | `wright_validate_edit_transaction` |
-| `providerSemanticRename` | `wright_provider_semantic_rename` |
 | `providerValidateEdit` | `wright_provider_validate_edit` |
 | `lookup` | `wright_lookup` |
 
@@ -195,8 +193,6 @@ the successful `result` payload.
 | `costEstimate` | optional selection, optional `rule`, optional `all` | Exact generated-resource counts, `elementCount` (the canonical Workshop structure counted against the client element budget; `rules` ranked by count, largest first. `index` is the canonical rule position and each entry carries a resolved `span`; the 5 largest by default, `all: true` for every rule; `null` plus `elementCountUnavailable` when the count cannot run), findings (each with a resolved `span`), and `selection` when applied. With `rule` the result is the rule drill-down (#724): `rule` (identity, `count`, `span`), `statements[]` (direct children ranked by recursive `count`, each with `name`, `count`, `span`) and `byNode[]` (each node's own `base_count + adjustment` cost summed per canonical node name with `occurrences`; the entries sum to the rule's `count`) | The default result carries no run-cache comparison — an agent requests one explicitly by passing the reference record as inline data, not a file path (ADR-0027, #723). |
 | `targetMetadata` | none | Canonical target/catalog metadata |
 | `validateEditTransaction` | `transaction`, optional `sources` | Atomic validation status, diagnostics, and previews when valid |
-| `semanticRename` | `target`, optional `sources` | Validated rename transaction or structured refusal |
-| `providerSemanticRename` | `language_id`, `position_document_uri`, `position`, `new_name`, optional `documents`, `sources`, `project_root` | Provider-resolved rename transaction or structured refusal |
 | `providerValidateEdit` | `language_id`, `transaction`, optional `documents`, `sources`, `project_root` | Provider-validated transaction or structured refusal |
 | `lookup` | required `language`; optional `query`, `kind`, `within`, `locale`, `limit` | Owner vocabulary entries with accepted spellings and rendered signatures, or an explicit `unavailable` payload naming the owner |
 
@@ -277,7 +273,7 @@ diagnostic a snapshot query refuses with), matching the embedding API's
 
 Numeric symbol ids and rule indexes are valid only for the program that
 issued them. After a content-changing reload, a request carrying a numeric
-`symbol`, `rule`, or `semanticRename` target id is refused `stale-id` until
+`symbol` or `rule` is refused `stale-id` until
 the client observes the new space: a successful `symbols` response
 re-establishes symbol ids, a successful `rules` response re-establishes
 rule indexes, and an `ambiguous-symbol`/`ambiguous-rule` refusal
@@ -326,8 +322,7 @@ characters and 2 otherwise, ties in declaration order), or the `symbols` /
 message only, as ADR-0021 decision 6 does for owner vocabulary. A name shared
 by more than one symbol, or more than one rule for `cfg`, returns
 `ambiguous-symbol`/`ambiguous-rule` listing the candidate numeric ids.
-Resolution never guesses or returns an empty success; `semanticRename`
-addressed by name reports the same refusals. `usage`
+Resolution never guesses or returns an empty success. `usage`
 also echoes the resolved `id` and `kind` so a name-addressed caller
 can correlate the result with `symbols`.
 
@@ -435,9 +430,9 @@ proposes and validates edits; a caller remains responsible for applying them.
 Stale, overlapping, unsupported, or semantically invalid edits return an
 explicit refusal without a partial edit set.
 
-### Validated edits and semantic rename for raw Workshop (#434)
+### Validated edits for raw Workshop (#434)
 
-On raw Workshop input both operations are supported directly. `workshop-rs`
+On raw Workshop input the edit operation is supported directly. `workshop-rs`
 owns the source semantics and Wright orchestrates the transaction:
 
 * `validateEditTransaction` applies the caller's transaction to the current
@@ -449,35 +444,17 @@ owns the source semantics and Wright orchestrates the transaction:
   keeps that ability. A transaction that produces malformed or
   invalid Workshop refuses with the real parse/validation diagnostics and no
   partial preview; a valid one returns `ok: true` with a `preview` of each
-  edited source (edited text plus the post-edit identity).
-* `semanticRename` resolves `target` either by `symbol`, a numeric id or a
-  declared name that is exactly the addressing `references`/`usage` use, or by a
-  `source`/`line`/`col` position inside one identifier occurrence. Global
-  variables, player variables, and subroutines rename through the exact
-  identifier spans `workshop-rs` records: the declaration, the `Subroutine`
-  event binding, `Call Subroutine` callees, `Start Rule` subroutine
-  arguments, `Set`/`Modify`/`For` variable
-  arguments, and `Global.name`/`Event Player.name` value references all
-  rewrite, while prefixes, comments, strings, and unrelated identifiers stay
-  untouched. There is no textual-search fallback. An occurrence whose
-  recorded span does not cover exactly the identifier refuses with
-  `rename-unmapped-span`.
-  `sources` is optional (#472): when omitted or null, the service reads the
-  loaded input file's current text from disk; when supplied, it must carry
-  the current text of the loaded input file. A text
-  that differs from the loaded program's refuses with `edit-stale-source`
-  because provenance spans would no longer index it. A `to` name that
-  already declares a same-kind symbol refuses with `rename-name-collision`,
-  and one that does not survive reparsing refuses with the parse diagnostic;
-  rule names are not rename targets (`rename-unsupported-kind`).
+  edited source (edited text plus the post-edit identity). There is no
+  Wright-side rename operation: a rename is a caller-proposed transaction
+  over the identifier spans `references`/`symbols` report.
 * Non-Workshop input stays at the provider boundary: OPY refuses with
-  `edit-requires-provider` naming `providerValidateEdit` /
-  `providerSemanticRename`, and kinds without a shipped provider keep their
+  `edit-requires-provider` naming `providerValidateEdit`, and kinds without
+  a shipped provider keep their
   `source-provider-unavailable` refusal.
 * Findings on `lint` and `findings` carry a `fix` member when a rule offers
   a mechanically determined correction (#556): `fix.kind` names the
   remediation, `fix.summary` describes it, and `fix.transaction` is the
-  same `EditTransaction` shape `semanticRename` produces. Preview it
+  `EditTransaction` shape `validateEditTransaction` validates. Preview it
   through `validateEditTransaction` and apply it through the caller's own
   write path; there is no separate apply operation. Fixes exist only on raw
   Workshop input for `exact`-evidence findings whose correction is
@@ -494,14 +471,9 @@ owns the source semantics and Wright orchestrates the transaction:
   positions it freezes nothing, it marks the repeated evaluation as
   intentional so the finding retires.
 
-`wright rename <NAME> <NEW_NAME> [INPUT]` exposes the same semantic rename
-on the CLI: it prints the validated diff by default and applies it
-atomically with `--write`, refusing `edit-stale-source` when the file
-changed since validation.
-
 ### Provider-backed edits
 
-`providerValidateEdit` and `providerSemanticRename` run the same
+`providerValidateEdit` runs the same
 validated-edit pipeline through the configured source-language provider
 (`opy` today): Wright checks the caller's preconditions and translates
 coordinates, the provider validates each edited document, and the edited
@@ -518,36 +490,26 @@ caller-supplied or session-derived:
   the document set the session already holds. The omitted-set request reads
   the program like any other program-reading operation (#471): it triggers
   the deferred load and refuses with the loader's diagnostic on an
-  unloadable project. A `providerValidateEdit` `edits[].source` outside
-  the set refuses `edit-unknown-source`; `providerSemanticRename` requires
-  `position_document_uri` inside the set and refuses provider-returned
-  edits outside it with `provider-edit-outside-set`.
+  unloadable project. An `edits[].source` outside
+  the set refuses `edit-unknown-source`.
 * `sources` is optional (#548) and defaults to each document's text. It is
   a map from URI to current text covering every source the transaction may
-  edit: each `edits[].source` on `providerValidateEdit` and every document
-  the provider's rename may touch on `providerSemanticRename`. It is the
+  edit: each `edits[].source` on `providerValidateEdit`. It is the
   precondition each `source_identity` verifies against (SHA-256 hex of the
   text; for the entry document this equals `project.inputIdentity`) and
   the text the edits apply to.
 * `providerValidateEdit`'s post-edit check blocks on errors in any
   supplied document, so the set should cover the project documents whose
   diagnostics may break.
-* `providerSemanticRename` resolves the analyzable project from the
-  supplied documents themselves. Include the project entry document
-  (e.g. `main.opy`), not only the position file. A member file alone can
-  refuse `rename.noSymbolAtPosition` even when the position is valid;
-  supply the entry plus every file the rename may touch. The session-
-  derived set already contains every loaded member, entry included.
-* `providerSemanticRename`'s `position` uses the provider convention,
-  0-based line and UTF-16 character, while `transaction` ranges are the
+* `transaction` ranges are the
   `EditRange` 1-based half-open columns every edit operation shares. The
   returned transaction's `source` fields are document URIs and each
   `source_identity` is the identity of that document's current text, so
   the caller can replay or apply the edits itself.
 
 Operations carrying caller-supplied documents answer without consulting
-the session's loaded project (#471); both refuse cleanly when no provider
-is configured.
+the session's loaded project (#471); the operation refuses cleanly when no
+provider is configured.
 
 ### Name and signature lookup (#529, ADR-0021)
 
@@ -573,11 +535,16 @@ request's `language` selects the owner (`workshop` or `opy`, the ids
 
 Each entry carries its owner `identity`, `kind`, accepted `spelling`, and
 `displayName`, plus the owner fact that describes it (`callable`, `enum`,
-`parameter`, or `setting`). Callables also carry `signature`, a
-human-readable call shape Wright renders from the owner's parameter facts:
-required parameters name their type, optional parameters show `name?` or
-`name=default`, and an enum domain lists its members inline (a domain
-above the member bound renders as `Domain(count members)`).
+`parameter`, or `setting`). The `callable` fact holds the ordered
+`parameters`; when the owner declares them it also carries `returns`, the
+callable's return type in the same vocabulary as parameter `type`s (a
+Workshop `value` such as `distance` declares one; actions carry none),
+and `variadic: true` when the last parameter repeats for extra arguments.
+Callables also carry `signature`, a human-readable call shape Wright
+renders from the owner's parameter facts: required parameters name their
+type, optional parameters show `name?` or `name=default`, and an enum
+domain lists its members inline (a domain above the member bound renders
+as `Domain(count members)`).
 
 Workshop answers come from the `workshop-rs` catalog in process. OverPy
 answers come from the configured `opy-rs` provider's LPP lookup
@@ -636,10 +603,10 @@ metadata, meaning summary, rationale, documentation, known limits, evidence,
 and tags, is served once by `lintRules`.
 
 ADR-0020 records a second pre-freeze exception (#472): `sources` is optional
-on `validateEditTransaction` and `semanticRename` rather than required, so
+on `validateEditTransaction` rather than required, so
 agent callers stop resending whole files. The same exception extends to the
-provider operations (#548): `documents` and `sources` are optional on
-`providerSemanticRename` and `providerValidateEdit`, defaulting to the
+provider operation (#548): `documents` and `sources` are optional on
+`providerValidateEdit`, defaulting to the
 session's loaded project and each document's text.
 
 The optional guide installed by `wright agent install` (and distributed by

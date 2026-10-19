@@ -12,7 +12,6 @@ use std::time::Duration;
 
 use wright_driver::Severity;
 use wright_driver::config::OutputFormat;
-use wright_driver::edit::RenameResult;
 use wright_driver::progress::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit};
 use wright_driver::result::{
     CallGraphResult, CfgResult, CheckResult, CompileResult, ConvertResult, CostResult, Envelope,
@@ -283,7 +282,7 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation>(
 ) {
     if pres.format == OutputFormat::Json {
         let mut value = serde_json::to_value(envelope).expect("serializes");
-        if !matches!(envelope.command.as_str(), "compile" | "convert" | "rename") {
+        if !matches!(envelope.command.as_str(), "compile" | "convert") {
             wright_driver::essential::envelope(&mut value, pres.all);
         }
         if envelope.command == "check" {
@@ -360,7 +359,7 @@ fn render_report<T: serde::Serialize + ResultPresentation>(
     let mut ordered: Vec<&wright_driver::Diagnostic> = envelope.diagnostics.iter().collect();
     ordered.sort_by_key(|diagnostic| severity_rank(diagnostic.severity));
     let diagnostic_total = ordered.len();
-    let bounded = !matches!(envelope.command.as_str(), "compile" | "convert" | "rename");
+    let bounded = !matches!(envelope.command.as_str(), "compile" | "convert");
     let limit = if pres.all || !bounded { usize::MAX } else { 20 };
     for diagnostic in ordered.into_iter().take(limit) {
         let marks = pres.marks();
@@ -866,22 +865,6 @@ impl ResultPresentation for ConvertResult {
 
 impl ResultPresentation for CheckResult {
     fn render_body(&self, _ctx: &RenderContext<'_>) {}
-}
-
-impl ResultPresentation for RenameResult {
-    fn metadata(&self) -> Option<String> {
-        let transaction = self.transaction.as_ref()?;
-        let edits = transaction.edits.len();
-        let sources = self.preview.as_ref().map_or(0, Vec::len);
-        Some(if self.written.is_empty() {
-            format!("{edits} edit(s) across {sources} source(s); preview — pass --write to apply")
-        } else {
-            format!("{edits} edit(s) applied to {}", self.written.join(", "))
-        })
-    }
-    fn render_body(&self, _ctx: &RenderContext<'_>) {
-        render_rename(self);
-    }
 }
 
 impl ResultPresentation for LintResult {
@@ -1772,27 +1755,6 @@ fn render_compile(result: &CompileResult) {
 
 fn render_convert(result: &ConvertResult) {
     print!("{}", result.text);
-}
-
-/// The `rename` human report (#434): per-source, the lines the validated
-/// transaction changes, shown as `-`/`+` pairs with their line numbers —
-/// rename edits only ever rewrite identifier occurrences in place. Written
-/// files are listed after the diff when `--write` applied them.
-fn render_rename(result: &RenameResult) {
-    let Some(previews) = &result.preview else {
-        return;
-    };
-    for preview in previews {
-        println!("\n{}", preview.source);
-        let original = result
-            .originals
-            .get(&preview.source)
-            .map_or("", String::as_str);
-        render_diff_lines(original, &preview.new_text, "  ");
-    }
-    for written in &result.written {
-        println!("wrote {written}");
-    }
 }
 
 /// A line diff of `new_text` against `original`: the common prefix and

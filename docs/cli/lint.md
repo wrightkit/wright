@@ -207,7 +207,8 @@ operations identically:
 }
 ```
 
-`fix.transaction` is the same `EditTransaction` `semanticRename` produces:
+`fix.transaction` is the same `EditTransaction` `validateEditTransaction`
+validates:
 the agent path previews it through `validateEditTransaction` and applies it
 through the caller's own write path. There is no separate fix operation.
 On the CLI, `wright lint --fix` renders each offered fix's validated diff,

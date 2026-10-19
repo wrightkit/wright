@@ -25,8 +25,8 @@ pub(crate) struct Cli {
 pub(crate) const LONG_ABOUT: &str = "Wright compiler and Workshop tooling CLI.
 
 Commands check correctness, summarize semantic hotspots, lint, compile,
-rename Workshop symbols, resolve owner names and signatures (`lookup`), or
-reconstruct source through the typed wright-driver result envelope.
+resolve owner names and signatures (`lookup`), or reconstruct source
+through the typed wright-driver result envelope.
 `inspect`
 prints the semantic summary, and its query subcommands (symbols, refs, cfg,
 callgraph, cost) expose each detail area. `compile` writes the program to
@@ -98,9 +98,6 @@ pub(crate) enum Command {
         subcommand_precedence_over_arg = true
     )]
     Inspect(InspectArgs),
-    /// Rename a Workshop variable or subroutine semantically (#434): previews
-    /// the validated source diff by default; `--write` applies it atomically.
-    Rename(RenameArgs),
     /// Resolve a display name, near spelling, or guess to the language
     /// owner's accepted spelling and signature (#529). Use it before writing
     /// in an unfamiliar language and when a name is rejected.
@@ -282,28 +279,6 @@ pub(crate) struct CommonArgs {
     /// it never turns a failing command into a passing one.
     #[arg(long, value_enum, value_name = "LEVEL")]
     pub(crate) fail_on: Option<SeverityArg>,
-}
-
-/// Arguments of `rename` (#434, #739): the declared symbol name and the
-/// new identifier as positionals, then `[INPUT]` through the shared
-/// workflow options. Raw Workshop input renames through `workshop-rs`;
-/// OPY input resolves `NAME` through the provider's `lpp/symbols` and
-/// renames through `lpp/rename` — the same semantic rename the agent
-/// surface exposes.
-#[derive(Debug, Args)]
-pub(crate) struct RenameArgs {
-    /// The declared name of the symbol to rename.
-    #[arg(value_name = "NAME")]
-    pub(crate) name: String,
-    /// The new identifier.
-    #[arg(value_name = "NEW_NAME")]
-    pub(crate) to: String,
-    /// Apply the validated rename to the input file atomically instead of
-    /// previewing the diff.
-    #[arg(long)]
-    pub(crate) write: bool,
-    #[command(flatten)]
-    pub(crate) common: CommonArgs,
 }
 
 /// Arguments of `lookup` (#529): the free-text query, the language selector,

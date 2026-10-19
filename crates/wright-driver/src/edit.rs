@@ -2,29 +2,22 @@
 //! [`SourceEdit`]s — never as mutations of Wright's internal IR.
 //!
 //! Raw Workshop input is edited through `workshop-rs` itself (#434): a
-//! transaction applies to the caller-supplied current sources, the edited
-//! result is reparsed and validated through the session's own Workshop
-//! parse path, and a semantic rename rewrites exactly the identifier spans
-//! the parsed program reports — declarations, references, and positions
-//! carry the same provenance. Source languages stay at the provider
-//! boundary (`providerValidateEdit` / `providerSemanticRename`); there is
-//! no textual-search rename and no static fallback for them.
+//! transaction applies to the caller-supplied current sources and the
+//! edited result is reparsed and validated through the session's own
+//! Workshop parse path. Source languages stay at the provider boundary
+//! (`providerValidateEdit`); there is no static fallback for them.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use workshop_rs::catalog::{Catalog, Locale};
-use wright_analyzer::canonical::{
-    PositionResolution, ReferenceKind, SemanticIndex, Symbol, SymbolId, SymbolKind,
-};
 
 use crate::config::{SessionConfig, SourceKind};
 use crate::diag::{Diagnostic, Stage, source_provider_unavailable};
 use crate::input::{self, ResolvedInput};
 use crate::result::exit_code_from;
-use crate::service::Address;
-use crate::session::{Loaded, workshop_diag};
+use crate::session::workshop_diag;
 
 /// One proposed source edit.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -301,9 +294,9 @@ fn edit_stdin_refusal() -> Diagnostic {
 
 /// The source-kind boundary shared by the raw edit operations (#434): raw
 /// Workshop input validates through `workshop-rs`; OPY and other source
-/// languages belong to the provider operations (`providerValidateEdit` /
-/// `providerSemanticRename`), which keep their own contract. The refusal
-/// names the operation a caller should route to.
+/// languages belong to the provider operation (`providerValidateEdit`),
+/// which keeps its own contract. The refusal names the operation a caller
+/// should route to.
 pub(crate) fn edit_kind_gate(kind: SourceKind, provider_operation: &str) -> Option<Diagnostic> {
     match kind {
         SourceKind::Workshop => None,
@@ -324,404 +317,6 @@ pub(crate) fn edit_kind_gate(kind: SourceKind, provider_operation: &str) -> Opti
             ),
         )),
     }
-}
-
-/// The `semanticRename` target (#434): either a symbol address — the numeric
-/// id or the declared name, exactly as `references`/`usage` address symbols
-/// (#429) — or a `source`/`line`/`col` position inside one identifier
-/// occurrence.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RenameTarget {
-    /// The symbol to rename, by numeric id or declared name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub symbol: Option<Address>,
-    /// Position addressing: the source file the position is interpreted in.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-    /// Position addressing: the 1-based line.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub line: Option<u32>,
-    /// Position addressing: the 1-based column.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub col: Option<u32>,
-    /// The new identifier.
-    pub to: String,
-}
-
-/// The `semanticRename` result: the validated transaction and its previews,
-/// or refusal diagnostics with no transaction and no partial preview.
-#[derive(Debug, Clone, Serialize)]
-pub struct SemanticRename {
-    pub ok: bool,
-    pub transaction: Option<EditTransaction>,
-    pub diagnostics: Vec<Diagnostic>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub preview: Option<Vec<SourcePreview>>,
-}
-
-/// The `wright rename` result (#434): the validated transaction and the
-/// per-source previews; `written` lists the files `--write` updated.
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct RenameResult {
-    /// The validated rename transaction (absent on refusal).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub transaction: Option<EditTransaction>,
-    /// Per-source previews of the validated transaction.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub preview: Option<Vec<SourcePreview>>,
-    /// The files updated by `--write` (empty in preview mode).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub written: Vec<String>,
-    /// The source text the transaction was validated against — presentation
-    /// input for the human diff, not part of the JSON contract.
-    #[serde(skip)]
-    pub originals: BTreeMap<String, String>,
-}
-
-/// `semanticRename` on raw Workshop input (#434): the target resolves
-/// against the loaded program's semantic index — the same symbol and
-/// position addressing `references`/`usage` use — and every occurrence is
-/// rewritten through the program's own identifier provenance, never a
-/// textual search. When `sources` is absent (#472) the loaded input's
-/// current text is read from disk; a supplied `sources` stays the
-/// caller-side precondition text. The proposed transaction is validated by
-/// reparsing the edited source; every refusal carries structured
-/// diagnostics and no partial edit set.
-pub fn semantic_rename(
-    loaded: &Loaded,
-    catalog: &Catalog,
-    sources: Option<&BTreeMap<String, String>>,
-    target: &RenameTarget,
-) -> SemanticRename {
-    let refuse = |diagnostics: Vec<Diagnostic>| SemanticRename {
-        ok: false,
-        transaction: None,
-        diagnostics,
-        preview: None,
-    };
-    if target.to.is_empty() {
-        return refuse(vec![Diagnostic::error(
-            "rename-invalid-name",
-            Stage::Discovery,
-            "rename requires a non-empty new name",
-        )]);
-    }
-    if let Some(diagnostic) = edit_kind_gate(loaded.input.kind, "providerSemanticRename") {
-        return refuse(vec![diagnostic]);
-    }
-    let Some(input_path) = loaded.input.path.clone() else {
-        return refuse(vec![edit_stdin_refusal()]);
-    };
-    // #472: an absent `sources` means the current text of the file the
-    // request names comes from disk — the loaded input, keyed by the
-    // `target.source` spelling when position addressing names it, else by
-    // the input's display path, so the produced transaction names the
-    // source as the caller would have.
-    let defaulted_sources;
-    let sources = match sources {
-        Some(sources) => sources,
-        None => {
-            let bytes = match std::fs::read(&input_path) {
-                Ok(bytes) => bytes,
-                Err(error) => {
-                    return refuse(vec![Diagnostic::error(
-                        "input-io",
-                        Stage::Discovery,
-                        format!("cannot read '{}': {error}", input_path.display()),
-                    )]);
-                }
-            };
-            let source = target
-                .source
-                .clone()
-                .filter(|source| same_file(source, &input_path))
-                .unwrap_or_else(|| loaded.input.display.clone());
-            defaulted_sources =
-                BTreeMap::from([(source, crate::input::decode_source_text(&bytes))]);
-            &defaulted_sources
-        }
-    };
-    let Some((source, current)) = sources
-        .iter()
-        .find(|(source, _)| same_file(source, &input_path))
-        .map(|(source, text)| (source.clone(), text.clone()))
-    else {
-        return refuse(vec![Diagnostic::error(
-            "edit-unknown-source",
-            Stage::Discovery,
-            format!(
-                "semantic rename needs the current text of '{}' in `sources`",
-                loaded.input.display
-            ),
-        )]);
-    };
-    if current != loaded.input.text {
-        return refuse(vec![Diagnostic::error(
-            "edit-stale-source",
-            Stage::Discovery,
-            format!(
-                "the supplied text of '{source}' differs from the loaded program; reload the project and retry"
-            ),
-        )]);
-    }
-
-    let index = SemanticIndex::build(&loaded.program);
-    let symbol = match resolve_rename_target(&index, loaded, &input_path, target) {
-        Ok(symbol) => symbol,
-        Err(diagnostic) => return refuse(vec![diagnostic]),
-    };
-    match symbol.kind {
-        SymbolKind::GlobalVariable | SymbolKind::PlayerVariable | SymbolKind::Subroutine => {}
-        other => {
-            return refuse(vec![Diagnostic::error(
-                "rename-unsupported-kind",
-                Stage::Discovery,
-                format!(
-                    "semantic rename covers variables and subroutines, not '{}' symbols",
-                    other.as_str()
-                ),
-            )]);
-        }
-    }
-    if target.to == symbol.name {
-        return refuse(vec![Diagnostic::error(
-            "rename-invalid-name",
-            Stage::Discovery,
-            "the new name already names this symbol",
-        )]);
-    }
-    // Same-namespace collision: `to` must not already name another symbol of
-    // the same kind — global and player variables are separate namespaces,
-    // so the check is kind-scoped.
-    if let Some(other) = index
-        .symbols()
-        .find(|other| other.id != symbol.id && other.kind == symbol.kind && other.name == target.to)
-    {
-        return refuse(vec![Diagnostic::error(
-            "rename-name-collision",
-            Stage::Discovery,
-            format!(
-                "'{}' already names {} #{}; renaming '{}' would collide",
-                target.to,
-                other.kind.as_str(),
-                other.id.index(),
-                symbol.name
-            ),
-        )]);
-    }
-
-    let mut spans: Vec<workshop_rs::source::Span> = Vec::new();
-    for reference in index.references(symbol.id) {
-        let Some(occurrence) = reference.occurrence else {
-            return refuse(vec![rename_unmapped(loaded, symbol)]);
-        };
-        let Ok(edit) = loaded.program.edit_source(occurrence, &target.to) else {
-            return refuse(vec![rename_unmapped(loaded, symbol)]);
-        };
-        if current.get(edit.range()) != Some(symbol.name.as_str()) {
-            return refuse(vec![rename_unmapped(loaded, symbol)]);
-        }
-        if !spans.contains(&occurrence) {
-            spans.push(occurrence);
-        }
-    }
-    if spans.is_empty() {
-        return refuse(vec![Diagnostic::error(
-            "rename-invalid-target",
-            Stage::Discovery,
-            format!("symbol '{}' carries no identifier occurrences", symbol.name),
-        )]);
-    }
-    spans.sort_by_key(|span| {
-        (
-            span.file.index(),
-            span.start.line,
-            span.start.col,
-            span.end.line,
-            span.end.col,
-        )
-    });
-    let identity = crate::input_identity(&current);
-    let transaction = match EditTransaction::new(
-        spans
-            .iter()
-            .map(|span| SourceEdit {
-                edit_kind: "rename".to_string(),
-                source: source.clone(),
-                source_identity: identity.clone(),
-                range: EditRange {
-                    start_line: span.start.line,
-                    start_col: span.start.col,
-                    end_line: span.end.line,
-                    end_col: span.end.col,
-                },
-                new_text: target.to.clone(),
-            })
-            .collect(),
-    ) {
-        Ok(transaction) => transaction,
-        Err(diagnostic) => return refuse(vec![diagnostic]),
-    };
-    let previews = match transaction.apply(sources) {
-        Ok(previews) => previews,
-        Err(diagnostic) => return refuse(vec![diagnostic]),
-    };
-    let edited = previews
-        .iter()
-        .find(|preview| same_file(&preview.source, &input_path))
-        .expect("rename edits only ever touch the loaded input")
-        .new_text
-        .clone();
-    match verify_rename(&index, symbol, &target.to, &edited, loaded, catalog) {
-        Ok(()) => SemanticRename {
-            ok: true,
-            transaction: Some(transaction),
-            diagnostics: Vec::new(),
-            preview: Some(previews),
-        },
-        Err(diagnostics) => refuse(diagnostics),
-    }
-}
-
-/// Resolve the rename target: a numeric or name `symbol` address (#429), or
-/// a `source`/`line`/`col` position inside one identifier occurrence.
-fn resolve_rename_target<'a>(
-    index: &'a SemanticIndex,
-    loaded: &Loaded,
-    input_path: &Path,
-    target: &RenameTarget,
-) -> Result<&'a Symbol, Diagnostic> {
-    match &target.symbol {
-        Some(Address::Id(id)) => {
-            index
-                .symbol(SymbolId::from_index(*id as usize))
-                .ok_or_else(|| {
-                    Diagnostic::error(
-                        "invalid-id",
-                        Stage::Discovery,
-                        format!("unknown symbol {id}"),
-                    )
-                })
-        }
-        Some(Address::Name(name)) => index
-            .resolve_symbol(name)
-            .map_err(|error| Diagnostic::error(error.code, Stage::Discovery, error.message)),
-        None => symbol_at_position(index, loaded, input_path, target),
-    }
-}
-
-fn symbol_at_position<'a>(
-    index: &'a SemanticIndex,
-    loaded: &Loaded,
-    input_path: &Path,
-    target: &RenameTarget,
-) -> Result<&'a Symbol, Diagnostic> {
-    let (Some(source), Some(line), Some(col)) = (target.source.as_deref(), target.line, target.col)
-    else {
-        return Err(Diagnostic::error(
-            "rename-invalid-target",
-            Stage::Discovery,
-            "semanticRename needs a `symbol` (numeric id or declared name) or a `source`/`line`/`col` position",
-        ));
-    };
-    if !same_file(source, input_path) {
-        return Err(Diagnostic::error(
-            "rename-invalid-target",
-            Stage::Discovery,
-            format!(
-                "the position source '{source}' does not name the loaded input '{}'",
-                loaded.input.display
-            ),
-        ));
-    }
-    match index.symbol_at(line, col) {
-        PositionResolution::Resolved { symbol, .. } => Ok(symbol),
-        PositionResolution::Miss => Err(Diagnostic::error(
-            "rename-invalid-target",
-            Stage::Discovery,
-            format!("no symbol identifier covers {source}:{line}:{col}"),
-        )),
-        PositionResolution::Ambiguous(symbols) => Err(Diagnostic::error(
-            "ambiguous-symbol",
-            Stage::Discovery,
-            format!(
-                "more than one symbol covers {source}:{line}:{col}: {}",
-                symbols
-                    .iter()
-                    .map(|symbol| format!("{} {}", symbol.kind.as_str(), symbol.id.index()))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        )),
-    }
-}
-
-fn rename_unmapped(loaded: &Loaded, symbol: &Symbol) -> Diagnostic {
-    Diagnostic::error(
-        "rename-unmapped-span",
-        Stage::Discovery,
-        format!(
-            "a '{}' occurrence of {} '{}' does not map to an exact identifier span in '{}'",
-            symbol.name,
-            symbol.kind.as_str(),
-            symbol.id.index(),
-            loaded.input.display
-        ),
-    )
-}
-
-/// Reparse `edited` through the loaded program's parse context and verify
-/// the rename invariant: the text stays a valid Workshop program and the
-/// `(kind, to)` symbol binds the same reference-kind multiset that `(kind,
-/// from)` bound before. A name that does not survive reparsing — or a
-/// reference set that changed — refuses with no transaction.
-fn verify_rename(
-    index: &SemanticIndex,
-    symbol: &Symbol,
-    to: &str,
-    edited: &str,
-    loaded: &Loaded,
-    catalog: &Catalog,
-) -> Result<(), Vec<Diagnostic>> {
-    let locale = Locale::new(
-        loaded
-            .origin
-            .locale
-            .as_deref()
-            .expect("Workshop loads record their resolved locale"),
-    );
-    let program = workshop_rs::parser::parse_with_context(edited, catalog, &locale, catalog)
-        .map_err(|error| vec![workshop_diag(error, &loaded.input)])?;
-    program
-        .validate()
-        .map_err(|error| vec![workshop_diag(error, &loaded.input)])?;
-    let reparsed = SemanticIndex::build(&program);
-    let expected = reference_signature(index, symbol.id);
-    let actual = reparsed
-        .symbols()
-        .find(|candidate| candidate.kind == symbol.kind && candidate.name == to)
-        .map(|candidate| reference_signature(&reparsed, candidate.id));
-    match actual {
-        Some(actual) if actual == expected => Ok(()),
-        _ => Err(vec![Diagnostic::error(
-            "rename-mismatch",
-            Stage::Validation,
-            format!(
-                "the edited source no longer binds the same references to '{to}' as '{}' did; refusing rather than reporting a partial rename",
-                symbol.name
-            ),
-        )]),
-    }
-}
-
-fn reference_signature(index: &SemanticIndex, id: SymbolId) -> Vec<ReferenceKind> {
-    let mut kinds: Vec<ReferenceKind> = index
-        .references(id)
-        .iter()
-        .map(|reference| reference.kind)
-        .collect();
-    kinds.sort_by_key(|kind| *kind as usize);
-    kinds
 }
 
 /// Whether a `sources` key names the resolved input file: plain path
@@ -1007,7 +602,7 @@ fn char_col(line: &str, col: u32) -> usize {
 /// Deprecated `wright-embedding/v1` compatibility surface (#514): the
 /// request consumed by [`rename_symbol`]. Kept source-compatible for v1
 /// callers; removal requires a breaking embedding-contract transition.
-#[deprecated = "v1 compatibility helper for `rename_symbol`; the supported rename is the semantic `semanticRename` path"]
+#[deprecated = "v1 compatibility helper for `rename_symbol`; no supported rename path supersedes it"]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenameRequest {
     pub symbol_kind: String,
@@ -1022,12 +617,9 @@ pub struct RenameRequest {
 /// a name in `source` (#129). The replacement is textual only — it cannot
 /// distinguish semantic identity from strings, comments, or unrelated
 /// same-named symbols — so it carries no semantic-identity guarantee and no
-/// Wright product, CLI, LSP, agent, or embedding workflow may use it as a
-/// semantic-rename fallback. The supported rename is the semantic path
-/// (#434): `semanticRename`, [`CompilerSession::semantic_rename`], or
-/// `ToolRequest::SemanticRename`, which rewrites exact identifier spans.
+/// Wright product, CLI, LSP, agent, or embedding workflow may use it.
 /// Removal requires a breaking embedding-contract transition.
-#[deprecated = "textual whole-word proposal helper with no semantic-identity guarantee; use `semanticRename` instead"]
+#[deprecated = "textual whole-word proposal helper with no semantic-identity guarantee"]
 #[allow(deprecated)]
 pub fn rename_symbol(source: &str, request: &RenameRequest) -> Result<SourceEdit, Diagnostic> {
     if request.from.is_empty() || request.to.is_empty() {
@@ -1418,323 +1010,31 @@ mod tests {
     }
 
     #[test]
-    fn semantic_rename_rewrites_only_identifier_spans() {
-        let (dir, mut session) = workshop_session(WORKSHOP);
-        let loaded = session.load().expect("loaded");
-        let sources = BTreeMap::from([(loaded.input.display.clone(), loaded.input.text.clone())]);
-        let rename = semantic_rename(
-            &loaded,
-            session.catalog(),
-            Some(&sources),
-            &RenameTarget {
-                symbol: Some(Address::Name("score".to_string())),
-                source: None,
-                line: None,
-                col: None,
-                to: "total".to_string(),
-            },
-        );
-        assert!(rename.ok, "{:?}", rename.diagnostics);
-        let transaction = rename.transaction.expect("transaction");
-        // Declaration + `Set Global Variable` arg + `Global.score` read.
-        assert_eq!(transaction.edits.len(), 3);
-        for edit in &transaction.edits {
-            assert_eq!(edit.edit_kind, "rename");
-            assert_eq!(edit.new_text, "total");
-            let lines: Vec<&str> = loaded.input.text.split('\n').collect();
-            let line = lines[edit.range.start_line as usize - 1];
-            assert_eq!(edit.range.start_line, edit.range.end_line);
-            assert_eq!(
-                &line[edit.range.start_col as usize - 1..edit.range.end_col as usize - 1],
-                "score"
-            );
-        }
-        let preview = rename.preview.expect("preview");
-        assert!(preview[0].new_text.contains("0: total"));
-        assert!(preview[0].new_text.contains("Set Global Variable(total,"));
-        assert!(preview[0].new_text.contains("Add(Global.total, 1)"));
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn semantic_rename_by_position_and_stale_sources_refuse() {
-        let (dir, mut session) = workshop_session(WORKSHOP);
-        let loaded = session.load().expect("loaded");
-        let sources = BTreeMap::from([(loaded.input.display.clone(), loaded.input.text.clone())]);
-        // Position inside the `score` occurrence of `Set Global Variable`.
-        let by_position = semantic_rename(
-            &loaded,
-            session.catalog(),
-            Some(&sources),
-            &RenameTarget {
-                symbol: None,
-                source: Some(loaded.input.display.clone()),
-                line: Some(11),
-                col: Some(30),
-                to: "total".to_string(),
-            },
-        );
-        assert!(by_position.ok, "{:?}", by_position.diagnostics);
-
-        let stale = BTreeMap::from([(
-            loaded.input.display.clone(),
-            loaded.input.text.replacen("score", "other", 1),
-        )]);
-        let rename = semantic_rename(
-            &loaded,
-            session.catalog(),
-            Some(&stale),
-            &RenameTarget {
-                symbol: Some(Address::Name("score".to_string())),
-                source: None,
-                line: None,
-                col: None,
-                to: "total".to_string(),
-            },
-        );
-        assert!(!rename.ok);
-        assert_eq!(rename.diagnostics[0].code, "edit-stale-source");
-
-        for (target, code) in [
-            (
-                RenameTarget {
-                    symbol: Some(Address::Name("missing".to_string())),
-                    source: None,
-                    line: None,
-                    col: None,
-                    to: "x".to_string(),
-                },
-                "unknown-symbol",
-            ),
-            (
-                RenameTarget {
-                    symbol: None,
-                    source: Some(loaded.input.display.clone()),
-                    line: Some(1),
-                    col: Some(1),
-                    to: "x".to_string(),
-                },
-                "rename-invalid-target",
-            ),
-        ] {
-            let rename = semantic_rename(&loaded, session.catalog(), Some(&sources), &target);
-            assert!(!rename.ok);
-            assert_eq!(rename.diagnostics[0].code, code, "{target:?}");
-        }
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn semantic_rename_refuses_collisions_and_unsupported_kinds() {
-        let (dir, mut session) = workshop_session(WORKSHOP);
-        let loaded = session.load().expect("loaded");
-        let sources = BTreeMap::from([(loaded.input.display.clone(), loaded.input.text.clone())]);
-        let collision = semantic_rename(
-            &loaded,
-            session.catalog(),
-            Some(&sources),
-            &RenameTarget {
-                symbol: Some(Address::Name("score".to_string())),
-                source: None,
-                line: None,
-                col: None,
-                to: "score2".to_string(),
-            },
-        );
-        assert!(collision.ok);
-        let (dir2, mut session2) =
-            workshop_session(&WORKSHOP.replacen("0: score", "0: score\n        1: other", 1));
-        let loaded2 = session2.load().expect("loaded");
-        let sources2 =
-            BTreeMap::from([(loaded2.input.display.clone(), loaded2.input.text.clone())]);
-        let collision = semantic_rename(
-            &loaded2,
-            session2.catalog(),
-            Some(&sources2),
-            &RenameTarget {
-                symbol: Some(Address::Name("score".to_string())),
-                source: None,
-                line: None,
-                col: None,
-                to: "other".to_string(),
-            },
-        );
-        assert!(!collision.ok);
-        assert_eq!(collision.diagnostics[0].code, "rename-name-collision");
-        let rule = semantic_rename(
-            &loaded,
-            session.catalog(),
-            Some(&sources),
-            &RenameTarget {
-                symbol: Some(Address::Name("r".to_string())),
-                source: None,
-                line: None,
-                col: None,
-                to: "renamed".to_string(),
-            },
-        );
-        assert!(!rule.ok);
-        assert_eq!(rule.diagnostics[0].code, "rename-unsupported-kind");
-        let typo = semantic_rename(
-            &loaded,
-            session.catalog(),
-            Some(&sources),
-            &RenameTarget {
-                symbol: Some(Address::Name("scor".to_string())),
-                source: None,
-                line: None,
-                col: None,
-                to: "renamed".to_string(),
-            },
-        );
-        assert!(!typo.ok);
-        assert_eq!(typo.diagnostics[0].code, "unknown-symbol");
-        assert!(
-            typo.diagnostics[0]
-                .message
-                .contains("nearest declared: 'score'"),
-            "{:?}",
-            typo.diagnostics[0]
-        );
-        let _ = std::fs::remove_dir_all(dir);
-        let _ = std::fs::remove_dir_all(dir2);
-    }
-
-    #[test]
-    fn the_rename_invariant_catches_edits_that_drop_a_reference() {
-        // Ablation: a transaction missing one occurrence still fails the
-        // post-reparse reference-shape check rather than "succeeding".
-        let (dir, mut session) = workshop_session(WORKSHOP);
-        let loaded = session.load().expect("loaded");
-        let index = SemanticIndex::build(&loaded.program);
-        let symbol = index
-            .symbols()
-            .find(|symbol| symbol.name == "score")
-            .expect("score symbol");
-        let edited = loaded.input.text.replacen("0: score", "0: total", 1);
-        let result = verify_rename(&index, symbol, "total", &edited, &loaded, session.catalog());
-        let diagnostics = result.expect_err("a partial rename refuses");
-        assert_eq!(diagnostics[0].code, "rename-mismatch");
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn semantic_rename_covers_player_variables_and_subroutines() {
-        // #434 acceptance: player variables rewrite their declaration plus
-        // `Event Player.name` occurrences (prefix preserved), and
-        // subroutines rewrite the declaration, the event binding, and calls.
-        let source = "variables {\n    player:\n        1: streak\n}\n\nsubroutines {\n    0: helper\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Set Player Variable(Event Player, streak, Add(Event Player.streak, 1));\n        Call Subroutine(helper);\n    }\n}\n\nrule (\"sub\") {\n    event {\n        Subroutine;\n        helper;\n    }\n    actions {\n        Set Player Variable(Event Player, streak, 0);\n    }\n}\n";
-        let (dir, mut session) = workshop_session(source);
-        let loaded = session.load().expect("loaded");
-        let sources = BTreeMap::from([(loaded.input.display.clone(), loaded.input.text.clone())]);
-
-        let player = semantic_rename(
-            &loaded,
-            session.catalog(),
-            Some(&sources),
-            &RenameTarget {
-                symbol: Some(Address::Name("streak".to_string())),
-                source: None,
-                line: None,
-                col: None,
-                to: "combo".to_string(),
-            },
-        );
-        assert!(player.ok, "{:?}", player.diagnostics);
-        let text = &player.preview.as_ref().unwrap()[0].new_text;
-        assert!(text.contains("1: combo"), "{text}");
-        assert!(text.contains("Event Player, combo,"), "{text}");
-        assert!(text.contains("Event Player.combo"), "{text}");
-        assert!(!text.contains("streak"), "{text}");
-        assert!(text.contains("Call Subroutine(helper)"), "{text}");
-
-        let subroutine = semantic_rename(
-            &loaded,
-            session.catalog(),
-            Some(&sources),
-            &RenameTarget {
-                symbol: Some(Address::Name("helper".to_string())),
-                source: None,
-                line: None,
-                col: None,
-                to: "assist".to_string(),
-            },
-        );
-        assert!(subroutine.ok, "{:?}", subroutine.diagnostics);
-        let text = &subroutine.preview.as_ref().unwrap()[0].new_text;
-        assert!(text.contains("0: assist"), "{text}");
-        assert!(text.contains("Call Subroutine(assist)"), "{text}");
-        assert!(
-            text.contains("Subroutine;\n        assist;"),
-            "the event binding rewrites: {text}"
-        );
-        assert!(!text.contains("helper"), "{text}");
-
-        // Position addressing inside the `Subroutine; helper;` binding.
-        let helper_line = source
-            .lines()
-            .enumerate()
-            .find(|(_, line)| line.trim() == "helper;")
-            .map(|(index, _)| index as u32 + 1)
-            .expect("event binding");
-        let by_position = semantic_rename(
-            &loaded,
-            session.catalog(),
-            Some(&sources),
-            &RenameTarget {
-                symbol: None,
-                source: Some(loaded.input.display.clone()),
-                line: Some(helper_line),
-                col: Some(9),
-                to: "assist".to_string(),
-            },
-        );
-        assert!(by_position.ok, "{:?}", by_position.diagnostics);
-        assert_eq!(
-            by_position.transaction.unwrap().edits.len(),
-            subroutine.transaction.unwrap().edits.len(),
-            "position addressing resolves the same symbol"
-        );
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
     fn write_previews_refuses_stale_sources_and_updates_atomically() {
         // #434: `write_previews` rechecks each file's identity before
         // writing; a file that changed since validation refuses with no
         // write at all.
-        let (dir, mut session) = workshop_session(WORKSHOP);
-        let loaded = session.load().expect("loaded");
-        let sources = BTreeMap::from([(loaded.input.display.clone(), loaded.input.text.clone())]);
-        let rename = semantic_rename(
-            &loaded,
-            session.catalog(),
-            Some(&sources),
-            &RenameTarget {
-                symbol: Some(Address::Name("score".to_string())),
-                source: None,
-                line: None,
-                col: None,
-                to: "total".to_string(),
-            },
+        let (dir, path) = temp_workshop(WORKSHOP);
+        let new_text = WORKSHOP.replacen("0: score", "0: total", 1).replacen(
+            "Global.score",
+            "Global.total",
+            1,
         );
-        assert!(rename.ok, "{:?}", rename.diagnostics);
-        let transaction = rename.transaction.as_ref().unwrap();
-        let previews = rename.preview.as_ref().unwrap();
+        let (previews, transaction) = write_fixtures(&[(path.as_path(), WORKSHOP, &new_text)]);
 
-        std::fs::write(loaded.input.path.as_ref().unwrap(), "// changed\n").unwrap();
-        let error = write_previews(previews, transaction).unwrap_err();
+        std::fs::write(&path, "// changed\n").unwrap();
+        let error = write_previews(&previews, &transaction).unwrap_err();
         assert_eq!(error.code, "edit-stale-source");
         assert_eq!(
-            std::fs::read_to_string(loaded.input.path.as_ref().unwrap()).unwrap(),
+            std::fs::read_to_string(&path).unwrap(),
             "// changed\n",
             "a stale write leaves the file untouched"
         );
 
-        std::fs::write(loaded.input.path.as_ref().unwrap(), &loaded.input.text).unwrap();
-        let written = write_previews(previews, transaction).expect("writes");
+        std::fs::write(&path, WORKSHOP).unwrap();
+        let written = write_previews(&previews, &transaction).expect("writes");
         assert_eq!(written.len(), 1);
-        let text = std::fs::read_to_string(loaded.input.path.as_ref().unwrap()).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("0: total"), "{text}");
         assert!(text.contains("Global.total"), "{text}");
         let leftovers: Vec<_> = std::fs::read_dir(&dir)
@@ -1951,7 +1251,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("input.opy");
         std::fs::write(&path, "rule \"r\":\n    pass\n").unwrap();
-        let mut session = crate::CompilerSession::new(SessionConfig {
+        let session = crate::CompilerSession::new(SessionConfig {
             input: crate::InputSpec::Path(path.clone()),
             kind: SourceKind::Opy,
             ..SessionConfig::default()
@@ -1987,24 +1287,6 @@ mod tests {
                 .contains("providerValidateEdit"),
             "the refusal names the provider operation"
         );
-        let rename = session.semantic_rename(
-            Some(&sources),
-            &RenameTarget {
-                symbol: Some(Address::Name("x".to_string())),
-                source: None,
-                line: None,
-                col: None,
-                to: "y".to_string(),
-            },
-        );
-        assert!(!rename.ok);
-        assert_eq!(rename.diagnostics[0].code, "edit-requires-provider");
-        assert!(
-            rename.diagnostics[0]
-                .message
-                .contains("providerSemanticRename"),
-            "the refusal names the provider operation"
-        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -2036,150 +1318,6 @@ mod tests {
             .map(|edit| edit.range.start_line)
             .collect();
         assert_eq!(positions, vec![2, 3], "edits are ordered by position");
-    }
-
-    #[test]
-    fn semantic_rename_rewrites_start_rule_callee() {
-        // A `Start Rule` subroutine argument is a value-position reference:
-        // its exact identifier span must rewrite with the rename.
-        let source = "subroutines {\n    0: helper\n}\n\nrule (\"sub\") {\n    event {\n        Subroutine;\n        helper;\n    }\n    actions {\n        Call Subroutine(helper);\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Start Rule(helper, Restart Rule);\n    }\n}\n";
-        let (dir, mut session) = workshop_session(source);
-        let loaded = session.load().expect("loaded");
-        let sources = BTreeMap::from([(loaded.input.display.clone(), loaded.input.text.clone())]);
-        let rename = semantic_rename(
-            &loaded,
-            session.catalog(),
-            Some(&sources),
-            &RenameTarget {
-                symbol: Some(Address::Name("helper".to_string())),
-                source: None,
-                line: None,
-                col: None,
-                to: "assist".to_string(),
-            },
-        );
-        assert!(rename.ok, "{:?}", rename.diagnostics);
-        let text = &rename.preview.as_ref().unwrap()[0].new_text;
-        assert!(text.contains("0: assist"), "{text}");
-        assert!(text.contains("Subroutine;\n        assist;"), "{text}");
-        assert!(text.contains("Call Subroutine(assist)"), "{text}");
-        assert!(
-            text.contains("Start Rule(assist, Restart Rule)"),
-            "the Start Rule callee rewrites: {text}"
-        );
-        assert!(!text.contains("helper"), "{text}");
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn semantic_rename_binds_redeclared_names_to_the_last_declaration() {
-        // workshop-rs resolves a redeclared name to its last declaration:
-        // every use of `helper` binds #1. Renaming #1 rewrites the uses with
-        // it; renaming #0 touches only its own declaration and leaves the
-        // surviving `helper` bindings intact.
-        let source = "subroutines {\n    0: helper\n    1: helper\n}\n\nrule (\"sub\") {\n    event {\n        Subroutine;\n        helper;\n    }\n    actions {\n        Call Subroutine(helper);\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Start Rule(helper, Restart Rule);\n    }\n}\n";
-        let (dir, mut session) = workshop_session(source);
-        let loaded = session.load().expect("loaded");
-        let sources = BTreeMap::from([(loaded.input.display.clone(), loaded.input.text.clone())]);
-        let target = |symbol: Address| RenameTarget {
-            symbol: Some(symbol),
-            source: None,
-            line: None,
-            col: None,
-            to: "assist".to_string(),
-        };
-
-        let last = semantic_rename(
-            &loaded,
-            session.catalog(),
-            Some(&sources),
-            &target(Address::Id(1)),
-        );
-        assert!(last.ok, "{:?}", last.diagnostics);
-        let text = &last.preview.as_ref().unwrap()[0].new_text;
-        assert!(text.contains("0: helper"), "{text}");
-        assert!(text.contains("1: assist"), "{text}");
-        assert!(text.contains("Subroutine;\n        assist;"), "{text}");
-        assert!(text.contains("Call Subroutine(assist)"), "{text}");
-        assert!(text.contains("Start Rule(assist, Restart Rule)"), "{text}");
-        assert_eq!(text.matches("helper").count(), 1, "{text}");
-
-        let first = semantic_rename(
-            &loaded,
-            session.catalog(),
-            Some(&sources),
-            &target(Address::Id(0)),
-        );
-        assert!(first.ok, "{:?}", first.diagnostics);
-        let text = &first.preview.as_ref().unwrap()[0].new_text;
-        assert!(text.contains("0: assist"), "{text}");
-        assert_eq!(
-            text.matches("helper").count(),
-            4,
-            "the surviving declaration keeps every binding: {text}"
-        );
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn semantic_rename_leaves_other_namespaces_and_strings_untouched() {
-        // #434: a global variable, a player variable, and a rule name may
-        // share one identifier text. The namespaces are separate symbols and
-        // the rule name is a string literal, so renaming the global variable
-        // rewrites only its own declaration and references — same-named
-        // player occurrences, the rule name, and comments stay untouched.
-        let source = "// score tracks the global score\nvariables {\n    global:\n        0: score\n    player:\n        1: score\n}\n\nrule (\"score\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Set Global Variable(score, Add(Global.score, 1));\n        Set Player Variable(Event Player, score, Add(Event Player.score, 1));\n    }\n}\n";
-        let (dir, mut session) = workshop_session(source);
-        let loaded = session.load().expect("loaded");
-        let sources = BTreeMap::from([(loaded.input.display.clone(), loaded.input.text.clone())]);
-        let index = SemanticIndex::build(&loaded.program);
-        let id_of = |kind| {
-            index
-                .symbols()
-                .find(|symbol| symbol.name == "score" && symbol.kind == kind)
-                .map(|symbol| symbol.id.index() as u32)
-                .expect("score symbol")
-        };
-        let target = |id| RenameTarget {
-            symbol: Some(Address::Id(id)),
-            source: None,
-            line: None,
-            col: None,
-            to: "streak".to_string(),
-        };
-
-        let global = semantic_rename(
-            &loaded,
-            session.catalog(),
-            Some(&sources),
-            &target(id_of(SymbolKind::GlobalVariable)),
-        );
-        assert!(global.ok, "{:?}", global.diagnostics);
-        let text = &global.preview.as_ref().unwrap()[0].new_text;
-        assert!(text.contains("0: streak"), "{text}");
-        assert!(text.contains("Set Global Variable(streak,"), "{text}");
-        assert!(text.contains("Global.streak"), "{text}");
-        assert!(text.contains("1: score"), "{text}");
-        assert!(text.contains("Event Player, score,"), "{text}");
-        assert!(text.contains("Event Player.score"), "{text}");
-        assert!(text.contains("rule (\"score\")"), "{text}");
-        assert!(text.contains("// score tracks the global score"), "{text}");
-
-        let player = semantic_rename(
-            &loaded,
-            session.catalog(),
-            Some(&sources),
-            &target(id_of(SymbolKind::PlayerVariable)),
-        );
-        assert!(player.ok, "{:?}", player.diagnostics);
-        let text = &player.preview.as_ref().unwrap()[0].new_text;
-        assert!(text.contains("1: streak"), "{text}");
-        assert!(text.contains("Event Player, streak,"), "{text}");
-        assert!(text.contains("Event Player.streak"), "{text}");
-        assert!(text.contains("0: score"), "{text}");
-        assert!(text.contains("Set Global Variable(score,"), "{text}");
-        assert!(text.contains("Global.score"), "{text}");
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -2262,28 +1400,6 @@ mod tests {
         );
         assert!(!validation.ok);
         assert_eq!(validation.diagnostics[0].code, "edit-unknown-source");
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn semantic_rename_refuses_an_unchanged_name() {
-        let (dir, mut session) = workshop_session(WORKSHOP);
-        let loaded = session.load().expect("loaded");
-        let sources = BTreeMap::from([(loaded.input.display.clone(), loaded.input.text.clone())]);
-        let rename = semantic_rename(
-            &loaded,
-            session.catalog(),
-            Some(&sources),
-            &RenameTarget {
-                symbol: Some(Address::Name("score".to_string())),
-                source: None,
-                line: None,
-                col: None,
-                to: "score".to_string(),
-            },
-        );
-        assert!(!rename.ok);
-        assert_eq!(rename.diagnostics[0].code, "rename-invalid-name");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use wright_driver::edit::{EditRange, EditTransaction, RenameTarget, SourceEdit};
+use wright_driver::edit::{EditRange, EditTransaction, SourceEdit};
 use wright_driver::service::{Address, ToolRequest, ToolResponse, ToolService};
 use wright_driver::{
     CompilerSession, FindingSelection, InputSpec, SessionConfig, Severity, SourceKind,
@@ -2419,16 +2419,6 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
             all: true,
         },
         ToolRequest::Usage { symbol: 0.into() },
-        ToolRequest::SemanticRename {
-            sources: Some(std::collections::BTreeMap::new()),
-            target: wright_driver::edit::RenameTarget {
-                symbol: Some(0.into()),
-                source: None,
-                line: None,
-                col: None,
-                to: "renamed".to_string(),
-            },
-        },
         ToolRequest::Cfg {
             rule: 0.into(),
             kind: None,
@@ -2991,45 +2981,16 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
         },
     );
     assert_eq!(validate["ok"], true, "{validate}");
-    let rename = result_of(
-        &mut service,
-        &ToolRequest::SemanticRename {
-            sources: Some(sources),
-            target: wright_driver::edit::RenameTarget {
-                symbol: Some("points".into()),
-                source: None,
-                line: None,
-                col: None,
-                to: "score".to_string(),
-            },
-        },
-    );
-    assert_eq!(rename["ok"], true, "{rename}");
 
-    for request in [
-        ToolRequest::ProviderSemanticRename {
-            language_id: "not-a-language".to_string(),
-            documents: Some(Default::default()),
-            position_document_uri: String::new(),
-            position: wright_lpp::Position {
-                line: 0,
-                character: 0,
-            },
-            new_name: String::new(),
-            project_root: None,
-            sources: None,
-        },
-        ToolRequest::ProviderValidateEdit {
-            language_id: "not-a-language".to_string(),
-            documents: Some(Default::default()),
-            transaction: wright_driver::edit::EditTransaction { edits: vec![] },
-            sources: None,
-            project_root: None,
-        },
-    ] {
-        let result = result_of(&mut service, &request);
-        assert_eq!(result["ok"], false, "{request:?}: {result}");
-    }
+    let request = ToolRequest::ProviderValidateEdit {
+        language_id: "not-a-language".to_string(),
+        documents: Some(Default::default()),
+        transaction: wright_driver::edit::EditTransaction { edits: vec![] },
+        sources: None,
+        project_root: None,
+    };
+    let result = result_of(&mut service, &request);
+    assert_eq!(result["ok"], false, "{request:?}: {result}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -3440,17 +3401,7 @@ fn a_failed_refresh_invalidates_the_snapshot_even_when_bytes_return() {
 
 const RENAMEABLE: &str = "variables {\n    global:\n        0: score\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(score, Add(Global.score, 1));\n    }\n}\n";
 
-fn rename_target() -> RenameTarget {
-    RenameTarget {
-        symbol: Some(Address::Name("score".to_string())),
-        source: None,
-        line: None,
-        col: None,
-        to: "total".to_string(),
-    }
-}
-
-fn rename_edit_transaction(key: &str, source_identity: String) -> EditTransaction {
+fn score_edit_transaction(key: &str, source_identity: String) -> EditTransaction {
     EditTransaction::new(vec![SourceEdit {
         edit_kind: "edit".to_string(),
         source: key.to_string(),
@@ -3479,28 +3430,9 @@ fn edit_operations_default_sources_to_the_on_disk_text() {
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
 
-    let rename = |sources| ToolRequest::SemanticRename {
-        sources,
-        target: rename_target(),
-    };
-    let defaulted = result_of(&mut service, &rename(None));
-    let explicit = result_of(
-        &mut service,
-        &rename(Some(BTreeMap::from([(key.clone(), on_disk.clone())]))),
-    );
-    assert_eq!(defaulted["ok"], true, "{defaulted:?}");
-    assert_eq!(defaulted, explicit);
-    assert!(
-        defaulted["preview"][0]["new_text"]
-            .as_str()
-            .unwrap()
-            .contains("0: total"),
-        "{defaulted:?}"
-    );
-
     let validate = |sources| ToolRequest::ValidateEdit {
         sources,
-        transaction: rename_edit_transaction(&key, wright_driver::input_identity(&on_disk)),
+        transaction: score_edit_transaction(&key, wright_driver::input_identity(&on_disk)),
     };
     let defaulted = result_of(&mut service, &validate(None));
     let explicit = result_of(
@@ -3520,10 +3452,10 @@ fn edit_operations_default_sources_to_the_on_disk_text() {
 }
 
 #[test]
-fn rename_accepts_percent_encoded_file_uri_sources() {
-    // #636: a `sources` key spelled `file:///…/my%20dir/main.ws` binds the
-    // member whose path contains a space — the rename succeeds exactly as
-    // with the plain spelling.
+fn edits_accept_percent_encoded_file_uri_sources() {
+    // #636: an edit `source` spelled `file:///…/my%20dir/main.ws` binds the
+    // member whose path contains a space — the validation succeeds exactly
+    // as with the plain spelling.
     use std::sync::atomic::{AtomicUsize, Ordering};
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
@@ -3545,22 +3477,23 @@ fn rename_accepts_percent_encoded_file_uri_sources() {
     let mut service = ToolService::new(&mut session).unwrap();
 
     let uri = format!("file://{}", path.display().to_string().replace(' ', "%20"));
+    let identity = wright_driver::input_identity(&on_disk);
     let encoded = result_of(
         &mut service,
-        &ToolRequest::SemanticRename {
-            sources: Some(BTreeMap::from([(uri, on_disk.clone())])),
-            target: rename_target(),
+        &ToolRequest::ValidateEdit {
+            sources: Some(BTreeMap::from([(uri.clone(), on_disk.clone())])),
+            transaction: score_edit_transaction(&uri, identity.clone()),
         },
     );
     assert_eq!(encoded["ok"], true, "{encoded:?}");
     let plain = result_of(
         &mut service,
-        &ToolRequest::SemanticRename {
+        &ToolRequest::ValidateEdit {
             sources: Some(BTreeMap::from([(
                 path.to_string_lossy().into_owned(),
                 on_disk,
             )])),
-            target: rename_target(),
+            transaction: score_edit_transaction(&path.to_string_lossy(), identity),
         },
     );
     assert_eq!(plain["ok"], true, "{plain:?}");
@@ -3581,45 +3514,23 @@ fn edit_operations_keep_supplied_source_and_project_boundaries() {
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
 
-    for (op, result) in [
-        (
-            "semanticRename",
-            result_of(
-                &mut service,
-                &ToolRequest::SemanticRename {
-                    sources: Some(BTreeMap::from([(
-                        key.clone(),
-                        on_disk.replacen("score", "other", 1),
-                    )])),
-                    target: rename_target(),
-                },
-            ),
-        ),
-        (
-            "validateEditTransaction",
-            result_of(
-                &mut service,
-                &ToolRequest::ValidateEdit {
-                    sources: Some(BTreeMap::from([(key.clone(), "changed".to_string())])),
-                    transaction: rename_edit_transaction(
-                        &key,
-                        wright_driver::input_identity(&on_disk),
-                    ),
-                },
-            ),
-        ),
-    ] {
-        assert_eq!(result["ok"], false, "{op}: {result:?}");
-        assert_eq!(
-            result["diagnostics"][0]["code"], "edit-stale-source",
-            "{op}: {result:?}"
-        );
-        assert!(result["preview"].is_null(), "{op}: no partial preview");
-    }
+    let result = result_of(
+        &mut service,
+        &ToolRequest::ValidateEdit {
+            sources: Some(BTreeMap::from([(key.clone(), "changed".to_string())])),
+            transaction: score_edit_transaction(&key, wright_driver::input_identity(&on_disk)),
+        },
+    );
+    assert_eq!(result["ok"], false, "{result:?}");
+    assert_eq!(
+        result["diagnostics"][0]["code"], "edit-stale-source",
+        "{result:?}"
+    );
+    assert!(result["preview"].is_null(), "no partial preview");
 
     let foreign = |sources| ToolRequest::ValidateEdit {
         sources,
-        transaction: rename_edit_transaction("other.ws", wright_driver::input_identity(&on_disk)),
+        transaction: score_edit_transaction("other.ws", wright_driver::input_identity(&on_disk)),
     };
     for (op, result) in [
         ("absent sources", result_of(&mut service, &foreign(None))),
@@ -3643,29 +3554,17 @@ fn edit_operations_keep_supplied_source_and_project_boundaries() {
 
     // The default reads disk, not a stale snapshot: rewriting the input is
     // observed by the service's freshness check (#471), so the unsourced
-    // rename resolves against the reloaded program — the new `other`
-    // symbol renames cleanly while the old `score` name is gone.
+    // validation resolves against the reloaded program.
     std::fs::write(&path, on_disk.replace("score", "other")).unwrap();
-    let renamed = result_of(
+    let reloaded = std::fs::read_to_string(&path).unwrap();
+    let validation = result_of(
         &mut service,
-        &ToolRequest::SemanticRename {
+        &ToolRequest::ValidateEdit {
             sources: None,
-            target: RenameTarget {
-                symbol: Some(Address::Name("other".to_string())),
-                ..rename_target()
-            },
+            transaction: score_edit_transaction(&key, wright_driver::input_identity(&reloaded)),
         },
     );
-    assert_eq!(renamed["ok"], true, "{renamed:?}");
-    let stale = result_of(
-        &mut service,
-        &ToolRequest::SemanticRename {
-            sources: None,
-            target: rename_target(),
-        },
-    );
-    assert_eq!(stale["ok"], false, "{stale:?}");
-    assert_eq!(stale["diagnostics"][0]["code"], "unknown-symbol");
+    assert_eq!(validation["ok"], true, "{validation:?}");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -4103,11 +4002,10 @@ fn a_fold_that_would_be_non_finite_keeps_the_off_profile_verdict() {
 }
 
 /// #639: the `Or(True, X)`/`And(False, X)` short-circuit folds discard X —
-/// an identifier-bearing operand must survive, so `references` and
-/// `semanticRename` for `g` return the same result under `compat` as under
-/// `off`.
+/// an identifier-bearing operand must survive, so `references` for `g`
+/// returns the same result under `compat` as under `off`.
 #[test]
-fn short_circuit_folds_preserve_occurrences_for_references_and_rename() {
+fn short_circuit_folds_preserve_occurrences_for_references() {
     let path = temp_workshop(
         "or-fold.ws",
         "variables\n{\n    global:\n        0: g\n}\n\nrule (\"r\")\n{\n    conditions\n    {\n        Or(True, Global.g) == True;\n    }\n    actions\n    {\n        Wait(1, Abort When False);\n    }\n}\n",
@@ -4121,7 +4019,7 @@ fn short_circuit_folds_preserve_occurrences_for_references_and_rename() {
         })
         .expect("session creates");
         let mut service = ToolService::new(&mut session).expect("service");
-        let references = result_of(
+        result_of(
             &mut service,
             &ToolRequest::References {
                 symbol: "g".into(),
@@ -4131,32 +4029,14 @@ fn short_circuit_folds_preserve_occurrences_for_references_and_rename() {
                 max: None,
                 all: true,
             },
-        );
-        let rename = result_of(
-            &mut service,
-            &ToolRequest::SemanticRename {
-                sources: None,
-                target: RenameTarget {
-                    symbol: Some(Address::Name("g".to_string())),
-                    source: None,
-                    line: None,
-                    col: None,
-                    to: "renamed".to_string(),
-                },
-            },
-        );
-        (references, rename)
+        )
     };
 
-    let (off_references, off_rename) = query(wright_driver::Profile::Off);
-    let (compat_references, compat_rename) = query(wright_driver::Profile::Compat);
+    let off_references = query(wright_driver::Profile::Off);
+    let compat_references = query(wright_driver::Profile::Compat);
     assert_eq!(
         compat_references, off_references,
         "references see the same occurrences under both profiles"
-    );
-    assert_eq!(
-        compat_rename, off_rename,
-        "semanticRename resolves the same occurrences under both profiles"
     );
     assert!(
         off_references["references"]
@@ -4165,11 +4045,6 @@ fn short_circuit_folds_preserve_occurrences_for_references_and_rename() {
             .iter()
             .any(|reference| reference["kind"] == "read"),
         "the Or-folded operand keeps its authored read: {off_references:?}"
-    );
-    assert_eq!(
-        off_rename["ok"],
-        serde_json::Value::Bool(true),
-        "rename validates: {off_rename:?}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

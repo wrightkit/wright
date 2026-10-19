@@ -860,7 +860,8 @@ impl CompilerSession {
     /// and record it as the new previous run (plus the named baseline when
     /// `--save-baseline` is given). Returns the comparison when one was
     /// available; every cache failure is swallowed (ADR-0027 decision 10).
-    /// An explicitly named but absent baseline is a usage error instead.
+    /// An explicitly named but unusable baseline is a usage error outside
+    /// CI and degrades to no comparison under it (ADR-0030 decision 14).
     pub(crate) fn run_cost_comparison(&self) -> Option<cache::Comparison> {
         let loaded = self.loaded.as_ref()?;
         let run = self.cost_run(loaded);
@@ -873,10 +874,12 @@ impl CompilerSession {
 
     /// Whether the explicitly named `--baseline` exists — `compile` turns a
     /// missing one into a usage error like `inspect cost` does (#723).
+    /// Under CI an unusable baseline degrades silently instead (ADR-0030
+    /// decision 14).
     pub(crate) fn named_baseline_missing(&self) -> Option<String> {
         let run = self.cost_run(self.loaded.as_ref()?);
         let name = run.baseline.as_deref()?;
-        (!cache::baseline_exists(&run)).then(|| name.to_string())
+        (!cache::ci() && !cache::baseline_exists(&run)).then(|| name.to_string())
     }
 
     fn load_workshop(&mut self, resolved: &ResolvedInput) -> Result<(Program, String), Diagnostic> {
@@ -1421,11 +1424,15 @@ pub(crate) fn workshop_diag(
             );
         }
         workshop_rs::WorkshopError::Unknown { kind, span, .. }
-        | workshop_rs::WorkshopError::UnknownWithCandidates { kind, span, .. } => {
-            (format!("unknown-{kind}"), Stage::Frontend, to_span(*span))
-        }
-        workshop_rs::WorkshopError::NotDetected { kind, span, .. } => {
-            (format!("unknown-{kind}"), Stage::Frontend, to_span(*span))
+        | workshop_rs::WorkshopError::UnknownWithCandidates { kind, span, .. }
+        | workshop_rs::WorkshopError::NotDetected { kind, span, .. } => {
+            // Owner kinds are phrases (`"enum member"`); the emitted code is
+            // a single kebab-case token (`unknown-enum-member`, #789).
+            (
+                format!("unknown-{}", kind.replace(' ', "-")),
+                Stage::Frontend,
+                to_span(*span),
+            )
         }
         workshop_rs::WorkshopError::Malformed { span, .. } => {
             ("parse-error".to_string(), Stage::Frontend, to_span(*span))

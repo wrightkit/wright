@@ -60,8 +60,6 @@ pub const OPERATIONS: &[&str] = &[
     "analyze",
     "inspect",
     "validateEditTransaction",
-    "semanticRename",
-    "providerSemanticRename",
     "providerValidateEdit",
     "lookup",
 ];
@@ -276,64 +274,6 @@ pub enum ToolRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sources: Option<std::collections::BTreeMap<String, String>>,
         transaction: crate::edit::EditTransaction,
-    },
-    /// Request a semantic rename through the shared refactoring contract
-    /// (#129/#130/#434): returns the validated exact-range transaction or
-    /// structured refusal diagnostics. On raw Workshop input the target is
-    /// a `symbol` (numeric id or declared name, as `references`/`usage`
-    /// address them) or a `source`/`line`/`col` position, and occurrences
-    /// rewrite through `workshop-rs` identifier provenance. Source
-    /// languages route to `providerSemanticRename`. Wright
-    /// proposes/validates; applying edits to disk is an explicit consumer
-    /// responsibility.
-    SemanticRename {
-        /// The current text of every source the rename may edit, keyed by
-        /// the same source identities the target names. Optional (#472):
-        /// when absent the service reads the loaded input's current text
-        /// from disk; when present it stays the caller-side precondition
-        /// text.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        sources: Option<std::collections::BTreeMap<String, String>>,
-        target: crate::edit::RenameTarget,
-    },
-    /// Provider-driven semantic rename (#139): rename target resolution and
-    /// edit generation route through the LPP `rename` capability of the
-    /// provider configured for `language_id`; the resulting source edits are
-    /// wrapped in Wright's own transaction (identity/version preconditions,
-    /// deterministic ordering, overlap checks, atomic preview) and validated
-    /// through the provider's project semantics (`lpp/validateEdits` per
-    /// edited document, then `lpp/check` over the edited project) before
-    /// success. Provider refusals, unsupported capabilities, stale sources,
-    /// and semantic validation failures are structured refusals with no
-    /// partial edit set; there is no fallback to textual search/replace.
-    #[serde(rename = "providerSemanticRename")]
-    ProviderSemanticRename {
-        /// The opaque language id of the configured provider.
-        language_id: String,
-        /// The document set the rename is computed against (the provider's
-        /// view: text, language id, version). Optional (#548): when omitted,
-        /// the session's loaded project supplies it — every member file read
-        /// from disk at `version` 0, keyed by `file://` URI. An omitted set
-        /// therefore reads the program the way the other program-reading
-        /// operations do.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        documents: Option<wright_lpp::DocumentSet>,
-        /// The URI (a key of `documents`) in which `position` is
-        /// interpreted.
-        position_document_uri: String,
-        /// The position of the symbol to rename (0-based LSP conventions).
-        position: wright_lpp::Position,
-        /// The new name; the provider validates it against the language's
-        /// identifier rules.
-        new_name: String,
-        /// The project the documents belong to (informational).
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        project_root: Option<String>,
-        /// The caller's current text for every source the rename may edit,
-        /// keyed by document URI (the identity/version precondition view).
-        /// Optional (#548): defaults to each document's text.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        sources: Option<std::collections::BTreeMap<String, String>>,
     },
     /// Provider-driven edit validation (#139): validate a caller-proposed
     /// source-edit transaction against the provider's project semantics
@@ -631,10 +571,6 @@ impl<'a> ToolService<'a> {
                 | ToolRequest::Compile { .. }
                 | ToolRequest::Capabilities
                 | ToolRequest::TargetMetadata
-                | ToolRequest::ProviderSemanticRename {
-                    documents: Some(_),
-                    ..
-                }
                 | ToolRequest::ProviderValidateEdit {
                     documents: Some(_),
                     ..
@@ -817,9 +753,6 @@ impl<'a> ToolService<'a> {
                 rule: Some(Address::Id(_)),
                 ..
             } => !self.rule_ids_current,
-            ToolRequest::SemanticRename { target, .. } => {
-                matches!(target.symbol, Some(Address::Id(_))) && !self.symbol_ids_current
-            }
             _ => false,
         };
         stale.then(|| ToolErrorInfo {
@@ -830,18 +763,12 @@ impl<'a> ToolService<'a> {
 
     /// A request that names the current id space re-establishes it (#471): a
     /// successful `symbols`/`rules` listing, or an `ambiguous-*` refusal that
-    /// already reports the current candidates. `semanticRename` reports its
-    /// `ambiguous-symbol` as a result diagnostic rather than a refusal.
+    /// already reports the current candidates.
     fn note_id_space(&mut self, request: &ToolRequest, response: &ToolResponse) {
         match response {
-            ToolResponse::Ok { result } => match request {
+            ToolResponse::Ok { .. } => match request {
                 ToolRequest::Symbols { .. } => self.symbol_ids_current = true,
                 ToolRequest::Rules { .. } => self.rule_ids_current = true,
-                ToolRequest::SemanticRename { .. }
-                    if diagnostics_list_code(result, "ambiguous-symbol") =>
-                {
-                    self.symbol_ids_current = true;
-                }
                 _ => {}
             },
             ToolResponse::Error { error } => match error.code.as_str() {
@@ -957,40 +884,6 @@ impl<'a> ToolService<'a> {
                     .validate_edit_transaction(sources.as_ref(), transaction),
             )
             .expect("serializes")),
-            ToolRequest::SemanticRename { sources, target } => {
-                let rename = self.session.semantic_rename(sources.as_ref(), target);
-                self.ok(serde_json::to_value(rename).expect("serializes"))
-            }
-            ToolRequest::ProviderSemanticRename {
-                language_id,
-                documents,
-                position_document_uri,
-                position,
-                new_name,
-                project_root,
-                sources,
-            } => {
-                let documents = match self.provider_documents(language_id, documents) {
-                    Ok(documents) => documents,
-                    Err(error) => return ToolResponse::Error { error },
-                };
-                let req = crate::provider_edit::ProviderRenameRequest {
-                    position_document_uri: position_document_uri.clone(),
-                    position: *position,
-                    new_name: new_name.clone(),
-                    project_root: project_root.clone(),
-                    sources: sources
-                        .clone()
-                        .unwrap_or_else(|| document_sources(&documents)),
-                    documents,
-                };
-                self.ok(
-                    serde_json::to_value(self.run_provider_flow(language_id, |p| {
-                        crate::provider_edit::semantic_rename(p, &req)
-                    }))
-                    .expect("serializes"),
-                )
-            }
             ToolRequest::ProviderValidateEdit {
                 language_id,
                 documents,
@@ -1744,10 +1637,12 @@ impl<'a> ToolService<'a> {
     /// The CLI-side run-cache comparison and `--max-total` gate for
     /// `inspect cost` (ADR-0027, #723): `--max-total` fails with the
     /// overage named and reads no cache; an explicitly named baseline that
-    /// does not exist is a usage error; an absent/corrupt/unknown-version
-    /// record just omits the comparison. Agent `costEstimate` requests
-    /// never reach here — the agent surface takes its reference as inline
-    /// data and returns no implicit comparison (decision 3).
+    /// does not exist is a usage error outside CI — under CI it degrades
+    /// to no comparison silently (ADR-0030 decision 14); an
+    /// absent/corrupt/unknown-version record just omits the comparison.
+    /// Agent `costEstimate` requests never reach here — the agent surface
+    /// takes its reference as inline data and returns no implicit
+    /// comparison (decision 3).
     ///
     /// Returns the comparison for the caller to carry in-process; it is
     /// never serialized into the JSON or agent result.
@@ -1772,7 +1667,10 @@ impl<'a> ToolService<'a> {
             }
         }
         let cost_run = self.session.cost_run(loaded);
-        if run.baseline.is_some() && !crate::cache::baseline_exists(&cost_run) {
+        if run.baseline.is_some()
+            && !crate::cache::ci()
+            && !crate::cache::baseline_exists(&cost_run)
+        {
             return Err(ToolErrorInfo {
                 code: "invalid-selection".to_string(),
                 message: format!(
@@ -1929,22 +1827,7 @@ fn request_label(request: &ToolRequest) -> &'static str {
         ToolRequest::CostEstimate { .. } => "req::costEstimate",
         ToolRequest::TargetMetadata => "req::targetMetadata",
         ToolRequest::ValidateEdit { .. } => "req::validateEdit",
-        ToolRequest::SemanticRename { .. } => "req::semanticRename",
-        ToolRequest::ProviderSemanticRename { .. } => "req::providerSemanticRename",
         ToolRequest::ProviderValidateEdit { .. } => "req::providerValidateEdit",
         ToolRequest::Lookup { .. } => "req::lookup",
     }
-}
-
-/// Whether a result payload's `diagnostics` include `code` (#471): the
-/// `semanticRename` refusal surface embeds `ambiguous-symbol` this way.
-fn diagnostics_list_code(result: &serde_json::Value, code: &str) -> bool {
-    result
-        .get("diagnostics")
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(|diagnostics| {
-            diagnostics
-                .iter()
-                .any(|d| d.get("code").and_then(serde_json::Value::as_str) == Some(code))
-        })
 }
