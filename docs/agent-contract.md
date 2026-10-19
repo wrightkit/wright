@@ -182,7 +182,7 @@ the successful `result` payload.
 | `project` | none | Loaded program origin, files, counts, and findings summary |
 | `rules` | optional selection, optional `content` | Canonical Workshop rules. Each entry carries `id`, `name`, `event` (the rule's event binding, `subroutine:<name>` for subroutine rules), and `span`; `{"rules": [...], "selection": {...}}` when a selection is applied. See [Rule content](#rule-content-adr-0024) |
 | `symbols` | optional selection, optional `all` | Symbols; `{"symbols": [...], "selection": {...}}` when `file`/`max` is applied (a `kind`-only request keeps the bare array) |
-| `references` | required `symbol` (id or name), optional selection and `all` | Usage header and references for the symbol; `{"references": [...], "selection": {...}}` when a selection is applied |
+| `references` | required `symbol` (id or name), optional selection and `all` | Usage header and references for the symbol; `{"references": [...], "selection": {...}}` when a selection is applied. Each reference carries `owningRule` — the owning rule's `{id, name, span}` — so a consumer renders a rule location without a `rules` lookup (#792) |
 | `usage` | required `symbol` (id or name) | Usage counts for the symbol, plus its resolved `id` and `kind` |
 | `cfg` | required `rule` (index or name), optional selection and `all` | Control-flow graph for the rule, plus `selection` when a selection is applied |
 | `findings` | optional selection, optional `all` | Wright static-analysis findings; `{"findings": [...], "selection": {...}}` when a selection is applied |
@@ -190,7 +190,7 @@ the successful `result` payload.
 | `lint` | optional selection, optional `all` | Finding counts by severity and actionable findings; effective policy is available from `lintRules` |
 | `lintRules` | none | Registered lint rules with full metadata and effective configuration |
 | `callGraph` | optional selection, optional `all` | Subroutine call graph; `{"edges": [...], "selection": {...}}` when a selection is applied |
-| `costEstimate` | optional selection, optional `rule`, optional `all` | Exact generated-resource counts, `elementCount` (the canonical Workshop structure counted against the client element budget; `rules` ranked by count, largest first. `index` is the canonical rule position and each entry carries a resolved `span`; the 5 largest by default, `all: true` for every rule; when the count cannot run `elementCount` carries only `budget` — the known limit still reports — and `elementCountUnavailable` names the reason, never a zero (ADR-0030 decision 3). `exact.emittedBytes` likewise reports `null` plus `emittedBytesUnavailable` when emission fails), findings (each with a resolved `span`), and `selection` when applied. With `rule` the result is the rule drill-down (#724): `rule` (identity, `count`, `span`), `statements[]` (direct children ranked by recursive `count`, each with `name`, `count`, `span`) and `byNode[]` (each node's own `base_count + adjustment` cost summed per canonical node name with `occurrences`; the entries sum to the rule's `count`) | The default result carries no run-cache comparison — an agent requests one explicitly by passing the reference record as inline data, not a file path (ADR-0027, #723). |
+| `costEstimate` | optional selection, optional `rule`, optional `all` | Exact generated-resource counts (`programRules` counts every declared rule, disabled included — the same inventory `program.rules` reports; `exact.emittedBytes` reports `null` plus `emittedBytesUnavailable` when emission fails, never `0`), `elementCount` (the canonical Workshop structure counted against the client element budget; `rules` ranked by count, largest first. `index` is the canonical rule position and each entry carries a resolved `span`; the 5 largest by default, `all: true` for every rule; when the count cannot run `elementCount` carries only `budget` — the known limit still reports — and `elementCountUnavailable` names the reason, never a zero (ADR-0030 decision 3)), findings (the same configured-registry set `lint` serves, each with a resolved `span`), `skipped` rule evaluations (canonical CFG unavailable — the same disclosure `lint` carries), and `selection` when applied. With `rule` the result is the rule drill-down (#724): `rule` (identity, `count`, `span`), `statements[]` (direct children ranked by recursive `count`, each with `name`, `count`, `span`) and `byNode[]` (each node's own `base_count + adjustment` cost summed per canonical node name with `occurrences`; the entries sum to the rule's `count`) | The default result carries no run-cache comparison — an agent requests one explicitly by passing the reference record as inline data, not a file path (ADR-0027, #723). |
 | `targetMetadata` | none | Canonical target/catalog metadata |
 | `validateEditTransaction` | `transaction`, optional `sources` | Atomic validation status, diagnostics, and previews when valid |
 | `providerValidateEdit` | `language_id`, `transaction`, optional `documents`, `sources`, `project_root` | Provider-validated transaction or structured refusal |
@@ -419,6 +419,15 @@ carries `repeated` — `{expression, count, spanKind}` where `spanKind` is
 prose (#791). Full spans and fix transactions
 are available from `findings`; lint policy is available from `lintRules`.
 Persistent-object details are queried through `persistentObjects`.
+
+Two ADR-0030 prerequisites add shared members (#792): `check`'s result now
+carries `program`, the same summary members `analyze`'s `program` reports —
+origin, files, and declaration counts — and `check`, `lint`, `analyze`, and
+`inspect` carry `next`, a list of complete `wright` command lines a renderer
+prints as `next:` records or a summary footer. A `references`/`inspect`
+reference also carries `owningRule` — `{id, name, span}` like a `rules` list
+entry, or null when nothing owns it — so a consumer renders the owning rule's
+location without a second lookup.
 
 Full fact dumps are available only through the in-process `CompilerSession`
 API; external callers use the narrower semantic operations.

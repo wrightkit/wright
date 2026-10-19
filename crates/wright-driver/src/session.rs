@@ -1076,7 +1076,13 @@ impl CompilerSession {
             |session, loaded| {
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
                 session.attach_workshop_completeness(&loaded);
-                CheckResult {}
+                CheckResult {
+                    // #792: `check` reports the program summary `analyze`
+                    // computes and the shared follow-up commands, so
+                    // renderers and agents get both without a second call.
+                    program: Some(semantic::check_program_summary(&loaded)),
+                    next: crate::result::next::list(crate::result::next::CHECK),
+                }
             },
         )
     }

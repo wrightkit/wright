@@ -497,6 +497,85 @@ fn inspect_results_resolve_span_paths() {
 }
 
 #[test]
+fn check_reports_the_program_summary_and_follow_ups() {
+    // #792: `check` exposes the program summary `analyze` already computes
+    // — the same members, byte-identical — plus the shared follow-up
+    // command list every result carries for renderers to print as `next:`
+    // records.
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(workshop_path()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let check = serde_json::to_value(session.check().result).unwrap();
+    let analyze = serde_json::to_value(session.analyze().result).unwrap();
+    let inspect = serde_json::to_value(session.inspect().result).unwrap();
+
+    assert_eq!(check["program"], analyze["program"]);
+    assert!(
+        check["program"]["rules"].as_u64().unwrap() > 0,
+        "check's summary counts the loaded program: {check}"
+    );
+    for (surface, result) in [
+        ("check", &check),
+        ("analyze", &analyze),
+        ("inspect", &inspect),
+    ] {
+        let next = result["next"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{surface} offers follow-up commands: {result}"));
+        assert!(!next.is_empty(), "{surface} lists at least one follow-up");
+        assert!(
+            next.iter().all(|command| command
+                .as_str()
+                .is_some_and(|command| command.starts_with("wright "))),
+            "{surface} follow-ups are complete `wright` command lines: {next:?}"
+        );
+    }
+}
+
+#[test]
+fn references_carry_their_owning_rule_identity() {
+    // #792: each reference names its owning rule — id, name, and the rule's
+    // span — so a renderer attributes it without a `rules` lookup; a
+    // reference with no owning rule reports null.
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(declarations_path()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let refs = serde_json::to_value(session.refs("score", None, None, None, None).result).unwrap();
+    let entries = refs["references"]
+        .as_array()
+        .expect("refs lists references");
+    assert!(!entries.is_empty(), "the fixture names references");
+    let mut owned = 0;
+    for entry in entries {
+        match (entry["rule"].as_u64(), entry["owningRule"].as_object()) {
+            (Some(id), Some(owning)) => {
+                owned += 1;
+                assert_eq!(owning["id"].as_u64().unwrap(), id);
+                assert!(
+                    owning["name"].as_str().is_some_and(|name| !name.is_empty()),
+                    "owningRule names the rule: {entry}"
+                );
+                assert!(
+                    owning["span"]["path"]
+                        .as_str()
+                        .is_some_and(|path| !path.is_empty()),
+                    "owningRule's span resolves a path: {entry}"
+                );
+            }
+            (None, None) => {}
+            _ => panic!("`rule` and `owningRule` disagree: {entry}"),
+        }
+    }
+    assert!(owned > 0, "the fixture's references own a rule: {refs}");
+}
+
+#[test]
 fn cost_estimate_file_selection_narrows_findings_like_lint() {
     // #722: cost findings now carry resolved span paths, so `file`
     // applies exactly like `lint` — it narrows the reported set and the
@@ -1501,7 +1580,10 @@ disabled rule ("disabled caller") {
         serde_json::json!({
             "emittedBytes": cost["exact"]["emittedBytes"],
             "programActions": 0,
-            "programRules": 1,
+            // `programRules` counts the declared inventory — the disabled
+            // rule included — like `program.rules`/`elementCount.rules`
+            // (#788); actions and waits stay live-only.
+            "programRules": 2,
             "waitActions": 0,
         })
     );
@@ -1513,7 +1595,7 @@ disabled rule ("disabled caller") {
     assert_eq!(
         analyze["result"]["cost"]["counts"],
         serde_json::json!({
-            "rules": 1,
+            "rules": 2,
             "conditions": 0,
             "actions": 0,
             "waits": 0,

@@ -120,8 +120,52 @@ pub struct CompileResult {
     pub output: Option<CompiledOutput>,
 }
 
+/// The shared follow-up commands a result offers (#792, ADR-0030): renderers
+/// print each entry verbatim as a `next:` record or summary footer, so every
+/// string is a complete `wright` command line; `<NAME>`/`<RULE>` mark the
+/// caller's slots, matching the detail-command hints bare `inspect` prints.
+pub mod next {
+    /// `inspect`'s detail commands — the same list bare `inspect` prints.
+    pub const INSPECT: &[&str] = &[
+        "wright inspect symbols",
+        "wright inspect refs <NAME>",
+        "wright inspect cfg <RULE>",
+        "wright inspect callgraph",
+        "wright inspect cost",
+    ];
+    /// After `check`: findings, cost, and the program model.
+    pub const CHECK: &[&str] = &["wright lint", "wright analyze", "wright inspect"];
+    /// After `lint`: apply offered fixes, then the cost/model context.
+    pub const LINT: &[&str] = &["wright lint --fix", "wright analyze", "wright inspect cost"];
+    /// After `analyze`: the lint findings and the detail commands.
+    pub const ANALYZE: &[&str] = &[
+        "wright lint",
+        "wright inspect symbols",
+        "wright inspect refs <NAME>",
+        "wright inspect cfg <RULE>",
+        "wright inspect callgraph",
+        "wright inspect cost",
+    ];
+
+    /// The list as owned strings for a result field.
+    pub fn list(commands: &'static [&'static str]) -> Vec<String> {
+        commands
+            .iter()
+            .map(|command| (*command).to_string())
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
-pub struct CheckResult {}
+pub struct CheckResult {
+    /// The loaded program's summary — the same members `analyze`'s `program`
+    /// reports (#792): origin, files, and declaration counts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<serde_json::Value>,
+    /// The shared follow-up commands (#792).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub next: Vec<String>,
+}
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct AnalyzeResult {
@@ -133,6 +177,9 @@ pub struct AnalyzeResult {
     /// Present when a finding selection was applied to `facts.risks` (#430).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selection: Option<crate::select::SelectionOutcome>,
+    /// The shared follow-up commands (#792).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub next: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -141,6 +188,9 @@ pub struct InspectResult {
     pub rules: serde_json::Value,
     pub symbols: serde_json::Value,
     pub references: serde_json::Value,
+    /// The shared follow-up commands (#792).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub next: Vec<String>,
 }
 
 /// `rules` result (ADR-0024): the `rules` agent operation's payload verbatim
@@ -225,6 +275,9 @@ pub struct LintResult {
     /// what each offered fix validated to, and whether it applied.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fixes: Option<Vec<LintFixOutcome>>,
+    /// The shared follow-up commands (#792).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub next: Vec<String>,
 }
 
 /// What the validated-edit path did with one finding's fix (#556): the fix
