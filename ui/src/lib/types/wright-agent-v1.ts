@@ -757,6 +757,23 @@ export interface CompilePayload {
  * via the `definition` "CheckPayload".
  */
 export interface CheckPayload {
+  program: AnalyzedProgramSummary
+  /**
+   * Shared follow-up commands rendered as `next:` records (#792); each entry is a complete `wright` command line.
+   */
+  next: string[]
+  [k: string]: unknown
+}
+/**
+ * The loaded program's summary — the same members `analyze`'s `program` reports (#792).
+ */
+export interface AnalyzedProgramSummary {
+  origin: Origin
+  files: number
+  globalVariables: number
+  playerVariables: number
+  subroutines: number
+  rules: number
   [k: string]: unknown
 }
 /**
@@ -764,7 +781,7 @@ export interface CheckPayload {
  * via the `definition` "AnalyzePayload".
  */
 export interface AnalyzePayload {
-  program: AnalyzedProgramSummary
+  program: AnalyzedProgramSummary1
   cost: {
     [k: string]: unknown
   }
@@ -782,6 +799,10 @@ export interface AnalyzePayload {
     [k: string]: unknown
   }
   expand: string
+  /**
+   * Shared follow-up commands rendered as `next:` records (#792); each entry is a complete `wright` command line.
+   */
+  next: string[]
   truncation?: Truncation
   selection?: SelectionSummary
 }
@@ -789,7 +810,7 @@ export interface AnalyzePayload {
  * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
  * via the `definition` "AnalyzedProgramSummary".
  */
-export interface AnalyzedProgramSummary {
+export interface AnalyzedProgramSummary1 {
   origin: Origin
   files: number
   globalVariables: number
@@ -812,6 +833,24 @@ export interface ActionableFinding {
   location?: string
   evidence: string
   boundedness?: string
+  repeated?: RepeatedValue
+}
+/**
+ * Present on `repeated-value` findings only (#791).
+ */
+export interface RepeatedValue {
+  /**
+   * The canonical spelling of the repeated expression.
+   */
+  expression: string
+  /**
+   * How many times the expression is evaluated.
+   */
+  count: number
+  /**
+   * Whether the finding's `span` is the expression's own span or the enclosing loop action's span (#791).
+   */
+  spanKind: 'expression' | 'enclosing-loop'
 }
 /**
  * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
@@ -823,6 +862,12 @@ export interface Truncation {
     shown: number
     truncated: number
     expand: string
+    /**
+     * Per-code counts over the full list before this cap (#791); omitted for lists whose items carry no `code`.
+     */
+    byCode?: {
+      [k: string]: number
+    }
   }
 }
 /**
@@ -832,6 +877,12 @@ export interface Truncation {
 export interface SelectionSummary {
   total: number
   withheld: number
+  /**
+   * Per-code finding counts over the filtered set before `max` truncation (#791); omitted when the set has no coded findings.
+   */
+  byCode?: {
+    [k: string]: number
+  }
   [k: string]: unknown
 }
 /**
@@ -849,6 +900,10 @@ export interface InspectPayload {
     [k: string]: unknown
   }[]
   expand: string
+  /**
+   * Shared follow-up commands rendered as `next:` records (#792); each entry is a complete `wright` command line.
+   */
+  next: string[]
   truncation?: Truncation
   selection?: SelectionSummary
 }
@@ -982,6 +1037,12 @@ export interface Reference {
   rule: number | null
   action: number | null
   value: number | null
+  /**
+   * The owning rule's identity — `{id, name, span}` like a `rules` list entry — so a consumer renders a rule location without a second lookup (#792); null when the reference has no owning rule.
+   */
+  owningRule: {
+    [k: string]: unknown
+  } | null
   [k: string]: unknown
 }
 /**
@@ -1030,6 +1091,12 @@ export interface Finding {
   value: number | null
   evidence: string
   boundedness: string | null
+  /**
+   * The `RepeatedValue` facts on a `repeated-value` finding; null otherwise (#791).
+   */
+  repeated: {
+    [k: string]: unknown
+  } | null
   [k: string]: unknown
 }
 /**
@@ -1058,6 +1125,10 @@ export interface LintPayload {
   }
   findings: ActionableFinding[]
   expand: string
+  /**
+   * Shared follow-up commands rendered as `next:` records (#792); each entry is a complete `wright` command line.
+   */
+  next: string[]
   truncation?: Truncation
   selection?: SelectionSummary
 }
@@ -1135,12 +1206,26 @@ export interface CallGraphSelectionResult {
  */
 export interface CostEstimateResult {
   exact: {
-    emittedBytes: number
+    /**
+     * Emitted artifact size in bytes; null when emission fails — emittedBytesUnavailable names the reason (ADR-0030 decision 3: unknown is not a value).
+     */
+    emittedBytes: number | null
+    emittedBytesUnavailable?: string
     programActions: number
     programRules: number
     waitActions: number
     [k: string]: unknown
   }
+  elementCount?: {
+    /**
+     * Canonical element total; absent when the count cannot run — elementCountUnavailable names the reason. The budget still reports even when the count is unavailable.
+     */
+    total?: number
+    budget: number
+    rules?: unknown[]
+    [k: string]: unknown
+  }
+  elementCountUnavailable?: string
   findings: {
     code: string
     severity: string
@@ -1272,6 +1357,24 @@ export interface ToolErrorInfo {
   code: string
   message: string
   [k: string]: unknown
+}
+/**
+ * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
+ * via the `definition` "RepeatedValue".
+ */
+export interface RepeatedValue1 {
+  /**
+   * The canonical spelling of the repeated expression.
+   */
+  expression: string
+  /**
+   * How many times the expression is evaluated.
+   */
+  count: number
+  /**
+   * Whether the finding's `span` is the expression's own span or the enclosing loop action's span (#791).
+   */
+  spanKind: 'expression' | 'enclosing-loop'
 }
 /**
  * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
