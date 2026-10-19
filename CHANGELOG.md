@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.2](https://github.com/wrightkit/wright/compare/v0.26.1...v0.26.2) (2026-10-19)
+
+
+### Bug Fixes
+
+* **install:** detect Windows architecture from the environment ([#773](https://github.com/wrightkit/wright/issues/773)) ([262471a](https://github.com/wrightkit/wright/commit/262471a3b00bf1e8c0795d9311a104cf2458f221))
+
 ## [0.26.1](https://github.com/wrightkit/wright/compare/v0.26.0...v0.26.1) (2026-10-19)
 
 
