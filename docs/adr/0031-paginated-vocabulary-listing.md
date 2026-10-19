@@ -1,6 +1,6 @@
 # ADR-0031: Paginated vocabulary listing for structured editors
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-19
 - Related: [Issue #782](https://github.com/wrightkit/wright/issues/782), [Issue #781](https://github.com/wrightkit/wright/issues/781), [Issue #798](https://github.com/wrightkit/wright/issues/798), [ADR-0021](0021-name-and-signature-lookup.md), [ADR-0022](0022-shared-surface-for-semantic-queries.md), [ADR-0024](0024-structured-rule-content.md), [ADR-0029](0029-structured-statement-edits.md), [Agent contract](../agent-contract.md)
 
