@@ -176,6 +176,65 @@ fn workshop_lookup_answers_a_setting_key() {
 }
 
 #[test]
+fn workshop_lookup_callable_carries_the_owners_return_type_and_variadic() {
+    // #781/#798: a Workshop `value` entry's `callable` carries the owner's
+    // `returns` — the declared return type in the parameter `type`
+    // vocabulary — and a variadic signature carries `variadic: true`.
+    // Actions declare no return type and non-variadic callables carry no
+    // `variadic` member at all.
+    let mut owned = session(workshop_path());
+    let mut service = ToolService::new(&mut owned).unwrap();
+
+    for (identity, returns) in [
+        ("distance", "Number"),
+        ("eventPlayer", "Player"),
+        ("vector", "Vector"),
+    ] {
+        let entries = entries_of(service.handle(&lookup_request("workshop", Some(identity))));
+        let entry = entries
+            .iter()
+            .find(|entry| entry["identity"] == identity)
+            .unwrap_or_else(|| panic!("lookup returned no '{identity}' entry: {entries:?}"));
+        assert_eq!(entry["kind"], "value", "{entry}");
+        assert_eq!(
+            entry["callable"]["returns"], returns,
+            "the owner's declared return type: {entry}"
+        );
+    }
+
+    let entries = entries_of(service.handle(&lookup_request("workshop", Some("array"))));
+    let array = entries
+        .iter()
+        .find(|entry| entry["identity"] == "array")
+        .unwrap_or_else(|| panic!("lookup returned no 'array' entry: {entries:?}"));
+    assert_eq!(
+        array["callable"]["variadic"], true,
+        "array's last parameter repeats: {array}"
+    );
+
+    let entries = entries_of(service.handle(&lookup_request("workshop", Some("distance"))));
+    let distance = entries
+        .iter()
+        .find(|entry| entry["identity"] == "distance")
+        .expect("the distance value");
+    assert!(
+        distance["callable"].get("variadic").is_none(),
+        "distance is not variadic: {distance}"
+    );
+
+    let entries = entries_of(service.handle(&lookup_request("workshop", Some("Wait"))));
+    let wait = entries
+        .iter()
+        .find(|entry| entry["identity"] == "wait")
+        .expect("the wait action");
+    assert_eq!(wait["kind"], "action");
+    assert!(
+        wait["callable"].get("returns").is_none(),
+        "an action declares no return type: {wait}"
+    );
+}
+
+#[test]
 fn workshop_lookup_filters_by_kind_and_bounds_the_limit() {
     let mut owned = session(workshop_path());
     let mut service = ToolService::new(&mut owned).unwrap();

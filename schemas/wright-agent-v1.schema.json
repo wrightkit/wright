@@ -728,7 +728,14 @@
         "spelling": { "type": "string" },
         "displayName": { "type": "string" },
         "signature": { "type": "string" },
-        "callable": { "type": "object" },
+        "callable": {
+          "type": "object",
+          "properties": {
+            "returns": { "type": "string", "description": "Optional: the owner-declared return type of a value, in the same vocabulary as parameter types." },
+            "variadic": { "type": "boolean", "description": "Optional: present as true when the callable's last parameter repeats for extra arguments." }
+          },
+          "additionalProperties": true
+        },
         "enum": { "type": "object" },
         "parameter": { "type": "object" },
         "setting": { "type": "object" }

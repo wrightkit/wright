@@ -573,11 +573,16 @@ request's `language` selects the owner (`workshop` or `opy`, the ids
 
 Each entry carries its owner `identity`, `kind`, accepted `spelling`, and
 `displayName`, plus the owner fact that describes it (`callable`, `enum`,
-`parameter`, or `setting`). Callables also carry `signature`, a
-human-readable call shape Wright renders from the owner's parameter facts:
-required parameters name their type, optional parameters show `name?` or
-`name=default`, and an enum domain lists its members inline (a domain
-above the member bound renders as `Domain(count members)`).
+`parameter`, or `setting`). The `callable` fact holds the ordered
+`parameters`; when the owner declares them it also carries `returns`, the
+callable's return type in the same vocabulary as parameter `type`s (a
+Workshop `value` such as `distance` declares one; actions carry none),
+and `variadic: true` when the last parameter repeats for extra arguments.
+Callables also carry `signature`, a human-readable call shape Wright
+renders from the owner's parameter facts: required parameters name their
+type, optional parameters show `name?` or `name=default`, and an enum
+domain lists its members inline (a domain above the member bound renders
+as `Domain(count members)`).
 
 Workshop answers come from the `workshop-rs` catalog in process. OverPy
 answers come from the configured `opy-rs` provider's LPP lookup

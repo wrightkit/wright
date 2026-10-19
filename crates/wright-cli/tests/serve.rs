@@ -625,6 +625,69 @@ fn lookup_answers_over_every_transport_and_a_broken_project() {
 }
 
 #[test]
+fn lookup_callable_carries_returns_and_variadic_on_every_transport() {
+    // #781/#798: the owner-declared `returns` and `variadic` members are
+    // part of a Workshop entry's `callable` fact and reach stdio,
+    // JSON-RPC `request`, and MCP `tools/call` identically.
+    let input = corpus_workshop("synthetic/basic-rule");
+    let stdio = run_lines(
+        "stdio",
+        &input,
+        &[
+            r#"{"op":"lookup","language":"workshop","query":"distance","kind":"value"}"#,
+            r#"{"op":"lookup","language":"workshop","query":"array","kind":"value"}"#,
+        ],
+    );
+    let jsonrpc = run_lines(
+        "jsonrpc",
+        &input,
+        &[
+            r#"{"jsonrpc":"2.0","id":1,"method":"request","params":{"op":"lookup","language":"workshop","query":"distance","kind":"value"}}"#,
+            r#"{"jsonrpc":"2.0","id":2,"method":"request","params":{"op":"lookup","language":"workshop","query":"array","kind":"value"}}"#,
+        ],
+    );
+    let mcp = run_lines(
+        "mcp",
+        &input,
+        &[
+            &mcp_call(
+                1,
+                "wright_lookup",
+                json!({"language": "workshop", "query": "distance", "kind": "value"}),
+            ),
+            &mcp_call(
+                2,
+                "wright_lookup",
+                json!({"language": "workshop", "query": "array", "kind": "value"}),
+            ),
+        ],
+    );
+    let entry = |result: &serde_json::Value, identity: &str| {
+        result["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["identity"] == identity)
+            .unwrap_or_else(|| panic!("no '{identity}' entry: {result}"))
+            .clone()
+    };
+    assert_eq!(
+        entry(&stdio[0]["result"], "distance")["callable"]["returns"],
+        "Number"
+    );
+    let array = entry(&stdio[1]["result"], "array");
+    assert_eq!(array["callable"]["variadic"], true);
+    assert!(
+        array["callable"].get("returns").is_some(),
+        "array is a value and declares a return type: {array}"
+    );
+    assert_eq!(stdio[0]["result"], jsonrpc[0]["result"]);
+    assert_eq!(stdio[1]["result"], jsonrpc[1]["result"]);
+    assert_eq!(stdio[0]["result"], mcp_payload(&mcp[0]));
+    assert_eq!(stdio[1]["result"], mcp_payload(&mcp[1]));
+}
+
+#[test]
 fn stdio_transport_recovers_in_the_same_process() {
     // #512: a session that started over a missing input loads the repaired
     // project on the next program-reading request — no restart, no reload
