@@ -1637,10 +1637,12 @@ impl<'a> ToolService<'a> {
     /// The CLI-side run-cache comparison and `--max-total` gate for
     /// `inspect cost` (ADR-0027, #723): `--max-total` fails with the
     /// overage named and reads no cache; an explicitly named baseline that
-    /// does not exist is a usage error; an absent/corrupt/unknown-version
-    /// record just omits the comparison. Agent `costEstimate` requests
-    /// never reach here — the agent surface takes its reference as inline
-    /// data and returns no implicit comparison (decision 3).
+    /// does not exist is a usage error outside CI — under CI it degrades
+    /// to no comparison silently (ADR-0030 decision 14); an
+    /// absent/corrupt/unknown-version record just omits the comparison.
+    /// Agent `costEstimate` requests never reach here — the agent surface
+    /// takes its reference as inline data and returns no implicit
+    /// comparison (decision 3).
     ///
     /// Returns the comparison for the caller to carry in-process; it is
     /// never serialized into the JSON or agent result.
@@ -1665,7 +1667,10 @@ impl<'a> ToolService<'a> {
             }
         }
         let cost_run = self.session.cost_run(loaded);
-        if run.baseline.is_some() && !crate::cache::baseline_exists(&cost_run) {
+        if run.baseline.is_some()
+            && !crate::cache::ci()
+            && !crate::cache::baseline_exists(&cost_run)
+        {
             return Err(ToolErrorInfo {
                 code: "invalid-selection".to_string(),
                 message: format!(

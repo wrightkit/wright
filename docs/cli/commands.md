@@ -280,11 +280,20 @@ Resolution never guesses.
   (an unknown name is a usage error) and `--save-baseline <name>` records
   the current run under a name. `--max-total <N>` is an explicit gate on
   `inspect cost`: exit 1 naming the overage when the element total exceeds
-  N, identical with and without a cache. `--no-cache`, a non-empty
-  `WRIGHT_NO_CACHE`, or a truthy `CI` disable reading and writing `.wright/`;
-  add it to your `.gitignore` — Wright does not edit it for you. A failing
-  run never replaces the previous reference, and cache failures never fail
-  a command.
+  N, identical with and without a cache. `--no-cache` or a non-empty
+  `WRIGHT_NO_CACHE` disable reading and writing `.wright/`; add it to your
+  `.gitignore` — Wright does not edit it for you. A failing run never
+  replaces the previous reference, and cache failures never fail a
+  command.
+
+  Under a truthy `CI` the implicit previous-run comparison stays off, but
+  the explicit baseline flags still read and write `.wright/` so a CI
+  cache can carry it between runs (ADR-0030): `--save-baseline` records
+  the run and `--baseline` compares against it only when a usable record
+  exists. A missing cache, an unknown name, or a record that is
+  unreadable, incompatible, or keyed to a different input, kind, locale
+  or profile turns the comparison off with no error, warning or output —
+  the verdict and exit code are unchanged.
 * `inspect cost --rule <NAME>` shows where one declared rule's element cost
   goes (#724): the rule's `Costliest statements` (its direct conditions and
   actions ranked by recursive `count`) and `By node name` (each node's own
