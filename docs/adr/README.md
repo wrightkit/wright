@@ -48,4 +48,8 @@ its audit date.
 * [ADR-0026: The agent benchmark lives with the benchmark suite](0026-agent-benchmark-ownership.md)
 * [ADR-0027: Project run cache and comparison against the previous run](0027-project-run-cache.md)
 * [ADR-0028: Transformation profiles apply to Workshop input only](0028-profile-applies-to-workshop-input-only.md)
+* [ADR-0029: Structured statement edits for raw Workshop](0029-structured-statement-edits.md)
+* [ADR-0030: One result model, three renderers, and the CLI/action boundary](0030-renderers-and-the-cli-action-boundary.md)
+* [ADR-0031: Paginated vocabulary listing for structured editors](0031-paginated-vocabulary-listing.md)
+* [ADR-0032: The structured Workshop editor: form factor, ownership, and stack](0032-structured-editor-form-factor.md)
 * [Post-ADR-0010 decision inventory](post-0010-inventory.md)
