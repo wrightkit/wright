@@ -936,7 +936,7 @@ fn assert_default_surface_parity_on_input(
             if *key == "blocks" {
                 if let Some(id) = item["id"].as_u64() {
                     assert!(
-                        text.contains(&format!("block {id}")),
+                        text.contains(&format!("block: id={id}")),
                         "cfg block absent: {text}"
                     );
                 }

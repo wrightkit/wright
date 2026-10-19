@@ -1,0 +1,29 @@
+---
+source: crates/wright-cli/tests/plain.rs
+expression: transcript(&output)
+---
+exit 0
+== stdout
+WARN analyze root=. kind=workshop locale=en-us
+summary: files=1 rules=2 globalVariables=3 playerVariables=0 subroutines=0 errors=0 warnings=10 notes=0 cost=428
+cost: elements=428 budget=32768 actions=29 conditions=0 waits=1
+finding: warning repeated-value count=2 at=cake.ws:22:67 spanKind=expression expression="add(firstOf(cakePos), vector(0, i2, 0))" evidence=exact message="`add(firstOf(cakePos), vector(0, i2, 0))` is evaluated 2 times within the same loop scope"
+finding: warning repeated-value count=2 at=cake.ws:22:123 spanKind=expression expression="add(valueInArray(cakePos, 1), vector(0, i2, 0))" evidence=exact message="`add(valueInArray(cakePos, 1), vector(0, i2, 0))` is evaluated 2 times within the same loop scope"
+finding: warning repeated-value count=2 at=cake.ws:23:132 spanKind=expression expression="add(valueInArray(cakePos, 2), vector(0, i2, 0))" evidence=exact message="`add(valueInArray(cakePos, 2), vector(0, i2, 0))` is evaluated 2 times within the same loop scope"
+finding: warning repeated-value count=2 at=cake.ws:24:132 spanKind=expression expression="add(valueInArray(cakePos, 3), vector(0, i2, 0))" evidence=exact message="`add(valueInArray(cakePos, 3), vector(0, i2, 0))` is evaluated 2 times within the same loop scope"
+finding: warning repeated-value count=2 at=cake.ws:25:132 spanKind=expression expression="add(valueInArray(cakePos, 4), vector(0, i2, 0))" evidence=exact message="`add(valueInArray(cakePos, 4), vector(0, i2, 0))` is evaluated 2 times within the same loop scope"
+truncated: risks=5/10 byCode=min-wait-loop:1,repeated-value:9 expand="wright analyze --all"
+hotspot: name=cake elements=408 share=95.3 blocks=18 edges=22 risks=9 at=cake.ws:8:1
+hotspot: name=candles elements=20 share=4.7 blocks=5 edges=5 risks=1 at=cake.ws:41:1
+complexity: blocks=23 edges=27 loopBlocks=5 waitBlocks=1
+variable: kind=globalVariable name=candlePos rules=2 reads=5 writes=2
+variable: kind=globalVariable name=i2 rules=1 reads=25 writes=4
+variable: kind=globalVariable name=cakePos rules=1 reads=16 writes=1
+next: wright lint
+next: wright inspect symbols
+next: wright inspect refs <NAME>
+next: wright inspect cfg <RULE>
+next: wright inspect callgraph
+next: wright inspect cost
+
+== stderr

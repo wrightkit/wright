@@ -46,6 +46,26 @@ impl UpdateError {
         }
     }
 
+    /// The record code for the failure class (#793).
+    fn code(&self) -> &'static str {
+        match self {
+            Self::Usage(_) => "usage",
+            Self::Rejected(_) => "rejected",
+            Self::Unsupported(_) => "unsupported",
+            Self::Failed(_) => "failed",
+        }
+    }
+
+    /// The `error:` record for the plain surface (#793); `update` errors
+    /// are the command's machine-readable outcome.
+    pub(crate) fn record(&self) -> String {
+        format!(
+            "error: {} {}",
+            self.code(),
+            crate::plain::field("message", self.message())
+        )
+    }
+
     pub(crate) fn message(&self) -> &str {
         match self {
             Self::Usage(m) | Self::Rejected(m) | Self::Unsupported(m) | Self::Failed(m) => m,
@@ -159,11 +179,11 @@ fn update_all(check_only: bool, pres: crate::present::Presentation) -> u8 {
             println!("skipped wright self-update: {}", error.message());
         }
         Err(error) => {
-            crate::present::terminal::report_error(
+            report_update_error(
                 pres,
                 crate::present::terminal::exit_word(error.exit_code()),
-                "update",
                 error.message(),
+                &error.record(),
             );
             code = fold(code, error.exit_code());
         }
@@ -258,11 +278,11 @@ fn provider_check(
         Some(version) => match parse_version(version) {
             Ok(_) => version.trim_start_matches('v').to_string(),
             Err(error) => {
-                crate::present::terminal::report_error(
+                report_update_error(
                     pres,
                     crate::present::terminal::exit_word(error.exit_code()),
-                    "update",
                     error.message(),
+                    &error.record(),
                 );
                 return error.exit_code();
             }
@@ -297,13 +317,32 @@ fn provider_check(
 }
 
 fn provider_failure(error: &OpyProviderError, pres: crate::present::Presentation) -> u8 {
-    crate::present::terminal::report_error(
+    report_update_error(
         pres,
         crate::present::terminal::exit_word(error.exit_code()),
-        "update",
         &format!("{}: {}", error.code(), error),
+        &format!(
+            "error: {} {}",
+            error.code(),
+            crate::plain::field("message", &error.to_string())
+        ),
     );
     error.exit_code()
+}
+
+/// An update failure is a verdict tag on the terminal renderer and an
+/// `error:` record on the machine-readable surfaces (#793).
+fn report_update_error(
+    pres: crate::present::Presentation,
+    word: &str,
+    message: &str,
+    record: &str,
+) {
+    if pres.is_terminal() {
+        crate::present::terminal::report_error(pres, word, "update", message);
+    } else {
+        eprintln!("{record}");
+    }
 }
 
 fn self_update(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateError> {

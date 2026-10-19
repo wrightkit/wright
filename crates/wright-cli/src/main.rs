@@ -3,9 +3,11 @@ mod agenttools;
 mod cli;
 mod completion;
 mod mcp;
+mod plain;
 mod present;
 mod serve;
 mod tooldefs;
+mod ui;
 mod update;
 
 use std::io::Write;
@@ -89,6 +91,7 @@ fn main() -> ExitCode {
         Some(Command::SemanticCompare(args)) => run_semantic_compare(args),
         Some(Command::Lookup(args)) => run_lookup(&args),
         Some(Command::Serve(args)) => serve::run(args),
+        Some(Command::Ui(args)) => ui::run(args),
         Some(Command::Completion(args)) => match args.subcommand {
             Some(cli::CompletionSubcommand::Install(install_args)) => {
                 match completion::run_install(&install_args, args.shell) {
@@ -139,12 +142,16 @@ fn main() -> ExitCode {
                     ExitCode::from(code)
                 }
                 Err(error) => {
-                    present::terminal::report_error(
-                        pres,
-                        present::terminal::exit_word(error.exit_code()),
-                        "update",
-                        error.message(),
-                    );
+                    if pres.is_terminal() {
+                        present::terminal::report_error(
+                            pres,
+                            present::terminal::exit_word(error.exit_code()),
+                            "update",
+                            error.message(),
+                        );
+                    } else {
+                        eprintln!("{}", error.record());
+                    }
                     ExitCode::from(error.exit_code())
                 }
             }
@@ -408,6 +415,7 @@ fn run_workflow(command: Command) -> ExitCode {
         | Command::Update(_)
         | Command::Agent(_)
         | Command::Serve(_)
+        | Command::Ui(_)
         | Command::Lookup(_)
         | Command::SemanticCompare(_) => {
             unreachable!("non-workflow command handled before run_workflow")
@@ -428,7 +436,10 @@ fn essential_envelope<T: serde::Serialize>(
 }
 
 fn run_configured<
-    T: serde::Serialize + present::ResultPresentation + present::terminal::TerminalReport,
+    T: serde::Serialize
+        + present::ResultPresentation
+        + plain::PlainReport
+        + present::terminal::TerminalReport,
 >(
     name: &'static str,
     config: SessionConfig,
@@ -612,18 +623,22 @@ fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
                         present::terminal::lookup(&result, pres);
                     }
                 }
-                OutputFormatArg::Text => print_lookup_text(&result),
+                OutputFormatArg::Text => print_lookup_text(&result, args.language.as_str()),
             }
             if result.get("unavailable").is_some() {
                 return ExitCode::from(exit::UNSUPPORTED);
             }
             if result["entries"].as_array().is_none_or(Vec::is_empty) {
-                present::terminal::report_error(
-                    pres,
-                    "ERROR",
-                    "lookup",
-                    "lookup returned no entries",
-                );
+                if pres.is_terminal() {
+                    present::terminal::report_error(
+                        pres,
+                        "ERROR",
+                        "lookup",
+                        "lookup returned no entries",
+                    );
+                } else {
+                    eprintln!("error: no-entries message=\"lookup returned no entries\"");
+                }
                 return ExitCode::from(exit::SOURCE_ERROR);
             }
             ExitCode::SUCCESS
@@ -636,16 +651,35 @@ fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
                         .expect("error serializes")
                 ),
                 OutputFormatArg::Text => {
-                    present::terminal::lookup_error(
-                        pres,
-                        if error.code.starts_with("invalid-") {
+                    if pres.is_terminal() {
+                        present::terminal::lookup_error(
+                            pres,
+                            if error.code.starts_with("invalid-") {
+                                "USAGE"
+                            } else {
+                                "ERROR"
+                            },
+                            &error.code,
+                            &error.message,
+                        );
+                    } else {
+                        // `invalid-*` request errors are the CLI's usage
+                        // failures; anything else is a source error.
+                        let word = if error.code.starts_with("invalid-") {
                             "USAGE"
                         } else {
                             "ERROR"
-                        },
-                        &error.code,
-                        &error.message,
-                    );
+                        };
+                        println!(
+                            "{word} lookup {}",
+                            plain::field("language", args.language.as_str())
+                        );
+                        eprintln!(
+                            "error: {} {}",
+                            error.code,
+                            plain::field("message", &error.message)
+                        );
+                    }
                 }
             }
             if error.code.starts_with("invalid-") {
@@ -657,37 +691,53 @@ fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
     }
 }
 
-/// One line per lookup entry in text mode: the rendered signature for a
-/// callable, else the accepted spelling, then its kind, the owner identity
-/// when it differs from the spelling, and the display name when that adds
-/// information. An `unavailable` result names the owner and the missing
-/// capability.
-fn print_lookup_text(result: &serde_json::Value) {
+/// Lookup's text output is the line-record surface (#793): the verdict
+/// names the command (`LOOKUP` on success, `UNSUPPORTED` when the owner
+/// cannot answer, `ERROR` on an empty result), `summary:` reports the entry
+/// count, and one `entry:` record per match carries the rendered signature
+/// for a callable, else the accepted spelling, with its kind, the owner
+/// identity when it differs from the spelling, and the display name when
+/// that adds information.
+fn print_lookup_text(result: &serde_json::Value, language: &str) {
     if let Some(unavailable) = result.get("unavailable") {
+        println!("UNSUPPORTED lookup {}", plain::field("language", language));
         eprintln!(
-            "unavailable: {} ({})",
-            unavailable["message"].as_str().unwrap_or_default(),
-            result["owner"].as_str().unwrap_or_default()
+            "unavailable: {} {}",
+            plain::field("owner", result["owner"].as_str().unwrap_or_default()),
+            plain::field(
+                "message",
+                unavailable["message"].as_str().unwrap_or_default()
+            )
         );
         return;
     }
-    let Some(entries) = result["entries"].as_array() else {
-        return;
+    let entries = result["entries"].as_array().map_or(&[][..], Vec::as_slice);
+    let word = if entries.is_empty() {
+        "ERROR"
+    } else {
+        "LOOKUP"
     };
+    println!(
+        "{word} lookup {} {}",
+        plain::field("language", language),
+        plain::field("query", result["query"].as_str().unwrap_or_default())
+    );
+    println!("summary: entries={}", entries.len());
     for entry in entries {
         let spelling = entry["spelling"].as_str().unwrap_or_default();
-        let head = entry["signature"].as_str().unwrap_or(spelling);
-        let mut line = format!("{head} [{}]", entry["kind"].as_str().unwrap_or_default());
+        let mut items = vec![entry["kind"].as_str().unwrap_or("entry").to_string()];
+        items.push(plain::field("name", spelling));
+        if let Some(signature) = entry["signature"].as_str().filter(|s| *s != spelling) {
+            items.push(plain::field("signature", signature));
+        }
         let identity = entry["identity"].as_str().unwrap_or_default();
         if identity != spelling {
-            line.push_str(&format!("  {identity}"));
+            items.push(plain::field("identity", identity));
         }
-        if let Some(display) = entry["displayName"].as_str() {
-            if display != spelling {
-                line.push_str(&format!("  — {display}"));
-            }
+        if let Some(display) = entry["displayName"].as_str().filter(|d| *d != spelling) {
+            items.push(plain::field("display", display));
         }
-        println!("{line}");
+        println!("entry: {}", items.join(" "));
     }
 }
 
@@ -809,7 +859,10 @@ fn is_directory_input(common: &CommonArgs) -> bool {
 
 /// Run one driver workflow and render its envelope in the CLI presentation.
 fn run_command<
-    T: serde::Serialize + present::ResultPresentation + present::terminal::TerminalReport,
+    T: serde::Serialize
+        + present::ResultPresentation
+        + plain::PlainReport
+        + present::terminal::TerminalReport,
 >(
     session: &mut wright_driver::CompilerSession,
     run: impl FnOnce(&mut wright_driver::CompilerSession) -> wright_driver::Envelope<T>,

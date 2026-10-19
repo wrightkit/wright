@@ -1,0 +1,9 @@
+---
+source: crates/wright-cli/tests/plain.rs
+expression: "transcript(&run_in_env(&dir, &[\"update\", \"self\", \"--check\"],\n&[(\"WRIGHT_INSTALL_OS\", \"plan9\"), (\"WRIGHT_INSTALL_ARCH\", \"m68k\")]))"
+---
+exit 3
+== stdout
+
+== stderr
+error: unsupported message="unsupported platform plan9/m68k (supported: linux/x86_64, darwin/x86_64, darwin/aarch64); use the official installer (curl -fsSL https://install.wrightkit.dev/wright/install.sh | bash) or a package manager"

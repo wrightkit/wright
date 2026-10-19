@@ -84,7 +84,7 @@ enum ProviderOperation {
 /// import over it (`OWBastion/Bastion#263`). `workshop-rs` owns the
 /// canonical count; the budget policy is Wright's consumer policy
 /// (workshop-rs ADR-0010).
-pub(crate) const WORKSHOP_CLIENT_ELEMENT_LIMIT: usize = 32768;
+pub const WORKSHOP_CLIENT_ELEMENT_LIMIT: usize = 32768;
 
 fn loaded_origin(loaded: &Loaded) -> Origin {
     Origin {

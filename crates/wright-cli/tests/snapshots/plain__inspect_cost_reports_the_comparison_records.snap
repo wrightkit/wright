@@ -1,0 +1,13 @@
+---
+source: crates/wright-cli/tests/plain.rs
+expression: "transcript(&run_in(&dir, &[\"inspect\", \"cost\", \"t.ws\"]))"
+---
+exit 0
+== stdout
+COST cost root=.
+summary: emittedBytes=101 actions=1 rules=1 waits=1
+cost: elements=3 budget=32768
+share: rule=r index=0 elements=3 at=t.ws:1:1
+comparison: reference=previous delta=0 previousTotal=3
+
+== stderr

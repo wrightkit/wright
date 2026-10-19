@@ -1,0 +1,13 @@
+---
+source: crates/wright-cli/tests/plain.rs
+expression: "transcript(&run_in(&dir, &[\"lookup\", \"wait\"]))"
+---
+exit 0
+== stdout
+LOOKUP lookup language=workshop query=""
+summary: entries=3
+entry: action name=Wait signature="Wait(time: Any, waitBehavior=Ignore Condition)" identity=wait
+entry: enum name=Wait
+entry: action name="Wait Until" signature="Wait Until(continueCondition: Boolean|Number, timeout: Number)" identity=waitUntil
+
+== stderr

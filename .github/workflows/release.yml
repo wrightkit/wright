@@ -201,8 +201,24 @@ jobs:
           cache-targets: false
           cache-save: ${{ github.ref == 'refs/heads/main' }}
 
+      # `wright ui` embeds the built ui/ assets (ADR-0032 decision 9): a
+      # release build with the `ui` feature refuses an empty ui/dist, so
+      # the page builds before Cargo.
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Build UI assets
+        working-directory: ui
+        run: npm ci && npm run build
+
       - name: Build release binaries
-        run: cargo build --locked --release -p wright-cli -p wright-lsp --target "$TARGET"
+        run: >-
+          cargo build --locked --release -p wright-cli -p wright-lsp
+          --target "$TARGET" --features wright-cli/ui
 
       - name: Package release archive
         run: >-
@@ -213,6 +229,7 @@ jobs:
           --extension "$EXT"
           --commit "$RELEASE_COMMIT"
           --runner-os "${{ runner.os }}"
+          --features wright-cli/ui
 
       - name: Smoke test release archive
         run: >-
@@ -281,7 +298,7 @@ jobs:
                .toolchain == "stable" and
                .profile == "release" and
                .packages == ["wright-cli", "wright-lsp"] and
-               .features == []' "$identity" >/dev/null
+               .features == ["wright-cli/ui"]' "$identity" >/dev/null
             cp "$archive" "$checksum" verified/
           done
           (cd verified && sha256sum wright-*.tar.gz wright-*.zip > SHA256SUMS)

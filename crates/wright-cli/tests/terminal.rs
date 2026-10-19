@@ -462,7 +462,7 @@ fn verdict_exit_and_counts_match_plain_and_json() {
             terminal.stdout
         );
         assert!(
-            plain.stdout.starts_with(&format!("{}\n", case.plain_word)),
+            plain.stdout.starts_with(&format!("{} ", case.plain_word)),
             "{args:?} plain verdict: {}",
             plain.stdout
         );

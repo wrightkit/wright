@@ -1,0 +1,10 @@
+---
+source: crates/wright-cli/tests/plain.rs
+expression: "transcript(&run_in(&dir, &[\"lookup\", \"--within\", \"nope\"]))"
+---
+exit 1
+== stdout
+ERROR lookup language=workshop
+
+== stderr
+error: lookup.unknownWithin message="unknown lookup scope spelling 'nope' for locale 'en-us'"

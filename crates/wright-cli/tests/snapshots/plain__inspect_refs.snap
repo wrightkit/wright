@@ -1,0 +1,28 @@
+---
+source: crates/wright-cli/tests/plain.rs
+expression: "transcript(&run_in(&dir, &[\"inspect\", \"refs\", \"cakePos\", \"cake.ws\"]))"
+---
+exit 0
+== stdout
+REFS refs root=.
+summary: symbol=cakePos kind=globalVariable reads=16 writes=1 calls=0 rules=1
+ref: declaration at=cake.ws:3:14
+ref: write at=cake.ws:13:29 rule=cake action=0
+ref: read at=cake.ws:22:87 rule=cake action=9 value=78
+ref: read at=cake.ws:22:149 rule=cake action=9 value=85
+ref: read at=cake.ws:23:93 rule=cake action=10 value=98
+ref: read at=cake.ws:23:158 rule=cake action=10 value=106
+ref: read at=cake.ws:24:93 rule=cake action=11 value=119
+ref: read at=cake.ws:24:158 rule=cake action=11 value=127
+ref: read at=cake.ws:25:93 rule=cake action=12 value=140
+ref: read at=cake.ws:25:158 rule=cake action=12 value=148
+ref: read at=cake.ws:26:93 rule=cake action=13 value=161
+ref: read at=cake.ws:26:158 rule=cake action=13 value=169
+ref: read at=cake.ws:27:93 rule=cake action=14 value=182
+ref: read at=cake.ws:27:158 rule=cake action=14 value=190
+ref: read at=cake.ws:28:93 rule=cake action=15 value=203
+ref: read at=cake.ws:28:158 rule=cake action=15 value=211
+ref: read at=cake.ws:29:93 rule=cake action=16 value=224
+ref: read at=cake.ws:29:152 rule=cake action=16 value=232
+
+== stderr

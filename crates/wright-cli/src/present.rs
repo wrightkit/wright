@@ -22,6 +22,8 @@ use crate::cli::{ColorArg, CommonArgs, OutputFormatArg, RendererArg};
 
 pub(crate) mod terminal;
 
+use crate::plain;
+
 /// The report's layout width ceiling: a terminal wider than this still gets
 /// the 100-column layout (ADR-0030 decision 4).
 const MAX_WIDTH: u16 = 100;
@@ -31,12 +33,12 @@ const COMPACT_BELOW: u16 = 90;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct Presentation {
-    format: OutputFormat,
-    renderer: Renderer,
+    pub(crate) format: OutputFormat,
+    pub(crate) renderer: Renderer,
     pub(crate) color: bool,
-    interactive: bool,
-    all: bool,
-    width: u16,
+    pub(crate) interactive: bool,
+    pub(crate) all: bool,
+    pub(crate) width: u16,
 }
 
 pub(crate) struct Activity {
@@ -342,7 +344,9 @@ fn env_truthy(name: &str) -> bool {
     })
 }
 
-pub(crate) fn render<T: serde::Serialize + ResultPresentation + terminal::TerminalReport>(
+pub(crate) fn render<
+    T: serde::Serialize + ResultPresentation + plain::PlainReport + terminal::TerminalReport,
+>(
     envelope: &Envelope<T>,
     pres: Presentation,
     elapsed: Duration,
@@ -360,10 +364,18 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation + terminal::Termin
         println!("{}", serde_json::to_string(&value).expect("serializes"));
         return;
     }
+    let ctx = RenderContext {
+        presentation: pres,
+        elapsed,
+        source_base,
+        subject,
+    };
     match pres.renderer {
         Renderer::GithubActions => render_github(envelope, subject),
+        // Plain is the agent-facing line-record surface (#793); terminal
+        // renders the verdict-tag report.
+        Renderer::Plain => plain::render(envelope, &ctx),
         Renderer::Terminal => terminal::render(envelope, pres, elapsed, source_base, subject),
-        Renderer::Plain => render_report(envelope, pres, elapsed, source_base, subject),
     }
 }
 
@@ -379,189 +391,13 @@ pub(crate) struct RenderContext<'a> {
     pub(crate) subject: Option<&'a str>,
 }
 
-/// The human-first result hierarchy (#443): the verdict leads, blocking
-/// errors come before non-blocking diagnostics, secondary metadata trails
-/// each diagnostic, and execution metadata (affected files, elapsed) closes
-/// the report.
-fn render_report<T: serde::Serialize + ResultPresentation>(
-    envelope: &Envelope<T>,
-    pres: Presentation,
-    elapsed: Duration,
-    source_base: Option<&Path>,
-    subject: Option<&str>,
-) {
-    let ctx = RenderContext {
-        presentation: pres,
-        elapsed,
-        source_base,
-        subject,
-    };
-    if !envelope.result.is_artifact_stream() {
-        render_verdict(envelope, pres.color);
-    }
-    let mut ordered: Vec<&wright_driver::Diagnostic> = envelope.diagnostics.iter().collect();
-    ordered.sort_by_key(|diagnostic| severity_rank(diagnostic.severity));
-    let diagnostic_total = ordered.len();
-    let bounded = !matches!(envelope.command.as_str(), "compile" | "convert");
-    let limit = if pres.all || !bounded { usize::MAX } else { 20 };
-    for diagnostic in ordered.into_iter().take(limit) {
-        let marks = pres.marks();
-        render_diagnostic(diagnostic, pres.color, &marks);
-        // ADR-0021 decision 6: text `check`/`compile` points an agent at
-        // `wright lookup` after a rejected-name diagnostic. Owner codes are
-        // namespaced (`workshop.unknown-value.futurevaluething`), so any
-        // code segment carrying the `unknown-` kind qualifies. The
-        // structured result is unchanged; the pointer lives in text only.
-        // `unknown-language` is `WorkshopError::NotDetected` — detection
-        // found no markers and rejected no name, so there is nothing
-        // `wright lookup` could resolve; skip the hint.
-        if matches!(envelope.command.as_str(), "check" | "compile")
-            && diagnostic
-                .code
-                .split('.')
-                .any(|segment| segment.starts_with("unknown-") && segment != "unknown-language")
-        {
-            // `lookup` answers in the vocabulary of the rejected name's
-            // source (#692): an OPY diagnostic names `--language opy`, a
-            // non-default Workshop locale names `--locale`, anything else
-            // keeps the Workshop default.
-            let source = diagnostic.source.as_ref();
-            let hint = if source.is_some_and(|source| source.kind == "opy") {
-                "hint: run 'wright lookup --language opy' with the rejected name to find its spelling and signature".to_string()
-            } else if let Some(locale) = source
-                .and_then(|source| source.locale.as_deref())
-                .filter(|locale| !locale.eq_ignore_ascii_case("en-US"))
-            {
-                format!(
-                    "hint: run 'wright lookup --locale {locale}' with the rejected name to find its spelling and signature"
-                )
-            } else {
-                "hint: run 'wright lookup' with the rejected name to find its spelling and signature".to_string()
-            };
-            eprintln!("{}{}", marks.pad, dim(&hint, pres.color));
-        }
-    }
-    if bounded && !pres.all && diagnostic_total > 20 {
-        eprintln!("  diagnostics: showing 20 of {diagnostic_total}; --all to see every item");
-    }
-    if let Some(selection) = &envelope.selection {
-        if selection.withheld > 0 {
-            eprintln!(
-                "  ... {} diagnostic(s) withheld (--max)",
-                selection.withheld
-            );
-        }
-    }
-    // A gated result is a raised verdict, not a failed command: its real
-    // result body still renders — the findings are the reason it failed.
-    if envelope.ok || envelope.gated {
-        envelope.result.render_body(&ctx);
-        // The run-cache comparison (ADR-0027, #723) rides the envelope
-        // in-process — shown on every renderer, never in the JSON result,
-        // and never after an artifact stream where it would corrupt bytes.
-        if !envelope.result.is_artifact_stream() {
-            render_comparison(envelope.comparison.as_ref());
-        }
-    } else if envelope.diagnostics.is_empty() {
-        eprintln!("{}: failed", envelope.command);
-    }
-    if envelope.command == "check" {
-        render_check_footer(envelope, pres, elapsed);
-    }
-}
-
 /// Diagnostics render in action order — errors first — without changing the
 /// reported set or the driver's production order (#443).
-fn severity_rank(severity: Severity) -> u8 {
+pub(crate) fn severity_rank(severity: Severity) -> u8 {
     match severity {
         Severity::Error => 0,
         Severity::Warning => 1,
         Severity::Info => 2,
-    }
-}
-
-fn render_verdict<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>, color: bool) {
-    let status = summary_status(envelope);
-    let label = if color {
-        let code = match status {
-            "PASS" => "32",
-            "WARN" => "33",
-            _ => "31",
-        };
-        format!("\x1b[{code}m{status}\x1b[0m")
-    } else {
-        status.to_string()
-    };
-    println!("{label} {}", envelope.command);
-    // A failed command reports its diagnostics, not the default result's
-    // metadata — a default `RefsResult` would print `<unknown>` usage counts
-    // that look like real answers (#446).
-    let metadata = match envelope.command.as_str() {
-        "check" => check_metadata(envelope),
-        _ if !envelope.ok && !envelope.gated => String::new(),
-        _ => envelope.result.metadata().unwrap_or_default(),
-    };
-    if !metadata.is_empty() {
-        println!("  {}", dim(&metadata, color));
-    }
-}
-
-/// The check verdict names the blocking error count first, then the
-/// non-blocking severities (#443). Under a finding selection the envelope
-/// keeps only the true total, so the count line falls back to it.
-fn check_metadata<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) -> String {
-    if let Some(selection) = &envelope.selection {
-        return format!("{} diagnostic(s)", selection.total);
-    }
-    let mut counts = [0usize; 3];
-    for diagnostic in &envelope.diagnostics {
-        counts[severity_rank(diagnostic.severity) as usize] += 1;
-    }
-    let mut parts = Vec::new();
-    if counts[0] > 0 {
-        parts.push(format!("{} error(s)", counts[0]));
-    }
-    if counts[1] > 0 {
-        parts.push(format!("{} warning(s)", counts[1]));
-    }
-    if counts[2] > 0 {
-        parts.push(format!("{} info diagnostic(s)", counts[2]));
-    }
-    if parts.is_empty() {
-        "0 diagnostic(s)".to_string()
-    } else {
-        parts.join(", ")
-    }
-}
-
-/// The closing check summary carries only execution metadata: files the
-/// reported diagnostics point at, plus elapsed time on the interactive
-/// terminal (kept off plain output so it stays deterministic) (#443).
-fn render_check_footer<T: serde::Serialize + ResultPresentation>(
-    envelope: &Envelope<T>,
-    pres: Presentation,
-    elapsed: Duration,
-) {
-    let files: BTreeSet<String> = envelope
-        .diagnostics
-        .iter()
-        .filter_map(|diagnostic| diagnostic.span.as_ref())
-        .filter(|span| is_real_source_path(&span.path))
-        .map(|span| display_location_path(&span.path))
-        .collect();
-    let mut parts = Vec::new();
-    if !files.is_empty() {
-        parts.push(format!("{} file(s) affected", files.len()));
-    }
-    if pres.interactive {
-        parts.push(format!("{} ms", elapsed.as_millis()));
-    }
-    if !parts.is_empty() {
-        println!(
-            "{}{}",
-            pres.footer_head(),
-            dim(&parts.join(" · "), pres.color)
-        );
     }
 }
 
@@ -582,12 +418,6 @@ struct Marks {
 }
 
 impl Presentation {
-    /// Marks for a block hung directly under the verdict (envelope
-    /// diagnostics).
-    fn marks(&self) -> Marks {
-        self.connector("")
-    }
-
     /// Marks for an item under a section header's two-space indent.
     fn section_marks(&self) -> Marks {
         self.connector("  ")
@@ -846,44 +676,6 @@ impl ResultPresentation for CompileResult {
     }
 }
 
-/// The run-cache comparison line (ADR-0027, #723): the delta against the
-/// previous run or named baseline, plus the rules whose counts changed.
-/// Absent entirely when no reference existed — never an error line.
-fn render_comparison(comparison: Option<&serde_json::Value>) {
-    let Some(comparison) = comparison.filter(|c| c.is_object()) else {
-        return;
-    };
-    let delta = comparison["totalDelta"].as_i64().unwrap_or(0);
-    let sign = if delta > 0 { "+" } else { "" };
-    let reference = comparison["reference"].as_str().unwrap_or("previous");
-    println!(
-        "\nElement cost: {sign}{delta} vs {reference} run ({} total)",
-        comparison["previousTotal"].as_u64().unwrap_or(0)
-    );
-    let mut lines = Vec::new();
-    for change in comparison["changed"].as_array().into_iter().flatten() {
-        let name = change["name"].as_str().unwrap_or("?");
-        let d = change["delta"].as_i64().unwrap_or(0);
-        let s = if d > 0 { "+" } else { "" };
-        lines.push(format!(
-            "  {name}: {} -> {} ({s}{d})",
-            change["before"], change["after"]
-        ));
-    }
-    for name in comparison["added"].as_array().into_iter().flatten() {
-        lines.push(format!("  {}: added", name.as_str().unwrap_or("?")));
-    }
-    for name in comparison["removed"].as_array().into_iter().flatten() {
-        lines.push(format!("  {}: removed", name.as_str().unwrap_or("?")));
-    }
-    for line in lines.iter().take(5) {
-        println!("{line}");
-    }
-    if lines.len() > 5 {
-        println!("  ... {} more changed rule(s)", lines.len() - 5);
-    }
-}
-
 impl ResultPresentation for ConvertResult {
     fn is_artifact_stream(&self) -> bool {
         true
@@ -1082,7 +874,7 @@ impl ResultPresentation for EssentialResult {
 
 /// A reported span as `path:line:col` for inline display, or `None` when the
 /// result carries no resolved path.
-fn inline_location(span: &serde_json::Value) -> Option<String> {
+pub(crate) fn inline_location(span: &serde_json::Value) -> Option<String> {
     let path = span
         .get("path")
         .and_then(serde_json::Value::as_str)
@@ -1107,7 +899,7 @@ fn symbol_kind_heading(kind: &str) -> &str {
 /// The item array of a semantic query payload (#531): the bare array of an
 /// unselected request, or the `<key>` member of a `{<key>: [...], selection:
 /// {...}}` selected result.
-fn query_items<'a>(value: &'a serde_json::Value, key: &str) -> &'a [serde_json::Value] {
+pub(crate) fn query_items<'a>(value: &'a serde_json::Value, key: &str) -> &'a [serde_json::Value] {
     value
         .as_array()
         .or_else(|| value.get(key).and_then(serde_json::Value::as_array))
@@ -1160,7 +952,7 @@ impl ResultPresentation for RulesResult {
 }
 
 /// One rule-content node as a single `name(arg, ...)` line.
-fn render_node(node: &serde_json::Value) -> String {
+pub(crate) fn render_node(node: &serde_json::Value) -> String {
     if let Some(call) = node["call"].as_str() {
         let args = node["args"]
             .as_array()
@@ -1729,7 +1521,7 @@ fn max_envelope_severity<T: serde::Serialize + ResultPresentation>(
         .max_by_key(|severity| severity_level(*severity))
 }
 
-fn summary_status<T: serde::Serialize + ResultPresentation>(
+pub(crate) fn summary_status<T: serde::Serialize + ResultPresentation>(
     envelope: &Envelope<T>,
 ) -> &'static str {
     let mut status = if envelope.ok {
@@ -1799,7 +1591,7 @@ pub(crate) fn escape_workflow_data(value: &str) -> String {
         .replace('\n', "%0A")
 }
 
-fn is_real_source_path(path: &str) -> bool {
+pub(crate) fn is_real_source_path(path: &str) -> bool {
     !path.is_empty() && !path.starts_with('<')
 }
 
@@ -1830,6 +1622,14 @@ fn render_convert(result: &ConvertResult) {
 /// lines print as `-`/`+` rows with their own file's line number; unchanged
 /// lines are elided.
 fn render_diff_lines(original: &str, new_text: &str, indent: &str) {
+    for row in diff_rows(original, new_text) {
+        println!("{indent}{row}");
+    }
+}
+
+/// The changed rows of the diff as `{:>4} - text` / `{:>4} + text` strings
+/// (no indent), so the plain renderer's `patch:` records share one diff.
+pub(crate) fn diff_rows(original: &str, new_text: &str) -> Vec<String> {
     let old_lines: Vec<&str> = original.split('\n').collect();
     let new_lines: Vec<&str> = new_text.split('\n').collect();
     let mut lo = 0usize;
@@ -1842,14 +1642,16 @@ fn render_diff_lines(original: &str, new_text: &str, indent: &str) {
         old_hi -= 1;
         new_hi -= 1;
     }
+    let mut rows = Vec::new();
     for (removed, added) in align_lines(&old_lines[lo..old_hi], &new_lines[lo..new_hi]) {
         if let Some(index) = removed {
-            println!("{indent}{:>4} - {}", lo + index + 1, old_lines[lo + index]);
+            rows.push(format!("{:>4} - {}", lo + index + 1, old_lines[lo + index]));
         }
         if let Some(index) = added {
-            println!("{indent}{:>4} + {}", lo + index + 1, new_lines[lo + index]);
+            rows.push(format!("{:>4} + {}", lo + index + 1, new_lines[lo + index]));
         }
     }
+    rows
 }
 
 /// The differing rows of a longest-common-subsequence alignment between
@@ -1900,7 +1702,7 @@ fn array_len(value: &serde_json::Value) -> usize {
     value.as_array().map_or(0, Vec::len)
 }
 
-fn count(value: &serde_json::Value, key: &str) -> usize {
+pub(crate) fn count(value: &serde_json::Value, key: &str) -> usize {
     value
         .get(key)
         .and_then(serde_json::Value::as_u64)
@@ -1912,7 +1714,7 @@ fn count(value: &serde_json::Value, key: &str) -> usize {
 /// risk indicators, and cross-cutting state. Every line marks whether it is
 /// an exact count, a static fact, or a heuristic, and locations use real
 /// resolved paths — unmapped structures stay explicitly unmapped.
-fn rule_name(rule: &serde_json::Value) -> &str {
+pub(crate) fn rule_name(rule: &serde_json::Value) -> &str {
     match rule["name"].as_str() {
         Some("") | None => "<unnamed>",
         Some(name) => name,
@@ -1981,7 +1783,7 @@ fn lint_footer_parts(files: usize, skipped: usize, ctx: &RenderContext<'_>) -> V
 /// unknown severities conservatively ordered as warnings, and informational
 /// severities last. The driver's reported set and order are unchanged
 /// — this is a presentation-layer reorder only.
-fn finding_severity_rank(finding: &serde_json::Value) -> u8 {
+pub(crate) fn finding_severity_rank(finding: &serde_json::Value) -> u8 {
     match finding.get("severity").and_then(serde_json::Value::as_str) {
         Some("error") => 0,
         Some("info") | Some("notice") => 2,
@@ -2468,69 +2270,9 @@ fn finding_severity_label(finding: &serde_json::Value, color: bool) -> String {
     }
 }
 
-/// The bare `inspect` overview (#446): the program inventory and a bounded
-/// rule preview answer "what is this", and the detail commands route the
-/// reader to the query that owns each full answer — the overview never dumps
-/// the symbol or reference lists those queries serve.
-fn render_diagnostic(diagnostic: &wright_driver::Diagnostic, color: bool, marks: &Marks) {
-    let sev = diagnostic.severity.as_str();
-    let label = if color {
-        let code = match diagnostic.severity {
-            Severity::Error => "31",
-            Severity::Warning => "33",
-            Severity::Info => "36",
-        };
-        format!("\x1b[{code}m{sev}\x1b[0m")
-    } else {
-        sev.to_string()
-    };
-    eprintln!(
-        "{}{label}[{}]: {}",
-        marks.head, diagnostic.code, diagnostic.message
-    );
-    // Secondary notes — locations without a mapped source file, the owning
-    // stage, and non-native input origins — render dimmed under the problem
-    // line rather than competing with it (#443).
-    let mut notes = Vec::new();
-    if let Some(span) = &diagnostic.span {
-        if is_real_source_path(&span.path) {
-            eprintln!(
-                "{}--> {}:{}:{}",
-                marks.pad,
-                display_location_path(&span.path),
-                span.start.line,
-                span.start.col
-            );
-            // The source frame stays on the diagnostic stream so the context
-            // is emitted directly with the diagnostic it explains (#443).
-            if let Some(context) =
-                source_context(&span.path, span.start.line, span.start.col, &marks.pad)
-            {
-                eprintln!("{context}");
-            }
-        } else {
-            notes.push(format!(
-                "at {}:{}:{} (no source file)",
-                span.path, span.start.line, span.start.col
-            ));
-        }
-    }
-    notes.push(diagnostic.stage.as_str().to_string());
-    if let Some(source) = &diagnostic.source {
-        if source.kind != "workshop" {
-            notes.push(format!("{kind} source", kind = source.kind));
-        }
-    }
-    eprintln!(
-        "{}{}",
-        marks.pad,
-        dim(&format!("= {}", notes.join(" · ")), color)
-    );
-}
-
 /// The user-facing spelling of a reported path: cwd-relative when possible so
 /// locations read the same regardless of which stage produced them (#443).
-fn display_location_path(path: &str) -> String {
+pub(crate) fn display_location_path(path: &str) -> String {
     wright_driver::input::display_path(Path::new(path))
 }
 
@@ -2939,39 +2681,6 @@ mod tests {
             result: CheckResult::default(),
             comparison: None,
         }
-    }
-
-    #[test]
-    fn check_metadata_counts_errors_first() {
-        let envelope = check_envelope(
-            vec![
-                diagnostic(Severity::Warning),
-                diagnostic(Severity::Error),
-                diagnostic(Severity::Warning),
-                diagnostic(Severity::Info),
-            ],
-            None,
-        );
-        assert_eq!(
-            check_metadata(&envelope),
-            "1 error(s), 2 warning(s), 1 info diagnostic(s)"
-        );
-        let clean = check_envelope(Vec::new(), None);
-        assert_eq!(check_metadata(&clean), "0 diagnostic(s)");
-    }
-
-    #[test]
-    fn check_metadata_under_selection_reports_the_true_total() {
-        let envelope = check_envelope(
-            vec![diagnostic(Severity::Error)],
-            Some(wright_driver::SelectionOutcome {
-                total: 5,
-                withheld: 2,
-                by_code: Default::default(),
-                max_severity: Some(Severity::Error),
-            }),
-        );
-        assert_eq!(check_metadata(&envelope), "5 diagnostic(s)");
     }
 
     fn lint_result(

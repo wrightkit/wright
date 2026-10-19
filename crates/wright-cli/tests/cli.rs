@@ -156,8 +156,8 @@ fn compile_over_element_limit_warns_and_still_emits() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("warning[target-element-limit]"),
-        "the limit warning reaches stderr: {stderr}"
+        stderr.contains("diagnostic: warning target-element-limit"),
+        "the limit warning reaches stderr as a record: {stderr}"
     );
     assert!(stderr.contains("32768"), "{stderr}");
 
@@ -233,7 +233,7 @@ fn compile_writes_the_default_file_and_reports_status_only() {
     );
     let stdout = String::from_utf8_lossy(&text.stdout);
     assert!(stdout.contains("PASS compile"), "{stdout}");
-    assert!(stdout.contains("wrote mode.ow"), "{stdout}");
+    assert!(stdout.contains("output: path=mode.ow"), "{stdout}");
     assert!(stdout.contains(&sha256_of(&written)), "{stdout}");
     assert!(!stdout.contains("Disable Inspector Recording"), "{stdout}");
 
@@ -614,28 +614,46 @@ fn check_text_leads_with_verdict_and_blocking_count() {
     assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut lines = stdout.lines();
-    assert_eq!(lines.next(), Some("ERROR check"), "{stdout}");
+    let verdict = lines.next().unwrap_or_default().to_string();
+    assert!(verdict.starts_with("ERROR check root="), "{stdout}");
     let counts = lines.next().unwrap_or_default().to_string();
-    assert!(counts.contains("1 error(s)"), "{stdout}");
-    assert!(counts.contains("2 warning(s)"), "{stdout}");
-    assert_eq!(lines.next(), Some("  1 file(s) affected"), "{stdout}");
-    assert!(lines.next().is_none(), "the footer stays compact: {stdout}");
+    assert_eq!(
+        counts, "summary: errors=1 warnings=2 notes=0 affected=1",
+        "{stdout}"
+    );
+    // The shared follow-ups (#792) then the lookup the rejected name needs.
+    for expected in [
+        "next: wright lint",
+        "next: wright analyze",
+        "next: wright inspect",
+    ] {
+        assert_eq!(lines.next(), Some(expected), "{stdout}");
+    }
+    assert_eq!(lines.next(), Some("next: wright lookup"), "{stdout}");
+    assert!(lines.next().is_none(), "the report stays compact: {stdout}");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let error_at = stderr.find("error[").expect("an error diagnostic");
-    let warning_at = stderr.find("warning[").expect("a warning diagnostic");
+    let error_at = stderr
+        .find("diagnostic: error ")
+        .expect("an error diagnostic");
+    let warning_at = stderr
+        .find("diagnostic: warning ")
+        .expect("a warning diagnostic");
     assert!(
         error_at < warning_at,
         "blocking errors precede warnings: {stderr}"
     );
-    assert!(stderr.contains(" --> "), "a mapped location: {stderr}");
     assert!(
-        stderr.contains("Set Global Variable(B, FutureValueThing(2));"),
-        "the source context sits with the diagnostic: {stderr}"
+        stderr.contains("at=") && stderr.contains("mixed.txt:"),
+        "a mapped location is one path:line:col token: {stderr}"
     );
     assert!(
-        stderr.contains("= analysis"),
-        "stage stays secondary: {stderr}"
+        stderr.contains("unknown-value.futurevaluething"),
+        "the rejected name's code rides the record: {stderr}"
+    );
+    assert!(
+        stderr.contains("stage=analysis"),
+        "the stage is a field, not a sentence: {stderr}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -690,8 +708,8 @@ fn terminal_renderer_marks_independent_diagnostics() {
 
 #[test]
 fn plain_renderer_keeps_the_undecorated_diagnostic_layout() {
-    // `plain` is the deterministic, undecorated contract (#703): no box
-    // connectors, same lines as before the terminal refinement.
+    // `plain` is the deterministic line-record surface (#793): no box
+    // connectors, `diagnostic:` records in place of the sentence layout.
     let path = temp_file("mixed.txt", MIXED_CHECK_SOURCE);
     let output = run(&[
         "check",
@@ -704,11 +722,14 @@ fn plain_renderer_keeps_the_undecorated_diagnostic_layout() {
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        !stderr.contains('├') && !stderr.contains('╰'),
+        !stderr.contains('├') && !stderr.contains('╰') && !stderr.contains(" --> "),
         "plain stays undecorated: {stderr}"
     );
-    assert!(stderr.contains("error["), "{stderr}");
-    assert!(stderr.contains("\n  --> "), "{stderr}");
+    assert!(stderr.contains("diagnostic: error "), "{stderr}");
+    assert!(
+        stderr.contains("at=") && stderr.contains("mixed.txt:"),
+        "{stderr}"
+    );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -893,19 +914,19 @@ fn terminal_renderer_marks_analyze_risks_and_cfg_blocks() {
 
 #[test]
 fn check_unmapped_locations_are_not_fabricated() {
-    // `<stdin>` is a pseudo-path: the position is honest metadata, never a
-    // file-style `-->` location.
+    // `<stdin>` is a pseudo-path: the record carries the position verbatim
+    // as `at=<stdin>:l:c`, never dressed up as a file location.
     let output = run_with_stdin(
         &["check", "-", "--renderer", "plain", "--color", "never"],
         "rule (\"x\") { event { Ongoing - Global; } actions { If(True); }",
     );
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!stderr.contains("--> <stdin>"), "{stderr}");
     assert!(
-        stderr.contains("= at <stdin>:1:63"),
-        "the unmapped position stays secondary metadata: {stderr}"
+        stderr.contains("at=<stdin>:1:63"),
+        "the unmapped position is one verbatim token: {stderr}"
     );
+    assert!(!stderr.contains("-->"), "{stderr}");
 }
 
 #[test]
@@ -922,10 +943,33 @@ fn check_success_renders_a_compact_deterministic_summary() {
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stderr.is_empty());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(
-        stdout, "PASS check\n  0 diagnostic(s)\n",
-        "a clean check is a two-line summary on the deterministic plain surface"
+    let mut lines = stdout.lines();
+    assert!(
+        lines
+            .next()
+            .unwrap_or_default()
+            .starts_with("PASS check root="),
+        "{stdout}"
     );
+    assert_eq!(
+        lines.next(),
+        Some("summary: errors=0 warnings=0 notes=0"),
+        "{stdout}"
+    );
+    // `check` reports the program summary and shared follow-ups (#792).
+    assert_eq!(
+        lines.next(),
+        Some("program: files=1 rules=1 globalVariables=0 playerVariables=0 subroutines=0"),
+        "{stdout}"
+    );
+    for expected in [
+        "next: wright lint",
+        "next: wright analyze",
+        "next: wright inspect",
+    ] {
+        assert_eq!(lines.next(), Some(expected), "{stdout}");
+    }
+    assert!(lines.next().is_none(), "{stdout}");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -1048,7 +1092,7 @@ fn lint_over_workshop_input_reports_findings_in_text_and_json() {
     assert!(stdout.contains("WARN lint"), "summary line: {stdout}");
     assert!(stdout.contains("min-wait-loop"), "findings: {stdout}");
     assert!(
-        stdout.contains("evidence:"),
+        stdout.contains("evidence="),
         "text mode exposes the evidence class: {stdout}"
     );
     let output = run(&["lint", path.to_str().unwrap(), "-f", "json"]);
@@ -1122,8 +1166,11 @@ fn lint_fix_previews_and_writes_validated_fixes() {
     let output = run(&["lint", path, "--fix"]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("fix[duplicate-condition]"), "{stdout}");
-    assert!(stdout.contains("fix[repeated-value]"), "{stdout}");
+    assert!(
+        stdout.contains("fix: preview duplicate-condition"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("fix: preview repeated-value"), "{stdout}");
     assert_eq!(
         std::fs::read_to_string(path).unwrap(),
         FIXABLE_WORKSHOP,
@@ -1133,8 +1180,11 @@ fn lint_fix_previews_and_writes_validated_fixes() {
     let output = run(&["lint", path, "--fix", "--write"]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("applied[duplicate-condition]"), "{stdout}");
-    assert!(stdout.contains("applied[repeated-value]"), "{stdout}");
+    assert!(
+        stdout.contains("fix: applied duplicate-condition"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("fix: applied repeated-value"), "{stdout}");
     let applied = std::fs::read_to_string(path).unwrap();
     assert!(
         !applied.contains("Else If(Compare(Global.index, ==, 0));"),
@@ -1514,7 +1564,7 @@ fn selection_never_changes_the_verdict_or_exit_code() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("WARN lint"), "{stdout}");
-    assert!(stdout.contains("10 finding(s)"), "{stdout}");
+    assert!(stdout.contains("findings=10"), "{stdout}");
 
     let _ = std::fs::remove_dir_all(broken.parent().unwrap());
     let _ = std::fs::remove_dir_all(cake.parent().unwrap());
@@ -1544,8 +1594,10 @@ fn fail_on_raises_warn_to_fail_on_every_renderer() {
     assert_eq!(gated.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&gated.stdout);
     assert!(stdout.contains("FAIL lint"), "{stdout}");
-    assert!(stdout.contains("Lint findings"), "{stdout}");
-    assert!(stdout.contains("warning[while-without-wait]"), "{stdout}");
+    assert!(
+        stdout.contains("finding: warning while-without-wait"),
+        "{stdout}"
+    );
 
     // Terminal.
     let terminal = run(&[
@@ -1660,8 +1712,8 @@ fn lint_max_reports_the_withheld_count_in_text_and_json() {
     let output = run(&["lint", path.to_str().unwrap(), "--max", "3"]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("7 finding(s) withheld"), "{stdout}");
-    assert!(stdout.contains("10 finding(s)"), "{stdout}");
+    assert!(stdout.contains("withheld=7"), "{stdout}");
+    assert!(stdout.contains("findings=10"), "{stdout}");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -1681,7 +1733,7 @@ fn essential_reports_bound_lists_and_expose_expansion() {
             .contains("--all")
     );
     let output = run(&["inspect", path.to_str().unwrap()]);
-    assert!(String::from_utf8_lossy(&output.stdout).contains("showing 20 of 21"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("truncated: rules=20/21"));
     let full = parse_json(&run(&["inspect", path.to_str().unwrap(), "--all", "-f", "json"]).stdout)
         ["result"]
         .clone();
@@ -1710,7 +1762,8 @@ fn essential_reports_bound_lists_and_expose_expansion() {
                     && note["expand"].as_str().unwrap().contains("--all"))
         );
         let text = run(&["inspect", query, path.to_str().unwrap()]);
-        assert!(String::from_utf8_lossy(&text.stdout).contains("showing 20 of 21"));
+        let stdout = String::from_utf8_lossy(&text.stdout);
+        assert!(stdout.contains("truncated: items=20/21"), "{stdout}");
         let all = parse_json(
             &run(&[
                 "inspect",
@@ -1838,7 +1891,7 @@ fn analyze_selection_narrows_facts_risks() {
     assert!(stdout.contains("WARN analyze"), "{stdout}");
     let output = run(&["analyze", path.to_str().unwrap(), "--max", "2"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("8 finding(s) withheld"), "{stdout}");
+    assert!(stdout.contains("withheld=8"), "{stdout}");
 
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -2003,10 +2056,18 @@ fn lint_text_collapses_identical_findings_into_one_entry() {
 }
 ",
     );
-    let output = run(&["lint", path.to_str().unwrap()]);
+    // The terminal view collapses the identical entries (#735).
+    let output = run(&[
+        "lint",
+        path.to_str().unwrap(),
+        "--renderer",
+        "terminal",
+        "--color",
+        "never",
+    ]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("4 warning(s)"), "{stdout}");
+    assert!(stdout.contains("4 warnings"), "{stdout}");
     assert_eq!(
         stdout.matches("[repeated-value]").count(),
         1,
@@ -2026,6 +2087,24 @@ fn lint_text_collapses_identical_findings_into_one_entry() {
         stdout.matches(" --> ").count(),
         8,
         "two grouped locations per warning entry plus four expensive-loop-check locations: {stdout}"
+    );
+
+    // The record surface never collapses: each finding is its own
+    // `finding:` record carrying the repeated-value count (#793).
+    let output = run(&["lint", path.to_str().unwrap()]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("findings=8"), "{stdout}");
+    assert_eq!(
+        stdout.matches("finding: warning repeated-value").count(),
+        2,
+        "each loop's finding is its own record: {stdout}"
+    );
+    assert!(
+        stdout.contains("count=2")
+            && stdout
+                .contains("expression=\"distance(getPosition(eventPlayer), vector(0, 0, 0))\""),
+        "{stdout}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -2129,26 +2208,22 @@ fn lint_text_orders_all_severity_bands_by_action_priority() {
 }
 
 #[test]
-fn lint_text_presents_a_finding_with_location_context_and_secondary_metadata() {
+fn lint_text_presents_a_finding_with_location_and_secondary_metadata() {
+    // The record form carries what the terminal's stacked entry did: the
+    // location is one `at=` token, evidence and message are fields (#793).
     let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
     let output = run(&["lint", path.to_str().unwrap()]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("WARN lint"), "{stdout}");
-    assert!(stdout.contains("1 warning(s)"), "{stdout}");
-    let message = stdout
-        .find("warning[min-wait-loop]: loop body waits")
-        .expect("primary line: {stdout}");
-    let location = stdout.find(" --> ").expect("location: {stdout}");
-    let frame = stdout.find(" | 11 | ").expect("source frame: {stdout}");
-    let evidence = stdout
-        .find("= evidence: static-indicator")
-        .expect("notes: {stdout}");
+    assert!(stdout.contains("warnings=1"), "{stdout}");
     assert!(
-        message < location && location < frame && frame < evidence,
+        stdout.contains(
+            "finding: warning min-wait-loop at=flow.txt:11:9 evidence=static-indicator message=\"loop body waits at the workshop minimum rate; the loop runs at maximum frequency\""
+        ),
         "{stdout}"
     );
-    assert!(stdout.contains("1 file(s) affected"), "{stdout}");
+    assert!(stdout.contains("affected=1"), "{stdout}");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -2162,6 +2237,22 @@ fn lint_text_resolves_locations_under_a_subdirectory_input_root() {
     let path = dir.join("sub").join("flow.txt");
     std::fs::write(&path, corpus_workshop("synthetic/control-flow")).unwrap();
     let output = run(&["lint", path.to_str().unwrap()]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("at=flow.txt:11:9"),
+        "the record's location resolves under the input root: {stdout}"
+    );
+
+    // The terminal view keeps the resolved absolute path and source frame.
+    let output = run(&[
+        "lint",
+        path.to_str().unwrap(),
+        "--renderer",
+        "terminal",
+        "--color",
+        "never",
+    ]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -2179,8 +2270,11 @@ fn lint_text_clean_input_reports_a_pass_verdict_and_no_findings() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("PASS lint"), "{stdout}");
-    assert!(stdout.contains("0 finding(s)"), "{stdout}");
-    assert!(stdout.contains("Lint findings\n  none"), "{stdout}");
+    assert!(stdout.contains("findings=0"), "{stdout}");
+    assert!(
+        !stdout.contains("finding:"),
+        "a clean result lists no records: {stdout}"
+    );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -3508,13 +3602,17 @@ fn symbols_lists_program_symbols_and_filters_by_kind() {
     let output = run(&["inspect", "symbols", path]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("PASS symbols"), "{stdout}");
-    assert!(stdout.contains("5 symbol(s)"), "{stdout}");
-    // Symbols group by kind; each entry names its primary location (#446).
-    assert!(stdout.contains("Global variables (3)"), "{stdout}");
-    assert!(stdout.contains("cakePos --> cake.txt:3:14"), "{stdout}");
-    assert!(stdout.contains("Rules (2)"), "{stdout}");
-    assert!(stdout.contains("cake --> cake.txt:8:1"), "{stdout}");
+    assert!(stdout.contains("SYMBOLS symbols"), "{stdout}");
+    assert!(stdout.contains("summary: symbols=5"), "{stdout}");
+    // Each symbol is a `symbol:` record naming kind and location (#446/#793).
+    assert!(
+        stdout.contains("symbol: globalVariable name=cakePos at=cake.txt:3:14"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("symbol: rule name=cake at=cake.txt:8:1"),
+        "{stdout}"
+    );
 
     let output = run(&["inspect", "symbols", path, "-f", "json"]);
     assert!(output.status.success(), "{}", command_result(&output));
@@ -3560,22 +3658,20 @@ fn refs_reports_references_and_usage_for_a_named_symbol() {
     let output = run(&["inspect", "refs", "cakePos", path]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("PASS refs"), "{stdout}");
+    assert!(stdout.contains("REFS refs"), "{stdout}");
     // Target identity and the usage summary lead the location list (#446).
     assert!(
-        stdout.contains("16 read(s), 1 write(s)"),
+        stdout.contains(
+            "summary: symbol=cakePos kind=globalVariable reads=16 writes=1 calls=0 rules=1"
+        ),
         "the usage header: {stdout}"
     );
     assert!(
-        stdout.contains("References to cakePos (globalVariable)"),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains("declaration --> cake.txt:3:14"),
+        stdout.contains("ref: declaration at=cake.txt:3:14"),
         "locations carry source positions: {stdout}"
     );
     // 18 references bound to a first page; JSON is the complete path (#446).
-    assert!(!stdout.contains("more reference(s)"), "{stdout}");
+    assert!(!stdout.contains("truncated:"), "{stdout}");
 
     let output = run(&["inspect", "refs", "cakePos", path, "-f", "json"]);
     assert!(output.status.success(), "{}", command_result(&output));
@@ -3611,15 +3707,14 @@ fn cfg_reports_the_named_rules_control_flow_graph() {
     let output = run(&["inspect", "cfg", "cake", path]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("PASS cfg"), "{stdout}");
+    assert!(stdout.contains("CFG cfg"), "{stdout}");
     // Rule identity and the graph shape lead the block detail (#446).
     assert!(
-        stdout.contains("Control-flow graph of rule \"cake\""),
+        stdout.contains("summary: rule=cake blocks=18 edges=22"),
         "{stdout}"
     );
-    assert!(stdout.contains("block(s), "), "{stdout}");
-    let shape = stdout.find("edge(s):").expect("shape summary");
-    let detail = stdout.find("block 0 (entry)").expect("block detail");
+    let shape = stdout.find("summary:").expect("shape summary");
+    let detail = stdout.find("block: id=0 kind=entry").expect("block detail");
     assert!(shape < detail, "shape summary before blocks: {stdout}");
 
     let output = run(&["inspect", "cfg", "cake", path, "-f", "json"]);
@@ -3649,8 +3744,11 @@ fn callgraph_reports_subroutine_call_edges() {
     let output = run(&["inspect", "callgraph", path]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("PASS callgraph"), "{stdout}");
-    assert!(stdout.contains("player starts -> showStatus"), "{stdout}");
+    assert!(stdout.contains("CALLGRAPH callgraph"), "{stdout}");
+    assert!(
+        stdout.contains("edge: caller=\"player starts\" callee=showStatus"),
+        "{stdout}"
+    );
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
 
@@ -3664,14 +3762,17 @@ fn callgraph_ranks_fan_in_and_fan_out_before_the_edge_list() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     // The shape summary leads, then notable fan-in/fan-out, then edges (#446).
     assert!(
-        stdout.contains("3 edge(s): 2 calling rule(s), 2 subroutine(s) called"),
+        stdout.contains("summary: edges=3 callers=2 callees=2"),
         "{stdout}"
     );
-    assert!(stdout.contains("shared: 2 caller(s)"), "{stdout}");
-    assert!(stdout.contains("first: calls 2 subroutine(s)"), "{stdout}");
-    let most_called = stdout.find("Most-called subroutines").unwrap();
-    let edges = stdout.find("Edges").unwrap();
-    assert!(most_called < edges, "ranking before edge list: {stdout}");
+    assert!(
+        stdout.contains("fan-in: subroutine=shared callers=2"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("fan-out: rule=first calls=2"), "{stdout}");
+    let fan_in = stdout.find("fan-in:").unwrap();
+    let edges = stdout.find("edge:").unwrap();
+    assert!(fan_in < edges, "ranking before edge list: {stdout}");
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
 
@@ -3705,8 +3806,11 @@ fn callgraph_highlight_sections_fold_beyond_the_bound() {
     let output = run(&["inspect", "callgraph", path]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("sub0: 2 caller(s)"), "{stdout}");
-    assert!(stdout.contains("showing 20 of 24"), "{stdout}");
+    assert!(
+        stdout.contains("fan-in: subroutine=sub0 callers=2"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("truncated: items=20/24"), "{stdout}");
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
 
@@ -3724,7 +3828,7 @@ fn cost_run_cache_compares_against_the_previous_run() {
     let first = run(&["inspect", "cost", path]);
     assert!(first.status.success(), "{}", command_result(&first));
     assert!(
-        !String::from_utf8_lossy(&first.stdout).contains("vs previous run"),
+        !String::from_utf8_lossy(&first.stdout).contains("comparison:"),
         "no reference on a first run"
     );
     assert!(dir.join(".wright").is_dir(), "the run wrote a record");
@@ -3732,8 +3836,11 @@ fn cost_run_cache_compares_against_the_previous_run() {
     // The second run of the same key reports a zero delta.
     let second = run(&["inspect", "cost", path]);
     let stdout = String::from_utf8_lossy(&second.stdout);
-    assert!(stdout.contains("vs previous run"), "{stdout}");
-    assert!(stdout.contains("Element cost: 0 "), "{stdout}");
+    assert!(
+        stdout.contains("comparison: reference=previous"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("delta=0"), "{stdout}");
 
     // The comparison rides the envelope, never the default JSON result.
     let json = run(&["inspect", "cost", path, "-f", "json"]);
@@ -3768,7 +3875,7 @@ fn cost_run_cache_compares_against_the_previous_run() {
             command_result(&output)
         );
         assert!(
-            !String::from_utf8_lossy(&output.stdout).contains("vs previous run"),
+            !String::from_utf8_lossy(&output.stdout).contains("comparison:"),
             "{args:?} suppressed the comparison"
         );
         let after = std::fs::read_dir(dir.join(".wright")).map(|r| r.count());
@@ -3781,7 +3888,7 @@ fn cost_run_cache_compares_against_the_previous_run() {
     assert!(save.status.success(), "{}", command_result(&save));
     let named = run(&["inspect", "cost", path, "--baseline", "v1"]);
     let stdout = String::from_utf8_lossy(&named.stdout);
-    assert!(stdout.contains("baseline:v1"), "{stdout}");
+    assert!(stdout.contains("reference=baseline:v1"), "{stdout}");
     let unknown = run(&["inspect", "cost", path, "--baseline", "nope"]);
     assert_eq!(
         unknown.status.code(),
@@ -3820,8 +3927,11 @@ fn cost_run_cache_is_shared_by_compile_and_inspect() {
     let inspected = run(&["inspect", "cost", path]);
     assert!(inspected.status.success(), "{}", command_result(&inspected));
     let stdout = String::from_utf8_lossy(&inspected.stdout);
-    assert!(stdout.contains("vs previous run"), "{stdout}");
-    assert!(stdout.contains("Element cost: 0 "), "{stdout}");
+    assert!(
+        stdout.contains("comparison: reference=previous"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("delta=0"), "{stdout}");
     assert_eq!(cache_records(), compiled_records);
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -3843,10 +3953,16 @@ fn cost_run_cache_names_added_and_grown_rules() {
     std::fs::write(&path, grown).unwrap();
     let second = run(&["inspect", "cost", path_str]);
     let stdout = String::from_utf8_lossy(&second.stdout);
-    assert!(stdout.contains("vs previous run"), "{stdout}");
-    assert!(stdout.contains("a: "), "grown rule a is named: {stdout}");
     assert!(
-        stdout.contains("b: added"),
+        stdout.contains("comparison: reference=previous"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("change: rule=a"),
+        "grown rule a is named: {stdout}"
+    );
+    assert!(
+        stdout.contains("change: rule=b added"),
         "added rule b is named: {stdout}"
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -3950,25 +4066,31 @@ fn cost_reports_exact_counts_and_selected_findings() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     // The cost verdict counts static finding severities: warnings warn (#635).
     assert!(stdout.contains("WARN cost"), "{stdout}");
-    assert!(stdout.contains("3960 emitted byte(s)"), "{stdout}");
-    assert!(stdout.contains("29 action(s)"), "{stdout}");
-    // The findings are the same objects `lint` serves (#788) — resolved span
-    // and fix affordances included — so the default view is byte-bounded and
-    // names the true total rather than listing every entry.
-    assert!(stdout.contains("of 10"), "{stdout}");
-    // Each repeated-value finding names its expression (#735): `--all`
-    // renders the nine cake findings as nine distinguishable entries.
-    let output = run(&["inspect", "cost", path, "--all"]);
-    assert!(output.status.success(), "{}", command_result(&output));
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("emittedBytes=3960"), "{stdout}");
+    assert!(stdout.contains("actions=29"), "{stdout}");
+    // The bounded default page states what it withheld: the shown subset,
+    // the true total, and the expansion command.
     assert_eq!(
-        stdout.matches("warning[repeated-value]").count(),
-        9,
+        stdout.matches("finding: warning repeated-value").count(),
+        3,
         "{stdout}"
     );
+    assert!(stdout.contains("truncated: findings=3/10"), "{stdout}");
+    // Each repeated-value finding names its expression (#735), so the nine
+    // cake findings render as nine distinguishable records under `--all`.
+    let full = run(&["inspect", "cost", path, "--all"]);
+    assert!(full.status.success(), "{}", command_result(&full));
+    let full_stdout = String::from_utf8_lossy(&full.stdout);
+    assert_eq!(
+        full_stdout
+            .matches("finding: warning repeated-value")
+            .count(),
+        9,
+        "{full_stdout}"
+    );
     assert!(
-        stdout.contains("`add(valueInArray(cakePos, 7), vector(0, i2, 0))` is evaluated"),
-        "{stdout}"
+        full_stdout.contains("`add(valueInArray(cakePos, 7), vector(0, i2, 0))` is evaluated"),
+        "{full_stdout}"
     );
     // Repeated identical findings still collapse into one counted entry
     // (#446): two hot loops raise the same min-wait-loop finding.
@@ -3992,9 +4114,10 @@ fn cost_reports_exact_counts_and_selected_findings() {
     let output = run(&["inspect", "cost", identical.to_str().unwrap()]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("min-wait-loop] (2 occurrences)"),
-        "{stdout}"
+    assert_eq!(
+        stdout.matches("finding: warning min-wait-loop").count(),
+        2,
+        "each identical finding is its own record: {stdout}"
     );
 
     let output = run(&["inspect", "cost", path, "-f", "json"]);
@@ -4047,13 +4170,7 @@ fn cost_text_reports_the_element_budget_and_rule_shares() {
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains(&format!(
-            "{total} element(s) of the 32768-element budget [exact]"
-        )),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains("not a statement of client importability"),
+        stdout.contains(&format!("cost: elements={total} budget=32768")),
         "{stdout}"
     );
     // The payload is already ranked by count, largest first; the text view
@@ -4067,11 +4184,12 @@ fn cost_text_reports_the_element_budget_and_rule_shares() {
     );
     let mut offset = 0;
     for rule in rules {
-        // Each share renders `N element(s)  <name>  <path:line:col>` (#722).
+        // Each share renders `share: rule=<name> index=<i> elements=<n>` (#722).
         let needle = format!(
-            "{} element(s)  {}",
-            rule["count"].as_u64().unwrap(),
-            rule["name"].as_str().unwrap()
+            "share: rule={} index={} elements={}",
+            rule["name"].as_str().unwrap(),
+            rule["index"].as_u64().unwrap(),
+            rule["count"].as_u64().unwrap()
         );
         offset = stdout[offset..]
             .find(&needle)
@@ -4113,19 +4231,20 @@ fn cost_reports_unavailable_element_count_with_budget_and_reason() {
     let output = run(&["inspect", "cost", failing]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("emitted byte(s) unavailable"), "{stdout}");
     assert!(
-        stdout.contains("emitted bytes: unavailable — unknown action spelling 'rawWorkshopAction'"),
+        stdout.contains("emittedBytes=unavailable")
+            && stdout
+                .contains("emittedBytesUnavailable=\"unknown action spelling 'rawWorkshopAction'"),
         "{stdout}"
     );
     assert!(
         stdout.contains(
-            "element count unavailable: invalid program: unknown action spelling 'rawWorkshopAction' for locale 'en-us' — the 32768-element budget still applies"
+            "cost: elements=unavailable budget=32768 elementCountUnavailable=\"invalid program: unknown action spelling 'rawWorkshopAction' for locale 'en-us'\""
         ),
         "{stdout}"
     );
-    assert!(!stdout.contains("0 element(s)"), "{stdout}");
-    assert!(!stdout.contains("emitted bytes: 0"), "{stdout}");
+    assert!(!stdout.contains("elements=0"), "{stdout}");
+    assert!(!stdout.contains("emittedBytes=0"), "{stdout}");
 
     let json = run(&["inspect", "cost", failing, "-f", "json", "--all"]);
     assert!(json.status.success(), "{}", command_result(&json));
@@ -4233,7 +4352,7 @@ fn cost_rule_shares_rank_and_cap_at_five_by_default() {
     let text = run(&["inspect", "cost", path]);
     assert!(text.status.success(), "{}", command_result(&text));
     let stdout = String::from_utf8_lossy(&text.stdout);
-    assert!(stdout.contains("showing 5 of 25"), "{stdout}");
+    assert!(stdout.contains("truncated: rules=5/25"), "{stdout}");
 
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
@@ -4386,7 +4505,7 @@ fn analyze_lint_and_cost_report_the_same_rule_and_finding_totals() {
     let fix = run(&["lint", path, "--fix"]);
     assert!(fix.status.success(), "{}", command_result(&fix));
     let stdout = String::from_utf8_lossy(&fix.stdout);
-    assert!(stdout.contains("across 3 rule(s)"), "{stdout}");
+    assert!(stdout.contains("program: files=1 rules=3"), "{stdout}");
 
     // Finding totals: one `while-without-wait` info finding — lint's whole
     // set, cost's whole set, and analyze's risk subset all report it with
@@ -4519,11 +4638,14 @@ fn inspect_names_the_detail_query_commands() {
         "wright inspect callgraph",
         "wright inspect cost",
     ] {
-        assert!(stdout.contains(pointer), "{pointer}: {stdout}");
+        assert!(
+            stdout.contains(&format!("next: {pointer}")),
+            "{pointer}: {stdout}"
+        );
     }
     // The program inventory leads; the detail commands close (#446).
     assert!(
-        stdout.find("Program overview").unwrap() < stdout.find("Detail commands").unwrap(),
+        stdout.find("summary:").unwrap() < stdout.find("next:").unwrap(),
         "{stdout}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -4541,7 +4663,7 @@ fn inspect_names_unnamed_rules_by_index() {
     let output = run(&["inspect", path.to_str().unwrap()]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\n  rule 0\n"), "{stdout}");
+    assert!(stdout.contains("rule: name=<unnamed> id=0"), "{stdout}");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -4578,17 +4700,17 @@ fn inspect_overview_and_cfg_bound_large_detail() {
     let output = run(&["inspect", path]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("13 rule(s)"), "{stdout}");
-    assert!(!stdout.contains("more rule(s)"), "{stdout}");
+    assert!(stdout.contains("rules=13"), "{stdout}");
+    assert!(!stdout.contains("truncated:"), "{stdout}");
 
     let output = run(&["inspect", "cfg", "r0", path]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("14 block(s), 17 edge(s)"),
+        stdout.contains("blocks=14") && stdout.contains("edges=17"),
         "shape summary: {stdout}"
     );
-    assert!(!stdout.contains("more block(s)"), "{stdout}");
+    assert!(!stdout.contains("truncated:"), "{stdout}");
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
 
@@ -4724,10 +4846,10 @@ fn lookup_resolves_a_display_name_to_a_rendered_signature() {
     let output = run(&["lookup", "create hud text"]);
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("[action]"), "{stdout}");
-    assert!(stdout.contains("createHudText"), "{stdout}");
+    assert!(stdout.contains("entry: action"), "{stdout}");
+    assert!(stdout.contains("identity=createHudText"), "{stdout}");
     assert!(
-        stdout.contains("Create HUD Text("),
+        stdout.contains("signature=\"Create HUD Text("),
         "a callable renders its signature: {stdout}"
     );
 }
@@ -4782,8 +4904,8 @@ fn lookup_within_lists_an_enums_members() {
     let output = run(&["lookup", "--within", "Team", "--kind", "enum-member"]);
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("All Teams [enumMember]"), "{stdout}");
-    assert!(stdout.contains("Team 1 [enumMember]"), "{stdout}");
+    assert!(stdout.contains("name=\"All Teams\""), "{stdout}");
+    assert!(stdout.contains("name=\"Team 1\""), "{stdout}");
 }
 
 #[test]
@@ -4862,8 +4984,8 @@ fn lookup_names_opy_rs_when_the_provider_cannot_answer() {
 
 #[test]
 fn check_text_points_unknown_names_at_lookup() {
-    // ADR-0021 decision 6: a rejected name in text output ends with a
-    // one-line pointer to the lookup surface.
+    // ADR-0021 decision 6, in record form (#793): a rejected name closes
+    // the report with a `next:` follow-up pointing at the lookup surface.
     let path = temp_file("lookup-hint.txt", MIXED_CHECK_SOURCE);
     let output = run(&[
         "check",
@@ -4874,21 +4996,21 @@ fn check_text_points_unknown_names_at_lookup() {
         "never",
     ]);
     assert_eq!(output.status.code(), Some(1));
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stderr.contains("hint: run 'wright lookup'"),
-        "the unknown-value diagnostic carries the pointer: {stderr}"
+        stdout.contains("next: wright lookup\n"),
+        "the unknown-value diagnostic carries the pointer: {stdout}"
     );
     assert!(
-        !stderr.contains("--language"),
-        "a Workshop source keeps the default-vocabulary hint: {stderr}"
+        !stdout.contains("--language"),
+        "a Workshop source keeps the default-vocabulary hint: {stdout}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 /// #789: owner `kind` phrases carry spaces (`"enum member"`), but the
-/// diagnostic code is a single kebab-case token on every surface — text
-/// `error[...]`, the JSON envelope, and the GitHub annotation title.
+/// diagnostic code is a single kebab-case token on every surface — the
+/// `diagnostic:` record, the JSON envelope, and the GitHub annotation title.
 #[test]
 fn check_unknown_kind_code_is_kebab_case_on_every_surface() {
     const SOURCE: &str = "rule (\"r\")\n{\n    event\n    {\n        Ongoing - Global;\n    }\n    actions\n    {\n        Set Global Variable(A, Map(Not A Real Map));\n    }\n}\n";
@@ -4899,8 +5021,8 @@ fn check_unknown_kind_code_is_kebab_case_on_every_surface() {
     assert_eq!(text.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&text.stderr);
     assert!(
-        stderr.contains("error[unknown-enum-member]"),
-        "the text code is one kebab-case token: {stderr}"
+        stderr.contains("diagnostic: error unknown-enum-member "),
+        "the record carries one kebab-case token: {stderr}"
     );
     assert!(
         !stderr.contains("unknown-enum member"),
@@ -4956,12 +5078,13 @@ fn check_text_locates_unknown_setting_value_and_names_the_locale() {
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("lookup-hint-zh.ow:9:"),
+        stderr.contains("at=") && stderr.contains("lookup-hint-zh.ow:9:"),
         "the rejected value carries its file and line: {stderr}"
     );
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stderr.contains("hint: run 'wright lookup --locale zh-CN'"),
-        "the hint names the locale of the rejected name: {stderr}"
+        stdout.contains("next: wright lookup --locale zh-CN"),
+        "the follow-up names the locale of the rejected name: {stdout}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -5020,10 +5143,10 @@ for line in sys.stdin:
         "never",
     ]);
     assert_eq!(output.status.code(), Some(1), "{output:?}");
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stderr.contains("hint: run 'wright lookup --language opy'"),
-        "an OPY rejected name points at the OPY vocabulary: {stderr}"
+        stdout.contains("next: wright lookup --language opy"),
+        "an OPY rejected name points at the OPY vocabulary: {stdout}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -5048,9 +5171,10 @@ fn check_text_skips_the_lookup_hint_when_no_name_was_rejected() {
         stderr.contains("unknown-language"),
         "the detection diagnostic still reports: {stderr}"
     );
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        !stderr.contains("wright lookup"),
-        "no rejected name means no lookup pointer: {stderr}"
+        !stdout.contains("next: wright lookup"),
+        "no rejected name means no lookup pointer: {stdout}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
