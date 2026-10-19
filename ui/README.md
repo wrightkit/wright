@@ -1,9 +1,15 @@
 # wright ui
 
-The browser view for `wright ui` — a structured Workshop editor over the
-`wright-agent/v1` contract (ADR-0032). Svelte 5, TypeScript strict, Vite. The
-only runtime dependency is `svelte`; no component library, CSS framework,
-router, or state library.
+The browser view for `wright ui` — the read-only structured Workshop rule
+view over the `wright-agent/v1` contract (ADR-0032); editing is a later
+layer. Svelte 5, TypeScript strict, Vite. The only runtime dependency is
+`svelte`; no component library, CSS framework, router, or state library.
+
+The page comes alive only under `wright ui`: it reads `rules`
+(`content: true`), `lookup`, `symbols`, and `findings` through `POST /api`,
+carrying `Authorization: Bearer <token>` with the token from the session
+URL fragment. `vite dev`/`preview` serve the bundle but have no `/api`
+backend, so they render the loading state only.
 
 ## Build and test
 
@@ -15,8 +21,23 @@ npm run dev             # dev server
 npm run build           # production build -> dist/ (ignored, never committed)
 npm run check           # svelte-check + tsc
 npm test                # vitest unit tests
+npm run test:e2e        # browser E2E: wright ui + headless Chromium-family
 npm run check:size      # dist/ JS+CSS must be < 100 KiB gzipped (fails over)
 ```
+
+`test:e2e` builds nothing itself: it needs a `wright` binary built with
+`--features ui` after `npm run build` (debug builds embed `dist/` at
+compile time), and a Chromium-family browser. Overrides:
+
+```sh
+WRIGHT_BIN=target/debug/wright    # binary under test
+WRIGHT_UI_BROWSER=brave           # executable path or its name on PATH
+E2E_TRACE=1                       # echo browser stderr while diagnosing
+```
+
+The script spawns `wright ui --no-open tests/fixtures/workshop/synthetic/ui-view.ws`,
+launches the browser headless, and drives the real DOM over the DevTools
+protocol — no driver dependency.
 
 ## Generated types
 

@@ -391,6 +391,19 @@ enable the `ui` Cargo feature. Builds without the feature — a plain
 `cargo build`, which needs no Node toolchain — compile the command as a
 stub that prints `this build does not include \`wright ui\`` and exits 2.
 
+The page itself is a read-only structured rule view. The left pane lists
+the project's rules in service order (searchable by name); selecting one
+shows its structured content: the event with its filters, the conditions,
+and the actions with control-flow bodies indented under their openers.
+Disabled rules, conditions, and statements carry a `disabled` marker.
+Workshop semantics are never hardcoded — names are resolved through the
+`lookup` operation — and a rule the structured export cannot express
+renders the `rule-content-unavailable` refusal inline while the rest of
+the project stays viewable. `symbols` and `findings` back read-only
+Variables and Diagnostics dialogs, and `?debug` exposes line numbers,
+call ids, and raw node JSON that stay hidden otherwise. There is no edit
+path: `editStatements` and pending changes are later layers (ADR-0032).
+
 ## `wright convert` and the reconstruction surface (#126)
 
 `wright convert [INPUT] --target opy|ostw` converts **validated Workshop

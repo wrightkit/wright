@@ -688,6 +688,49 @@ jobs:
         working-directory: ui
         run: npm run check:size
 
+  # Drives the built page in a real Chromium-family browser against
+  # `wright ui --no-open`. Needs both toolchains: `ui/dist` must exist before
+  # the `ui` Cargo feature embeds it into the debug binary.
+  ui-e2e:
+    name: UI E2E
+    needs: paths
+    if: needs.paths.outputs.ui == 'true' || needs.paths.outputs.rust_core == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Build UI assets
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
+
+      - name: Set up Rust
+        uses: wrightkit/.github/.github/actions/setup-rust@main
+        with:
+          toolchain: stable
+          cache-shared-key: linux-quality-stable-dev-test
+
+      - name: Build CLI with embedded UI
+        run: cargo build --locked -p wright-cli --features ui
+
+      # ubuntu-latest ships google-chrome; the harness also accepts
+      # chromium-family browsers via WRIGHT_UI_BROWSER.
+      - name: Browser E2E
+        working-directory: ui
+        env:
+          WRIGHT_BIN: ${{ github.workspace }}/target/debug/wright
+        run: npm run test:e2e
+
   # Fails when any gating job failed or was cancelled, and when a job whose
   # path condition selected it did not finish successfully — a skipped
   # required job must never read as a pass.
@@ -712,6 +755,7 @@ jobs:
       - dist-validation
       - agent-guide
       - ui
+      - ui-e2e
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -738,7 +782,8 @@ jobs:
             "dist-cli-build": ($p.dist == "true"),
             "dist-validation": ($p.dist == "true"),
             "agent-guide": ($p.agent_guide == "true"),
-            "ui": ($p.ui == "true")
+            "ui": ($p.ui == "true"),
+            "ui-e2e": ($p.ui == "true" or $p.rust_core == "true")
           }')
           for job in $(jq -r 'keys[]' <<<"$required"); do
             result=$(jq -r --arg job "$job" '.[$job].result // "missing"' <<<"$NEEDS")
