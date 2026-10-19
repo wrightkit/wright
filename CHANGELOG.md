@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.0](https://github.com/wrightkit/wright/compare/v0.26.3...v0.27.0) (2026-10-19)
+
+
+### Features
+
+* **install:** add the default install directory to the user PATH ([#778](https://github.com/wrightkit/wright/issues/778)) ([831a5db](https://github.com/wrightkit/wright/commit/831a5dbf19f76fe94aeea4cdd58d399e6a6f0304))
+
 ## [0.26.3](https://github.com/wrightkit/wright/compare/v0.26.2...v0.26.3) (2026-10-19)
 
 
