@@ -1357,6 +1357,23 @@ fn lint_selection_filters_findings_and_reports_withheld() {
     assert!(findings.iter().all(|f| f["code"] == "repeated-value"));
     assert_eq!(envelope["result"]["selection"]["total"], 10);
     assert_eq!(envelope["result"]["selection"]["withheld"], 7);
+    // #791: `byCode` counts the filtered set `max` truncated, so the cap
+    // cannot hide a code's real count; `repeated` carries the facts the
+    // finding message states, as data a renderer can consume.
+    assert_eq!(
+        envelope["result"]["selection"]["byCode"]["repeated-value"],
+        9
+    );
+    assert!(findings.iter().all(|f| {
+        f["repeated"]["expression"].is_string()
+            && f["repeated"]["count"]
+                .as_u64()
+                .is_some_and(|count| count >= 2)
+            && matches!(
+                f["repeated"]["spanKind"].as_str(),
+                Some("expression") | Some("enclosing-loop")
+            )
+    }));
 
     // --severity is a threshold: `error` selects none of the warning findings
     // while the envelope records the full set.
@@ -1468,6 +1485,130 @@ fn selection_never_changes_the_verdict_or_exit_code() {
     assert!(stdout.contains("10 finding(s)"), "{stdout}");
 
     let _ = std::fs::remove_dir_all(broken.parent().unwrap());
+    let _ = std::fs::remove_dir_all(cake.parent().unwrap());
+}
+
+#[test]
+fn fail_on_raises_warn_to_fail_on_every_renderer() {
+    // ADR-0030 decision 13: `--fail-on <severity>` makes a result at or
+    // above the threshold exit 1 with a FAIL verdict, off by default. The
+    // wait-less loop produces a warning finding, so `lint` and `inspect
+    // cost` report WARN.
+    let path = temp_file("waitless.txt", WAITLESS_LOOP);
+    let path = path.to_str().unwrap();
+
+    // Default behavior is unchanged: WARN still exits 0.
+    let default = run(&["lint", path]);
+    assert_eq!(default.status.code(), Some(0));
+    assert!(
+        String::from_utf8_lossy(&default.stdout).contains("WARN lint"),
+        "{}",
+        String::from_utf8_lossy(&default.stdout)
+    );
+
+    // Plain (the non-TTY default): FAIL verdict, exit 1, and the result
+    // body still renders — the findings are the reason it failed.
+    let gated = run(&["lint", path, "--fail-on", "warning"]);
+    assert_eq!(gated.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&gated.stdout);
+    assert!(stdout.contains("FAIL lint"), "{stdout}");
+    assert!(stdout.contains("Lint findings"), "{stdout}");
+    assert!(stdout.contains("warning[while-without-wait]"), "{stdout}");
+
+    // Terminal.
+    let terminal = run(&[
+        "lint",
+        path,
+        "--fail-on",
+        "warning",
+        "--renderer",
+        "terminal",
+        "--color",
+        "never",
+    ]);
+    assert_eq!(terminal.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&terminal.stdout);
+    assert!(stdout.contains("FAIL lint"), "{stdout}");
+
+    // GitHub Actions: the log group and the step-summary line carry the
+    // same FAIL verdict and exit code.
+    let gha = run(&[
+        "lint",
+        path,
+        "--fail-on",
+        "warning",
+        "--renderer",
+        "github-actions",
+    ]);
+    assert_eq!(gha.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&gha.stderr);
+    assert!(stderr.contains("FAIL lint"), "{stderr}");
+    assert!(stderr.contains("**FAIL** (exit 1)"), "{stderr}");
+
+    // JSON: the envelope carries the raised verdict as ok/exit.
+    let json = run(&["lint", path, "--fail-on", "warning", "-f", "json"]);
+    assert_eq!(json.status.code(), Some(1));
+    let envelope = parse_json(&json.stdout);
+    assert_eq!(envelope["ok"], false);
+    assert_eq!(envelope["exit"], 1);
+    assert!(envelope.get("gated").is_none());
+
+    // `inspect cost` gates on the same finding severities.
+    let cost = run(&["inspect", "cost", path, "--fail-on", "warning"]);
+    assert_eq!(cost.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&cost.stdout);
+    assert!(stdout.contains("FAIL cost"), "{stdout}");
+
+    let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
+}
+
+#[test]
+fn fail_on_can_only_raise_a_verdict() {
+    // A genuine failure keeps its verdict and exit code even at the lowest
+    // threshold — the gate never turns a failing command into a passing
+    // one or an ERROR into a FAIL.
+    let broken = temp_file(
+        "broken.txt",
+        "rule (\"x\") { event { Ongoing - Global; } actions { If(True); }",
+    );
+    let output = run(&["check", broken.to_str().unwrap(), "--fail-on", "info"]);
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ERROR check"), "{stdout}");
+
+    // A result below the threshold is untouched: WARN + `--fail-on error`
+    // stays WARN and exits 0.
+    let waitless = temp_file("waitless.txt", WAITLESS_LOOP);
+    let output = run(&["lint", waitless.to_str().unwrap(), "--fail-on", "error"]);
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("WARN lint"), "{stdout}");
+
+    // A clean result has nothing at the threshold and stays PASS.
+    let clean = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
+    let output = run(&["check", clean.to_str().unwrap(), "--fail-on", "warning"]);
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("PASS check"), "{stdout}");
+
+    // Error-severity findings are at the threshold: today they exit 0, so
+    // `--fail-on error` raises them to FAIL.
+    let cake = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
+    let output = run(&[
+        "lint",
+        cake.to_str().unwrap(),
+        "--rule-severity",
+        "min-wait-loop:error",
+        "--fail-on",
+        "error",
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("FAIL lint"), "{stdout}");
+
+    let _ = std::fs::remove_dir_all(broken.parent().unwrap());
+    let _ = std::fs::remove_dir_all(waitless.parent().unwrap());
+    let _ = std::fs::remove_dir_all(clean.parent().unwrap());
     let _ = std::fs::remove_dir_all(cake.parent().unwrap());
 }
 
@@ -3141,11 +3282,63 @@ for line in sys.stdin:
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A staged OPY provider for `convert` tests: `reconstruct` toggles the one
+/// capability under test. The ambient provider release decides which
+/// capabilities it advertises — `opy-provider` 0.3.19 added `reconstruct` —
+/// so a test that asserts wright's response to a negotiated (or absent)
+/// capability stages its own provider rather than depending on today's
+/// release contents.
+#[cfg(unix)]
+fn write_convert_provider(dir: &std::path::Path, reconstruct: bool) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    const PROVIDER: &str = r##"#!/usr/bin/env python3
+import json, sys
+def reply(id, result=None, error=None):
+    message = {"jsonrpc": "2.0", "id": id}
+    message.update({"error": error} if error else {"result": result})
+    print(json.dumps(message), flush=True)
+for line in sys.stdin:
+    request = json.loads(line)
+    id, method = request["id"], request["method"]
+    if method == "lpp/initialize":
+        reply(id, {"protocolVersion": request["params"]["protocolVersion"], "serverInfo": {"name": "fake", "version": "0"},
+                   "languages": [{"id": "opy", "extensions": ["opy"]}],
+                   "capabilities": {"check": True, "compile": True, "reconstruct": RECONSTRUCT, "symbols": False, "definition": False, "references": False, "rename": False, "editValidation": False, "projectLoading": True}})
+    elif method == "lpp/reconstruct":
+        reply(id, {"source": "# reconstructed opy source\n"})
+    else:
+        reply(id, {})
+"##;
+
+    let script = dir.join("fake-convert-provider");
+    std::fs::write(
+        &script,
+        PROVIDER.replace("RECONSTRUCT", if reconstruct { "True" } else { "False" }),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    script
+}
+
+/// `convert --target opy` refuses `capability-unavailable` when the
+/// negotiated provider lacks `reconstruct` — regardless of what the
+/// ambient release happens to advertise.
+#[cfg(unix)]
 #[test]
 fn convert_workshop_input_to_opy_requires_provider_reconstruct_capability() {
     let path = temp_file("convert.txt", &corpus_workshop("synthetic/basic-rule"));
-    let path = path.to_str().unwrap();
-    let output = run(&["convert", "--target", "opy", path, "-f", "json"]);
+    let provider = write_convert_provider(path.parent().unwrap(), false);
+    let output = run(&[
+        "convert",
+        "--target",
+        "opy",
+        path.to_str().unwrap(),
+        "--opy-provider",
+        provider.to_str().unwrap(),
+        "-f",
+        "json",
+    ]);
     let envelope = parse_json(&output.stdout);
     assert_eq!(envelope["ok"], false);
     assert_eq!(envelope["command"], "convert");
@@ -3158,6 +3351,7 @@ fn convert_workshop_input_to_opy_requires_provider_reconstruct_capability() {
         envelope["diagnostics"][0]
     );
     assert!(envelope["result"]["text"].as_str().unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[test]
@@ -3183,18 +3377,35 @@ fn convert_workshop_input_to_ostw_reports_provider_unavailable() {
     assert!(envelope["result"]["text"].as_str().unwrap().is_empty());
 }
 
+/// The success envelope: a staged provider that negotiates `reconstruct`
+/// keeps the assertion independent of the ambient provider release.
+#[cfg(unix)]
 #[test]
 fn convert_json_envelope_reports_command_result_and_target() {
     let path = temp_file("convert.txt", &corpus_workshop("synthetic/basic-rule"));
-    let path = path.to_str().unwrap();
-    let output = run(&["convert", "--target", "opy", path, "-f", "json"]);
+    let provider = write_convert_provider(path.parent().unwrap(), true);
+    let output = run(&[
+        "convert",
+        "--target",
+        "opy",
+        path.to_str().unwrap(),
+        "--opy-provider",
+        provider.to_str().unwrap(),
+        "-f",
+        "json",
+    ]);
     assert!(output.stderr.is_empty(), "JSON mode keeps stderr clean");
     let envelope = parse_json(&output.stdout);
-    assert_eq!(envelope["ok"], false);
-    assert_ne!(envelope["exit"], 0);
+    assert_eq!(envelope["ok"], true);
+    assert_eq!(envelope["exit"], 0);
     assert_eq!(envelope["command"], "convert");
     assert_eq!(envelope["wright"]["contract"], "wright-result/v1");
     assert_eq!(envelope["result"]["target"], "opy");
+    assert_eq!(
+        envelope["result"]["text"].as_str().unwrap(),
+        "# reconstructed opy source\n"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[test]
@@ -3829,6 +4040,84 @@ fn cost_text_reports_the_element_budget_and_rule_shares() {
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
 
+/// #790 (ADR-0030 decision 3): a failed element count reports unavailable
+/// with its reason and the known client budget — never `0 element(s) of the
+/// 0-element budget` — and failed emission reports `emitted bytes:
+/// unavailable`, never `0`; a program whose count succeeds reports the real
+/// total and emitted size.
+#[test]
+fn cost_reports_unavailable_element_count_with_budget_and_reason() {
+    // A stray `End;` is preserved as an opaque `rawWorkshopAction`, so the
+    // program loads but the emitter and the element counter cannot model it.
+    let failing = temp_file(
+        "opaque.ws",
+        "variables {\n    global:\n        0: x\n}\nrule (\"test\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Wait(1);\n        End;\n    }\n}\n",
+    );
+    let failing = failing.to_str().unwrap();
+
+    let output = run(&["inspect", "cost", failing]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("emitted byte(s) unavailable"), "{stdout}");
+    assert!(
+        stdout.contains("emitted bytes: unavailable — unknown action spelling 'rawWorkshopAction'"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains(
+            "element count unavailable: invalid program: unknown action spelling 'rawWorkshopAction' for locale 'en-us' — the 32768-element budget still applies"
+        ),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("0 element(s)"), "{stdout}");
+    assert!(!stdout.contains("emitted bytes: 0"), "{stdout}");
+
+    let json = run(&["inspect", "cost", failing, "-f", "json", "--all"]);
+    assert!(json.status.success(), "{}", command_result(&json));
+    let result = parse_json(&json.stdout)["result"].clone();
+    assert_eq!(result["elementCount"]["budget"], 32768);
+    assert!(
+        result["elementCount"].get("total").is_none(),
+        "the count is absent, not zero: {result}"
+    );
+    assert!(
+        result["elementCount"].get("rules").is_none(),
+        "no fabricated shares list: {result}"
+    );
+    assert!(
+        result["elementCountUnavailable"]
+            .as_str()
+            .unwrap()
+            .contains("rawWorkshopAction"),
+        "{result}"
+    );
+    assert!(result["exact"]["emittedBytes"].is_null());
+    assert!(
+        result["exact"]["emittedBytesUnavailable"]
+            .as_str()
+            .unwrap()
+            .contains("rawWorkshopAction"),
+        "{result}"
+    );
+
+    // The succeeding path keeps reporting the real total, the same budget,
+    // and a real emitted size.
+    let ok = temp_file("ok.ws", &corpus_workshop("synthetic/basic-rule"));
+    let ok = ok.to_str().unwrap();
+    let json = run(&["inspect", "cost", ok, "-f", "json"]);
+    assert!(json.status.success(), "{}", command_result(&json));
+    let result = parse_json(&json.stdout)["result"].clone();
+    assert!(result["elementCount"]["total"].as_u64().unwrap() > 0);
+    assert_eq!(result["elementCount"]["budget"], 32768);
+    assert!(result["elementCount"]["rules"].is_array());
+    assert!(result["exact"]["emittedBytes"].as_u64().unwrap() > 0);
+    assert!(result.get("elementCountUnavailable").is_none());
+    assert!(result["exact"].get("emittedBytesUnavailable").is_none());
+
+    let _ = std::fs::remove_dir_all(Path::new(failing).parent().unwrap());
+    let _ = std::fs::remove_dir_all(Path::new(ok).parent().unwrap());
+}
+
 /// The default `inspect cost` view keeps the 5 largest rules — payload
 /// order is the ranking, so the cap keeps the head of it — and
 /// reports the cut through `elementCount.truncation.rules`.
@@ -4370,6 +4659,21 @@ fn lookup_within_rejects_an_unknown_scope() {
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("lookup.unknownWithin"), "{stderr}");
+}
+
+#[test]
+fn lookup_rejects_an_out_of_range_limit() {
+    // #783: `--limit` outside the contract's 1..=10 is a
+    // `malformed-request` refusal on the JSON surface, not a silent clamp;
+    // the boundary `--limit 10` still answers.
+    for limit in ["0", "11"] {
+        let output = run(&["lookup", "wait", "--limit", limit, "-f", "json"]);
+        assert_eq!(output.status.code(), Some(1), "--limit {limit}: {output:?}");
+        let result = parse_json(&output.stdout);
+        assert_eq!(result["error"]["code"], "malformed-request", "{result}");
+    }
+    let output = run(&["lookup", "wait", "--limit", "10"]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
 }
 
 #[test]

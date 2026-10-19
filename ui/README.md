@@ -1,37 +1,43 @@
 # wright ui
 
-The browser UI that `wright ui` serves for a bound Workshop project
-(ADR-0032). Svelte 5 + TypeScript (strict) + Vite; the built assets are
-embedded in the `wright` binary behind its `ui` Cargo feature.
+The browser view for `wright ui` — a structured Workshop editor over the
+`wright-agent/v1` contract (ADR-0032). Svelte 5, TypeScript strict, Vite. The
+only runtime dependency is `svelte`; no component library, CSS framework,
+router, or state library.
 
 ## Build and test
 
+Node `^22.12 || ^24 || >=26` and npm:
+
 ```sh
-npm ci            # install the locked toolchain
-npm run generate  # regenerate src/generated/ from the committed schemas
-npm run check     # svelte-check
-npm test          # unit tests (vitest)
-npm run build     # production build into dist/ (ignored, never committed)
-npm run check-size  # fail when dist JS+CSS exceeds 100 KiB gzipped
+npm ci                  # install the locked dependencies
+npm run dev             # dev server
+npm run build           # production build -> dist/ (ignored, never committed)
+npm run check           # svelte-check + tsc
+npm test                # vitest unit tests
+npm run check:size      # dist/ JS+CSS must be < 100 KiB gzipped (fails over)
 ```
 
-`npm run generate` reads `Cargo.lock` for the pinned `workshop-rs` version,
-downloads that crate from crates.io, and compiles both committed schemas
-(`schemas/wright-agent-v1.schema.json`, `schemas/rule-content-v1.schema.json`
-in the crate) to TypeScript. CI regenerates them and fails on any diff, so
-the committed copies always match the schemas in force.
+## Generated types
+
+`src/lib/types/` is generated from the committed schemas — never edited by
+hand:
+
+```sh
+npm run generate-types  # regenerate src/lib/types/*.ts
+npm run check-types     # fail when the committed files are stale (CI)
+```
+
+`wright-agent-v1.ts` comes from `schemas/wright-agent-v1.schema.json`;
+`rule-content-v1.ts` comes from the `rule-content-v1.schema.json` shipped in
+the published `workshop-rs` crate at the version `Cargo.lock` pins.
 
 ## Rules
 
-- **Runes only.** `svelte.config.js` sets `compilerOptions.runes: true`
-  project-wide. Svelte 3/4 syntax (`export let`, `$:`) is a compile error —
-  use `$state`, `$derived`, `$props`, `$effect`.
+- **Runes only.** Runes mode is set project-wide in `svelte.config.js`, so
+  `export let` and other Svelte 3/4 syntax are compile errors. Props come from
+  `$props()`, state from `$state`, derived values from `$derived`.
 - **Snapshots at the boundary** (ADR-0032 decision 7). `$state` values are
-  proxies, not plain objects. Anything that leaves the reactive tree —
-  request bodies, copies, values passed to `structuredClone` — goes through
-  `$state.snapshot` first.
-- **The only runtime dependency is `svelte`.** No component library, CSS
-  framework, router, or state library.
-- **No Workshop semantics here.** Names, spellings, and validity come from
-  `wright-agent/v1` responses; this project implements no emission, name
-  matching, or validation of its own.
+  reactive proxies, not plain objects. Every value that leaves the reactive
+  tree — request bodies, copies, anything handed to `structuredClone` — passes
+  through `$state.snapshot` first.

@@ -165,6 +165,18 @@ fn repeated_value_names_each_repeated_expression() {
         ![distance.span, towards.span].contains(&program.action_span(0, 0)),
         "the findings carry expression spans, not the loop action's: {distance:?} {towards:?}"
     );
+    // #791: the same facts the message states are structured fields, so
+    // renderers consume them instead of parsing prose.
+    let distance = distance.repeated.as_ref().expect("repeated facts");
+    assert_eq!(
+        distance.expression,
+        "distance(getPosition(eventPlayer), vector(0, 0, 0))"
+    );
+    assert_eq!(distance.count, 2);
+    assert_eq!(
+        distance.span_kind,
+        wright_analyzer::canonical::RepeatedValueSpan::Expression
+    );
 }
 
 /// The provider shape — rule/action-level provenance with no nested value
@@ -203,5 +215,12 @@ rule ("nested repeat") {
         finding.span,
         program.action_span(0, 0),
         "with no recorded value span the finding locates the enclosing While"
+    );
+    let repeated = finding.repeated.as_ref().expect("repeated facts");
+    assert_eq!(repeated.count, 2);
+    assert_eq!(
+        repeated.span_kind,
+        wright_analyzer::canonical::RepeatedValueSpan::EnclosingLoop,
+        "the structured field states what the message suffix does (#791)"
     );
 }

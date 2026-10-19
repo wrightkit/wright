@@ -12,7 +12,7 @@ updates:
     schedule:
       interval: monthly
 
-  # The UI project: npm with a committed lockfile (ADR-0032).
+  # UI toolchain (ADR-0032): npm packages under ui/.
   - package-ecosystem: npm
     directory: /ui
     schedule:

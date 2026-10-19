@@ -60,6 +60,7 @@ WORKFLOW OPTIONS:
     -f, --format <FMT>   Output format: text|json
     --renderer <MODE>    Presentation: auto|terminal|plain|github-actions
     --color <POLICY>     ANSI color: auto|always|never
+    --fail-on <LEVEL>    Fail (exit 1) when a diagnostic or finding reaches LEVEL: error|warning|info
 
 LINT OPTIONS:
     --lint-config <PATH>       Read project lint configuration YAML
@@ -277,6 +278,12 @@ pub(crate) struct CommonArgs {
     /// ANSI color policy.
     #[arg(long, value_enum, default_value_t = ColorArg::Auto)]
     pub(crate) color: ColorArg,
+    /// Fail with exit 1 and a FAIL verdict when the result's highest
+    /// diagnostic or finding severity reaches this threshold (ADR-0030
+    /// decision 13). Off by default; the gate can only raise a verdict —
+    /// it never turns a failing command into a passing one.
+    #[arg(long, value_enum, value_name = "LEVEL")]
+    pub(crate) fail_on: Option<SeverityArg>,
 }
 
 /// Arguments of `lookup` (#529): the free-text query, the language selector,
@@ -810,6 +817,16 @@ pub(crate) enum SeverityArg {
     #[value(alias = "warn")]
     Warning,
     Info,
+}
+
+impl SeverityArg {
+    pub(crate) fn as_severity(self) -> wright_driver::Severity {
+        match self {
+            Self::Error => wright_driver::Severity::Error,
+            Self::Warning => wright_driver::Severity::Warning,
+            Self::Info => wright_driver::Severity::Info,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]

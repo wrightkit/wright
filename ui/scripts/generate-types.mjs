@@ -1,98 +1,190 @@
-// Generates the TypeScript types the UI compiles against (ADR-0032 decision
-// 8): `wright-agent-v1` request/response shapes from this repository's
-// committed schema, and `rule-content-v1` nodes from the schema that ships in
-// the published workshop-rs crate at the version Cargo.lock pins.
-// No request or node type is written by hand.
+// Regenerates the TypeScript contract types from the committed JSON schemas
+// (ADR-0032 decision 8):
 //
-// Usage: npm run generate      (rewrites src/generated/)
-// CI fails the job when a regenerated file differs from the committed copy.
+//   - schemas/wright-agent-v1.schema.json        -> src/lib/types/wright-agent-v1.ts
+//   - workshop-rs schemas/rule-content-v1.schema.json -> src/lib/types/rule-content-v1.ts
+//
+// The rule-content schema ships in the published workshop-rs crate; the version
+// pinned in Cargo.lock is downloaded from static.crates.io so the types always
+// match the semantic core Wright actually links.
+//
+//   node scripts/generate-types.mjs          write the generated files
+//   node scripts/generate-types.mjs --check  fail if the committed files are stale
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { gunzipSync } from 'node:zlib';
-import { compile } from 'json-schema-to-typescript';
+import { gunzipSync } from 'node:zlib'
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { compile } from 'json-schema-to-typescript'
 
-const UI_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const REPO_ROOT = resolve(UI_DIR, '..');
-const GENERATED_DIR = join(UI_DIR, 'src', 'generated');
-const BANNER = (source) =>
-  `// Generated from ${source} by ui/scripts/generate-types.mjs — do not edit.\n` +
-  '/* eslint-disable */\n\n';
+const uiDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const repoRoot = resolve(uiDir, '..')
+const check = process.argv.includes('--check')
 
-// --- workshop-rs at the version Cargo.lock pins ----------------------------
+// -- Inputs ---------------------------------------------------------------
 
-function pinnedWorkshopVersion(lockfileText) {
-  const entry = lockfileText.match(
-    /\[\[package\]\]\s*\nname = "workshop-rs"\s*\nversion = "([^"]+)"/,
-  );
-  if (!entry) {
-    throw new Error('workshop-rs not found in Cargo.lock');
-  }
-  return entry[1];
+function pinnedWorkshopRsVersion() {
+  const lock = readFileSync(join(repoRoot, 'Cargo.lock'), 'utf8')
+  const match = lock.match(/\[\[package\]\]\s*\nname = "workshop-rs"\s*\nversion = "([^"]+)"/)
+  if (!match) throw new Error('workshop-rs not found in Cargo.lock')
+  return match[1]
 }
 
-// A .crate is a gzipped tar; return the named member's UTF-8 text.
-function readTarMember(tar, suffix) {
-  let offset = 0;
-  while (offset + 512 <= tar.length) {
-    const header = tar.subarray(offset, offset + 512);
-    const name = header.subarray(0, 100).toString('utf8').replaceAll('\0', '');
-    const size = parseInt(header.subarray(124, 136).toString('utf8').trim(), 8);
-    if (!name || Number.isNaN(size)) break;
-    if (name.endsWith(suffix)) {
-      return tar.subarray(offset + 512, offset + 512 + size).toString('utf8');
-    }
-    offset += 512 + Math.ceil(size / 512) * 512;
-  }
-  throw new Error(`no tar member ends with ${suffix}`);
-}
-
-async function fetchWorkshopRuleContentSchema(version) {
-  const url = `https://static.crates.io/crates/workshop-rs/workshop-rs-${version}.crate`;
-  const response = await fetch(url);
+async function fetchPublishedSchema(crateName, version, schemaPath) {
+  const url = `https://static.crates.io/crates/${crateName}/${crateName}-${version}.crate`
+  const response = await fetch(url)
   if (!response.ok) {
-    throw new Error(`cannot download ${url}: ${response.status}`);
+    throw new Error(`fetching ${url} failed: HTTP ${response.status}`)
   }
-  const tar = gunzipSync(Buffer.from(await response.arrayBuffer()));
-  return readTarMember(tar, 'schemas/rule-content-v1.schema.json');
+  const archive = gunzipSync(Buffer.from(await response.arrayBuffer()))
+  const entry = tarEntry(archive, `${crateName}-${version}/${schemaPath}`)
+  if (!entry) {
+    throw new Error(`${schemaPath} not found in ${crateName}-${version}.crate`)
+  }
+  return JSON.parse(entry.toString('utf8'))
 }
 
-// --- schema -> TypeScript --------------------------------------------------
+// Minimal tar reader for the single file we need out of a .crate archive.
+// Handles ustar entries, ustar prefix fields, and GNU long-name ('L')
+// records; that covers the archives cargo publishes to crates.io.
+function tarEntry(archive, wanted) {
+  let offset = 0
+  let longName = null
+  while (offset + 512 <= archive.length) {
+    const header = archive.subarray(offset, offset + 512)
+    if (header.every((byte) => byte === 0)) break
+    const prefix = header.subarray(345, 500).toString('utf8').replace(/\0[\s\S]*$/, '')
+    let name = (longName ?? header.subarray(0, 100).toString('utf8')).replace(/\0[\s\S]*$/, '')
+    if (prefix) name = `${prefix}/${name}`
+    longName = null
+    const size = parseInt(
+      header.subarray(124, 136).toString('utf8').replace(/\0[\s\S]*$/, '').trim(),
+      8,
+    )
+    if (!Number.isFinite(size)) throw new Error('malformed tar size field')
+    const typeflag = String.fromCharCode(header[156])
+    const data = archive.subarray(offset + 512, offset + 512 + size)
+    offset += 512 + Math.ceil(size / 512) * 512
+    if (typeflag === 'L') {
+      longName = data.toString('utf8').replace(/\0[\s\S]*$/, '')
+      continue
+    }
+    if (name === wanted && (typeflag === '0' || typeflag === '\0')) return data
+  }
+  return null
+}
 
-async function emit(name, schema, source) {
-  const ts = await compile(schema, name, {
-    bannerComment: '',
+// -- Generation -----------------------------------------------------------
+
+const STYLE = { semi: false, singleQuote: true }
+
+// The agent schema's root is a bare `$ref` to ToolRequest, so a plain compile
+// emits request-side types only. Re-anchor the root on a synthetic
+// {request, response} envelope: the generator then parses the root as an
+// object and `unreachableDefinitions` emits every $defs entry — requests,
+// the result envelope, and all payload types.
+function agentEnvelope(schema) {
+  const { $ref, ...rest } = schema
+  return {
+    ...rest,
+    type: 'object',
+    required: ['request', 'response'],
+    additionalProperties: false,
+    properties: {
+      request: {
+        $ref: '#/$defs/ToolRequest',
+        description: 'A wright-agent/v1 request body.',
+      },
+      response: {
+        $ref: '#/$defs/ToolResponse',
+        description: 'A wright-agent/v1 result envelope.',
+      },
+    },
+  }
+}
+
+// The generator inlines a `$defs` entry that is a bare `$ref` instead of
+// naming it, which would silently drop those names (CapabilitiesResult,
+// LintResult, …). Emit them explicitly so every schema name resolves.
+function refAliases(schema) {
+  return Object.entries(schema.$defs ?? {})
+    .filter(([, def]) => {
+      const keys = Object.keys(def).filter((key) => key !== 'description')
+      return keys.length === 1 && def.$ref?.startsWith('#/$defs/')
+    })
+    .map(([name, def]) => ({
+      name,
+      target: def.$ref.slice('#/$defs/'.length),
+      description: def.description,
+    }))
+}
+
+async function generate(schema, rootName, sourceNote) {
+  const banner = `/**
+ * Generated by scripts/generate-types.mjs — do not edit.
+ * Source: ${sourceNote}
+ * Regenerate: npm run generate-types
+ */`
+  let body = await compile(schema, rootName, {
+    bannerComment: banner,
     unreachableDefinitions: true,
-    strictIndexSignatures: true,
-  });
-  const path = join(GENERATED_DIR, `${name}.ts`);
-  await writeFile(path, BANNER(source) + ts);
-  return path;
+    style: STYLE,
+  })
+  for (const alias of refAliases(schema)) {
+    if (alias.description) {
+      body += `/**\n * ${alias.description.replaceAll('*/', '*\\/')}\n */\n`
+    }
+    body += `export type ${alias.name} = ${alias.target}\n`
+  }
+  return body.endsWith('\n') ? body : `${body}\n`
 }
 
-const lock = await readFile(join(REPO_ROOT, 'Cargo.lock'), 'utf8');
-const version = pinnedWorkshopVersion(lock);
-const agentSchema = JSON.parse(
-  await readFile(join(REPO_ROOT, 'schemas', 'wright-agent-v1.schema.json'), 'utf8'),
-);
-// The committed root $ref reaches only the request side; the page also needs
-// `ToolResponse` and the result types it references.
-delete agentSchema.$ref;
-agentSchema.oneOf = [
-  { $ref: '#/$defs/ToolRequest' },
-  { $ref: '#/$defs/ToolResponse' },
-];
-const ruleContentSchema = JSON.parse(await fetchWorkshopRuleContentSchema(version));
+const workshopRsVersion = pinnedWorkshopRsVersion()
 
-await mkdir(GENERATED_DIR, { recursive: true });
-for (const path of [
-  await emit('wright-agent-v1', agentSchema, 'schemas/wright-agent-v1.schema.json'),
-  await emit(
-    'rule-content-v1',
-    ruleContentSchema,
-    `workshop-rs ${version} schemas/rule-content-v1.schema.json`,
-  ),
-]) {
-  console.log(`wrote ${path}`);
+const outputs = [
+  {
+    file: 'src/lib/types/wright-agent-v1.ts',
+    schema: agentEnvelope(
+      JSON.parse(readFileSync(join(repoRoot, 'schemas/wright-agent-v1.schema.json'), 'utf8')),
+    ),
+    rootName: 'ToolContract',
+    sourceNote: 'schemas/wright-agent-v1.schema.json',
+  },
+  {
+    file: 'src/lib/types/rule-content-v1.ts',
+    schema: await fetchPublishedSchema(
+      'workshop-rs',
+      workshopRsVersion,
+      'schemas/rule-content-v1.schema.json',
+    ),
+    rootName: 'RuleContent',
+    sourceNote: `workshop-rs ${workshopRsVersion} (Cargo.lock pin), schemas/rule-content-v1.schema.json`,
+  },
+]
+
+let stale = false
+for (const output of outputs) {
+  const generated = await generate(output.schema, output.rootName, output.sourceNote)
+  const path = join(uiDir, output.file)
+  if (check) {
+    let committed = null
+    try {
+      committed = readFileSync(path, 'utf8')
+    } catch {
+      committed = null
+    }
+    if (committed !== generated) {
+      console.error(`${output.file} is stale; run \`npm run generate-types\``)
+      stale = true
+    }
+  } else {
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, generated)
+    console.log(`wrote ${output.file}`)
+  }
+}
+
+if (check) {
+  if (stale) process.exit(1)
+  console.log('generated types are up to date')
 }

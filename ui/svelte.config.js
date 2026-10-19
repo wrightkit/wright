@@ -1,8 +1,8 @@
-import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
-
-// ADR-0032 decision 7: runes mode is project-wide, so the compiler rejects
-// Svelte 3/4 component syntax (no `export let`, no `$:`) everywhere.
+/** @type {import("@sveltejs/vite-plugin-svelte").SvelteConfig} */
 export default {
-  preprocess: vitePreprocess(),
-  compilerOptions: { runes: true },
-};
+  // ADR-0032 decision 7: runes mode is set project-wide. The compiler rejects
+  // Svelte 3/4 syntax such as `export let`.
+  compilerOptions: {
+    runes: true,
+  },
+}

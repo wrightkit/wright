@@ -1,34 +1,50 @@
-// ADR-0032 decision 10: the production bundle's JavaScript and CSS together
-// must stay under 100 KiB gzipped.
+// Bundle size budget (ADR-0032 decision 10): the built JavaScript and CSS
+// together must stay under 100 KB gzipped. Run after `npm run build`.
+//
+//   node scripts/check-bundle-size.mjs
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { gzipSync } from 'node:zlib';
+import { gzipSync } from 'node:zlib'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { dirname } from 'node:path'
 
-const DIST = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
-const BUDGET = 100 * 1024;
+const BUDGET_KIB = 100
+const uiDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const distDir = join(uiDir, 'dist')
 
-function* walk(dir) {
+function* bundleFiles(dir) {
   for (const entry of readdirSync(dir)) {
-    const path = join(dir, entry);
+    const path = join(dir, entry)
     if (statSync(path).isDirectory()) {
-      yield* walk(path);
-    } else {
-      yield path;
+      yield* bundleFiles(path)
+    } else if (/\.(js|css)$/.test(entry)) {
+      yield path
     }
   }
 }
 
-let total = 0;
-for (const path of walk(DIST)) {
-  if (!path.endsWith('.js') && !path.endsWith('.css')) continue;
-  const size = gzipSync(readFileSync(path)).length;
-  total += size;
-  console.log(`${size} B gzipped  ${path.slice(DIST.length + 1)}`);
+let files
+try {
+  files = [...bundleFiles(distDir)]
+} catch {
+  console.error('dist/ not found; run `npm run build` first')
+  process.exit(1)
 }
-console.log(`total ${total} B gzipped (budget ${BUDGET} B)`);
-if (total > BUDGET) {
-  console.error('bundle exceeds the 100 KiB gzipped budget');
-  process.exitCode = 1;
+if (files.length === 0) {
+  console.error('dist/ contains no JavaScript or CSS; run `npm run build` first')
+  process.exit(1)
+}
+
+let total = 0
+for (const file of files.sort()) {
+  const size = gzipSync(readFileSync(file), { level: 9 }).length
+  total += size
+  console.log(`${file.slice(distDir.length + 1)}: ${(size / 1024).toFixed(1)} KiB gzipped`)
+}
+console.log(`total: ${(total / 1024).toFixed(1)} KiB gzipped (budget ${BUDGET_KIB} KiB)`)
+
+if (total > BUDGET_KIB * 1024) {
+  console.error('bundle exceeds the 100 KiB gzipped budget')
+  process.exit(1)
 }
