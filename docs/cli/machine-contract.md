@@ -116,7 +116,12 @@ model requires a new major contract such as `wright-result/v2`.
 Recorded exceptions apply before the 1.0 contract freeze (#134).
 [ADR-0025](../adr/0025-essential-default-output.md) replaces full external
 results with essential defaults, removes `brief`, adds `all`, and makes JSON
-compact without bumping the contract id. The earlier exception remains:
+compact without bumping the contract id. Diagnostic codes are single
+kebab-case tokens: `unknown-enum member` and the other space-carrying
+`unknown-<kind>` codes (owner `kind` phrases such as `enum domain`,
+`localized string`, and `event player`) are hyphenated, so consumers match
+`unknown-enum-member`, `unknown-enum-domain`, `unknown-localized-string`,
+and `unknown-event-player` (#789). The earlier exception remains:
 the `lint` result's `rules` member lists only each rule's `id` and
 `effectiveSeverity` (#431). `lintRules` serves the full rule metadata once,
 covering summary, rationale, documentation, known limits, evidence, and tags,

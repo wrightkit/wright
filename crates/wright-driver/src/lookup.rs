@@ -350,7 +350,11 @@ fn workshop_entry(catalog: &Catalog, locale: &Locale, found: LookupMatch) -> Opt
 }
 
 /// The `callable` fact object for a Workshop callable: the ordered
-/// parameter facts the signature renders from (`name-lookup.md` §21.4).
+/// parameter facts the signature renders from (`name-lookup.md` §21.4),
+/// plus the owner's `returns` when the signature declares a return type
+/// (#781) and `variadic` when its last parameter repeats (#798) — both
+/// passed through unchanged, both absent when the owner does not declare
+/// them.
 fn callable_facts(signature: &workshop_rs::lookup::Signature) -> Value {
     let parameters = signature
         .params
@@ -394,7 +398,14 @@ fn callable_facts(signature: &workshop_rs::lookup::Signature) -> Value {
             wire
         })
         .collect::<Vec<_>>();
-    json!({ "parameters": parameters })
+    let mut facts = json!({ "parameters": parameters });
+    if let Some(return_type) = &signature.return_type {
+        facts["returns"] = json!(return_type);
+    }
+    if signature.variadic {
+        facts["variadic"] = json!(true);
+    }
+    facts
 }
 
 fn workshop_param<'a>(

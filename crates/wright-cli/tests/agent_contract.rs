@@ -433,6 +433,43 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
 }
 
 #[test]
+fn lookup_result_schema_covers_callable_returns_and_variadic() {
+    // #781/#798: `returns` and `variadic` are additive optional members of
+    // a `callable` fact; a live result that carries them must validate
+    // against the committed schema.
+    let schema: Value = serde_json::from_str(
+        &std::fs::read_to_string(workspace_root().join("schemas/wright-agent-v1.schema.json"))
+            .unwrap(),
+    )
+    .unwrap();
+    let mut document = schema.clone();
+    document["$ref"] = Value::String("#/$defs/LookupResult".to_string());
+    let result_schema = JSONSchema::compile(&document).expect("result schema compiles");
+
+    let ToolResponse::Ok { result } = service_response(&ToolRequest::Lookup {
+        language: "workshop".to_string(),
+        query: Some("array".to_string()),
+        kind: None,
+        within: None,
+        locale: None,
+        limit: Some(10),
+    }) else {
+        panic!("lookup failed");
+    };
+    let entries = result["entries"].as_array().unwrap();
+    let array = entries
+        .iter()
+        .find(|entry| entry["identity"] == "array")
+        .expect("the array value");
+    assert_eq!(array["callable"]["variadic"], true);
+    assert_eq!(array["callable"]["returns"], "Array");
+    assert!(
+        result_schema.is_valid(&result),
+        "LookupResult rejected a callable carrying returns/variadic: {result}"
+    );
+}
+
+#[test]
 fn cli_and_agent_selections_return_the_same_set() {
     // #430: the CLI flags and the agent request fields drive one driver-side
     // selection, so both surfaces must return the same selected findings.

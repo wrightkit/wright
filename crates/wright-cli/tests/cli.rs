@@ -3599,6 +3599,94 @@ fn cost_run_cache_names_added_and_grown_rules() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// ADR-0030 decision 14 / #797: under a truthy `CI` the explicit baseline
+/// flags still read and write `.wright/` (so a platform cache can restore
+/// and save it), a baseline that is missing, unreadable, or keyed to a
+/// different input turns the comparison off silently — byte-identical
+/// output and the same exit code as a run without `--baseline` — and the
+/// implicit previous-run comparison stays off.
+#[test]
+fn cost_baseline_degrades_silently_under_ci() {
+    let dir = temp_dir();
+    let source = "rule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Wait(0.016);\n    }\n}\n";
+    let a = dir.join("a.ws");
+    let b = dir.join("b.ws");
+    std::fs::write(&a, source).unwrap();
+    std::fs::write(&b, source).unwrap();
+    let a = a.to_str().unwrap();
+    let b = b.to_str().unwrap();
+    let ci: &[(&str, &str)] = &[("CI", "true")];
+
+    let assert_same_run =
+        |output: &std::process::Output, bare: &std::process::Output, case: &str| {
+            assert_eq!(
+                output.status.code(),
+                bare.status.code(),
+                "{case}: {}",
+                command_result(output)
+            );
+            assert_eq!(output.stdout, bare.stdout, "{case}: stdout changed");
+            assert_eq!(output.stderr, bare.stderr, "{case}: stderr changed");
+        };
+
+    // No cache restored: a run with an unknown `--baseline` is identical
+    // to the bare run.
+    let bare = run_with_env(&["inspect", "cost", a], ci);
+    assert!(bare.status.success(), "{}", command_result(&bare));
+    let unknown = run_with_env(&["inspect", "cost", a, "--baseline", "nope"], ci);
+    assert_same_run(&unknown, &bare, "unknown name");
+
+    // A corrupt record degrades the same way.
+    std::fs::create_dir_all(dir.join(".wright")).unwrap();
+    std::fs::write(dir.join(".wright/baseline-bad.json"), "not json").unwrap();
+    let corrupt = run_with_env(&["inspect", "cost", a, "--baseline", "bad"], ci);
+    assert_same_run(&corrupt, &bare, "corrupt record");
+
+    // A baseline saved for a different key never compares under CI —
+    // `--save-baseline` still wrote it through the restored cache.
+    let save = run_with_env(&["inspect", "cost", a, "--save-baseline", "v1"], ci);
+    assert!(save.status.success(), "{}", command_result(&save));
+    let bare_b = run_with_env(&["inspect", "cost", b], ci);
+    assert!(bare_b.status.success(), "{}", command_result(&bare_b));
+    let mismatched = run_with_env(&["inspect", "cost", b, "--baseline", "v1"], ci);
+    assert_same_run(&mismatched, &bare_b, "mismatched key");
+
+    // A usable baseline still produces the comparison under CI.
+    let named = run_with_env(&["inspect", "cost", a, "--baseline", "v1"], ci);
+    assert!(named.status.success(), "{}", command_result(&named));
+    let stdout = String::from_utf8_lossy(&named.stdout);
+    assert!(stdout.contains("baseline:v1"), "{stdout}");
+
+    // `compile` shares the contract: under CI an unusable `--baseline`
+    // emits no diagnostic and the artifact is identical to the bare run.
+    let bare_compile = run_with_env(&["compile", a, "-o", "-"], ci);
+    let compiled = run_with_env(&["compile", a, "-o", "-", "--baseline", "nope"], ci);
+    assert_same_run(&compiled, &bare_compile, "compile with unknown baseline");
+
+    // CI runs wrote only the named baseline — no previous-run record.
+    let mut names: Vec<_> = std::fs::read_dir(dir.join(".wright"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["baseline-bad.json", "baseline-v1.json"]);
+
+    // Outside CI the same unknown name stays a usage error.
+    let outside = run(&["inspect", "cost", a, "--baseline", "nope"]);
+    assert_eq!(
+        outside.status.code(),
+        Some(1),
+        "{}",
+        command_result(&outside)
+    );
+    assert!(
+        String::from_utf8_lossy(&outside.stderr).contains("unknown baseline 'nope'"),
+        "{}",
+        command_result(&outside)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn cost_reports_exact_counts_and_selected_findings() {
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
@@ -4240,6 +4328,34 @@ fn lookup_json_matches_the_agent_result() {
 }
 
 #[test]
+fn lookup_json_carries_callable_returns_and_variadic() {
+    // #781/#798: a value entry's `callable` names the owner-declared
+    // return type, and `array`'s repeats its last parameter.
+    let output = run(&["lookup", "distance", "-f", "json"]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let result = parse_json(&output.stdout);
+    let distance = result["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["identity"] == "distance")
+        .expect("the distance value");
+    assert_eq!(distance["callable"]["returns"], "Number");
+    assert!(distance["callable"].get("variadic").is_none());
+
+    let output = run(&["lookup", "array", "-f", "json"]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let result = parse_json(&output.stdout);
+    let array = result["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["identity"] == "array")
+        .expect("the array value");
+    assert_eq!(array["callable"]["variadic"], true);
+}
+
+#[test]
 fn lookup_within_lists_an_enums_members() {
     let output = run(&["lookup", "--within", "Team", "--kind", "enum-member"]);
     assert_eq!(output.status.code(), Some(0), "{output:?}");
@@ -4345,6 +4461,51 @@ fn check_text_points_unknown_names_at_lookup() {
         !stderr.contains("--language"),
         "a Workshop source keeps the default-vocabulary hint: {stderr}"
     );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// #789: owner `kind` phrases carry spaces (`"enum member"`), but the
+/// diagnostic code is a single kebab-case token on every surface — text
+/// `error[...]`, the JSON envelope, and the GitHub annotation title.
+#[test]
+fn check_unknown_kind_code_is_kebab_case_on_every_surface() {
+    const SOURCE: &str = "rule (\"r\")\n{\n    event\n    {\n        Ongoing - Global;\n    }\n    actions\n    {\n        Set Global Variable(A, Map(Not A Real Map));\n    }\n}\n";
+    let path = temp_file("bad-enum.ws", SOURCE);
+    let file = path.to_str().unwrap();
+
+    let text = run(&["check", file, "--renderer", "plain", "--color", "never"]);
+    assert_eq!(text.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&text.stderr);
+    assert!(
+        stderr.contains("error[unknown-enum-member]"),
+        "the text code is one kebab-case token: {stderr}"
+    );
+    assert!(
+        !stderr.contains("unknown-enum member"),
+        "no code carries a space: {stderr}"
+    );
+
+    let json = run(&["check", file, "--format", "json"]);
+    assert_eq!(json.status.code(), Some(1));
+    let envelope = parse_json(&json.stdout);
+    assert!(
+        envelope["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "unknown-enum-member"),
+        "the JSON code is unknown-enum-member: {}",
+        envelope["diagnostics"]
+    );
+
+    let github = run(&["check", file, "--renderer", "github-actions"]);
+    assert_eq!(github.status.code(), Some(1));
+    let annotations = String::from_utf8_lossy(&github.stderr);
+    assert!(
+        annotations.contains("title=unknown-enum-member"),
+        "the annotation title is one token: {annotations}"
+    );
+
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 

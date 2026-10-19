@@ -276,6 +276,41 @@ fn workshop_check_and_compile_reject_violations_beside_residuals() {
     let _ = std::fs::remove_dir_all(&directory);
 }
 
+/// #789: owner `kind` phrases carry spaces (`"enum member"`), and a
+/// diagnostic code is a single kebab-case token wherever it is emitted, so
+/// the rejection is `unknown-enum-member`.
+#[test]
+fn workshop_unknown_kind_codes_are_kebab_case_tokens() {
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Text {
+            text: "rule (\"r\")\n{\n    event\n    {\n        Ongoing - Global;\n    }\n    actions\n    {\n        Set Global Variable(A, Map(Not A Real Map));\n    }\n}\n".to_string(),
+            path: None,
+        },
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .expect("session creates");
+    let check = session.check();
+    let compile = session.compile();
+    for (name, diagnostics) in [
+        ("check", check.diagnostics),
+        ("compile", compile.diagnostics),
+    ] {
+        let diagnostic = diagnostics
+            .iter()
+            .find(|d| d.code == "unknown-enum-member")
+            .unwrap_or_else(|| panic!("{name}: the code is unknown-enum-member: {diagnostics:?}"));
+        assert_eq!(diagnostic.severity, wright_driver::Severity::Error);
+        assert_eq!(diagnostic.stage, wright_driver::Stage::Frontend);
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| !d.code.contains(char::is_whitespace)),
+            "{name}: every code is a single token: {diagnostics:?}"
+        );
+    }
+}
+
 /// Trailing catalog defaults are not required arguments: the owner
 /// validator accepts `Wait(1)` and `Wait(1, Ignore Condition)`, and the
 /// integration must not reject them.
