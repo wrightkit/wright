@@ -812,6 +812,24 @@ export interface ActionableFinding {
   location?: string
   evidence: string
   boundedness?: string
+  repeated?: RepeatedValue
+}
+/**
+ * Present on `repeated-value` findings only (#791).
+ */
+export interface RepeatedValue {
+  /**
+   * The canonical spelling of the repeated expression.
+   */
+  expression: string
+  /**
+   * How many times the expression is evaluated.
+   */
+  count: number
+  /**
+   * Whether the finding's `span` is the expression's own span or the enclosing loop action's span (#791).
+   */
+  spanKind: 'expression' | 'enclosing-loop'
 }
 /**
  * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
@@ -823,6 +841,12 @@ export interface Truncation {
     shown: number
     truncated: number
     expand: string
+    /**
+     * Per-code counts over the full list before this cap (#791); omitted for lists whose items carry no `code`.
+     */
+    byCode?: {
+      [k: string]: number
+    }
   }
 }
 /**
@@ -832,6 +856,12 @@ export interface Truncation {
 export interface SelectionSummary {
   total: number
   withheld: number
+  /**
+   * Per-code finding counts over the filtered set before `max` truncation (#791); omitted when the set has no coded findings.
+   */
+  byCode?: {
+    [k: string]: number
+  }
   [k: string]: unknown
 }
 /**
@@ -1030,6 +1060,12 @@ export interface Finding {
   value: number | null
   evidence: string
   boundedness: string | null
+  /**
+   * The `RepeatedValue` facts on a `repeated-value` finding; null otherwise (#791).
+   */
+  repeated: {
+    [k: string]: unknown
+  } | null
   [k: string]: unknown
 }
 /**
@@ -1290,6 +1326,24 @@ export interface ToolErrorInfo {
   code: string
   message: string
   [k: string]: unknown
+}
+/**
+ * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
+ * via the `definition` "RepeatedValue".
+ */
+export interface RepeatedValue1 {
+  /**
+   * The canonical spelling of the repeated expression.
+   */
+  expression: string
+  /**
+   * How many times the expression is evaluated.
+   */
+  count: number
+  /**
+   * Whether the finding's `span` is the expression's own span or the enclosing loop action's span (#791).
+   */
+  spanKind: 'expression' | 'enclosing-loop'
 }
 /**
  * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
