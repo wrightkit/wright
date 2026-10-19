@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.3](https://github.com/wrightkit/wright/compare/v0.26.2...v0.26.3) (2026-10-19)
+
+
+### Performance Improvements
+
+* **deps:** require workshop-rs 1.18.0 ([#776](https://github.com/wrightkit/wright/issues/776)) ([fe04237](https://github.com/wrightkit/wright/commit/fe04237d3e234887835fce38beaef19f867f4113)), closes [#775](https://github.com/wrightkit/wright/issues/775)
+
 ## [0.26.2](https://github.com/wrightkit/wright/compare/v0.26.1...v0.26.2) (2026-10-19)
 
 
