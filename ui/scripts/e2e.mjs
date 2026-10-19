@@ -183,14 +183,23 @@ class Cdp {
     return result.value
   }
 
-  /** Poll until the expression is truthy or the deadline passes. */
+  /** Poll until the expression is truthy or the deadline passes. On
+      timeout the failure report carries the rule view's DOM, since a
+      missing element alone cannot distinguish loading, refusal, and a
+      wrong rule. */
   async waitFor(sessionId, expression, timeoutMs = 15_000) {
     const deadline = Date.now() + timeoutMs
     for (;;) {
       const value = await this.evaluate(sessionId, expression)
       if (value) return value
       if (Date.now() > deadline) {
-        throw new Error(`timed out waiting for: ${expression}`)
+        const dom = await this.evaluate(
+          sessionId,
+          `document.querySelector('.rule-view')?.outerHTML ?? document.body.outerHTML`,
+        ).catch(() => '<dom dump failed>')
+        throw new Error(
+          `timed out waiting for: ${expression}\nrule-view: ${String(dom).slice(0, 2000)}`,
+        )
       }
       await new Promise((resolve) => setTimeout(resolve, 100))
     }
