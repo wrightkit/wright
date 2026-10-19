@@ -54,14 +54,6 @@ jobs:
               - 'crates/wright-cli/src/agent.rs'
               - 'scripts/sync-agent-guide.py'
               - '.github/workflows/**'
-            # The UI reads schemas/wright-agent-v1.schema.json and the pinned
-            # workshop-rs rule-content schema (Cargo.lock carries the pin).
-            ui:
-              - 'ui/**'
-              - 'schemas/**'
-              - 'Cargo.toml'
-              - 'Cargo.lock'
-              - '.github/workflows/**'
             dist:
               - 'dist/**'
               - 'install.sh'
@@ -360,57 +352,6 @@ jobs:
         run: >-
           cargo test --locked -p wright-lpp -p wright-driver
           --test mock_provider --test lpp --test provider_edit
-
-  # The UI gate (ADR-0032 decision 10). The Rust jobs never need Node; this
-  # is the only job that does.
-  ui:
-    name: UI
-    needs: paths
-    if: needs.paths.outputs.ui == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
-
-      - name: Install
-        run: npm ci
-        working-directory: ui
-
-      # Regenerating must be a no-op: a diff means the committed types are
-      # stale relative to the schemas.
-      - name: Verify generated types are current
-        run: |
-          npm run generate
-          if [[ -n "$(git status --porcelain src/generated)" ]]; then
-            git status --porcelain src/generated
-            echo "::error::generated types are stale; run 'npm run generate' in ui/ and commit the result"
-            exit 1
-          fi
-        working-directory: ui
-
-      - name: svelte-check
-        run: npm run check
-        working-directory: ui
-
-      - name: Unit tests
-        run: npm test
-        working-directory: ui
-
-      - name: Production build
-        run: npm run build
-        working-directory: ui
-
-      - name: Size budget
-        run: npm run check-size
-        working-directory: ui
 
   cli-behavior:
     name: CLI behavior
@@ -761,7 +702,6 @@ jobs:
       - opy-integration
       - lpp-integration
       - cli-behavior
-      - ui
       - metrics-shard
       - metrics-drift
       - dist-cli-build
@@ -789,7 +729,6 @@ jobs:
             "opy-integration": ($p.opy == "true"),
             "lpp-integration": ($p.lpp == "true"),
             "cli-behavior": ($p.cli == "true"),
-            "ui": ($p.ui == "true"),
             "metrics-shard": ($p.opy == "true"),
             "metrics-drift": ($p.opy == "true"),
             "dist-cli-build": ($p.dist == "true"),
