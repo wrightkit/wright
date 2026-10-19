@@ -1,0 +1,14 @@
+---
+source: crates/wright-cli/tests/plain.rs
+expression: "transcript(&run_in(&dir, &[\"check\", \"ok.ws\"]))"
+---
+exit 0
+== stdout
+PASS check root=. kind=workshop locale=en-us
+summary: errors=0 warnings=0 notes=0
+program: files=1 rules=1 globalVariables=0 playerVariables=0 subroutines=0
+next: wright lint
+next: wright analyze
+next: wright inspect
+
+== stderr

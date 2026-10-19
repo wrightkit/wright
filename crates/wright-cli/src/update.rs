@@ -46,6 +46,26 @@ impl UpdateError {
         }
     }
 
+    /// The record code for the failure class (#793).
+    fn code(&self) -> &'static str {
+        match self {
+            Self::Usage(_) => "usage",
+            Self::Rejected(_) => "rejected",
+            Self::Unsupported(_) => "unsupported",
+            Self::Failed(_) => "failed",
+        }
+    }
+
+    /// The `error:` record for the plain surface (#793); `update` errors
+    /// are the command's machine-readable outcome.
+    pub(crate) fn record(&self) -> String {
+        format!(
+            "error: {} {}",
+            self.code(),
+            crate::plain::field("message", self.message())
+        )
+    }
+
     pub(crate) fn message(&self) -> &str {
         match self {
             Self::Usage(m) | Self::Rejected(m) | Self::Unsupported(m) | Self::Failed(m) => m,
@@ -149,7 +169,7 @@ fn update_all(check_only: bool) -> u8 {
             println!("skipped wright self-update: {}", error.message());
         }
         Err(error) => {
-            eprintln!("wright: {}", error.message());
+            eprintln!("{}", error.record());
             code = fold(code, error.exit_code());
         }
     }
@@ -237,7 +257,7 @@ fn provider_check(
         Some(version) => match parse_version(version) {
             Ok(_) => version.trim_start_matches('v').to_string(),
             Err(error) => {
-                eprintln!("wright: {}", error.message());
+                eprintln!("{}", error.record());
                 return error.exit_code();
             }
         },
@@ -271,7 +291,11 @@ fn provider_check(
 }
 
 fn provider_failure(error: &OpyProviderError) -> u8 {
-    eprintln!("wright: {}: {}", error.code(), error);
+    eprintln!(
+        "error: {} {}",
+        error.code(),
+        crate::plain::field("message", &error.to_string())
+    );
     error.exit_code()
 }
 

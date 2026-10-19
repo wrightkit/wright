@@ -83,11 +83,63 @@ Selection is a rendering concern only: it runs after the verdict and exit
 code are fixed on the
 complete set, so it can never turn a failing command into `exit 0` or a
 `WARN` verdict into `PASS`. Consecutive lint findings sharing a rule id and
-message render as one entry listing all locations; when `--max` withholds
+message render as one entry listing all locations on the terminal renderer
+(the plain renderer keeps one record per finding); when `--max` withholds
 findings, text output states the withheld count and the JSON envelope carries
 `selection.total`/`selection.withheld` beside the filtered array, plus
 `selection.byCode` counting the filtered set per code before `max` truncates
 it (#791).
+
+### The plain renderer: line records (#793, ADR-0030)
+
+The plain renderer — the default on a non-TTY or generic CI — renders every
+non-artifact report as line records: one fact per line, deterministic, and
+free of decoration, pluralized units, and wall-clock values. A record is
+
+```text
+<kind>: <key>=<value> [<key>=<value> …]
+```
+
+except the leading verdict line, which is `<STATUS> <command>
+[key=value …]`. The status shares the renderers' tag set: `PASS`, `WARN`,
+`FAIL` (a raised `--fail-on` verdict), `ERROR` (a genuine failure), `USAGE`
+and `UNSUPPORTED` for exit 2/3 envelopes; a clean query command (`inspect`,
+`rules`, `symbols`, `refs`, `cfg`, `callgraph`, `cost`, `lookup`) shows its
+uppercase name in place of a vacuous `PASS`. Verdict fields carry the input
+`root=` plus program `kind=`/`locale=` when the result reports an origin.
+
+Records lead with the verdict, then `summary:` — the headline counts named
+after their JSON fields (`errors=`, `warnings=`, `notes=`/`findings=`,
+`affected=`, `emittedBytes=`, `rules=`, `symbols=`, `reads=`, `writes=`,
+`calls=`, `blocks=`, `edges=`, …) — then the command's section records:
+`program:`, `rule:`, `symbol:`, `ref:`, `block:`, `edge:`, `fan-in:`,
+`fan-out:`, `share:`, `statement:`, `byNode:`, `hotspot:`, `tree:`,
+`complexity:`, `variable:`, `objects:`, `cost:`, `output:` (written-path
+plus `sha256=`), `fix:`/`patch:`/`refusal:` for `lint --fix`, and `entry:`
+records for `lookup`. `diagnostic:` records render envelope diagnostics on
+stderr; result records stay on stdout, and artifacts keep byte-exact
+stdout ownership. A `diagnostic:` carries `<severity> <code>` then
+`at=<path:line:col>`, `stage=`, `status=`, `source=`, `locale=`, and
+`message=`; a `finding:` carries the same shape plus `count=`/`spanKind=`/
+`expression=` when the `repeated` member is present and `evidence=` when
+reported. Locations are single `at=path:line:col` tokens — never a `-->`
+line or source frame.
+
+Key names share the JSON fields they mirror, and values stay bare unless
+they contain whitespace, `=`, `"`, or `\`, in which case they are
+double-quoted with `\"`, `\\`, `\n`, and `\t` escapes. Unavailable
+computations report `unavailable` plus the payload's own reason member
+(`elementCountUnavailable`, `emittedBytesUnavailable`,
+`unavailableReason`) — never a fabricated zero (ADR-0030 decision 3).
+Truncation is explicit: `truncated: <list>=<shown>/<total>
+[byCode=<code>:<n>,…] expand="<command>"`, and a selection closes with
+`selected: <noun>=<shown>/<total> [byCode=…] [withheld=<n> expand=…]`.
+Run-cache and baseline comparisons render `comparison:`/`change:` records,
+and `next:` records name follow-up commands — the shared list the result
+carries (#792) first, then the `wright lookup` pointer a rejected-name
+diagnostic implies. Non-envelope command errors use `error:`/`unavailable:` records
+on stderr: `update` refusals are the record alone, while `lookup` request
+errors also print the `<STATUS> lookup` verdict line on stdout.
 
 JSON output is one `wright-result/v1` envelope on stdout with no ANSI, progress,
 or workflow commands. The `convert` source artifact and the `compile -o -`
@@ -133,22 +185,25 @@ JSON keep their existing undecorated layout byte-for-byte, and the reported
 findings, verdicts, exit codes, caps, and `--all` expansion are identical
 across renderers.
 
-The `check` report follows a human-first hierarchy (#443) on the
-terminal/plain text surface only: the verdict line leads with the blocking
-error count before the non-blocking severities, diagnostics render in action
-order (errors before warnings and info notes, stable within a severity), and a
-mapped diagnostic carries its `-->` location plus a one-line source frame on
-the diagnostic stream. Spans whose path is not a readable source file, such as
+The `check` report follows a human-first hierarchy (#443): the verdict line
+leads with the blocking error count before the non-blocking severities, and
+diagnostics render in action order (errors before warnings and info notes,
+stable within a severity). On the terminal renderer a mapped diagnostic
+carries its `-->` location plus a one-line source frame on the diagnostic
+stream; on the plain renderer the same location is the record's `at=` field.
+Spans whose path is not a readable source file, such as
 `<stdin>`, `<provider-artifact>`, or a dangling `<file N>`, are never dressed
 up as file locations; the reported position and the pipeline stage trail each
 diagnostic as secondary metadata instead. A diagnostic whose code carries an
 `unknown-` kind (a rejected Workshop or OverPy name) is followed by a
 one-line `hint: run 'wright lookup' ...` pointer on `check` and `compile`
 (#529, ADR-0021); an OPY-origin diagnostic names its vocabulary:
-`wright lookup --language opy` (#692). The hint is text presentation only
-and never enters the envelope. A compact footer closes the report
+`wright lookup --language opy` (#692). The plain renderer carries the same
+follow-up as a `next:` record. The hint is text presentation only
+and never enters the envelope. A compact footer closes the terminal report
 with the count of affected source files and, on an interactive terminal, the
-elapsed workflow time; plain output omits wall-clock values so it stays
+elapsed workflow time; the plain renderer folds the same affected count into
+its `summary:` record and omits wall-clock values so it stays
 deterministic. Severity ordering, secondary metadata, the lookup hint, and
 the footer are presentation-layer concerns: the `wright-result/v1` envelope
 keeps the driver's diagnostic set and production order, and the GitHub
@@ -156,50 +211,66 @@ Actions renderer is unchanged.
 
 The `lint` report applies the same hierarchy to findings: the verdict
 leads with finding counts by severity, findings render in action order, and a
-finding entry leads with severity, rule id, and message before its `-->`
-location and one-line source frame. Evidence class and boundedness trail
-dimmed as secondary metadata; pseudo-path spans degrade to position notes.
-Repeated findings keep the shared collapse, one entry naming its finding
-count and using the selected locations, and interactive elapsed time stays presentation-only.
+finding entry leads with severity, rule id, and message before its location
+(the terminal renderer's `-->` line and one-line source frame; the plain
+record's `at=` field). Evidence class and boundedness trail
+dimmed as secondary metadata on the terminal renderer and as `evidence=`
+fields on the plain renderer; pseudo-path spans degrade to position notes.
+On the terminal renderer repeated findings keep the shared collapse, one
+entry naming its finding count and using the selected locations — the plain
+renderer emits one `finding:` record per finding — and interactive elapsed
+time stays presentation-only.
 The `wright-result/v1` envelope uses the same selected finding set,
 and the GitHub Actions renderer is unchanged.
 
-The `inspect` queries follow the same human-first hierarchy (#446) on the
-terminal/plain text surface. Bare `wright inspect` prints the program
+The `inspect` queries follow the same human-first hierarchy (#446): on the
+terminal renderer as stacked sections, on the plain renderer as the same
+facts in record order. Bare `wright inspect` prints the program
 inventory of file, rule, variable, subroutine, and finding counts, followed
 by a bounded rule-name preview and the detail commands, so the first screen
-answers "what is this" and routes deeper questions to the owning query. Each
+answers "what is this" and routes deeper questions to the owning query — on
+the plain renderer the detail commands are `next:` records. Each
 subcommand leads with its subject and summary before its detail:
 
 * `inspect symbols` groups entries under their kind and prints each symbol's
-  name beside its primary `path:line:col` location.
+  name beside its primary `path:line:col` location (`symbol:` records on the
+  plain renderer).
 * `inspect refs` prints the queried symbol's identity and usage counts in the
-  verdict metadata, then the reference list where each entry carries its
-  location, kind, and rule/action index.
+  verdict metadata (`summary:` fields on the plain renderer), then the
+  reference list where each entry carries its location, kind, and rule/action
+  index (`ref:` records).
 * `inspect cfg` prints the queried rule's name, the graph shape (block, edge,
   loop-header, wait, and call-site counts; entry and exit blocks), then the
-  block/edge listing.
+  block/edge listing (`block:`/`edge:` records).
 * `inspect callgraph` prints the edge shape first, then notable fan-in and
   fan-out, that is, subroutines with more than one caller and rules calling
-  more than one subroutine, then the edge list.
+  more than one subroutine, then the edge list (`fan-in:`/`fan-out:`/`edge:`
+  records on the plain renderer).
 * `inspect cost` prints exact generated-resource totals — the declared
   program rule count `analyze` reports among them — the canonical
   element count against the client element budget with each rule's share
-  ranked by count and located in source (`path:line:col`), then static
+  ranked by count and located in source (`path:line:col`; `share:` records),
+  then static
   findings
   ordered by severity with consecutive identical findings collapsed into one
-  counted entry that lists every occurrence's location (#722). A failed
+  counted entry that lists every occurrence's location on the terminal
+  renderer (#722). A failed
   computation is never a zero: a failed element count prints
   `element count unavailable: <reason> — the 32768-element budget still
   applies`, and failed emission prints `emitted bytes: unavailable —
-  <reason>` (ADR-0030 decision 3). Skipped rule
-  evaluations are disclosed like `lint`'s (#788). With
+  <reason>` (`elements=unavailable`/`emittedBytes=unavailable` plus the
+  `elementCountUnavailable`/`emittedBytesUnavailable` reason fields on the
+  plain renderer) (ADR-0030 decision 3). Skipped rule
+  evaluations are disclosed like `lint`'s (#788 — `skipped=` on the plain
+  `summary:`). With
   `--rule`, `inspect cost` instead prints that rule's identity and
   location, its `Costliest statements` ranked by recursive count, and the
-  `By node name` own-cost shares that reconcile to the rule's total (#724).
+  `By node name` own-cost shares that reconcile to the rule's total (#724)
+  (`statement:`/`byNode:` records).
 
 Text and compact JSON present the same selected items. Detail lists default
-to at most 20 items, with their total and an expansion hint when truncated;
+to at most 20 items, with their total and an expansion hint when truncated —
+a `truncated:` record naming the expansion command on the plain renderer;
 `--all` lifts the default cap. The analyze report keeps its ranked top-five
 hotspots, risks and variables and top-three condition trees, with the same
 explicit expansion metadata. JSON is the structured form for programmatic

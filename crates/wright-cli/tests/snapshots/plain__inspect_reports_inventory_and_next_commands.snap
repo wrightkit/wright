@@ -1,0 +1,20 @@
+---
+source: crates/wright-cli/tests/plain.rs
+expression: "transcript(&run_in(&dir, &[\"inspect\", \"subs.ws\"]))"
+---
+exit 0
+== stdout
+INSPECT inspect root=. kind=workshop locale=en-us
+summary: rules=4 symbols=7 references=14
+program: files=1 rules=4 globalVariables=1 playerVariables=0 subroutines=2
+rule: name="Subroutine shared" id=0
+rule: name="Subroutine helper" id=1
+rule: name=first id=2
+rule: name=second id=3
+next: wright inspect symbols
+next: wright inspect refs <NAME>
+next: wright inspect cfg <RULE>
+next: wright inspect callgraph
+next: wright inspect cost
+
+== stderr

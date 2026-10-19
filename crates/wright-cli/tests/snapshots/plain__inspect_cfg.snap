@@ -1,0 +1,12 @@
+---
+source: crates/wright-cli/tests/plain.rs
+expression: "transcript(&run_in(&dir, &[\"inspect\", \"cfg\", \"first\", \"subs.ws\"]))"
+---
+exit 0
+== stdout
+CFG cfg root=.
+summary: rule=first blocks=2 edges=1 loopHeaders=0 waits=0 callSites=2 entry=0 exit=1
+block: id=0 kind=entry actions=2 flags=calls to=1:fallthrough
+block: id=1 kind=exit actions=0
+
+== stderr

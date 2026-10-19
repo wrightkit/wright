@@ -1,0 +1,18 @@
+---
+source: crates/wright-cli/tests/plain.rs
+expression: "transcript(&run_in(&dir, &[\"inspect\", \"cost\", \"cake.ws\"]))"
+---
+exit 0
+== stdout
+WARN cost root=.
+summary: emittedBytes=3960 actions=29 rules=2 waits=1
+cost: elements=428 budget=32768
+share: rule=cake index=0 elements=408 at=cake.ws:8:1
+share: rule=candles index=1 elements=20 at=cake.ws:41:1
+finding: warning repeated-value count=2 at=cake.ws:22:67 spanKind=expression expression="add(firstOf(cakePos), vector(0, i2, 0))" action=8 evidence=exact rule=0 value=76 message="`add(firstOf(cakePos), vector(0, i2, 0))` is evaluated 2 times within the same loop scope"
+finding: warning repeated-value count=2 at=cake.ws:22:123 spanKind=expression expression="add(valueInArray(cakePos, 1), vector(0, i2, 0))" action=8 evidence=exact rule=0 value=83 message="`add(valueInArray(cakePos, 1), vector(0, i2, 0))` is evaluated 2 times within the same loop scope"
+finding: warning repeated-value count=2 at=cake.ws:23:132 spanKind=expression expression="add(valueInArray(cakePos, 2), vector(0, i2, 0))" action=8 evidence=exact rule=0 value=104 message="`add(valueInArray(cakePos, 2), vector(0, i2, 0))` is evaluated 2 times within the same loop scope"
+finding: warning repeated-value count=2 at=cake.ws:24:132 spanKind=expression expression="add(valueInArray(cakePos, 3), vector(0, i2, 0))" action=8 evidence=exact rule=0 value=125 message="`add(valueInArray(cakePos, 3), vector(0, i2, 0))` is evaluated 2 times within the same loop scope"
+truncated: findings=4/10 byCode=min-wait-loop:1,repeated-value:9 expand="wright inspect cost --all"
+
+== stderr

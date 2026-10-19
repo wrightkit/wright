@@ -1,0 +1,15 @@
+---
+source: crates/wright-cli/tests/plain.rs
+expression: "transcript(&run_in(&dir, &[\"inspect\", \"callgraph\", \"subs.ws\"]))"
+---
+exit 0
+== stdout
+CALLGRAPH callgraph root=.
+summary: edges=3 callers=2 callees=2
+fan-in: subroutine=shared callers=2
+fan-out: rule=first calls=2
+edge: caller=first callee=shared
+edge: caller=first callee=helper
+edge: caller=second callee=shared
+
+== stderr
