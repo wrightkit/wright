@@ -92,7 +92,11 @@ function Test-Version([string]$Executable, [string]$Version) {
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
     Fail "unsupported operating system; install.ps1 must run on Windows x86_64"
 }
-if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne [Runtime.InteropServices.Architecture]::X64) {
+# RuntimeInformation.OSArchitecture returns nothing on some .NET Framework
+# 4.x builds, so read the architecture the OS exports instead. A 32-bit or
+# emulated process reports the real OS architecture in PROCESSOR_ARCHITEW6432.
+$OsArchitecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+if ($OsArchitecture -ne "AMD64") {
     Fail "unsupported CPU architecture; install.ps1 supports Windows x86_64 only"
 }
 
