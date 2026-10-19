@@ -1530,8 +1530,7 @@ impl<'a> ToolService<'a> {
                 .map(|result| (result, None));
         }
         let locale = CompilerSession::locale_for(loaded);
-        let text = workshop_rs::emitter::emit(&loaded.program, self.session.catalog(), &locale)
-            .unwrap_or_default();
+        let emitted = workshop_rs::emitter::emit(&loaded.program, self.session.catalog(), &locale);
         let live = loaded
             .program
             .rules
@@ -1570,18 +1569,29 @@ impl<'a> ToolService<'a> {
         }
         let (findings, outcome) =
             selection.apply_findings(findings, &crate::select::file_bases(&loaded.input));
+        // Unknown is not a value (ADR-0030 decision 3): a computation that
+        // failed reports `null` plus an `<x>Unavailable` reason instead of a
+        // fabricated zero, and a known limit such as the element budget is
+        // still reported.
+        let mut exact = json!({
+            "programActions": program_actions,
+            "programRules": loaded
+                .program
+                .rules
+                .iter()
+                .filter(|rule| !rule.disabled)
+                .count(),
+            "waitActions": waits,
+        });
+        match &emitted {
+            Ok(text) => exact["emittedBytes"] = json!(text.len()),
+            Err(error) => {
+                exact["emittedBytes"] = serde_json::Value::Null;
+                exact["emittedBytesUnavailable"] = json!(error.to_string());
+            }
+        }
         let mut result = json!({
-            "exact": {
-                "emittedBytes": text.len(),
-                "programActions": program_actions,
-                "programRules": loaded
-                    .program
-                    .rules
-                    .iter()
-                    .filter(|rule| !rule.disabled)
-                    .count(),
-                "waitActions": waits,
-            },
+            "exact": exact,
             "findings": findings,
             "kind": {
                 "exact": "exact target-resource counts",
@@ -1625,7 +1635,11 @@ impl<'a> ToolService<'a> {
                 });
             }
             Err(error) => {
-                result["elementCount"] = serde_json::Value::Null;
+                // The count itself is absent, not zero; the known client
+                // budget still reports (ADR-0030 decision 3).
+                result["elementCount"] = json!({
+                    "budget": crate::session::WORKSHOP_CLIENT_ELEMENT_LIMIT,
+                });
                 result["elementCountUnavailable"] = json!(error.to_string());
             }
         }

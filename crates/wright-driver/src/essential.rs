@@ -314,7 +314,13 @@ pub fn cost(result: &Value, all: bool) -> Value {
         cap(&mut output, "byNode", 5, all);
         return output;
     }
-    cap(&mut output["elementCount"], "rules", 5, all);
+    // A failed count reports `{"budget": N}` plus `elementCountUnavailable`
+    // (ADR-0030 decision 3) — only cap the per-rule shares when they exist;
+    // indexing `["rules"]` on the bare-budget shape would fabricate a null
+    // member.
+    if output["elementCount"]["rules"].is_array() {
+        cap(&mut output["elementCount"], "rules", 5, all);
+    }
     let mut output = query(&output, all);
     // Findings carry resolved span objects (#722), which cost roughly four
     // times the lint `location` string — on a large project the default

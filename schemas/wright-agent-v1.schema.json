@@ -690,13 +690,25 @@
           "type": "object",
           "required": ["emittedBytes", "programActions", "programRules", "waitActions"],
           "properties": {
-            "emittedBytes": { "type": "integer", "minimum": 0 },
+            "emittedBytes": { "type": ["integer", "null"], "minimum": 0, "description": "Emitted artifact size in bytes; null when emission fails — emittedBytesUnavailable names the reason (ADR-0030 decision 3: unknown is not a value)." },
+            "emittedBytesUnavailable": { "type": "string" },
             "programActions": { "type": "integer", "minimum": 0 },
             "programRules": { "type": "integer", "minimum": 0 },
             "waitActions": { "type": "integer", "minimum": 0 }
           },
           "additionalProperties": true
         },
+        "elementCount": {
+          "type": "object",
+          "required": ["budget"],
+          "properties": {
+            "total": { "type": "integer", "minimum": 0, "description": "Canonical element total; absent when the count cannot run — elementCountUnavailable names the reason. The budget still reports even when the count is unavailable." },
+            "budget": { "type": "integer", "minimum": 0 },
+            "rules": { "type": "array" }
+          },
+          "additionalProperties": true
+        },
+        "elementCountUnavailable": { "type": "string" },
         "findings": { "type": "array", "items": { "type": "object", "required": ["code", "severity", "message"], "properties": { "code": { "type": "string" }, "severity": { "type": "string" }, "message": { "type": "string" } }, "additionalProperties": true } },
         "kind": { "type": "object", "required": ["exact", "findings", "performance"], "properties": { "exact": { "type": "string" }, "findings": { "type": "string" }, "performance": { "type": "string" } }, "additionalProperties": true },
         "selection": { "$ref": "#/$defs/SelectionSummary" }
