@@ -299,7 +299,7 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation + plain::PlainRepo
         subject,
     };
     match pres.renderer {
-        Renderer::GithubActions => render_github(envelope, subject),
+        Renderer::GithubActions => render_github(envelope, &ctx),
         // Plain is the agent-facing line-record surface (#793); terminal
         // keeps the human report.
         Renderer::Plain => plain::render(envelope, &ctx),
@@ -585,30 +585,124 @@ impl Presentation {
     }
 }
 
-fn render_github<T: serde::Serialize + ResultPresentation>(
-    envelope: &Envelope<T>,
-    subject: Option<&str>,
-) {
-    for diag in &envelope.diagnostics {
-        emit_diagnostic_annotation(diag);
+/// One GitHub Actions annotation before emission (#794): the command kind,
+/// its escaped properties, the message, and the dedup/ordering keys.
+/// `notice` is never a per-item annotation — it closes a withheld set.
+struct GithubAnnotation {
+    kind: &'static str,
+    props: Vec<String>,
+    title: String,
+    message: String,
+    path: String,
+    line: u64,
+    col: u64,
+}
+
+impl GithubAnnotation {
+    /// Dedup identity (ADR-0030 decision 8): same rule at the same location
+    /// is one annotation, however many findings repeat it. Owned so the
+    /// `retain` closure can keep keys without borrowing the vector.
+    fn key(&self) -> (u8, String, String, u64, u64) {
+        (
+            (self.kind != "error") as u8,
+            self.title.clone(),
+            self.path.clone(),
+            self.line,
+            self.col,
+        )
     }
-    envelope.result.render_github_findings();
+}
+
+/// The platform drops annotations past 10 per severity class per step
+/// (#794); the renderer stays inside the bound and says what it withheld.
+const GITHUB_ANNOTATION_LIMIT: usize = 10;
+
+/// The step summary's ceiling — comfortably inside the platform's 1 MiB.
+const GITHUB_SUMMARY_BUDGET: usize = 900_000;
+
+/// Dedup annotations by rule and location, order them by severity (errors
+/// first, stable within), and bound each severity class to the platform's
+/// per-step limit (#794). Returns the withheld count — the closing notice
+/// reports it.
+fn bound_annotations(annotations: &mut Vec<GithubAnnotation>) -> usize {
+    annotations.sort_by_key(|annotation| (annotation.kind != "error") as u8);
+    let mut seen = std::collections::BTreeSet::new();
+    annotations.retain(|annotation| seen.insert(annotation.key()));
+    let mut errors = 0usize;
+    let mut warnings = 0usize;
+    let mut withheld = 0usize;
+    annotations.retain(|annotation| {
+        let shown = match annotation.kind {
+            "error" => {
+                errors += 1;
+                errors <= GITHUB_ANNOTATION_LIMIT
+            }
+            _ => {
+                warnings += 1;
+                warnings <= GITHUB_ANNOTATION_LIMIT
+            }
+        };
+        if shown {
+            true
+        } else {
+            withheld += 1;
+            false
+        }
+    });
+    withheld
+}
+
+fn render_github<T: serde::Serialize + ResultPresentation + plain::PlainReport>(
+    envelope: &Envelope<T>,
+    ctx: &RenderContext<'_>,
+) {
+    // Errors and warnings only, deduplicated by rule and location, ordered
+    // by severity — the platform's per-step budget goes to the items a
+    // reviewer should see first (ADR-0030 decision 8).
+    let mut annotations: Vec<GithubAnnotation> = envelope
+        .diagnostics
+        .iter()
+        .filter_map(diagnostic_annotation)
+        .collect();
+    for finding in envelope.result.github_findings() {
+        if let Some(annotation) = finding_annotation(&finding) {
+            annotations.push(annotation);
+        }
+    }
+    let withheld = bound_annotations(&mut annotations);
+    for annotation in &annotations {
+        emit_workflow_annotation(annotation.kind, &annotation.props, &annotation.message);
+    }
+    // The log group is titled with the verdict and headline, then carries
+    // the same records the plain renderer prints (ADR-0030 decision 9).
+    let status = summary_status(envelope);
+    let headline = envelope
+        .result
+        .metadata()
+        .map(|metadata| format!(" {metadata}"))
+        .unwrap_or_default();
     eprintln!(
         "::group::{}",
-        escape_workflow_data(&format!("wright {}", envelope.command))
+        escape_workflow_data(&format!("wright {} — {status}{headline}", envelope.command))
     );
     if envelope.result.is_artifact_stream() {
-        envelope.result.render_body(&github_context(subject));
+        envelope.result.render_body(&github_context(ctx.subject));
     } else {
-        eprintln!("{} {}", summary_status(envelope), envelope.command);
-        if envelope.command == "compile" {
-            if let Some(metadata) = envelope.result.metadata() {
-                eprintln!("  {metadata}");
-            }
+        let (out, err) = plain::render_lines(envelope, ctx);
+        for line in out.iter().chain(err.iter()) {
+            eprintln!("{line}");
         }
     }
     eprintln!("::endgroup::");
-    emit_summary(envelope);
+    if withheld > 0 {
+        eprintln!(
+            "::notice title=Wright::{}",
+            escape_workflow_data(&format!(
+                "{withheld} annotation(s) withheld — the log group and step summary carry the full report"
+            ))
+        );
+    }
+    emit_summary(envelope, ctx, &annotations);
 }
 
 /// The GitHub Actions render path never reaches `render_body` for commands
@@ -629,40 +723,74 @@ fn github_context(subject: Option<&str>) -> RenderContext<'_> {
     }
 }
 
-fn emit_diagnostic_annotation(diagnostic: &wright_driver::Diagnostic) {
-    let kind = workflow_severity(diagnostic.severity);
+/// A diagnostic as an annotation, when it is actionable on the platform:
+/// errors and warnings only (#794) — an informational diagnostic still
+/// reports in the log group and summary but never draws a notice card.
+fn diagnostic_annotation(diagnostic: &wright_driver::Diagnostic) -> Option<GithubAnnotation> {
+    let kind = match diagnostic.severity {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
+        Severity::Info => return None,
+    };
     let mut props = vec![format!(
         "title={}",
         escape_workflow_property(&diagnostic.code)
     )];
+    let mut path = String::new();
+    let (mut line, mut col) = (0, 0);
     if let Some(span) = diagnostic
         .span
         .as_ref()
         .filter(|s| is_real_source_path(&s.path))
     {
-        props.insert(0, format!("file={}", escape_workflow_property(&span.path)));
+        path = display_location_path(&span.path);
+        line = u64::from(span.start.line);
+        col = u64::from(span.start.col);
+        props.insert(0, format!("file={}", escape_workflow_property(&path)));
         props.push(format!("line={}", span.start.line));
         props.push(format!("col={}", span.start.col));
         props.push(format!("endLine={}", span.end.line));
         props.push(format!("endColumn={}", span.end.col));
     }
-    emit_workflow_annotation(kind, &props, &diagnostic.message);
+    Some(GithubAnnotation {
+        kind,
+        props,
+        title: diagnostic.code.clone(),
+        message: diagnostic.message.clone(),
+        path,
+        line,
+        col,
+    })
 }
 
-fn emit_finding_annotation(finding: &serde_json::Value) {
-    let severity = match finding.get("severity").and_then(serde_json::Value::as_str) {
-        Some("error") => Severity::Error,
-        Some("warning") => Severity::Warning,
-        _ => Severity::Info,
+/// A finding as an annotation, when it locates in a real source file
+/// (#794): error/warning severities only; a finding whose span is absent
+/// or pseudo-pathed still reports in the log group and summary.
+fn finding_annotation(finding: &serde_json::Value) -> Option<GithubAnnotation> {
+    let kind = match finding_severity(finding) {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
+        Severity::Info => return None,
     };
-    let span = finding.get("span").filter(|span| span.is_object());
-    let Some(span) = span else { return };
+    // A `location` string joins `span` — the essential payloads carry one.
+    let located;
+    let finding = match finding_location_span(finding) {
+        Some(span) => {
+            located = {
+                let mut located = finding.clone();
+                located["span"] = span;
+                located
+            };
+            &located
+        }
+        None => finding,
+    };
+    let span = finding.get("span").filter(|span| span.is_object())?;
     let path = span
         .get("path")
         .and_then(serde_json::Value::as_str)
-        .filter(|path| is_real_source_path(path));
-    let Some(path) = path else { return };
-    let kind = workflow_severity(severity);
+        .filter(|path| is_real_source_path(path))
+        .map(display_location_path)?;
     let line = span_position(span, "start", "line").unwrap_or(1);
     let col = span_position(span, "start", "col").unwrap_or(1);
     let end_line = span_position(span, "end", "line").unwrap_or(line);
@@ -671,22 +799,27 @@ fn emit_finding_annotation(finding: &serde_json::Value) {
         .get("code")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("finding");
-    let msg = finding
+    let message = finding
         .get("message")
         .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    emit_workflow_annotation(
+        .unwrap_or_default()
+        .to_string();
+    Some(GithubAnnotation {
         kind,
-        &[
-            format!("file={}", escape_workflow_property(path)),
+        props: vec![
+            format!("file={}", escape_workflow_property(&path)),
             format!("line={line}"),
             format!("col={col}"),
             format!("endLine={end_line}"),
             format!("endColumn={end_col}"),
             format!("title={}", escape_workflow_property(code)),
         ],
-        msg,
-    );
+        title: code.to_string(),
+        message,
+        path,
+        line,
+        col,
+    })
 }
 
 fn emit_workflow_annotation(kind: &str, properties: &[String], message: &str) {
@@ -695,14 +828,6 @@ fn emit_workflow_annotation(kind: &str, properties: &[String], message: &str) {
         properties.join(","),
         escape_workflow_data(message)
     );
-}
-
-fn workflow_severity(severity: Severity) -> &'static str {
-    match severity {
-        Severity::Error => "error",
-        Severity::Warning => "warning",
-        Severity::Info => "notice",
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -789,7 +914,11 @@ pub(crate) trait ResultPresentation {
     fn is_artifact_stream(&self) -> bool {
         false
     }
-    fn render_github_findings(&self) {}
+    /// The finding objects the GitHub Actions renderer annotates (#794) —
+    /// raw payload items; span/`location` merging happens in the collector.
+    fn github_findings(&self) -> Vec<serde_json::Value> {
+        Vec::new()
+    }
     /// The result's highest finding severity across its complete set, or
     /// `None` when the command carries no findings — the one severity
     /// source shared by the verdict (`update_summary_status`) and the
@@ -940,12 +1069,8 @@ impl ResultPresentation for LintResult {
         render_lint(self, ctx);
         render_lint_fixes(self, ctx);
     }
-    fn render_github_findings(&self) {
-        if let Some(findings) = self.findings.as_array() {
-            for finding in findings {
-                emit_finding_annotation(finding);
-            }
-        }
+    fn github_findings(&self) -> Vec<serde_json::Value> {
+        self.findings.as_array().cloned().unwrap_or_default()
     }
     /// Selection narrows the reported list only; the verdict keeps the
     /// full set's highest severity (#430).
@@ -1002,16 +1127,11 @@ fn essential_metadata(value: &serde_json::Value) -> String {
 }
 
 impl ResultPresentation for EssentialResult {
-    fn render_github_findings(&self) {
-        for key in ["findings", "risks"] {
-            for finding in self.result[key].as_array().into_iter().flatten() {
-                let mut located = finding.clone();
-                if let Some(span) = finding_location_span(finding) {
-                    located["span"] = span;
-                }
-                emit_finding_annotation(&located);
-            }
-        }
+    fn github_findings(&self) -> Vec<serde_json::Value> {
+        ["findings", "risks"]
+            .iter()
+            .flat_map(|key| self.result[key].as_array().cloned().unwrap_or_default())
+            .collect()
     }
 
     fn metadata(&self) -> Option<String> {
@@ -1568,6 +1688,12 @@ impl ResultPresentation for CostResult {
             println!("  {skipped} rule evaluation(s) skipped");
         }
     }
+    fn github_findings(&self) -> Vec<serde_json::Value> {
+        self.result["findings"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+    }
     /// Static findings carry severities, so `cost` judges them like lint
     /// findings (#635).
     fn max_finding_severity(&self) -> Option<Severity> {
@@ -1736,18 +1862,97 @@ pub(crate) fn summary_status<T: serde::Serialize + ResultPresentation>(
     status.as_str()
 }
 
-fn emit_summary<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) {
+/// The Markdown step summary (ADR-0030 decision 10): one section per
+/// invocation titled with command and input — verdict and headline, the
+/// leading annotated items with blob links when the workflow env resolves
+/// them, the baseline comparison when one ran, and the full record report
+/// in a collapsed block inside the platform's size budget.
+fn emit_summary<T: serde::Serialize + ResultPresentation + plain::PlainReport>(
+    envelope: &Envelope<T>,
+    ctx: &RenderContext<'_>,
+    annotations: &[GithubAnnotation],
+) {
     let status = summary_status(envelope);
-    let line = format!(
-        "Wright `{}`: **{status}** (exit {})",
-        envelope.command, envelope.exit
+    let input = ctx
+        .source_base
+        .map(plain::display_root)
+        .or_else(|| ctx.subject.map(str::to_string))
+        .unwrap_or_default();
+    let mut section = format!(
+        "## Wright `{}` — **{status}** (exit {})\n\n",
+        if input.is_empty() {
+            envelope.command.clone()
+        } else {
+            format!("{} {input}", envelope.command)
+        },
+        envelope.exit
     );
+    if let Some(metadata) = envelope.result.metadata() {
+        section.push_str(&format!("{metadata}\n\n"));
+    }
+    if let Some(comparison) = envelope.comparison.as_ref().filter(|c| c.is_object()) {
+        let delta = comparison["totalDelta"].as_i64().unwrap_or(0);
+        let sign = if delta > 0 { "+" } else { "" };
+        let changes = ["changed", "added", "removed"]
+            .iter()
+            .map(|key| comparison[key].as_array().map_or(0, Vec::len))
+            .sum::<usize>();
+        section.push_str(&format!(
+            "**Baseline {}**: total {sign}{delta} ({changes} change(s))\n\n",
+            comparison["reference"].as_str().unwrap_or("previous"),
+        ));
+    }
+    for annotation in annotations.iter().take(5) {
+        let location = if annotation.path.is_empty() {
+            String::new()
+        } else {
+            let location = format!("{}:{}:{}", annotation.path, annotation.line, annotation.col);
+            format!(
+                " {}",
+                github_blob_url(&annotation.path, annotation.line)
+                    .map(|url| format!("[`{location}`]({url})"))
+                    .unwrap_or_else(|| format!("`{location}`"))
+            )
+        };
+        section.push_str(&format!(
+            "- `{}`{location} — {}\n",
+            annotation.title, annotation.message
+        ));
+    }
+    if !annotations.is_empty() {
+        section.push('\n');
+    }
+    if envelope.result.is_artifact_stream() {
+        section.push_str("The command's artifact streamed to stdout.\n");
+    } else {
+        let (out, err) = plain::render_lines(envelope, ctx);
+        let mut report = String::new();
+        let mut shown = 0usize;
+        let total = out.len() + err.len();
+        // The collapsed block carries the full report until the budget
+        // runs out — then a line states the remainder (ADR-0030 decision 10).
+        for line in out.iter().chain(err.iter()) {
+            let next = report.len() + line.len() + 1;
+            if next > GITHUB_SUMMARY_BUDGET {
+                break;
+            }
+            report.push_str(line);
+            report.push('\n');
+            shown += 1;
+        }
+        if shown < total {
+            report.push_str(&format!("… {} line(s) omitted\n", total - shown));
+        }
+        section.push_str(&format!(
+            "<details><summary>Full report</summary>\n\n```text\n{report}```\n\n</details>\n"
+        ));
+    }
     if let Some(path) = std::env::var_os("GITHUB_STEP_SUMMARY") {
         let result = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(path)
-            .and_then(|mut file| writeln!(file, "{line}"));
+            .and_then(|mut file| write!(file, "{section}"));
         if let Err(error) = result {
             eprintln!(
                 "::warning title=Wright summary::{}",
@@ -1757,9 +1962,28 @@ fn emit_summary<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>
     } else {
         eprintln!(
             "::notice title=Wright summary::{}",
-            escape_workflow_data(&line)
+            escape_workflow_data(&format!(
+                "Wright `{}`: **{status}** (exit {})",
+                envelope.command, envelope.exit
+            ))
         );
     }
+}
+
+/// A `…/blob/<sha>/<path>#L<line>` link when the workflow env names the
+/// server, repository, and commit — and the path stays repository-relative.
+/// An absolute or pseudo path never guesses a blob URL.
+fn github_blob_url(path: &str, line: u64) -> Option<String> {
+    if path.is_empty() || Path::new(path).is_absolute() {
+        return None;
+    }
+    let server = std::env::var("GITHUB_SERVER_URL").ok()?;
+    let repository = std::env::var("GITHUB_REPOSITORY").ok()?;
+    let sha = std::env::var("GITHUB_SHA").ok()?;
+    Some(format!(
+        "{server}/{repository}/blob/{sha}/{}#L{line}",
+        path.trim_start_matches("./")
+    ))
 }
 
 pub(crate) fn escape_workflow_property(value: &str) -> String {
@@ -3166,5 +3390,41 @@ mod tests {
             align_lines(&old, &new),
             vec![(None, Some(1)), (None, Some(2))]
         );
+    }
+
+    fn annotation(kind: &'static str, title: &str, line: u64) -> GithubAnnotation {
+        GithubAnnotation {
+            kind,
+            props: Vec::new(),
+            title: title.to_string(),
+            message: String::new(),
+            path: "flow.ws".to_string(),
+            line,
+            col: 1,
+        }
+    }
+
+    #[test]
+    fn annotations_dedup_by_rule_and_location() {
+        let mut annotations = vec![
+            annotation("warning", "a", 1),
+            annotation("warning", "a", 1),
+            annotation("warning", "a", 2),
+        ];
+        assert_eq!(bound_annotations(&mut annotations), 0);
+        assert_eq!(annotations.len(), 2);
+    }
+
+    #[test]
+    fn annotations_bound_each_severity_class_separately() {
+        let mut annotations: Vec<GithubAnnotation> = (1..=12)
+            .map(|line| annotation("warning", "a", line))
+            .chain((1..=3).map(|line| annotation("error", "b", line)))
+            .collect();
+        assert_eq!(bound_annotations(&mut annotations), 2);
+        // Errors lead, then the bounded warnings.
+        assert_eq!(annotations.len(), 13);
+        assert!(annotations[..3].iter().all(|a| a.kind == "error"));
+        assert!(annotations[3..].iter().all(|a| a.kind == "warning"));
     }
 }

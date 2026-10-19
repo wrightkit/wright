@@ -1,0 +1,18 @@
+---
+source: crates/wright-cli/tests/github.rs
+expression: transcript(&output)
+---
+exit 1
+== stdout
+
+== stderr
+::error file=mixed.ws,title=workshop.unknown-value.futurevaluething,line=11,col=26,endLine=11,endColumn=42::Workshop construct 'FutureValueThing' is unsupported (truly-unresolved-identifier)
+::group::wright check — ERROR
+ERROR check root=. kind=workshop locale=en-us
+summary: errors=1 warnings=0 notes=0 affected=1
+next: wright lint
+next: wright analyze
+next: wright inspect
+next: wright lookup
+diagnostic: error workshop.unknown-value.futurevaluething at=mixed.ws:11:26 stage=analysis status=unsupported message="Workshop construct 'FutureValueThing' is unsupported (truly-unresolved-identifier)"
+::endgroup::

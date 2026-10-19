@@ -145,12 +145,43 @@ JSON output is one `wright-result/v1` envelope on stdout with no ANSI, progress,
 or workflow commands. The `convert` source artifact and the `compile -o -`
 program remain the only stdout payloads in text mode, including when GitHub
 Actions presentation is selected; every other `compile` report is a verdict,
-the written path, and the output SHA-256. GitHub Actions diagnostics and findings are emitted as escaped
-workflow annotations; grouping is sent to the workflow command stream and a
-concise PASS/WARN/FAIL/ERROR line is appended to `GITHUB_STEP_SUMMARY` when the
-runner provides that file. The summary uses the highest structured severity:
-errors produce `ERROR`, warnings produce `WARN`, and info/notice-only results
-produce `PASS`; a result raised by `--fail-on` produces `FAIL` (exit 1).
+the written path, and the output SHA-256.
+
+### The GitHub Actions renderer (#794, ADR-0030 decisions 8–11)
+
+The GitHub Actions renderer — `auto`'s choice when `GITHUB_ACTIONS` is
+truthy — presents the same envelope three ways, so the platform's annotation
+budget never drops information silently:
+
+* **Annotations** are `::error`/`::warning` workflow commands on stderr —
+  informational severities never draw a card. They are deduplicated by rule
+  (`title=`, the diagnostic code or finding code) and location, ordered by
+  severity, and bounded to the platform's ten-per-class per-step limit; when
+  the bound withholds items one closing `::notice` states how many and
+  points at the log group and summary. `file`/`line`/`col`/`endLine`/
+  `endColumn` carry the span when it maps to a real source path; `file` is
+  the same display path `at=` records use, so it is repository-relative when
+  wright runs from the checkout root — under a different
+  `working-directory` or `--root`, run wright from the repository root for
+  GitHub to attach the annotation to the file. Property values escape `%`,
+  CR, LF, `:` and `,`; messages escape `%`, CR, and LF.
+* **The log group** `::group::wright <command> — <STATUS> <headline>`
+  wraps the same line records the plain renderer prints (artifact streams
+  still own stdout), so the full report — including items the annotation
+  bound withheld — is one expandable group in the run log.
+* **The step summary** appends a Markdown section to
+  `GITHUB_STEP_SUMMARY`: `## Wright \`<command> <input>\` — **STATUS**
+  (exit N)`, the headline metadata, the leading annotated items (linked to
+  `GITHUB_SERVER_URL`/`GITHUB_REPOSITORY`/`GITHUB_SHA` blob URLs when the
+  runner exports them, a code span otherwise), the baseline comparison when
+  one ran, and the full record report in a collapsed `<details>` block
+  bounded under the platform's 1 MiB limit. Without the env var the
+  renderer falls back to a one-line `::notice`.
+
+The verdict, exit code, and counts match the plain renderer and the JSON
+envelope: errors produce `ERROR`, warnings produce `WARN`, and info/
+notice-only results produce `PASS`; a result raised by `--fail-on` produces
+`FAIL` (exit 1).
 
 Interactive terminal mode is TUI-lite by design. For text workflows selected
 as `terminal`, Wright prints immediate activity feedback and then renders
@@ -207,7 +238,7 @@ its `summary:` record and omits wall-clock values so it stays
 deterministic. Severity ordering, secondary metadata, the lookup hint, and
 the footer are presentation-layer concerns: the `wright-result/v1` envelope
 keeps the driver's diagnostic set and production order, and the GitHub
-Actions renderer is unchanged.
+Actions renderer annotates the same set.
 
 The `lint` report applies the same hierarchy to findings: the verdict
 leads with finding counts by severity, findings render in action order, and a
@@ -221,7 +252,7 @@ entry naming its finding count and using the selected locations — the plain
 renderer emits one `finding:` record per finding — and interactive elapsed
 time stays presentation-only.
 The `wright-result/v1` envelope uses the same selected finding set,
-and the GitHub Actions renderer is unchanged.
+which the GitHub Actions renderer annotates and summarizes.
 
 The `inspect` queries follow the same human-first hierarchy (#446): on the
 terminal renderer as stacked sections, on the plain renderer as the same

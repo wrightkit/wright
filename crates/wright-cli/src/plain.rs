@@ -35,16 +35,33 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation + PlainReport>(
     envelope: &Envelope<T>,
     ctx: &RenderContext<'_>,
 ) {
-    let mut out: Vec<Line> = Vec::new();
-    let mut err: Vec<Line> = Vec::new();
     if envelope.result.is_artifact_stream() {
         // An artifact stream is the payload itself: it prints to stdout
         // unchanged while its diagnostics still become `diagnostic:` records.
+        let mut err: Vec<Line> = Vec::new();
         diagnostic_records(envelope, ctx, &mut err);
         emit(&mut err);
         envelope.result.render_body(ctx);
         return;
     }
+    let (out, err) = render_lines(envelope, ctx);
+    for line in out {
+        println!("{line}");
+    }
+    for line in err {
+        eprintln!("{line}");
+    }
+}
+
+/// The plain report as ordered `(stdout, stderr)` record strings before
+/// printing — the GitHub Actions log group renders the same lines (#794).
+/// Artifact streams are excluded: they own stdout byte-for-byte.
+pub(crate) fn render_lines<T: serde::Serialize + ResultPresentation + PlainReport>(
+    envelope: &Envelope<T>,
+    ctx: &RenderContext<'_>,
+) -> (Vec<String>, Vec<String>) {
+    let mut out: Vec<Line> = Vec::new();
+    let mut err: Vec<Line> = Vec::new();
     out.push((Stream::Out, verdict_line(envelope, ctx)));
     diagnostic_records(envelope, ctx, &mut err);
     // A gated result is a raised verdict, not a failed command: its real
@@ -90,8 +107,10 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation + PlainReport>(
         out.push((Stream::Out, format!("next: {next}")));
     }
     // The verdict and report lead; the diagnostic records annotate them.
-    emit(&mut out);
-    emit(&mut err);
+    (
+        out.into_iter().map(|(_, line)| line).collect(),
+        err.into_iter().map(|(_, line)| line).collect(),
+    )
 }
 
 /// The verdict word shares the renderers' tag set (ADR-0030 decision 4):
@@ -143,7 +162,7 @@ fn verdict_line<T: serde::Serialize + ResultPresentation + PlainReport>(
 
 /// The include root spelled for an agent: `.` when it is the working
 /// directory, else the display path (deterministic under a fixed cwd).
-fn display_root(root: &Path) -> String {
+pub(crate) fn display_root(root: &Path) -> String {
     if let Ok(cwd) = std::env::current_dir() {
         if root == cwd {
             return ".".to_string();
