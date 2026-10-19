@@ -121,7 +121,11 @@ kebab-case tokens: `unknown-enum member` and the other space-carrying
 `unknown-<kind>` codes (owner `kind` phrases such as `enum domain`,
 `localized string`, and `event player`) are hyphenated, so consumers match
 `unknown-enum-member`, `unknown-enum-domain`, `unknown-localized-string`,
-and `unknown-event-player` (#789). The earlier exception remains:
+and `unknown-event-player` (#789). `costEstimate`'s `exact.programRules`
+counts every declared program rule — disabled rules included — matching the
+`program` summary and `elementCount.rules` rather than the live rule subset
+(#788), and its `findings`/`skipped` members mirror the configured-registry
+set `lint` serves. The earlier exception remains:
 the `lint` result's `rules` member lists only each rule's `id` and
 `effectiveSeverity` (#431). `lintRules` serves the full rule metadata once,
 covering summary, rationale, documentation, known limits, evidence, and tags,

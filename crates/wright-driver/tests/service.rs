@@ -1580,7 +1580,10 @@ disabled rule ("disabled caller") {
         serde_json::json!({
             "emittedBytes": cost["exact"]["emittedBytes"],
             "programActions": 0,
-            "programRules": 1,
+            // `programRules` counts the declared inventory — the disabled
+            // rule included — like `program.rules`/`elementCount.rules`
+            // (#788); actions and waits stay live-only.
+            "programRules": 2,
             "waitActions": 0,
         })
     );
@@ -1592,7 +1595,7 @@ disabled rule ("disabled caller") {
     assert_eq!(
         analyze["result"]["cost"]["counts"],
         serde_json::json!({
-            "rules": 1,
+            "rules": 2,
             "conditions": 0,
             "actions": 0,
             "waits": 0,

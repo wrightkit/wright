@@ -1238,6 +1238,10 @@ export interface CostEstimateResult {
     performance: string
     [k: string]: unknown
   }
+  /**
+   * Rule evaluations the configured registry skipped (canonical CFG unavailable) — the same disclosure `lint` carries (#788).
+   */
+  skipped?: SkippedRule[]
   selection?: SelectionSummary
   [k: string]: unknown
 }
