@@ -1,6 +1,6 @@
 # ADR-0029: Structured statement edits for raw Workshop
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-19
 - Related: [ADR-0021](0021-name-and-signature-lookup.md), [ADR-0024](0024-structured-rule-content.md), [ADR-0028](0028-profile-applies-to-workshop-input-only.md), [Agent contract](../agent-contract.md), `workshop-rs` `docs/source-preservation.md` and its ADR-0017
 
@@ -9,7 +9,7 @@
 ADR-0024 made rule content readable as `workshop-rs/rule-content-v1` call trees and left "a typed authoring API" undecided. Two consumers now need the write direction:
 
 - **Agents.** To add or change a condition or action, an agent writes Workshop text, using `lookup` (ADR-0021) for spellings. It then checks the result with `validateEditTransaction`. The agent therefore has to know locale spellings, number and string formatting, variable syntax, operator layout, and indentation. Goal principle 4 promises structured access instead.
-- **A structured editing view.** A read-only prototype builds the in-game "create condition / create action" forms from `lookup` signatures. Each form produces a correct `rule-content-v1` node: its shape matches the content Wright returns for the same calls in a real project. No operation can turn that node into source text. The only way to write it today would be for the client to compose Workshop text itself.
+- **A structured view** — a presentation of a program as rules, conditions, and actions instead of text. A read-only prototype builds the in-game "create condition / create action" forms from `lookup` signatures. Each form produces a correct `rule-content-v1` node: its shape matches the content Wright returns for the same calls in a real project. No operation can turn that node into source text. The only way to write it today would be for the client to compose Workshop text itself.
 
 Wright already has most of the pieces it needs:
 
@@ -26,7 +26,7 @@ Two pieces are missing:
 
 ### 1. Input form: `rule-content-v1` list items
 
-A statement is written in the form `rule-content-v1` already uses for list items:
+A **statement** is one condition or one action of a rule. It is the unit this decision edits, the unit `workshop-rs` records a span for, and an entry in a rule's `conditions` or `actions` list. A statement is written in the form `rule-content-v1` already uses for list items:
 
 - A condition is `{"value": <node>}`.
 - An action is an action node, `{"call": id, "args": [...]}`.
@@ -37,7 +37,7 @@ Either may carry `"disabled": true`. Spans are output-only and are rejected on i
 
 | Owner | Responsibility |
 | --- | --- |
-| `workshop-rs` | Converts a `rule-content-v1` statement into the public model. Unknown ids, wrong argument counts, internal sentinels, and nodes that cannot form a statement fail with a structured error. Produces the checked `SourceEdit` that inserts, replaces, or deletes one condition or action of a parsed program at a statement address. That includes the statement's canonical text in the session's resolved Workshop locale (decision 3), its indentation relative to the surrounding source, statement comments (decision 3), and creating a missing section. Owns the round-trip contract in decision 5. |
+| `workshop-rs` | Converts a `rule-content-v1` statement into the public model. Unknown ids, wrong argument counts, internal sentinels, and nodes that cannot form a statement fail with a structured error. Produces the checked `SourceEdit` that inserts statements before, replaces, or deletes the statement at a statement address of a parsed program. That includes each emitted statement's canonical text in the session's resolved Workshop locale (decision 3), its indentation relative to the surrounding source, statement comments (decision 3), and creating a missing section. Owns the round-trip contract in decision 5. |
 | Wright | Owns the operation, addressing and freshness, the transaction it assembles from owner edits, its validation through the existing `validateEditTransaction` path, refusals, and presentation in `serve` and MCP. |
 
 Wright composes no Workshop text and reads no catalog spellings to build it. Locale, spelling, literal formatting, variable syntax, operator layout, and indentation are decided only by `workshop-rs`.
@@ -52,22 +52,28 @@ Wright composes no Workshop text and reads no catalog spellings to build it. Loc
   "inputIdentity": "<project.inputIdentity>",
   "edits": [
     { "rule": 3, "list": "actions", "index": 2, "change": "insert",
-      "statement": { "call": "startThrottleInDirection", "args": [ ... ] } },
+      "statements": [ { "call": "if", "args": [ ... ] },
+                      { "call": "startThrottleInDirection", "args": [ ... ] },
+                      { "call": "end", "args": [] } ] },
     { "rule": "Cover enums 108", "list": "conditions", "index": 0, "change": "replace",
       "statement": { "value": { "call": "==", "args": [ ... ] } } }
   ]
 }
 ```
 
-**Addressing.**
+**Addressing.** A **statement address** is `rule` + `list` + `index`:
 - `rule` is the same `Address` that `rules` and `cfg` accept.
 - `list` is `conditions` or `actions`.
 - `index` is the position in that list. For actions this is the flat index space that `rules`, `cfg`, `references`, and findings already share.
-- `change` is `insert`, `replace`, or `delete`. `insert` at the list length appends. `delete` takes no `statement`.
+
+**Changes.**
+- `insert` takes a non-empty `statements` array and places it, in order, before the statement at `index`. `index` equal to the list length appends.
+- `replace` takes one `statement` and replaces the statement at `index`.
+- `delete` takes neither and removes the statement at `index`.
 
 **Atomicity.**
-- Every address in a request refers to the program before any edit in that request.
-- Two edits at the same address refuse, as zero-width conflicts do in `EditTransaction`. Edits do not see each other's results, so an agent that adds an `If` and its `End` sends both in one request.
+- Every address in a request refers to the program before any edit in that request. Edits do not see each other's results.
+- Two edits at the same address refuse, as zero-width conflicts do in `EditTransaction`. Statements that belong at one position, such as an `If`, its body, and its `End`, go in one `insert`.
 
 **Freshness.** `inputIdentity` must equal the current `project.inputIdentity`. Otherwise the request refuses with `edit-stale-source` and edits nothing, so a client cannot address statements in a program it has not read.
 
@@ -110,9 +116,11 @@ This is checked over the owner's corpora in every supported Workshop locale. The
 
 ## Alternatives considered
 
-- **The client composes text from `lookup` spellings and validates it with `validateEditTransaction`:** rejected. Every client, including agents, an editing view, and the benchmark, would carry its own copy of Workshop emission. Validation would catch invalid text, but not a valid statement emitted differently from canonical output.
+- **The client composes text from `lookup` spellings and validates it with `validateEditTransaction`:** rejected. Every client, including agents, a structured view, and the benchmark, would carry its own copy of Workshop emission. Validation would catch invalid text, but not a valid statement emitted differently from canonical output.
 - **Regenerate the whole program with the canonical emitter and diff it:** rejected. Canonical emission does not preserve comments or formatting, so one inserted action would rewrite the file.
 - **A separate typed authoring format or Rust builder as the wire input:** rejected. It would add a second format next to `rule-content-v1` and force readers to translate between them.
+- **Several single-statement inserts at one address, ordered by their position in the request:** rejected. Only inserts would be exempt from the same-address conflict rule. One `insert` with a `statements` array says the same thing with no exception.
+- **Sequential addressing, where each edit sees the previous edit's result:** rejected. Callers would compute shifted positions themselves, and the request would no longer describe edits against the program the caller read.
 - **Addressing nested arguments by path:** rejected. The statement is the unit of span, validation, and index space. Replacing the whole statement covers argument changes without a second address space.
 - **An operation that also writes to disk:** rejected. It is inconsistent with the existing edit contract, where `validateEditTransaction`, `semanticRename`, and lint fixes return validated edits and the caller writes them.
 - **Extending `validateEditTransaction` to accept structured edits:** rejected. That operation's contract is caller-proposed text, and mixing the two input kinds would blur its refusals and its MCP schema.
@@ -120,7 +128,7 @@ This is checked over the owner's corpora in every supported Workshop locale. The
 ## Consequences
 
 - Agents can add, change, and remove conditions and actions by catalog id and argument position, and they get owner diagnostics before any byte is written.
-- A structured editing view can write what its forms build without owning any Workshop syntax. Where that view lives and what it looks like is a separate decision.
+- A structured view can write what its forms build without owning any Workshop syntax. Where that view lives and what it looks like is a separate decision.
 - `rule-content-v1` becomes an input format as well as an output format. Its stability now affects writers, and an incompatible change needs a new format id under the rules ADR-0024 set.
 - Follow-up work:
   - `workshop-rs`:
@@ -150,5 +158,5 @@ This is checked over the owner's corpora in every supported Workshop locale. The
   Each needs its own decision when a consumer needs it.
 - Not decided: creating or editing statement comments. That needs a comment field in a future `rule-content` format version, which `workshop-rs` owns.
 - Not decided: source-language authoring for OverPy or OSTW (decision 4).
-- Not decided: the form factor of a local editing view.
+- Not decided: the form factor of a local structured view, and whether such a view may use operations outside `wright-agent/v1`. Both belong to the decision that introduces the view.
 - The exact Rust API, error ids, and indentation rules belong to `workshop-rs`. The request field spellings above are illustrative until the Wright schema is written, but the addressing, atomicity, freshness, and write-path rules are decided here.
