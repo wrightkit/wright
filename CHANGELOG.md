@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.28.0](https://github.com/wrightkit/wright/compare/v0.27.0...v0.28.0) (2026-10-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* space-carrying diagnostic codes are renamed: unknown-enum member -> unknown-enum-member, and likewise for the other phrased owner kinds (unknown-enum-domain, unknown-localized-string, unknown-event-player, unknown-event-team, unknown-setting-boolean, unknown-modify-operator, unknown-settings-enum, unknown-top-level-section, unknown-rule-section, unknown-lookup-scope, unknown-global-variable, unknown-player-variable).
+* remove semantic rename from CLI and agent surfaces ([#801](https://github.com/wrightkit/wright/issues/801))
+
+### Features
+
+* **lookup:** carry owner return type and variadic on callable facts ([#807](https://github.com/wrightkit/wright/issues/807)) ([d51340c](https://github.com/wrightkit/wright/commit/d51340cce39718f04d26afe271bcc692df3d69e3)), closes [#781](https://github.com/wrightkit/wright/issues/781) [#798](https://github.com/wrightkit/wright/issues/798)
+* read and write .wright/ baselines under CI, degrade silently ([#809](https://github.com/wrightkit/wright/issues/809)) ([0308150](https://github.com/wrightkit/wright/commit/0308150c61f6b84235ba6a281e9a1f8bfea2aab6)), closes [#797](https://github.com/wrightkit/wright/issues/797)
+* remove semantic rename from CLI and agent surfaces ([#801](https://github.com/wrightkit/wright/issues/801)) ([befabc2](https://github.com/wrightkit/wright/commit/befabc202d59790e477accaf8d00a8fef96185d6))
+
+
+### Bug Fixes
+
+* hyphenate phrased Workshop error kinds in diagnostic codes ([#808](https://github.com/wrightkit/wright/issues/808)) ([03b7b9d](https://github.com/wrightkit/wright/commit/03b7b9d94f298b03fec13b2be6a65962fb62204c)), closes [#789](https://github.com/wrightkit/wright/issues/789)
+
 ## [0.27.0](https://github.com/wrightkit/wright/compare/v0.26.3...v0.27.0) (2026-10-19)
 
 
