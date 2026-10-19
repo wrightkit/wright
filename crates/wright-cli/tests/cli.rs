@@ -610,28 +610,39 @@ fn check_text_leads_with_verdict_and_blocking_count() {
     assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut lines = stdout.lines();
-    assert_eq!(lines.next(), Some("ERROR check"), "{stdout}");
+    let verdict = lines.next().unwrap_or_default().to_string();
+    assert!(verdict.starts_with("FAIL check root="), "{stdout}");
     let counts = lines.next().unwrap_or_default().to_string();
-    assert!(counts.contains("1 error(s)"), "{stdout}");
-    assert!(counts.contains("2 warning(s)"), "{stdout}");
-    assert_eq!(lines.next(), Some("  1 file(s) affected"), "{stdout}");
-    assert!(lines.next().is_none(), "the footer stays compact: {stdout}");
+    assert_eq!(
+        counts, "summary: errors=1 warnings=2 notes=0 affected=1",
+        "{stdout}"
+    );
+    // The lookup follow-up for the rejected name, then nothing else.
+    assert_eq!(lines.next(), Some("next: wright lookup"), "{stdout}");
+    assert!(lines.next().is_none(), "the report stays compact: {stdout}");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let error_at = stderr.find("error[").expect("an error diagnostic");
-    let warning_at = stderr.find("warning[").expect("a warning diagnostic");
+    let error_at = stderr
+        .find("diagnostic: error ")
+        .expect("an error diagnostic");
+    let warning_at = stderr
+        .find("diagnostic: warning ")
+        .expect("a warning diagnostic");
     assert!(
         error_at < warning_at,
         "blocking errors precede warnings: {stderr}"
     );
-    assert!(stderr.contains(" --> "), "a mapped location: {stderr}");
     assert!(
-        stderr.contains("Set Global Variable(B, FutureValueThing(2));"),
-        "the source context sits with the diagnostic: {stderr}"
+        stderr.contains("at=mixed.txt:"),
+        "a mapped location is one path:line:col token: {stderr}"
     );
     assert!(
-        stderr.contains("= analysis"),
-        "stage stays secondary: {stderr}"
+        stderr.contains("unknown-value.futurevaluething"),
+        "the rejected name's code rides the record: {stderr}"
+    );
+    assert!(
+        stderr.contains("stage=analysis"),
+        "the stage is a field, not a sentence: {stderr}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -682,8 +693,8 @@ fn terminal_renderer_marks_independent_diagnostics() {
 
 #[test]
 fn plain_renderer_keeps_the_undecorated_diagnostic_layout() {
-    // `plain` is the deterministic, undecorated contract (#703): no box
-    // connectors, same lines as before the terminal refinement.
+    // `plain` is the deterministic line-record surface (#793): no box
+    // connectors, `diagnostic:` records in place of the sentence layout.
     let path = temp_file("mixed.txt", MIXED_CHECK_SOURCE);
     let output = run(&[
         "check",
@@ -696,11 +707,11 @@ fn plain_renderer_keeps_the_undecorated_diagnostic_layout() {
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        !stderr.contains('├') && !stderr.contains('╰'),
+        !stderr.contains('├') && !stderr.contains('╰') && !stderr.contains(" --> "),
         "plain stays undecorated: {stderr}"
     );
-    assert!(stderr.contains("error["), "{stderr}");
-    assert!(stderr.contains("\n  --> "), "{stderr}");
+    assert!(stderr.contains("diagnostic: error "), "{stderr}");
+    assert!(stderr.contains("at=mixed.txt:"), "{stderr}");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -861,19 +872,19 @@ fn terminal_renderer_marks_analyze_risks_and_cfg_blocks() {
 
 #[test]
 fn check_unmapped_locations_are_not_fabricated() {
-    // `<stdin>` is a pseudo-path: the position is honest metadata, never a
-    // file-style `-->` location.
+    // `<stdin>` is a pseudo-path: the record carries the position verbatim
+    // as `at=<stdin>:l:c`, never dressed up as a file location.
     let output = run_with_stdin(
         &["check", "-", "--renderer", "plain", "--color", "never"],
         "rule (\"x\") { event { Ongoing - Global; } actions { If(True); }",
     );
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!stderr.contains("--> <stdin>"), "{stderr}");
     assert!(
-        stderr.contains("= at <stdin>:1:63"),
-        "the unmapped position stays secondary metadata: {stderr}"
+        stderr.contains("at=<stdin>:1:63"),
+        "the unmapped position is one verbatim token: {stderr}"
     );
+    assert!(!stderr.contains("-->"), "{stderr}");
 }
 
 #[test]
@@ -890,10 +901,17 @@ fn check_success_renders_a_compact_deterministic_summary() {
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stderr.is_empty());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(
-        stdout, "PASS check\n  0 diagnostic(s)\n",
-        "a clean check is a two-line summary on the deterministic plain surface"
+    let mut lines = stdout.lines();
+    assert!(
+        lines.next().unwrap_or_default().starts_with("PASS check root="),
+        "{stdout}"
     );
+    assert_eq!(
+        lines.next(),
+        Some("summary: errors=0 warnings=0 notes=0"),
+        "{stdout}"
+    );
+    assert!(lines.next().is_none(), "{stdout}");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -4425,8 +4443,8 @@ fn lookup_names_opy_rs_when_the_provider_cannot_answer() {
 
 #[test]
 fn check_text_points_unknown_names_at_lookup() {
-    // ADR-0021 decision 6: a rejected name in text output ends with a
-    // one-line pointer to the lookup surface.
+    // ADR-0021 decision 6, in record form (#793): a rejected name closes
+    // the report with a `next:` follow-up pointing at the lookup surface.
     let path = temp_file("lookup-hint.txt", MIXED_CHECK_SOURCE);
     let output = run(&[
         "check",
@@ -4437,21 +4455,21 @@ fn check_text_points_unknown_names_at_lookup() {
         "never",
     ]);
     assert_eq!(output.status.code(), Some(1));
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stderr.contains("hint: run 'wright lookup'"),
-        "the unknown-value diagnostic carries the pointer: {stderr}"
+        stdout.contains("next: wright lookup\n"),
+        "the unknown-value diagnostic carries the pointer: {stdout}"
     );
     assert!(
-        !stderr.contains("--language"),
-        "a Workshop source keeps the default-vocabulary hint: {stderr}"
+        !stdout.contains("--language"),
+        "a Workshop source keeps the default-vocabulary hint: {stdout}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 /// #789: owner `kind` phrases carry spaces (`"enum member"`), but the
-/// diagnostic code is a single kebab-case token on every surface — text
-/// `error[...]`, the JSON envelope, and the GitHub annotation title.
+/// diagnostic code is a single kebab-case token on every surface — the
+/// `diagnostic:` record, the JSON envelope, and the GitHub annotation title.
 #[test]
 fn check_unknown_kind_code_is_kebab_case_on_every_surface() {
     const SOURCE: &str = "rule (\"r\")\n{\n    event\n    {\n        Ongoing - Global;\n    }\n    actions\n    {\n        Set Global Variable(A, Map(Not A Real Map));\n    }\n}\n";
@@ -4462,8 +4480,8 @@ fn check_unknown_kind_code_is_kebab_case_on_every_surface() {
     assert_eq!(text.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&text.stderr);
     assert!(
-        stderr.contains("error[unknown-enum-member]"),
-        "the text code is one kebab-case token: {stderr}"
+        stderr.contains("diagnostic: error unknown-enum-member "),
+        "the record carries one kebab-case token: {stderr}"
     );
     assert!(
         !stderr.contains("unknown-enum member"),
@@ -4519,12 +4537,13 @@ fn check_text_locates_unknown_setting_value_and_names_the_locale() {
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("lookup-hint-zh.ow:9:"),
+        stderr.contains("at=lookup-hint-zh.ow:9:"),
         "the rejected value carries its file and line: {stderr}"
     );
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stderr.contains("hint: run 'wright lookup --locale zh-CN'"),
-        "the hint names the locale of the rejected name: {stderr}"
+        stdout.contains("next: wright lookup --locale zh-CN"),
+        "the follow-up names the locale of the rejected name: {stdout}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -4583,10 +4602,10 @@ for line in sys.stdin:
         "never",
     ]);
     assert_eq!(output.status.code(), Some(1), "{output:?}");
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stderr.contains("hint: run 'wright lookup --language opy'"),
-        "an OPY rejected name points at the OPY vocabulary: {stderr}"
+        stdout.contains("next: wright lookup --language opy"),
+        "an OPY rejected name points at the OPY vocabulary: {stdout}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -4611,9 +4630,10 @@ fn check_text_skips_the_lookup_hint_when_no_name_was_rejected() {
         stderr.contains("unknown-language"),
         "the detection diagnostic still reports: {stderr}"
     );
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        !stderr.contains("wright lookup"),
-        "no rejected name means no lookup pointer: {stderr}"
+        !stdout.contains("next: wright lookup"),
+        "no rejected name means no lookup pointer: {stdout}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

@@ -32,7 +32,7 @@ pub use result::{
     Envelope, EssentialResult, InspectResult, LintResult, RESULT_CONTRACT,
 };
 pub use select::{FindingSelection, SelectionOutcome};
-pub use session::{CompilerSession, Loaded, Provenance};
+pub use session::{CompilerSession, Loaded, Provenance, WORKSHOP_CLIENT_ELEMENT_LIMIT};
 pub use source_provider::{
     SourceBackend, SourceCompilation, SourceLanguage, SourceProvenance, SourceProvider,
     SourceProviderError, SourceTarget, SourceTargetKind,

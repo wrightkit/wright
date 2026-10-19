@@ -19,15 +19,16 @@ use wright_driver::result::{
 };
 
 use crate::cli::{ColorArg, CommonArgs, OutputFormatArg, RendererArg};
+use crate::plain;
 use crate::rail::{self, eprintln, println};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct Presentation {
-    format: OutputFormat,
-    renderer: Renderer,
-    color: bool,
-    interactive: bool,
-    all: bool,
+    pub(crate) format: OutputFormat,
+    pub(crate) renderer: Renderer,
+    pub(crate) color: bool,
+    pub(crate) interactive: bool,
+    pub(crate) all: bool,
 }
 
 pub(crate) struct Activity {
@@ -170,7 +171,7 @@ fn clear_activity_line(writer: &mut impl Write) {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Renderer {
+pub(crate) enum Renderer {
     Terminal,
     Plain,
     GithubActions,
@@ -273,7 +274,7 @@ fn env_truthy(name: &str) -> bool {
     })
 }
 
-pub(crate) fn render<T: serde::Serialize + ResultPresentation>(
+pub(crate) fn render<T: serde::Serialize + ResultPresentation + plain::PlainReport>(
     envelope: &Envelope<T>,
     pres: Presentation,
     elapsed: Duration,
@@ -291,11 +292,18 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation>(
         println!("{}", serde_json::to_string(&value).expect("serializes"));
         return;
     }
+    let ctx = RenderContext {
+        presentation: pres,
+        elapsed,
+        source_base,
+        subject,
+    };
     match pres.renderer {
         Renderer::GithubActions => render_github(envelope, subject),
-        Renderer::Terminal | Renderer::Plain => {
-            render_text(envelope, pres, elapsed, source_base, subject)
-        }
+        // Plain is the agent-facing line-record surface (#793); terminal
+        // keeps the human report.
+        Renderer::Plain => plain::render(envelope, &ctx),
+        Renderer::Terminal => render_text(envelope, pres, elapsed, source_base, subject),
     }
 }
 
@@ -322,17 +330,15 @@ fn render_text<T: serde::Serialize + ResultPresentation>(
     source_base: Option<&Path>,
     subject: Option<&str>,
 ) {
-    if pres.renderer == Renderer::Terminal && !envelope.result.is_artifact_stream() {
+    if !envelope.result.is_artifact_stream() {
         let lines = rail::capture(|| render_report(envelope, pres, elapsed, source_base, subject));
         rail::emit(rail::frame(lines, pres.color));
-    } else if pres.renderer == Renderer::Terminal {
+    } else {
         let flat = Presentation {
             renderer: Renderer::Plain,
             ..pres
         };
         render_report(envelope, flat, elapsed, source_base, subject);
-    } else {
-        render_report(envelope, pres, elapsed, source_base, subject);
     }
 }
 
@@ -429,7 +435,7 @@ fn render_report<T: serde::Serialize + ResultPresentation>(
 
 /// Diagnostics render in action order — errors first — without changing the
 /// reported set or the driver's production order (#443).
-fn severity_rank(severity: Severity) -> u8 {
+pub(crate) fn severity_rank(severity: Severity) -> u8 {
     match severity {
         Severity::Error => 0,
         Severity::Warning => 1,
@@ -1019,7 +1025,7 @@ impl ResultPresentation for EssentialResult {
 
 /// A reported span as `path:line:col` for inline display, or `None` when the
 /// result carries no resolved path.
-fn inline_location(span: &serde_json::Value) -> Option<String> {
+pub(crate) fn inline_location(span: &serde_json::Value) -> Option<String> {
     let path = span
         .get("path")
         .and_then(serde_json::Value::as_str)
@@ -1044,7 +1050,7 @@ fn symbol_kind_heading(kind: &str) -> &str {
 /// The item array of a semantic query payload (#531): the bare array of an
 /// unselected request, or the `<key>` member of a `{<key>: [...], selection:
 /// {...}}` selected result.
-fn query_items<'a>(value: &'a serde_json::Value, key: &str) -> &'a [serde_json::Value] {
+pub(crate) fn query_items<'a>(value: &'a serde_json::Value, key: &str) -> &'a [serde_json::Value] {
     value
         .as_array()
         .or_else(|| value.get(key).and_then(serde_json::Value::as_array))
@@ -1097,7 +1103,7 @@ impl ResultPresentation for RulesResult {
 }
 
 /// One rule-content node as a single `name(arg, ...)` line.
-fn render_node(node: &serde_json::Value) -> String {
+pub(crate) fn render_node(node: &serde_json::Value) -> String {
     if let Some(call) = node["call"].as_str() {
         let args = node["args"]
             .as_array()
@@ -1599,7 +1605,7 @@ fn render_cost_rule_body(result: &serde_json::Value, ctx: &RenderContext<'_>) {
     }
 }
 
-fn summary_status<T: serde::Serialize + ResultPresentation>(
+pub(crate) fn summary_status<T: serde::Serialize + ResultPresentation>(
     envelope: &Envelope<T>,
 ) -> &'static str {
     let mut status = if envelope.ok {
@@ -1664,7 +1670,7 @@ pub(crate) fn escape_workflow_data(value: &str) -> String {
         .replace('\n', "%0A")
 }
 
-fn is_real_source_path(path: &str) -> bool {
+pub(crate) fn is_real_source_path(path: &str) -> bool {
     !path.is_empty() && !path.starts_with('<')
 }
 
@@ -1695,6 +1701,14 @@ fn render_convert(result: &ConvertResult) {
 /// lines print as `-`/`+` rows with their own file's line number; unchanged
 /// lines are elided.
 fn render_diff_lines(original: &str, new_text: &str, indent: &str) {
+    for row in diff_rows(original, new_text) {
+        println!("{indent}{row}");
+    }
+}
+
+/// The changed rows of the diff as `{:>4} - text` / `{:>4} + text` strings
+/// (no indent), so the plain renderer's `patch:` records share one diff.
+pub(crate) fn diff_rows(original: &str, new_text: &str) -> Vec<String> {
     let old_lines: Vec<&str> = original.split('\n').collect();
     let new_lines: Vec<&str> = new_text.split('\n').collect();
     let mut lo = 0usize;
@@ -1707,14 +1721,16 @@ fn render_diff_lines(original: &str, new_text: &str, indent: &str) {
         old_hi -= 1;
         new_hi -= 1;
     }
+    let mut rows = Vec::new();
     for (removed, added) in align_lines(&old_lines[lo..old_hi], &new_lines[lo..new_hi]) {
         if let Some(index) = removed {
-            println!("{indent}{:>4} - {}", lo + index + 1, old_lines[lo + index]);
+            rows.push(format!("{:>4} - {}", lo + index + 1, old_lines[lo + index]));
         }
         if let Some(index) = added {
-            println!("{indent}{:>4} + {}", lo + index + 1, new_lines[lo + index]);
+            rows.push(format!("{:>4} + {}", lo + index + 1, new_lines[lo + index]));
         }
     }
+    rows
 }
 
 /// The differing rows of a longest-common-subsequence alignment between
@@ -1765,7 +1781,7 @@ fn array_len(value: &serde_json::Value) -> usize {
     value.as_array().map_or(0, Vec::len)
 }
 
-fn count(value: &serde_json::Value, key: &str) -> usize {
+pub(crate) fn count(value: &serde_json::Value, key: &str) -> usize {
     value
         .get(key)
         .and_then(serde_json::Value::as_u64)
@@ -1777,7 +1793,7 @@ fn count(value: &serde_json::Value, key: &str) -> usize {
 /// risk indicators, and cross-cutting state. Every line marks whether it is
 /// an exact count, a static fact, or a heuristic, and locations use real
 /// resolved paths — unmapped structures stay explicitly unmapped.
-fn rule_name(rule: &serde_json::Value) -> &str {
+pub(crate) fn rule_name(rule: &serde_json::Value) -> &str {
     match rule["name"].as_str() {
         Some("") | None => "<unnamed>",
         Some(name) => name,
@@ -1846,7 +1862,7 @@ fn lint_footer_parts(files: usize, skipped: usize, ctx: &RenderContext<'_>) -> V
 /// unknown severities conservatively ordered as warnings, and informational
 /// severities last. The driver's reported set and order are unchanged
 /// — this is a presentation-layer reorder only.
-fn finding_severity_rank(finding: &serde_json::Value) -> u8 {
+pub(crate) fn finding_severity_rank(finding: &serde_json::Value) -> u8 {
     match finding.get("severity").and_then(serde_json::Value::as_str) {
         Some("error") => 0,
         Some("info") | Some("notice") => 2,
@@ -2402,7 +2418,7 @@ fn render_diagnostic(diagnostic: &wright_driver::Diagnostic, color: bool, marks:
 
 /// The user-facing spelling of a reported path: cwd-relative when possible so
 /// locations read the same regardless of which stage produced them (#443).
-fn display_location_path(path: &str) -> String {
+pub(crate) fn display_location_path(path: &str) -> String {
     wright_driver::input::display_path(Path::new(path))
 }
 
