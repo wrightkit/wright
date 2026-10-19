@@ -622,6 +622,61 @@ fn cost_estimate_reports_the_canonical_element_count() {
     );
 }
 
+/// #790 (ADR-0030 decision 3): when the canonical count cannot run the
+/// `elementCount` member carries only the known client `budget` —
+/// `elementCountUnavailable` names the reason and the count is never a
+/// zero — and a failed emission reports `emittedBytes: null` plus
+/// `emittedBytesUnavailable`.
+#[test]
+fn cost_estimate_reports_unavailable_count_with_budget_and_reason() {
+    // A stray `End;` is preserved as an opaque `rawWorkshopAction`, so the
+    // program loads but the emitter and element counter cannot model it.
+    let path = temp_workshop(
+        "opaque.ws",
+        "variables {\n    global:\n        0: x\n}\nrule (\"test\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Wait(1);\n        End;\n    }\n}\n",
+    );
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(path.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+    let cost = result_of(
+        &mut service,
+        &ToolRequest::CostEstimate {
+            selection: FindingSelection::default(),
+            rule: None,
+            all: true,
+        },
+    );
+    assert_eq!(cost["elementCount"]["budget"], 32768);
+    assert!(
+        cost["elementCount"].get("total").is_none(),
+        "the count is absent, not zero: {cost}"
+    );
+    assert!(
+        cost["elementCount"].get("rules").is_none(),
+        "no fabricated shares list: {cost}"
+    );
+    assert!(
+        cost["elementCountUnavailable"]
+            .as_str()
+            .unwrap()
+            .contains("rawWorkshopAction"),
+        "{cost}"
+    );
+    assert!(cost["exact"]["emittedBytes"].is_null());
+    assert!(
+        cost["exact"]["emittedBytesUnavailable"]
+            .as_str()
+            .unwrap()
+            .contains("rawWorkshopAction"),
+        "{cost}"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
 #[test]
 fn session_cost_keeps_the_selection_outcome_for_the_verdict() {
     // #635: the in-process `CostResult` keeps the full set's outcome so the

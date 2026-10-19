@@ -275,10 +275,14 @@ Resolution never guesses.
   client budget. Each rule's share is ranked by count, largest first, where
   `index` is the canonical rule position; the 5 largest are shown by default
   and `--all` shows every rule. The count is a structure count, not a
-  statement of client importability, and is `null` with an
-  `elementCountUnavailable` reason when the count cannot run. Each rule
+  statement of client importability; when the count cannot run
+  `elementCount` carries only `budget` (the known client limit still
+  reports) and `elementCountUnavailable` names the reason — the count is
+  never reported as zero (ADR-0030 decision 3). Each rule
   entry and each finding carries its source location (`span`); a node
   without a retained span renders and serializes with no location (#722).
+  Likewise `exact.emittedBytes` is `null` plus an
+  `emittedBytesUnavailable` reason when emission fails, never `0`.
 
   **Run cache and gate (ADR-0027).** `compile` and `inspect cost` keep a
   small project-local run cache under `.wright/` at the project root and,
