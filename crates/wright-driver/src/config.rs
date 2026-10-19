@@ -110,13 +110,17 @@ pub struct SessionConfig {
 }
 
 /// Run-cache and cost-gate options (ADR-0027). Disabled entirely under
-/// `--no-cache`, a non-empty `WRIGHT_NO_CACHE`, or a truthy `CI`.
+/// `--no-cache` or a non-empty `WRIGHT_NO_CACHE`. Under a truthy `CI` only
+/// the explicit baseline flags read and write `.wright/` — the implicit
+/// previous-run comparison stays off and an unusable `--baseline` degrades
+/// silently (ADR-0030 decision 14).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RunOptions {
     /// `--no-cache`: neither read nor write `.wright/`.
     pub no_cache: bool,
     /// `--baseline <name>`: compare against the named reference instead of
-    /// the previous run. An unknown name given explicitly is a usage error.
+    /// the previous run. An unknown name given explicitly is a usage error
+    /// outside CI; under CI it turns the comparison off silently.
     pub baseline: Option<String>,
     /// `--save-baseline <name>`: record the current run under `name`.
     pub save_baseline: Option<String>,
