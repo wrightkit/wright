@@ -32,7 +32,7 @@ result.
 | Command | Purpose | Text-mode stdout |
 | --- | --- | --- |
 | `wright compile [INPUT] [--to LOCALE]` | Parse, lower, validate, emit Workshop text; warn on known client import limits | verdict, diagnostics, the written path, and the output SHA-256; the program goes to `<input stem>.ow` (or `-o PATH`; `-o -` prints only the program); `--to` emits in another Workshop client locale |
-| `wright convert [INPUT] --target opy\|ostw` | Reconstruct validated Workshop input as canonical OPY or OSTW source through a provider that negotiates `reconstruct` (the shipped OPY provider currently does not; no OSTW provider is shipped) | the reconstructed source |
+| `wright convert [INPUT] --target opy\|ostw` | Reconstruct validated Workshop input as canonical OPY or OSTW source through a provider that negotiates `reconstruct` (the shipped OPY provider does since 0.3.19; no OSTW provider is shipped) | the reconstructed source |
 | `wright check [INPUT]` | Parse, lower, validate, and report correctness diagnostics | verdict and validation diagnostics |
 | `wright analyze [INPUT] [--all]` | Summarize Workshop cost, ranked complexity hotspots, performance/stability risk indicators, and cross-cutting state | overview, cost, top hotspots, complexity, risks, and top variables with exact/static/heuristic evidence labels; `--all` lifts list caps |
 | `wright lint [INPUT] [--all] [--fix [--write]]` | Parse, lower, lint; report findings | finding counts by severity and actionable findings; `--all` lifts list caps; `--fix` previews each offered fix's validated diff, `--write` applies them |
@@ -275,10 +275,14 @@ Resolution never guesses.
   client budget. Each rule's share is ranked by count, largest first, where
   `index` is the canonical rule position; the 5 largest are shown by default
   and `--all` shows every rule. The count is a structure count, not a
-  statement of client importability, and is `null` with an
-  `elementCountUnavailable` reason when the count cannot run. Each rule
+  statement of client importability; when the count cannot run
+  `elementCount` carries only `budget` (the known client limit still
+  reports) and `elementCountUnavailable` names the reason — the count is
+  never reported as zero (ADR-0030 decision 3). Each rule
   entry and each finding carries its source location (`span`); a node
   without a retained span renders and serializes with no location (#722).
+  Likewise `exact.emittedBytes` is `null` plus an
+  `emittedBytesUnavailable` reason when emission fails, never `0`.
 
   **Run cache and gate (ADR-0027).** `compile` and `inspect cost` keep a
   small project-local run cache under `.wright/` at the project root and,
@@ -380,11 +384,11 @@ static Wright implementation.
   A non-Workshop input fails with the structured `convert-input-kind`
   diagnostic (exit 1).
 * Workshop-to-OPY reconstruction is available only when the provider
-  negotiates `reconstruct`. The shipped first-party `opy-rs` provider
-  currently does not advertise it, so the conversion refuses with
-  `capability-unavailable` (exit 3) and produces no source. Workshop-to-OSTW
-  is recognized but unavailable because no DEL/OSTW provider is shipped
-  (`source-provider-unavailable`).
+  negotiates `reconstruct`; the shipped first-party `opy-rs` provider
+  advertises it starting with 0.3.19, and an older or third-party provider
+  without it refuses with `capability-unavailable` (exit 3) and produces
+  no source. Workshop-to-OSTW is recognized but unavailable because no
+  DEL/OSTW provider is shipped (`source-provider-unavailable`).
 * When a provider does negotiate `reconstruct`, the result is **canonical
   reconstructed source** for the selected target
   (`result.text`) plus its deterministic SHA-256 (`result.sha256`) and the

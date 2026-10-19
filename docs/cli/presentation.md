@@ -186,7 +186,11 @@ subcommand leads with its subject and summary before its detail:
   ranked by count and located in source (`path:line:col`), then static
   findings
   ordered by severity with consecutive identical findings collapsed into one
-  counted entry that lists every occurrence's location (#722). Skipped rule
+  counted entry that lists every occurrence's location (#722). A failed
+  computation is never a zero: a failed element count prints
+  `element count unavailable: <reason> — the 32768-element budget still
+  applies`, and failed emission prints `emitted bytes: unavailable —
+  <reason>` (ADR-0030 decision 3). Skipped rule
   evaluations are disclosed like `lint`'s (#788). With
   `--rule`, `inspect cost` instead prints that rule's identity and
   location, its `Costliest statements` ranked by recursive count, and the

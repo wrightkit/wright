@@ -1421,9 +1421,15 @@ impl ResultPresentation for CostResult {
             ));
         }
         let exact = &self.result["exact"];
+        // A failed emission reports `null` plus `emittedBytesUnavailable` —
+        // the verdict says unavailable, never a fabricated zero (ADR-0030
+        // decision 3).
+        let emitted = match exact["emittedBytes"].as_u64() {
+            Some(bytes) => format!("{bytes} emitted byte(s)"),
+            None => "emitted byte(s) unavailable".to_string(),
+        };
         Some(format!(
-            "{} emitted byte(s), {} action(s), {} rule(s), {} wait(s)",
-            count(exact, "emittedBytes"),
+            "{emitted}, {} action(s), {} rule(s), {} wait(s)",
             count(exact, "programActions"),
             count(exact, "programRules"),
             count(exact, "waitActions"),
@@ -1441,7 +1447,15 @@ impl ResultPresentation for CostResult {
         }
         let exact = &self.result["exact"];
         println!("\nGenerated resources (exact)");
-        println!("  emitted bytes: {}", count(exact, "emittedBytes"));
+        match exact["emittedBytes"].as_u64() {
+            Some(bytes) => println!("  emitted bytes: {bytes}"),
+            None => println!(
+                "  emitted bytes: unavailable — {}",
+                exact["emittedBytesUnavailable"]
+                    .as_str()
+                    .unwrap_or("the emitter does not model this program")
+            ),
+        }
         println!("  actions: {}", count(exact, "programActions"));
         println!("  rules: {}", count(exact, "programRules"));
         println!("  waits: {}", count(exact, "waitActions"));
@@ -1452,11 +1466,12 @@ impl ResultPresentation for CostResult {
         // generic truncation note when the list was capped. Each rule
         // prints its source location (#722); a node without a retained
         // span simply omits it.
+        // The count is `Some(total)` or absent — unavailable, never zero —
+        // while the known budget still reports (ADR-0030 decision 3).
         let elements = &self.result["elementCount"];
-        if elements.is_object() {
+        if let Some(total) = elements["total"].as_u64() {
             println!(
-                "  {} element(s) of the {}-element budget [exact] — canonical structure, not a statement of client importability",
-                count(elements, "total"),
+                "  {total} element(s) of the {}-element budget [exact] — canonical structure, not a statement of client importability",
                 count(elements, "budget"),
             );
             for rule in elements["rules"].as_array().into_iter().flatten() {
@@ -1480,12 +1495,15 @@ impl ResultPresentation for CostResult {
                 );
             }
         } else {
-            println!(
-                "  element count unavailable: {}",
-                self.result["elementCountUnavailable"]
-                    .as_str()
-                    .unwrap_or("counter does not model this program")
-            );
+            let reason = self.result["elementCountUnavailable"]
+                .as_str()
+                .unwrap_or("counter does not model this program");
+            match elements["budget"].as_u64() {
+                Some(budget) => println!(
+                    "  element count unavailable: {reason} — the {budget}-element budget still applies"
+                ),
+                None => println!("  element count unavailable: {reason}"),
+            }
         }
 
         let mut findings = self.result["findings"]
