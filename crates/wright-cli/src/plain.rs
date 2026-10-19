@@ -47,7 +47,10 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation + PlainReport>(
     }
     out.push((Stream::Out, verdict_line(envelope, ctx)));
     diagnostic_records(envelope, ctx, &mut err);
-    if !envelope.ok {
+    // A gated result is a raised verdict, not a failed command: its real
+    // result body still renders — the findings are the reason it failed
+    // (ADR-0030 decision 13, matching render_report).
+    if !envelope.ok && !envelope.gated {
         // A failed command reports its diagnostics, not the default
         // result's headline — a default payload would masquerade as a real
         // answer (#446). The headline is the diagnostic severity counts.
@@ -79,8 +82,9 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation + PlainReport>(
     for next in next_commands(envelope) {
         out.push((Stream::Out, format!("next: {next}")));
     }
-    emit(&mut err);
+    // The verdict and report lead; the diagnostic records annotate them.
     emit(&mut out);
+    emit(&mut err);
 }
 
 /// The verdict word maps to the exit code (ADR-0030 decision 4 shares the
@@ -101,9 +105,8 @@ fn verdict_word<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>
     match summary_status(envelope) {
         "WARN" => "WARN".to_string(),
         _ => match envelope.command.as_str() {
-            "rules" | "symbols" | "refs" | "cfg" | "callgraph" | "inspect" | "lookup" => {
-                envelope.command.to_uppercase()
-            }
+            "rules" | "symbols" | "refs" | "cfg" | "callgraph" | "cost" | "inspect"
+            | "lookup" => envelope.command.to_uppercase(),
             _ => "PASS".to_string(),
         },
     }
@@ -170,6 +173,9 @@ fn diagnostic_records<T: serde::Serialize>(
         .filter(|selection| selection.total > 0)
     {
         let mut fields = vec![format!("diagnostics={total}/{}", selection.total)];
+        if let Some(by_code) = by_code_field(&selection.by_code) {
+            fields.push(by_code);
+        }
         if selection.withheld > 0 {
             fields.push(format!("withheld={}", selection.withheld));
             fields.push(field(
@@ -226,17 +232,10 @@ fn status_label(status: Status) -> &'static str {
     }
 }
 
-/// Follow-up commands as `next:` records (decision 2). When the result
-/// carries a driver-provided `next`/`followUps` list (#792), it wins;
-/// otherwise the command's known follow-ups apply.
-fn next_commands<T: serde::Serialize + ResultPresentation + PlainReport>(
-    envelope: &Envelope<T>,
-) -> Vec<String> {
-    if let Some(provided) = envelope.result.follow_up_commands() {
-        if !provided.is_empty() {
-            return provided;
-        }
-    }
+/// Follow-up commands as `next:` records (decision 2): the command's known
+/// follow-ups. A driver-provided list (#792) has not landed yet; when it
+/// does it wins over this table.
+fn next_commands<T: serde::Serialize>(envelope: &Envelope<T>) -> Vec<String> {
     let mut commands = Vec::new();
     match envelope.command.as_str() {
         "inspect" | "analyze" => {
@@ -419,14 +418,18 @@ fn severity_fields(error: usize, warning: usize, info: usize) -> Vec<String> {
 }
 
 /// One `finding:` record per reported finding — severity and code lead,
-/// the location is `at=`, every other scalar member of the finding becomes
-/// a field verbatim (`evidence`, `boundedness`, and the structured fields
-/// the driver adds such as `expression`/`count`/`spanKind`), and the
-/// message closes the line.
+/// the `repeated` member's facts ride as `count=`/`spanKind=`/`expression=`
+/// fields around the `at=` location, every other scalar member becomes a
+/// field verbatim (`evidence`, `boundedness`, and any structured fields the
+/// driver adds), and the message closes the line.
 fn finding_record(finding: &Value) -> String {
     let severity = finding["severity"].as_str().unwrap_or("warning");
     let code = finding["code"].as_str().unwrap_or("finding");
+    let repeated = finding.get("repeated").filter(|r| r.is_object());
     let mut items = vec![severity.to_string(), code.to_string()];
+    if let Some(count) = repeated.and_then(|r| r["count"].as_u64()) {
+        items.push(format!("count={count}"));
+    }
     if let Some(span) = finding.get("span").filter(|span| span.is_object()) {
         if let Some(at) = at_field(span) {
             items.push(at);
@@ -434,10 +437,27 @@ fn finding_record(finding: &Value) -> String {
     } else if let Some(location) = finding["location"].as_str() {
         items.push(format!("at={location}"));
     }
+    if let Some(repeated) = repeated {
+        if let Some(span_kind) = repeated["spanKind"].as_str() {
+            items.push(field("spanKind", span_kind));
+        }
+        if let Some(expression) = repeated["expression"].as_str() {
+            items.push(field("expression", expression));
+        }
+    }
     // Structured members become fields verbatim so driver additions ride
     // the record without a renderer change. Well-known members the record
-    // already carries (severity, code, message, span, location) are skipped.
-    const CARRIED: &[&str] = &["code", "severity", "message", "span", "location", "fix"];
+    // already carries (severity, code, message, span, location, repeated)
+    // are skipped.
+    const CARRIED: &[&str] = &[
+        "code",
+        "severity",
+        "message",
+        "span",
+        "location",
+        "fix",
+        "repeated",
+    ];
     if let Some(object) = finding.as_object() {
         for (key, value) in object {
             if CARRIED.contains(&key.as_str()) {
@@ -456,14 +476,35 @@ fn finding_record(finding: &Value) -> String {
     format!("finding: {}", items.join(" "))
 }
 
+/// The `byCode=` field for a `selected:`/`truncated:` record: per-code
+/// counts over the complete coded set, so a cap cannot hide a code's real
+/// count (#791). `None` when the set carries no codes.
+fn by_code_field(counts: &std::collections::BTreeMap<String, usize>) -> Option<String> {
+    if counts.is_empty() {
+        return None;
+    }
+    let joined = counts
+        .iter()
+        .map(|(code, n)| format!("{code}:{n}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    Some(format!("byCode={joined}"))
+}
+
 /// `selected:` record for a finding selection applied inside a result
 /// (`--max` withholds; `--severity`/`--rule-id`/`--file` narrow). The
 /// expansion repeats the command with `--max <total>` to lift the withhold.
 fn selected_record(noun: &str, shown: usize, selection: &SelectionOutcome, command: &str) -> Line {
     let mut fields = vec![format!("{noun}={shown}/{}", selection.total)];
+    if let Some(by_code) = by_code_field(&selection.by_code) {
+        fields.push(by_code);
+    }
     if selection.withheld > 0 {
         fields.push(format!("withheld={}", selection.withheld));
-        fields.push(field("expand", &format!("wright {command} --max {}", selection.total)));
+        fields.push(field(
+            "expand",
+            &format!("wright {command} --max {}", selection.total),
+        ));
     }
     (Stream::Out, format!("selected: {}", fields.join(" ")))
 }
@@ -484,17 +525,26 @@ fn truncation_keys(value: &Value) -> Vec<&str> {
         .unwrap_or_default()
 }
 
-/// The `truncated:` record for one capped list of `command`'s output.
+/// The `truncated:` record for one capped list of `command`'s output. A
+/// coded list's `byCode` counts describe the full set the cap hid (#791).
 fn truncation_line(value: &Value, key: &str, command: &str) -> String {
     let note = &value["truncation"][key];
-    truncated_record(
-        &[(
-            key,
-            note["shown"].as_u64().unwrap_or(0) as usize,
-            note["total"].as_u64().unwrap_or(0) as usize,
-        )],
-        &format!("wright {command} --all"),
-    )
+    let mut parts = vec![format!(
+        "{key}={}/{}",
+        note["shown"].as_u64().unwrap_or(0),
+        note["total"].as_u64().unwrap_or(0)
+    )];
+    if let Some(by_code) = note.get("byCode").and_then(Value::as_object) {
+        let counts = by_code
+            .iter()
+            .filter_map(|(code, n)| n.as_u64().map(|n| (code.clone(), n as usize)))
+            .collect();
+        if let Some(field) = by_code_field(&counts) {
+            parts.push(field);
+        }
+    }
+    parts.push(field("expand", &format!("wright {command} --all")));
+    format!("truncated: {}", parts.join(" "))
 }
 
 /// The `program` inventory as a `program:` record — present only when the
@@ -544,11 +594,6 @@ pub(crate) trait PlainReport {
     /// carries a program origin.
     fn origin_fields(&self) -> Vec<(&'static str, String)> {
         Vec::new()
-    }
-    /// A driver-provided list of follow-up commands (#792), when the
-    /// result carries one.
-    fn follow_up_commands(&self) -> Option<Vec<String>> {
-        None
     }
     /// Append this result's `summary:` and section records.
     fn plain_report(&self, envelope: &Envelope<Self>, ctx: &RenderContext<'_>, out: &mut Vec<Line>)
@@ -767,19 +812,6 @@ impl PlainReport for LintResult {
 impl PlainReport for EssentialResult {
     fn origin_fields(&self) -> Vec<(&'static str, String)> {
         origin_from_program(&self.result["program"])
-    }
-    fn follow_up_commands(&self) -> Option<Vec<String>> {
-        self.result
-            .get("next")
-            .or_else(|| self.result.get("followUps"))
-            .and_then(|next| {
-                next.as_array().map(|items| {
-                    items
-                        .iter()
-                        .filter_map(|item| item.as_str().map(str::to_string))
-                        .collect()
-                })
-            })
     }
     fn plain_report(
         &self,
@@ -1376,6 +1408,15 @@ fn selected_from_payload(value: &Value, noun: &str, shown: usize, out: &mut Vec<
     let withheld = selection["withheld"].as_u64().unwrap_or(0);
     let Some(total) = total else { return };
     let mut fields = vec![format!("{noun}={shown}/{total}")];
+    if let Some(by_code) = selection.get("byCode").and_then(Value::as_object) {
+        let counts = by_code
+            .iter()
+            .filter_map(|(code, n)| n.as_u64().map(|n| (code.clone(), n as usize)))
+            .collect();
+        if let Some(field) = by_code_field(&counts) {
+            fields.push(field);
+        }
+    }
     if withheld > 0 {
         fields.push(format!("withheld={withheld}"));
     }
@@ -1426,25 +1467,28 @@ impl PlainReport for CostResult {
             return;
         }
         let exact = &result["exact"];
+        // A failed emission reports `null` plus `emittedBytesUnavailable` —
+        // `unavailable`, never a fabricated zero (ADR-0030 decision 3).
+        let emitted = match exact["emittedBytes"].as_u64() {
+            Some(bytes) => format!("emittedBytes={bytes}"),
+            None => "emittedBytes=unavailable".to_string(),
+        };
         out.push((
             Stream::Out,
             format!(
-                "summary: emittedBytes={} actions={} rules={} waits={}",
-                count(exact, "emittedBytes"),
+                "summary: {emitted} actions={} rules={} waits={}",
                 count(exact, "programActions"),
                 count(exact, "programRules"),
                 count(exact, "waitActions")
             ),
         ));
         let elements = &result["elementCount"];
-        if elements.is_object() {
+        // The count is `Some(total)` or absent — unavailable, never zero —
+        // while the known budget still reports (ADR-0030 decision 3).
+        if let Some(total) = elements["total"].as_u64() {
             out.push((
                 Stream::Out,
-                format!(
-                    "cost: elements={} budget={}",
-                    count(elements, "total"),
-                    count(elements, "budget")
-                ),
+                format!("cost: elements={total} budget={}", count(elements, "budget")),
             ));
             for rule in elements["rules"].as_array().into_iter().flatten() {
                 let mut items = vec![
@@ -1518,6 +1562,7 @@ mod tests {
             exit,
             diagnostics: Vec::new(),
             selection: None,
+            gated: false,
             result,
             comparison: None,
         }
@@ -1565,21 +1610,24 @@ mod tests {
 
     #[test]
     fn finding_record_carries_structured_fields_verbatim() {
+        // The driver's `repeated{expression,count,spanKind}` member (#820)
+        // flattens to fields around the location; other scalar members
+        // sort into the field section before the closing message.
         let record = finding_record(&serde_json::json!({
             "code": "repeated-value",
             "severity": "warning",
             "location": "src/ana.opy:42:5",
             "message": "expr evaluated repeatedly",
             "evidence": "static-indicator",
-            "expression": "distance(x, y)",
-            "count": 3,
-            "spanKind": "enclosing-loop"
+            "repeated": {
+                "expression": "distance(x, y)",
+                "count": 3,
+                "spanKind": "enclosing-loop"
+            }
         }));
-        // Non-carried scalar members sort into the field section between
-        // the location and the closing message.
         assert_eq!(
             record,
-            "finding: warning repeated-value at=src/ana.opy:42:5 count=3 evidence=static-indicator expression=\"distance(x, y)\" spanKind=enclosing-loop message=\"expr evaluated repeatedly\""
+            "finding: warning repeated-value count=3 at=src/ana.opy:42:5 spanKind=enclosing-loop expression=\"distance(x, y)\" evidence=static-indicator message=\"expr evaluated repeatedly\""
         );
     }
 }

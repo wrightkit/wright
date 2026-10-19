@@ -23,6 +23,7 @@ jobs:
       cli: ${{ steps.filter.outputs.rust_core }}
       dist: ${{ steps.filter.outputs.dist }}
       agent_guide: ${{ steps.filter.outputs.agent_guide }}
+      ui: ${{ steps.filter.outputs.ui }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -66,6 +67,13 @@ jobs:
               - 'crates/**'
               - 'tests/fixtures/**'
               - 'scripts/**'
+              - '.github/workflows/**'
+            # Cargo.lock carries the workshop-rs pin the generated UI types
+            # follow; schemas/** also runs the Rust gates via rust_core.
+            ui:
+              - 'ui/**'
+              - 'schemas/**'
+              - 'Cargo.lock'
               - '.github/workflows/**'
   agent-guide:
     name: Agent guide sync
@@ -635,6 +643,47 @@ jobs:
         if: matrix.channel == 'WinGet'
         run: python scripts/test-distribution-winget.py
 
+  ui:
+    name: UI
+    needs: paths
+    if: needs.paths.outputs.ui == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ui
+        run: npm ci
+
+      - name: Verify generated types
+        working-directory: ui
+        run: npm run check-types
+
+      - name: svelte-check
+        working-directory: ui
+        run: npm run check
+
+      - name: Unit tests
+        working-directory: ui
+        run: npm test
+
+      - name: Production build
+        working-directory: ui
+        run: npm run build
+
+      - name: Bundle size budget (100 KiB gzipped)
+        working-directory: ui
+        run: npm run check:size
+
   # Fails when any gating job failed or was cancelled, and when a job whose
   # path condition selected it did not finish successfully — a skipped
   # required job must never read as a pass.
@@ -658,6 +707,7 @@ jobs:
       - dist-cli-build
       - dist-validation
       - agent-guide
+      - ui
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -683,7 +733,8 @@ jobs:
             "metrics-drift": ($p.opy == "true"),
             "dist-cli-build": ($p.dist == "true"),
             "dist-validation": ($p.dist == "true"),
-            "agent-guide": ($p.agent_guide == "true")
+            "agent-guide": ($p.agent_guide == "true"),
+            "ui": ($p.ui == "true")
           }')
           for job in $(jq -r 'keys[]' <<<"$required"); do
             result=$(jq -r --arg job "$job" '.[$job].result // "missing"' <<<"$NEEDS")

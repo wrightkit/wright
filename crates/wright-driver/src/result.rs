@@ -32,6 +32,12 @@ pub struct Envelope<T: Serialize> {
     /// Present when a finding selection was applied to `diagnostics` (#430).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selection: Option<crate::select::SelectionOutcome>,
+    /// Set when the CLI's `--fail-on` gate raised this result's verdict
+    /// (ADR-0030 decision 13): the command succeeded but a diagnostic or
+    /// finding reached the threshold severity. In-process only — the wire
+    /// already carries the raised `ok`/`exit` pair.
+    #[serde(skip)]
+    pub gated: bool,
     pub result: T,
     /// The run-cache comparison for `compile`/`inspect cost` (ADR-0027,
     /// #723): in-process only — it never serializes into the default JSON
@@ -53,6 +59,7 @@ impl<T: Serialize> Envelope<T> {
             exit: self.exit,
             diagnostics: self.diagnostics,
             selection: self.selection,
+            gated: self.gated,
             result: f(self.result),
             comparison: self.comparison,
         }

@@ -399,6 +399,27 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
     assert!(!request_schema.is_valid(&json!({"op":"lint","all":"yes"})));
     assert!(request_schema.is_valid(&json!({"op":"check","all":true})));
 
+    // #783: `limit` declares 1..=10 in the request schema. An out-of-range
+    // value fails schema validation, still deserializes (the wire type is
+    // an integer), and the service refuses it `malformed-request` — the
+    // same code a transport assigns a malformed request.
+    for request in [
+        json!({"op":"lookup","language":"workshop","limit":0}),
+        json!({"op":"lookup","language":"workshop","limit":11}),
+    ] {
+        assert!(
+            !request_schema.is_valid(&request),
+            "schema accepted an out-of-range limit: {request}"
+        );
+        let parsed =
+            serde_json::from_value::<ToolRequest>(request.clone()).expect("request deserializes");
+        let ToolResponse::Error { error } = service_response(&parsed) else {
+            panic!("{request} expected a malformed-request refusal");
+        };
+        assert_eq!(error.code, "malformed-request", "{request}: {error:?}");
+    }
+    assert!(request_schema.is_valid(&json!({"op":"lookup","language":"workshop","limit":10})));
+
     let valid_range = json!({"start_line":1,"start_col":1,"end_line":1,"end_col":1});
     assert!(edit_range_schema.is_valid(&valid_range));
     for coordinate in ["start_line", "start_col", "end_line", "end_col"] {
@@ -494,7 +515,10 @@ fn cli_and_agent_selections_return_the_same_set() {
     let cli = serde_json::from_slice::<Value>(&output.stdout).unwrap()["result"].clone();
     assert_eq!(cli["findings"], agent["findings"], "same selected set");
     assert_eq!(cli["selection"], agent["selection"], "same truncation");
-    assert_eq!(agent["selection"], json!({"total": 10, "withheld": 7}));
+    assert_eq!(
+        agent["selection"],
+        json!({"total": 10, "withheld": 7, "byCode": {"repeated-value": 9}})
+    );
 
     // #531: the semantic-query flags select the same set the agent request
     // fields do, through the same driver-side selection.

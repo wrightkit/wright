@@ -190,7 +190,7 @@ the successful `result` payload.
 | `lint` | optional selection, optional `all` | Finding counts by severity and actionable findings; effective policy is available from `lintRules` |
 | `lintRules` | none | Registered lint rules with full metadata and effective configuration |
 | `callGraph` | optional selection, optional `all` | Subroutine call graph; `{"edges": [...], "selection": {...}}` when a selection is applied |
-| `costEstimate` | optional selection, optional `rule`, optional `all` | Exact generated-resource counts, `elementCount` (the canonical Workshop structure counted against the client element budget; `rules` ranked by count, largest first. `index` is the canonical rule position and each entry carries a resolved `span`; the 5 largest by default, `all: true` for every rule; `null` plus `elementCountUnavailable` when the count cannot run), findings (each with a resolved `span`), and `selection` when applied. With `rule` the result is the rule drill-down (#724): `rule` (identity, `count`, `span`), `statements[]` (direct children ranked by recursive `count`, each with `name`, `count`, `span`) and `byNode[]` (each node's own `base_count + adjustment` cost summed per canonical node name with `occurrences`; the entries sum to the rule's `count`) | The default result carries no run-cache comparison — an agent requests one explicitly by passing the reference record as inline data, not a file path (ADR-0027, #723). |
+| `costEstimate` | optional selection, optional `rule`, optional `all` | Exact generated-resource counts, `elementCount` (the canonical Workshop structure counted against the client element budget; `rules` ranked by count, largest first. `index` is the canonical rule position and each entry carries a resolved `span`; the 5 largest by default, `all: true` for every rule; when the count cannot run `elementCount` carries only `budget` — the known limit still reports — and `elementCountUnavailable` names the reason, never a zero (ADR-0030 decision 3). `exact.emittedBytes` likewise reports `null` plus `emittedBytesUnavailable` when emission fails), findings (each with a resolved `span`), and `selection` when applied. With `rule` the result is the rule drill-down (#724): `rule` (identity, `count`, `span`), `statements[]` (direct children ranked by recursive `count`, each with `name`, `count`, `span`) and `byNode[]` (each node's own `base_count + adjustment` cost summed per canonical node name with `occurrences`; the entries sum to the rule's `count`) | The default result carries no run-cache comparison — an agent requests one explicitly by passing the reference record as inline data, not a file path (ADR-0027, #723). |
 | `targetMetadata` | none | Canonical target/catalog metadata |
 | `validateEditTransaction` | `transaction`, optional `sources` | Atomic validation status, diagnostics, and previews when valid |
 | `providerValidateEdit` | `language_id`, `transaction`, optional `documents`, `sources`, `project_root` | Provider-validated transaction or structured refusal |
@@ -345,10 +345,13 @@ The CLI options `--severity`, `--rule-id`, `--file`, and `--max` on `lint`,
 surfaces return the same selected set for the same input and selection.
 
 When a request applies any selection field, the result reports
-`selection: {"total": <set before selection>, "withheld": <dropped by max>}`:
+`selection: {"total": <set before selection>, "withheld": <dropped by max>,
+"byCode": {<code>: <count>}}`:
 `findings` becomes `{"findings": [...], "selection": {...}}`, while `lint`
 and `costEstimate` add a `selection` member to their existing result objects.
-Requests without selection fields receive the previous shapes unchanged.
+`byCode` counts the filtered set per code before `max` truncates it, so a
+capped result still reports every code's real count (#791). Requests without
+selection fields receive the previous shapes unchanged.
 
 ### Rule content (ADR-0024)
 
@@ -410,7 +413,10 @@ diagnostics; `lint` reports severity counts and actionable findings;
 `analyze` reports overview, cost, hotspots, complexity, risks, and top
 variables; bare `inspect` reports the overview, rule names, and detail commands.
 Lint and risk findings carry code, severity, message, evidence, and a compact
-`location` (`path:line:column`) when mapped. Full spans and fix transactions
+`location` (`path:line:column`) when mapped; a `repeated-value` finding also
+carries `repeated` — `{expression, count, spanKind}` where `spanKind` is
+`expression` or `enclosing-loop` — stating as data what the message states in
+prose (#791). Full spans and fix transactions
 are available from `findings`; lint policy is available from `lintRules`.
 Persistent-object details are queried through `persistentObjects`.
 
@@ -531,7 +537,8 @@ request's `language` selects the owner (`workshop` or `opy`, the ids
   a callable's parameters.
 * `locale`: the Workshop display-name locale (session configuration, then
   the catalog's primary locale when omitted).
-* `limit`: default 3, maximum 10.
+* `limit`: default 3, maximum 10. A `limit` outside that range is a
+  `malformed-request` refusal, never a silent clamp (#783).
 
 Each entry carries its owner `identity`, `kind`, accepted `spelling`, and
 `displayName`, plus the owner fact that describes it (`callable`, `enum`,

@@ -235,6 +235,55 @@ fn workshop_lookup_callable_carries_the_owners_return_type_and_variadic() {
 }
 
 #[test]
+fn lookup_rejects_an_out_of_range_limit_as_malformed() {
+    // #783: `limit` declares 1..=10 in the committed schema; a value
+    // outside it is a `malformed-request` refusal, never a silent clamp.
+    // `limit: 10` and an omitted limit behave as they always did.
+    let mut owned = session(workshop_path());
+    let mut service = ToolService::new(&mut owned).unwrap();
+
+    for limit in [0, 11, usize::MAX] {
+        let error = match service.handle(&ToolRequest::Lookup {
+            language: "workshop".to_string(),
+            query: Some("wait".to_string()),
+            kind: None,
+            within: None,
+            locale: None,
+            limit: Some(limit),
+        }) {
+            ToolResponse::Error { error } => error,
+            ToolResponse::Ok { result } => {
+                panic!("limit {limit} expected a refusal, got {result:?}")
+            }
+        };
+        assert_eq!(error.code, "malformed-request", "limit {limit}: {error:?}");
+        assert!(error.message.contains("limit"), "{error:?}");
+    }
+
+    // The `Hero` enum has more members than the maximum: `limit: 10`
+    // returns ten where an omitted limit returns the default three.
+    let entries = entries_of(service.handle(&ToolRequest::Lookup {
+        language: "workshop".to_string(),
+        query: None,
+        kind: None,
+        within: Some("Hero".to_string()),
+        locale: None,
+        limit: Some(10),
+    }));
+    assert_eq!(entries.len(), 10, "the boundary limit still answers");
+
+    let entries = entries_of(service.handle(&ToolRequest::Lookup {
+        language: "workshop".to_string(),
+        query: None,
+        kind: None,
+        within: Some("Hero".to_string()),
+        locale: None,
+        limit: None,
+    }));
+    assert_eq!(entries.len(), 3, "an omitted limit keeps the default");
+}
+
+#[test]
 fn workshop_lookup_filters_by_kind_and_bounds_the_limit() {
     let mut owned = session(workshop_path());
     let mut service = ToolService::new(&mut owned).unwrap();
