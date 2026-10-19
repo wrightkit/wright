@@ -4240,6 +4240,34 @@ fn lookup_json_matches_the_agent_result() {
 }
 
 #[test]
+fn lookup_json_carries_callable_returns_and_variadic() {
+    // #781/#798: a value entry's `callable` names the owner-declared
+    // return type, and `array`'s repeats its last parameter.
+    let output = run(&["lookup", "distance", "-f", "json"]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let result = parse_json(&output.stdout);
+    let distance = result["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["identity"] == "distance")
+        .expect("the distance value");
+    assert_eq!(distance["callable"]["returns"], "Number");
+    assert!(distance["callable"].get("variadic").is_none());
+
+    let output = run(&["lookup", "array", "-f", "json"]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let result = parse_json(&output.stdout);
+    let array = result["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["identity"] == "array")
+        .expect("the array value");
+    assert_eq!(array["callable"]["variadic"], true);
+}
+
+#[test]
 fn lookup_within_lists_an_enums_members() {
     let output = run(&["lookup", "--within", "Team", "--kind", "enum-member"]);
     assert_eq!(output.status.code(), Some(0), "{output:?}");
