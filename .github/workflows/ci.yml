@@ -549,7 +549,11 @@ jobs:
 
       - name: Build CLI and LSP
         shell: bash
-        run: cargo build --locked -p wright-cli -p wright-lsp
+        # `wright-cli/ui` matches the release archive's feature set so the
+        # post-install smoke exercises the shipped `wright ui` surface; a
+        # debug build embeds the stub page when ui/dist is absent, which is
+        # enough for the loopback URL and /api contract checks.
+        run: cargo build --locked -p wright-cli -p wright-lsp --features wright-cli/ui
 
       - name: Upload distribution binaries
         uses: actions/upload-artifact@v7
