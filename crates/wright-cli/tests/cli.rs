@@ -463,7 +463,7 @@ fn terminal_renderer_uses_command_specific_hierarchy() {
         ("check", " PASS  check", "0 diagnostics"),
         ("lint", " WARN  lint", "Lint findings"),
         ("analyze", " WARN  analyze", "Program overview"),
-        ("inspect", " INSPECT", "Detail commands"),
+        ("inspect", " INSPECT", "Rules"),
     ] {
         let output = run(&[
             command,
@@ -505,8 +505,12 @@ fn analyze_real_project_report_is_bounded_and_ranked() {
     assert!(stdout.contains("Performance and stability risks"));
     assert!(stdout.contains("State and coupling"));
     assert!(stdout.contains("[static]"));
+    assert!(stdout.contains("Next"));
+    // Bounded means the report does not scale with program size: every
+    // section truncates to a fixed row budget, and `Next` is a constant
+    // follow-up list.
     assert!(
-        stdout.lines().count() <= 40,
+        stdout.lines().count() <= 48,
         "report is not bounded:\n{stdout}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -755,7 +759,15 @@ fn terminal_renderer_marks_lint_findings_and_keeps_compact_results_flat() {
     ]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(stdout, " PASS  check\n  0 diagnostics\n", "{stdout}");
+    // The verdict stays flat — no findings group — while the shared
+    // program summary and follow-ups (#821) still report.
+    assert_eq!(
+        stdout,
+        " PASS  check\n  0 diagnostics\n\nProgram overview\n  1 file, 1 rule, \
+         0 global variables, 0 player variables, 0 subroutines\n\nNext\n  \
+         wright lint\n  wright analyze\n  wright inspect\n",
+        "{stdout}"
+    );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
