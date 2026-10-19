@@ -103,60 +103,38 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
         }
     }
 
-    if input.ends_with(".ws") {
-        let renamed = match service.handle(&ToolRequest::Symbols {
-            kind: Some("globalVariable".to_string()),
-            file: None,
-            max: None,
-            all: true,
-        }) {
-            wright_driver::service::ToolResponse::Ok { result } => result
-                .as_array()
-                .and_then(|symbols| symbols.first())
-                .and_then(|symbol| symbol.get("name"))
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string),
-            wright_driver::service::ToolResponse::Error { error } => {
-                panic!("symbols failed: {error:?}")
-            }
+    if input.ends_with(".ws") && !source.is_empty() {
+        // `validateEditTransaction` exercises the shared validated-edit path
+        // with a caller-proposed no-op replacement of the source's first
+        // character.
+        let transaction = wright_driver::edit::EditTransaction {
+            edits: vec![wright_driver::edit::SourceEdit {
+                edit_kind: "edit".to_string(),
+                source: input.to_string(),
+                source_identity: wright_driver::input_identity(&source),
+                range: wright_driver::edit::EditRange {
+                    start_line: 1,
+                    start_col: 1,
+                    end_line: 1,
+                    end_col: 2,
+                },
+                new_text: source.chars().next().unwrap().to_string(),
+            }],
         };
-        match renamed {
-            Some(name) => {
-                let rename = service.handle(&ToolRequest::SemanticRename {
-                    sources: Some(std::collections::BTreeMap::from([(
-                        input.to_string(),
-                        source.clone(),
-                    )])),
-                    target: wright_driver::edit::RenameTarget {
-                        symbol: Some(wright_driver::service::Address::Name(name)),
-                        source: None,
-                        line: None,
-                        col: None,
-                        to: "renamed_by_consumer".to_string(),
-                    },
-                });
-                match rename {
-                    wright_driver::service::ToolResponse::Ok { result } => {
-                        assert!(result["ok"].as_bool().unwrap_or(false), "rename validates");
-                        assert!(
-                            result["preview"]
-                                .as_array()
-                                .unwrap()
-                                .iter()
-                                .any(|p| p["new_text"]
-                                    .as_str()
-                                    .unwrap_or_default()
-                                    .contains("renamed_by_consumer")),
-                            "the preview rewrites the identifier"
-                        );
-                        println!("edit: semantic rename validated and previewed");
-                    }
-                    wright_driver::service::ToolResponse::Error { error } => {
-                        panic!("rename failed: {error:?}")
-                    }
-                }
+        match service.handle(&ToolRequest::ValidateEdit {
+            sources: Some(std::collections::BTreeMap::from([(
+                input.to_string(),
+                source.clone(),
+            )])),
+            transaction,
+        }) {
+            wright_driver::service::ToolResponse::Ok { result } => {
+                assert!(result["ok"].as_bool().unwrap_or(false), "edit validates");
+                println!("edit: transaction validated and previewed");
             }
-            None => println!("edit: no global variable to rename (skipped)"),
+            wright_driver::service::ToolResponse::Error { error } => {
+                panic!("validateEditTransaction failed: {error:?}")
+            }
         }
     }
 

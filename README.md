@@ -12,7 +12,7 @@ agents.
 - **Cost and risk analysis.** Workshop element cost, hotspots, and server-load
   risk indicators, each labeled exact, static, or heuristic.
 - **Semantic queries.** Symbols, references, control flow, call graph, cost.
-- **Validated edits.** Renames that preview a diff before writing.
+- **Validated edits.** Source edits that preview a diff before writing.
 - **Agent and editor integration.** `wright serve` (JSON-RPC and MCP) and
   `wright-lsp`.
 - **CI-friendly output.** JSON reports and GitHub Actions annotations.
@@ -54,7 +54,6 @@ wright check [INPUT]            # correctness diagnostics
 wright lint [INPUT]             # lint findings
 wright analyze [INPUT]          # cost, hotspots, and risk indicators
 wright inspect [INPUT]          # semantic summary
-wright rename OLD NEW [INPUT]   # preview a diff; --write applies it
 wright compile [INPUT]          # write <input>.ow; --to LOCALE selects the output locale
 wright serve [INPUT]            # agent session over stdio or MCP
 ```

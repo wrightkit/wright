@@ -685,9 +685,9 @@ fn stdio_transport_recovers_in_the_same_process() {
 #[test]
 fn stdio_transport_serves_mutation_operations() {
     // #130/#434: the stdio adapter exposes the shared mutation operations as
-    // thin mappings — validated edit preview and semantic rename — with the
-    // same structured all-or-nothing results as in-process consumers. On raw
-    // Workshop input both validate through `workshop-rs` reparse.
+    // thin mappings — a validated edit preview — with the same structured
+    // all-or-nothing results as in-process consumers. On raw Workshop input
+    // it validates through `workshop-rs` reparse.
     let input = corpus_workshop("synthetic/control-flow");
     let source = std::fs::read_to_string(&input).unwrap();
     let identity = wright_driver::input_identity(&source);
@@ -721,21 +721,6 @@ fn stdio_transport_serves_mutation_operations() {
             .contains("\"bounded loop\""),
         "the preview carries the edited source: {responses:?}"
     );
-
-    // Semantic rename through the same transport (#434): the declared name
-    // addresses the symbol; every occurrence rewrites through provenance.
-    let rename = serde_json::json!({
-        "op": "semanticRename",
-        "sources": { input.to_string_lossy().into_owned(): source.clone() },
-        "target": { "symbol": "index", "to": "counter" }
-    });
-    let responses = run_lines("stdio", &input, &[&serde_json::to_string(&rename).unwrap()]);
-    assert_eq!(responses[0]["result"]["ok"], true, "{responses:?}");
-    let preview = responses[0]["result"]["preview"][0]["new_text"]
-        .as_str()
-        .unwrap();
-    assert!(preview.contains("0: counter"), "{preview}");
-    assert!(preview.contains("Global.counter"), "{preview}");
 }
 
 #[test]
@@ -887,14 +872,29 @@ fn transports_are_equivalent_for_mutation_operations() {
     // in-process behavior.
     let input = corpus_workshop("synthetic/control-flow");
     let source = std::fs::read_to_string(&input).unwrap();
-    let rename = serde_json::json!({
-        "op": "semanticRename",
-        "sources": { input.to_string_lossy().into_owned(): source },
-        "target": { "symbol": "index", "to": "counter" }
+    let validate = serde_json::json!({
+        "op": "validateEditTransaction",
+        "sources": { input.to_string_lossy().into_owned(): source.clone() },
+        "transaction": {
+            "edits": [{
+                "kind": "edit",
+                "source": input.to_string_lossy().into_owned(),
+                "source_identity": wright_driver::input_identity(&source),
+                "range": {
+                    "start_line": 6, "start_col": 8,
+                    "end_line": 6, "end_col": 21,
+                },
+                "new_text": "bounded loop"
+            }]
+        }
     });
-    let stdio = run_lines("stdio", &input, &[&serde_json::to_string(&rename).unwrap()]);
+    let stdio = run_lines(
+        "stdio",
+        &input,
+        &[&serde_json::to_string(&validate).unwrap()],
+    );
     let jsonrpc_request = serde_json::json!({
-        "jsonrpc": "2.0", "id": 1, "method": "request", "params": rename
+        "jsonrpc": "2.0", "id": 1, "method": "request", "params": validate
     });
     let jsonrpc = run_lines(
         "jsonrpc",
@@ -967,8 +967,6 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
             "wright_analyze",
             "wright_inspect",
             "wright_validate_edit_transaction",
-            "wright_semantic_rename",
-            "wright_provider_semantic_rename",
             "wright_provider_validate_edit",
             "wright_lookup",
         ]
@@ -988,9 +986,7 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
             "call_graph" => "callGraph",
             "cost_estimate" => "costEstimate",
             "target_metadata" => "targetMetadata",
-            "semantic_rename" => "semanticRename",
             "validate_edit_transaction" => "validateEditTransaction",
-            "provider_semantic_rename" => "providerSemanticRename",
             "provider_validate_edit" => "providerValidateEdit",
             other => other,
         };
@@ -1004,26 +1000,31 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
         assert!(tool["inputSchema"]["properties"].get("op").is_none());
         assert!(tool["description"].is_string());
     }
-    for name in ["wright_validate_edit_transaction", "wright_semantic_rename"] {
-        let tool = tools.iter().find(|t| t["name"] == name).unwrap();
-        assert!(
-            tool["inputSchema"]["properties"].get("sources").is_none(),
-            "{name} omits sources"
-        );
-    }
-    // #548: the provider tools omit `documents`/`sources` — the service
+    let validate_tool = tools
+        .iter()
+        .find(|t| t["name"] == "wright_validate_edit_transaction")
+        .unwrap();
+    assert!(
+        validate_tool["inputSchema"]["properties"]
+            .get("sources")
+            .is_none(),
+        "wright_validate_edit_transaction omits sources"
+    );
+    // #548: the provider tool omits `documents`/`sources` — the service
     // derives them from the session's loaded project.
-    for name in [
-        "wright_provider_semantic_rename",
-        "wright_provider_validate_edit",
-    ] {
-        let tool = tools.iter().find(|t| t["name"] == name).unwrap();
-        assert!(
-            tool["inputSchema"]["properties"].get("documents").is_none()
-                && tool["inputSchema"]["properties"].get("sources").is_none(),
-            "{name} omits documents and sources"
-        );
-    }
+    let provider_tool = tools
+        .iter()
+        .find(|t| t["name"] == "wright_provider_validate_edit")
+        .unwrap();
+    assert!(
+        provider_tool["inputSchema"]["properties"]
+            .get("documents")
+            .is_none()
+            && provider_tool["inputSchema"]["properties"]
+                .get("sources")
+                .is_none(),
+        "wright_provider_validate_edit omits documents and sources"
+    );
     // #532: the report tools expose `all` in their derived input schemas.
     for name in ["wright_analyze", "wright_inspect", "wright_lint"] {
         let tool = tools.iter().find(|t| t["name"] == name).unwrap();
@@ -1065,10 +1066,6 @@ fn mcp_transport_results_match_the_service_contract() {
         // #472: the edit tools run without `sources` — the service reads the
         // on-disk text.
         (
-            "wright_semantic_rename",
-            serde_json::json!({"target": {"symbol": "index", "to": "counter"}}),
-        ),
-        (
             "wright_validate_edit_transaction",
             serde_json::json!({
                 "transaction": {
@@ -1099,9 +1096,7 @@ fn mcp_transport_results_match_the_service_contract() {
         let op = match tool.trim_start_matches("wright_") {
             "call_graph" => "callGraph",
             "cost_estimate" => "costEstimate",
-            "semantic_rename" => "semanticRename",
             "validate_edit_transaction" => "validateEditTransaction",
-            "provider_semantic_rename" => "providerSemanticRename",
             "provider_validate_edit" => "providerValidateEdit",
             other => other,
         };

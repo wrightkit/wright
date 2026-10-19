@@ -13,7 +13,7 @@ safe source-edit contracts, and the transport adapters
 | `wright_driver::{Envelope, CompileResult, CheckResult, AnalyzeResult, InspectResult, LintResult, Diagnostic, CompiledOutput}` | **stable** | `wright-result/v1` machine contract ([`docs/cli.md`](cli.md)) |
 | `wright_driver::service::{ToolService, ToolRequest, ToolResponse, Capabilities}` | **stable** | Session-aware tool contract `wright-agent/v1` ([`docs/agent-contract.md`](agent-contract.md)); capability discovery, queries, workflows, and validated mutation |
 | `wright_driver::edit::{SourceEdit, EditRange, EditTransaction, SourcePreview, EditValidation, validate_transaction}` | **stable** | Source-edit transactions; validated through the correct owner-backed project semantics (#128); `EditTransaction::apply` applies ranges against one original source snapshot |
-| `wright_driver::edit::{RenameRequest, rename_symbol}` | **deprecated** | `wright-embedding/v1` compatibility helpers retained for source compatibility (#514): a whole-file textual whole-word proposal with no semantic-identity guarantee. Strings, comments, and unrelated same-named symbols are not distinguished. The supported rename is `semanticRename` (see below); the helpers may be removed only with a breaking embedding-contract transition |
+| `wright_driver::edit::{RenameRequest, rename_symbol}` | **deprecated** | `wright-embedding/v1` compatibility helpers retained for source compatibility (#514): a whole-file textual whole-word proposal with no semantic-identity guarantee. Strings, comments, and unrelated same-named symbols are not distinguished. There is no Wright-side semantic rename on the tool surface; a rename is a caller-proposed `EditTransaction` validated through `validateEditTransaction` (see below). The helpers may be removed only with a breaking embedding-contract transition |
 | `wright_driver::{input_identity, EMBEDDING_CONTRACT}` | **stable** | `wright-embedding/v1` |
 | Internal HIR/WIR arenas, parser/CST, emitter internals | **internal** | Never part of the public contract |
 | `wright serve` stdio/JSON-RPC/MCP adapters | **stable** | Thin mappings over `ToolService` and `wright-agent/v1`; `wright-serve` remains a workspace binary alias |
@@ -83,7 +83,7 @@ remains readable and writable for source compatibility within
 `wright-embedding/v1`, but post-construction mutation is not a supported
 capability: the next workflow (`load`, `compile`, `check`, `analyze`,
 `inspect`, `lint`, `convert`, `symbols`, `refs`, `cfg`, `callgraph`, `cost`,
-`rename`, `validate_edit_transaction`, `semantic_rename`) or `ToolService`
+`validate_edit_transaction`) or `ToolService`
 construction refuses with a `session-config-changed` diagnostic naming the
 changed fields, rather than reusing state derived from the earlier
 configuration. The provider surfaces that consume the provider
@@ -123,8 +123,8 @@ actions, values, events, enum domains, and locales.
 
 ## Validated mutation (#130)
 
-Agents and embedding consumers request mutation through two structured
-tool operations over the session's project:
+Agents and embedding consumers request mutation through a structured
+tool operation over the session's project:
 
 * `validateEditTransaction`: validate and preview a caller-supplied
   [`EditTransaction`] against the session project. The request may carry the
@@ -132,20 +132,14 @@ tool operations over the session's project:
   `sources` is omitted the service reads those files from disk (#472). The
   response returns `ok`, structured diagnostics, and per-source previews
   with the edited text and its new SHA-256 identity.
-* `semanticRename`: request a semantic rename by `symbol` or at a 1-based
-  position (`source`/`line`/`col`/`to`) through the shared #129 refactoring
-  contract, with `sources` optional as for `validateEditTransaction` (#472).
-  The response returns the validated exact-range transaction
-  (`ok: true`) or structured refusal diagnostics (`ok: false`, no
-  transaction).
 
-Both preserve the #128 all-or-nothing semantics: an unsafe, stale,
+It preserves the #128 all-or-nothing semantics: an unsafe, stale,
 overlapping, colliding, or unsupported request returns structured
 diagnostics and never a partially applicable edit set. Wright
 **proposes and validates** edits; applying them to the filesystem is an
 explicit consumer responsibility because the semantic and tooling core never writes
-files. Capability discovery advertises `validateEditTransaction` and
-`semanticRename`; the `serve` transport adapters forward the same operations
+files. Capability discovery advertises `validateEditTransaction`; the
+`serve` transport adapters forward the same operation
 unchanged (behaviorally equivalent, transport-tested).
 
 ## Safe edits
@@ -164,24 +158,27 @@ overlapping/conflicting edits, invalid ranges, and compilation errors, and
 returns the previewed edited sources atomically (any failed validation returns
 `ok = false` and no validated preview). Validation runs through the
 provider-backed project/session semantics where the provider negotiates edit
-validation. OPY edit validation and rename are provider-backed: they run
-through `providerValidateEdit` / `providerSemanticRename` against the
-configured provider's negotiated `editValidation` and `rename` capabilities,
-and the shipped first-party provider negotiates both. Only a provider that
-does not negotiate them refuses (`capability-unavailable`); Wright never
-invokes a removed static frontend. The raw edit operations keep their source
+validation. OPY edit validation is provider-backed: it runs
+through `providerValidateEdit` against the
+configured provider's negotiated `editValidation` capability,
+and the shipped first-party provider negotiates it. Only a provider that
+does not negotiate it refuses (`capability-unavailable`); Wright never
+invokes a removed static frontend. The raw edit operation keeps its source
 kind gate: OPY input refuses with `edit-requires-provider` naming the
 provider operation, DEL/OSTW input refuses with
 `source-provider-unavailable`, and other non-Workshop kinds refuse with
-`edit-unsupported-kind`. On the provider operations, a `language_id` with no
-configured provider refuses explicitly (`provider-not-configured`). The
-supported refactoring is semantic rename (`semanticRename` above,
-`ToolRequest::SemanticRename`, or [`CompilerSession::semantic_rename`]): on
-raw Workshop it rewrites exactly the identifier spans the parsed program
-records and revalidates the edited project. The deprecated `rename_symbol` helper remains only for
+`edit-unsupported-kind`. On the provider operation, a `language_id` with no
+configured provider refuses explicitly (`provider-not-configured`). There is
+no Wright-side semantic rename on the tool surface: a rename is a
+caller-proposed `EditTransaction` over the identifier spans `symbols`/`refs`
+report, validated through `validateEditTransaction` (raw Workshop) or
+`providerValidateEdit` (provider-owned source). Provider-backed rename still
+exists for editors only, through the LSP `textDocument/rename` path
+(`wright_driver::provider_edit::semantic_rename`). The deprecated
+`rename_symbol` helper remains only for
 `wright-embedding/v1` source compatibility. It is a whole-word textual
-proposal with no semantic-identity guarantee and is never a fallback when
-semantic rename is unavailable or refused. Raw HIR/WIR mutation is never public, and
+proposal with no semantic-identity guarantee and is never a fallback for a
+refused validation. Raw HIR/WIR mutation is never public, and
 application/writing stays an explicit caller responsibility.
 
 ## Transports
@@ -217,4 +214,4 @@ omitted.
 
 `crates/wright-consumer` is a committed consumer that depends only on
 `wright-driver` and runs compile/check/analyze/lint, all tool queries, and a
-validated rename over the corpus (`wright-consumer/tests/consumer.rs`).
+validated edit transaction over the corpus (`wright-consumer/tests/consumer.rs`).

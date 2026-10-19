@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use wright_driver::edit::{EditTransaction, RenameTarget};
-use wright_driver::service::{Address, ToolService};
+use wright_driver::edit::EditTransaction;
+use wright_driver::service::ToolService;
 use wright_driver::{
     CompilerSession, Diagnostic, InputSpec, SessionConfig, SourceBackend, SourceKind,
 };
@@ -537,9 +537,7 @@ fn session_config_mutation_refuses_workflows() {
     assert!(refused_config_change(
         &session.symbols(None, None, None).diagnostics
     ));
-    assert!(refused_config_change(
-        &session.rename("x", "y", false).diagnostics
-    ));
+    assert!(refused_config_change(&session.lint_fix(false).diagnostics));
 
     session.config.kind = SourceKind::Workshop;
     assert!(session.check().ok, "check: {:?}", session.diagnostics());
@@ -570,19 +568,6 @@ fn session_config_mutation_refuses_edits_and_service_construction() {
         "{:?}",
         validation.diagnostics
     );
-
-    let rename = session.semantic_rename(
-        None,
-        &RenameTarget {
-            symbol: Some(Address::Name("x".to_string())),
-            source: None,
-            line: None,
-            col: None,
-            to: "y".to_string(),
-        },
-    );
-    assert!(!rename.ok);
-    assert!(refused_config_change(&rename.diagnostics));
 
     let error = ToolService::new(&mut session)
         .err()

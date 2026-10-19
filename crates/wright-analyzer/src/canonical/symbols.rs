@@ -131,8 +131,8 @@ pub struct UsageSummary {
 }
 
 /// The outcome of resolving a 1-based source position to the symbol whose
-/// identifier occurrence covers it (#429, #555). Every surface — CLI/agent
-/// rename targeting and editor hover/definition/references — shares this
+/// identifier occurrence covers it (#429, #555). The editor surfaces —
+/// hover, definition, and references — share this
 /// one resolution rule, so a position resolves to exactly one symbol, to
 /// none, or reports the ambiguity; no surface guesses by iteration order.
 #[derive(Debug, Clone, PartialEq, Eq)]

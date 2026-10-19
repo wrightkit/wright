@@ -1,6 +1,6 @@
 ---
 name: wright
-description: Use in a project of Overwatch Workshop rules or OverPy (.opy) source when you must judge what is wrong, risky, or expensive, or how a change propagates, and text search cannot answer it. Covers Workshop server freezes, infinite loops, rule cost, symbol and rule flow, safe renames, and OPY-to-Workshop compilation, through the `wright` CLI.
+description: Use in a project of Overwatch Workshop rules or OverPy (.opy) source when you must judge what is wrong, risky, or expensive, or how a change propagates, and text search cannot answer it. Covers Workshop server freezes, infinite loops, rule cost, symbol and rule flow, and OPY-to-Workshop compilation, through the `wright` CLI.
 license: AGPL-3.0
 ---
 

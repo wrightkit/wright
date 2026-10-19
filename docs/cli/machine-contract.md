@@ -79,7 +79,7 @@ analyzer's codes, including the name-addressing refusals `unknown-symbol`,
 `source-provider-unavailable` marks the explicit DEL/OSTW provider boundary
 and is reported at the internal stage. Provider failures keep the
 provider's typed classification in the diagnostic code, on the
-source-provider seam and in `providerSemanticRename`/`providerValidateEdit`
+source-provider seam and in `providerValidateEdit`
 mutation results alike: an LPP refusal is
 `provider-refusal-<refusalCode>` (a Wright-originated refusal keeps its own
 code, e.g. `session-config-changed`), a capability gap is
