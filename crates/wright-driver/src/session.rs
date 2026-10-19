@@ -1420,11 +1420,15 @@ pub(crate) fn workshop_diag(
             );
         }
         workshop_rs::WorkshopError::Unknown { kind, span, .. }
-        | workshop_rs::WorkshopError::UnknownWithCandidates { kind, span, .. } => {
-            (format!("unknown-{kind}"), Stage::Frontend, to_span(*span))
-        }
-        workshop_rs::WorkshopError::NotDetected { kind, span, .. } => {
-            (format!("unknown-{kind}"), Stage::Frontend, to_span(*span))
+        | workshop_rs::WorkshopError::UnknownWithCandidates { kind, span, .. }
+        | workshop_rs::WorkshopError::NotDetected { kind, span, .. } => {
+            // Owner kinds are phrases (`"enum member"`); the emitted code is
+            // a single kebab-case token (`unknown-enum-member`, #789).
+            (
+                format!("unknown-{}", kind.replace(' ', "-")),
+                Stage::Frontend,
+                to_span(*span),
+            )
         }
         workshop_rs::WorkshopError::Malformed { span, .. } => {
             ("parse-error".to_string(), Stage::Frontend, to_span(*span))

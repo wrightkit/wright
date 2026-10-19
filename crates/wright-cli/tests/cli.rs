@@ -4333,6 +4333,51 @@ fn check_text_points_unknown_names_at_lookup() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
+/// #789: owner `kind` phrases carry spaces (`"enum member"`), but the
+/// diagnostic code is a single kebab-case token on every surface — text
+/// `error[...]`, the JSON envelope, and the GitHub annotation title.
+#[test]
+fn check_unknown_kind_code_is_kebab_case_on_every_surface() {
+    const SOURCE: &str = "rule (\"r\")\n{\n    event\n    {\n        Ongoing - Global;\n    }\n    actions\n    {\n        Set Global Variable(A, Map(Not A Real Map));\n    }\n}\n";
+    let path = temp_file("bad-enum.ws", SOURCE);
+    let file = path.to_str().unwrap();
+
+    let text = run(&["check", file, "--renderer", "plain", "--color", "never"]);
+    assert_eq!(text.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&text.stderr);
+    assert!(
+        stderr.contains("error[unknown-enum-member]"),
+        "the text code is one kebab-case token: {stderr}"
+    );
+    assert!(
+        !stderr.contains("unknown-enum member"),
+        "no code carries a space: {stderr}"
+    );
+
+    let json = run(&["check", file, "--format", "json"]);
+    assert_eq!(json.status.code(), Some(1));
+    let envelope = parse_json(&json.stdout);
+    assert!(
+        envelope["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "unknown-enum-member"),
+        "the JSON code is unknown-enum-member: {}",
+        envelope["diagnostics"]
+    );
+
+    let github = run(&["check", file, "--renderer", "github-actions"]);
+    assert_eq!(github.status.code(), Some(1));
+    let annotations = String::from_utf8_lossy(&github.stderr);
+    assert!(
+        annotations.contains("title=unknown-enum-member"),
+        "the annotation title is one token: {annotations}"
+    );
+
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
 /// wright#753: a rejected value in a non-default Workshop locale names its
 /// file and line, and the hint carries the locale `lookup` needs to resolve it.
 /// `无需装弹: 禁用` stays rejected across workshop-rs versions; the
