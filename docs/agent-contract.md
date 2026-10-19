@@ -531,7 +531,8 @@ request's `language` selects the owner (`workshop` or `opy`, the ids
   a callable's parameters.
 * `locale`: the Workshop display-name locale (session configuration, then
   the catalog's primary locale when omitted).
-* `limit`: default 3, maximum 10.
+* `limit`: default 3, maximum 10. A `limit` outside that range is a
+  `malformed-request` refusal, never a silent clamp (#783).
 
 Each entry carries its owner `identity`, `kind`, accepted `spelling`, and
 `displayName`, plus the owner fact that describes it (`callable`, `enum`,

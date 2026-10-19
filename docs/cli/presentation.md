@@ -93,10 +93,10 @@ program remain the only stdout payloads in text mode, including when GitHub
 Actions presentation is selected; every other `compile` report is a verdict,
 the written path, and the output SHA-256. GitHub Actions diagnostics and findings are emitted as escaped
 workflow annotations; grouping is sent to the workflow command stream and a
-concise PASS/WARN/ERROR line is appended to `GITHUB_STEP_SUMMARY` when the
+concise PASS/WARN/FAIL/ERROR line is appended to `GITHUB_STEP_SUMMARY` when the
 runner provides that file. The summary uses the highest structured severity:
 errors produce `ERROR`, warnings produce `WARN`, and info/notice-only results
-produce `PASS`.
+produce `PASS`; a result raised by `--fail-on` produces `FAIL` (exit 1).
 
 Interactive terminal mode is TUI-lite by design. For text workflows selected
 as `terminal`, Wright prints immediate activity feedback and then renders
@@ -106,7 +106,7 @@ short anti-flicker threshold; phase output is transient and is fully cleared
 before the final verdict, diagnostics, report, or source artifact is rendered.
 Completed `check`, `lint`, `analyze`, `inspect`, and the `inspect` query
 subcommands (`symbols`, `refs`, `cfg`, `callgraph`, `cost`) print a
-command-specific PASS/WARN/ERROR verdict and compact summary before details;
+command-specific PASS/WARN/FAIL/ERROR verdict and compact summary before details;
 diagnostics and findings include a one-line source context when the reported
 provenance path is readable. The driver exposes typed progress events through
 `ProgressObserver`; no terminal strings, spinner frames, ANSI sequence, or

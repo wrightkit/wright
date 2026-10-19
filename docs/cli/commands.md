@@ -32,7 +32,7 @@ result.
 | Command | Purpose | Text-mode stdout |
 | --- | --- | --- |
 | `wright compile [INPUT] [--to LOCALE]` | Parse, lower, validate, emit Workshop text; warn on known client import limits | verdict, diagnostics, the written path, and the output SHA-256; the program goes to `<input stem>.ow` (or `-o PATH`; `-o -` prints only the program); `--to` emits in another Workshop client locale |
-| `wright convert [INPUT] --target opy\|ostw` | Reconstruct validated Workshop input as canonical OPY or OSTW source through a provider that negotiates `reconstruct` (the shipped OPY provider currently does not; no OSTW provider is shipped) | the reconstructed source |
+| `wright convert [INPUT] --target opy\|ostw` | Reconstruct validated Workshop input as canonical OPY or OSTW source through a provider that negotiates `reconstruct` (the shipped OPY provider does since 0.3.19; no OSTW provider is shipped) | the reconstructed source |
 | `wright check [INPUT]` | Parse, lower, validate, and report correctness diagnostics | verdict and validation diagnostics |
 | `wright analyze [INPUT] [--all]` | Summarize Workshop cost, ranked complexity hotspots, performance/stability risk indicators, and cross-cutting state | overview, cost, top hotspots, complexity, risks, and top variables with exact/static/heuristic evidence labels; `--all` lifts list caps |
 | `wright lint [INPUT] [--all] [--fix [--write]]` | Parse, lower, lint; report findings | finding counts by severity and actionable findings; `--all` lifts list caps; `--fix` previews each offered fix's validated diff, `--write` applies them |
@@ -207,6 +207,17 @@ share the finding-selection options `--severity`, `--rule-id`, `--file`, and
 or exit codes; see [lint configuration and findings](lint.md) and
 [presentation](presentation.md).
 
+Every workflow command accepts the opt-in gating option `--fail-on
+<error|warning|info>` (ADR-0030 decision 13): when the complete result's
+highest diagnostic or finding severity reaches the threshold — judged like
+the verdict, on the full set before selection — the command exits 1 and
+reports a FAIL verdict on every renderer and in JSON (`ok: false`,
+`exit: 1`). The gate only raises a verdict: a result below the threshold is
+untouched (a `WARN` result still exits 0, so gating is off by default), and
+a command already failing keeps its own exit code and verdict rather than
+reporting FAIL. Deciding when a workflow enables the gate belongs to the
+`wright` action; the CLI carries no policy.
+
 `check`, `lint`, `analyze`, `inspect`, and the `inspect` subcommands report
 verdicts and actionable content by default. Text and compact JSON carry the
 same items; JSON is for programs processing results. Long lists show at most
@@ -369,11 +380,11 @@ static Wright implementation.
   A non-Workshop input fails with the structured `convert-input-kind`
   diagnostic (exit 1).
 * Workshop-to-OPY reconstruction is available only when the provider
-  negotiates `reconstruct`. The shipped first-party `opy-rs` provider
-  currently does not advertise it, so the conversion refuses with
-  `capability-unavailable` (exit 3) and produces no source. Workshop-to-OSTW
-  is recognized but unavailable because no DEL/OSTW provider is shipped
-  (`source-provider-unavailable`).
+  negotiates `reconstruct`; the shipped first-party `opy-rs` provider
+  advertises it starting with 0.3.19, and an older or third-party provider
+  without it refuses with `capability-unavailable` (exit 3) and produces
+  no source. Workshop-to-OSTW is recognized but unavailable because no
+  DEL/OSTW provider is shipped (`source-provider-unavailable`).
 * When a provider does negotiate `reconstruct`, the result is **canonical
   reconstructed source** for the selected target
   (`result.text`) plus its deterministic SHA-256 (`result.sha256`) and the

@@ -409,11 +409,9 @@ fn render_report<T: serde::Serialize + ResultPresentation>(
             );
         }
     }
-    if !envelope.ok {
-        if envelope.diagnostics.is_empty() {
-            eprintln!("{}: failed", envelope.command);
-        }
-    } else {
+    // A gated result is a raised verdict, not a failed command: its real
+    // result body still renders — the findings are the reason it failed.
+    if envelope.ok || envelope.gated {
         envelope.result.render_body(&ctx);
         // The run-cache comparison (ADR-0027, #723) rides the envelope
         // in-process — shown on every renderer, never in the JSON result,
@@ -421,6 +419,8 @@ fn render_report<T: serde::Serialize + ResultPresentation>(
         if !envelope.result.is_artifact_stream() {
             render_comparison(envelope.comparison.as_ref());
         }
+    } else if envelope.diagnostics.is_empty() {
+        eprintln!("{}: failed", envelope.command);
     }
     if envelope.command == "check" {
         render_check_footer(envelope, pres, elapsed);
@@ -455,7 +455,7 @@ fn render_verdict<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<
     // that look like real answers (#446).
     let metadata = match envelope.command.as_str() {
         "check" => check_metadata(envelope),
-        _ if !envelope.ok => String::new(),
+        _ if !envelope.ok && !envelope.gated => String::new(),
         _ => envelope.result.metadata().unwrap_or_default(),
     };
     if !metadata.is_empty() {
@@ -703,6 +703,10 @@ fn workflow_severity(severity: Severity) -> &'static str {
 pub(crate) enum SummaryStatus {
     Pass,
     Warn,
+    /// The `--fail-on` gate's raised verdict (ADR-0030 decision 13): exit 1
+    /// after a result that met the threshold. A genuine command failure
+    /// (`Error`, any nonzero exit the driver produced) still outranks it.
+    Fail,
     Error,
 }
 
@@ -711,18 +715,8 @@ impl SummaryStatus {
         match self {
             Self::Pass => "PASS",
             Self::Warn => "WARN",
+            Self::Fail => "FAIL",
             Self::Error => "ERROR",
-        }
-    }
-
-    /// Maps a JSON finding's severity string, for the paths that carry no
-    /// typed [`Severity`].
-    fn from_finding_severity(severity: &str) -> Self {
-        match severity {
-            "error" => Self::Error,
-            "warning" => Self::Warn,
-            "info" | "notice" => Self::Pass,
-            _ => Self::Warn,
         }
     }
 }
@@ -737,29 +731,45 @@ impl From<Severity> for SummaryStatus {
     }
 }
 
-/// Selection-aware finding accounting for a result's verdict (#430): under
-/// a selection the outcome's recorded full-set maximum governs — the
-/// reported remainder can never understate the result; otherwise the
-/// reported findings' severities do.
-fn findings_summary_status(
+/// Severity as a gating rank: `info < warning < error`. The driver's
+/// `Severity` carries no `Ord`; the verdict/`--fail-on` threshold compares
+/// levels, never display order.
+fn severity_level(severity: Severity) -> u8 {
+    match severity {
+        Severity::Info => 0,
+        Severity::Warning => 1,
+        Severity::Error => 2,
+    }
+}
+
+/// A serialized finding's severity as [`Severity`], keeping `info` distinct.
+/// The conservative fallback matches selection's `parse_severity`: a missing
+/// or unknown severity reads as `Warning` so malformed findings never
+/// understate the result's true maximum.
+fn finding_severity(finding: &serde_json::Value) -> Severity {
+    match finding.get("severity").and_then(serde_json::Value::as_str) {
+        Some("error") => Severity::Error,
+        Some("info") | Some("notice") => Severity::Info,
+        _ => Severity::Warning,
+    }
+}
+
+/// The finding set's highest severity, selection-aware (#430): under a
+/// selection the outcome's recorded full-set maximum governs — the reported
+/// remainder can never understate the result; otherwise the reported
+/// findings' severities do.
+fn max_finding_severity(
     findings: &serde_json::Value,
     selection: &Option<wright_driver::SelectionOutcome>,
-    status: &mut SummaryStatus,
-) {
+) -> Option<Severity> {
     match selection {
-        Some(selection) => {
-            if let Some(severity) = selection.max_severity {
-                *status = (*status).max(SummaryStatus::from(severity));
-            }
-        }
-        None => {
-            for finding in findings.as_array().map_or(&[][..], Vec::as_slice) {
-                if let Some(severity) = finding.get("severity").and_then(serde_json::Value::as_str)
-                {
-                    *status = (*status).max(SummaryStatus::from_finding_severity(severity));
-                }
-            }
-        }
+        Some(selection) => selection.max_severity,
+        None => findings
+            .as_array()
+            .map_or(&[][..], Vec::as_slice)
+            .iter()
+            .map(finding_severity)
+            .max_by_key(|severity| severity_level(*severity)),
     }
 }
 
@@ -774,7 +784,18 @@ pub(crate) trait ResultPresentation {
         false
     }
     fn render_github_findings(&self) {}
-    fn update_summary_status(&self, _status: &mut SummaryStatus) {}
+    /// The result's highest finding severity across its complete set, or
+    /// `None` when the command carries no findings — the one severity
+    /// source shared by the verdict (`update_summary_status`) and the
+    /// `--fail-on` gate.
+    fn max_finding_severity(&self) -> Option<Severity> {
+        None
+    }
+    fn update_summary_status(&self, status: &mut SummaryStatus) {
+        if let Some(severity) = self.max_finding_severity() {
+            *status = (*status).max(SummaryStatus::from(severity));
+        }
+    }
 }
 
 impl ResultPresentation for CompileResult {
@@ -918,10 +939,10 @@ impl ResultPresentation for LintResult {
             }
         }
     }
-    fn update_summary_status(&self, status: &mut SummaryStatus) {
-        // Selection narrows the reported list only; the verdict keeps the
-        // full set's highest severity (#430).
-        findings_summary_status(&self.findings, &self.selection, status);
+    /// Selection narrows the reported list only; the verdict keeps the
+    /// full set's highest severity (#430).
+    fn max_finding_severity(&self) -> Option<Severity> {
+        max_finding_severity(&self.findings, &self.selection)
     }
 }
 
@@ -992,28 +1013,28 @@ impl ResultPresentation for EssentialResult {
     fn render_body(&self, ctx: &RenderContext<'_>) {
         render_essential(self, ctx);
     }
-    /// The counts carry the reported severities, so the verdict
-    /// color still reflects the highest-severity finding of the full set —
-    /// under a selection the counts describe the selected remainder, so the
+    /// The counts carry the reported severities, so the verdict still
+    /// reflects the highest-severity finding of the full set — under a
+    /// selection the counts describe the selected remainder, so the
     /// outcome's recorded full-set maximum governs instead (#635).
-    fn update_summary_status(&self, status: &mut SummaryStatus) {
+    fn max_finding_severity(&self) -> Option<Severity> {
         if let Some(selection) = &self.selection {
-            if let Some(severity) = selection.max_severity {
-                *status = (*status).max(SummaryStatus::from(severity));
-            }
-            return;
+            return selection.max_severity;
         }
-        for key in ["findings", "risks"] {
-            let Some(group) = self.result["counts"].get(key) else {
-                continue;
-            };
-            for severity in ["error", "warning", "info"] {
-                if group[severity].as_u64().unwrap_or(0) > 0 {
-                    *status = (*status).max(SummaryStatus::from_finding_severity(severity));
-                    break;
-                }
-            }
-        }
+        ["findings", "risks"]
+            .iter()
+            .filter_map(|key| self.result["counts"].get(key))
+            .filter_map(|group| {
+                [
+                    ("error", Severity::Error),
+                    ("warning", Severity::Warning),
+                    ("info", Severity::Info),
+                ]
+                .into_iter()
+                .find(|(label, _)| group[label].as_u64().unwrap_or(0) > 0)
+                .map(|(_, severity)| severity)
+            })
+            .max_by_key(|severity| severity_level(*severity))
     }
 }
 
@@ -1506,8 +1527,8 @@ impl ResultPresentation for CostResult {
     }
     /// Static findings carry severities, so `cost` judges them like lint
     /// findings (#635).
-    fn update_summary_status(&self, status: &mut SummaryStatus) {
-        findings_summary_status(&self.result["findings"], &self.selection, status);
+    fn max_finding_severity(&self) -> Option<Severity> {
+        max_finding_severity(&self.result["findings"], &self.selection)
     }
 }
 
@@ -1599,6 +1620,48 @@ fn render_cost_rule_body(result: &serde_json::Value, ctx: &RenderContext<'_>) {
     }
 }
 
+/// The `--fail-on` gate (ADR-0030 decision 13): a result whose complete
+/// diagnostic/finding set reaches the threshold severity exits 1 with a
+/// FAIL verdict. The gate can only raise a verdict — a command already
+/// failing keeps its exit code, so selecting the option never turns a
+/// failing command into a passing one.
+pub(crate) fn gate<T: serde::Serialize + ResultPresentation>(
+    envelope: &mut Envelope<T>,
+    threshold: Severity,
+) {
+    if envelope.exit != wright_driver::result::exit::SUCCESS {
+        return;
+    }
+    let met = max_envelope_severity(envelope)
+        .is_some_and(|severity| severity_level(severity) >= severity_level(threshold));
+    if met {
+        envelope.ok = false;
+        envelope.exit = wright_driver::result::exit::SOURCE_ERROR;
+        envelope.gated = true;
+    }
+}
+
+/// The full result set's highest severity — envelope diagnostics plus the
+/// findings each result type carries — on the same full-set rule as the
+/// verdict (#430): a selection's recorded maximum stands in for the
+/// reported remainder.
+fn max_envelope_severity<T: serde::Serialize + ResultPresentation>(
+    envelope: &Envelope<T>,
+) -> Option<Severity> {
+    let diagnostics = match &envelope.selection {
+        Some(selection) => selection.max_severity,
+        None => envelope
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.severity)
+            .max_by_key(|severity| severity_level(*severity)),
+    };
+    diagnostics
+        .into_iter()
+        .chain(envelope.result.max_finding_severity())
+        .max_by_key(|severity| severity_level(*severity))
+}
+
 fn summary_status<T: serde::Serialize + ResultPresentation>(
     envelope: &Envelope<T>,
 ) -> &'static str {
@@ -1622,6 +1685,11 @@ fn summary_status<T: serde::Serialize + ResultPresentation>(
         }
     }
     envelope.result.update_summary_status(&mut status);
+    // A gated result reports FAIL — the verdict the raised exit 1 maps to —
+    // not ERROR, which stays the genuine-failure word.
+    if envelope.gated {
+        status = SummaryStatus::Fail;
+    }
     status.as_str()
 }
 
@@ -2597,6 +2665,7 @@ mod tests {
             exit: if ok { 0 } else { 1 },
             diagnostics,
             selection: None,
+            gated: false,
             result: LintResult {
                 findings,
                 ..LintResult::default()
@@ -2654,6 +2723,141 @@ mod tests {
         assert_eq!(summary_status(&envelope), "ERROR");
     }
 
+    #[test]
+    fn gate_raises_warn_to_fail_on_the_envelope_and_verdict() {
+        let mut envelope = summary_envelope(
+            true,
+            vec![diagnostic(Severity::Warning)],
+            serde_json::json!([{"severity": "warning"}]),
+        );
+        gate(&mut envelope, Severity::Warning);
+        assert!(envelope.gated);
+        assert_eq!(envelope.exit, 1);
+        assert!(!envelope.ok);
+        assert_eq!(summary_status(&envelope), "FAIL");
+    }
+
+    #[test]
+    fn gate_fires_on_findings_without_diagnostics() {
+        // Lint-style results carry their severity in `result.findings`,
+        // not in envelope diagnostics.
+        let mut envelope = summary_envelope(
+            true,
+            Vec::new(),
+            serde_json::json!([{"severity": "warning"}]),
+        );
+        gate(&mut envelope, Severity::Warning);
+        assert_eq!(envelope.exit, 1);
+        assert_eq!(summary_status(&envelope), "FAIL");
+    }
+
+    #[test]
+    fn gate_counts_info_severity_for_fail_on_info() {
+        // `info` findings map to PASS on the summary scale but are still at
+        // the `--fail-on info` threshold.
+        let mut envelope =
+            summary_envelope(true, Vec::new(), serde_json::json!([{"severity": "info"}]));
+        gate(&mut envelope, Severity::Info);
+        assert_eq!(envelope.exit, 1);
+        assert_eq!(summary_status(&envelope), "FAIL");
+    }
+
+    #[test]
+    fn gate_judges_the_full_set_not_the_selected_remainder() {
+        // `selection.max_severity` records the unselected maximum — the gate
+        // reads it exactly like the verdict (#430).
+        let mut envelope = check_envelope(
+            vec![diagnostic(Severity::Info)],
+            Some(wright_driver::SelectionOutcome {
+                total: 2,
+                withheld: 0,
+                max_severity: Some(Severity::Warning),
+            }),
+        );
+        gate(&mut envelope, Severity::Warning);
+        assert_eq!(envelope.exit, 1);
+        assert_eq!(summary_status(&envelope), "FAIL");
+    }
+
+    #[test]
+    fn gate_reads_findings_severity_recorded_by_a_result_selection() {
+        let mut envelope =
+            summary_envelope(true, Vec::new(), serde_json::json!([{"severity": "info"}]));
+        envelope.result.selection = Some(wright_driver::SelectionOutcome {
+            total: 3,
+            withheld: 2,
+            max_severity: Some(Severity::Warning),
+        });
+        gate(&mut envelope, Severity::Warning);
+        assert_eq!(envelope.exit, 1);
+        assert_eq!(summary_status(&envelope), "FAIL");
+    }
+
+    #[test]
+    fn gate_never_lowers_a_failing_result() {
+        // Even at the lowest threshold a real failure keeps its verdict and
+        // exit code — the gate only raises.
+        let mut envelope = summary_envelope(
+            false,
+            vec![diagnostic(Severity::Error)],
+            serde_json::json!([]),
+        );
+        gate(&mut envelope, Severity::Info);
+        assert!(!envelope.gated);
+        assert_eq!(envelope.exit, 1);
+        assert_eq!(summary_status(&envelope), "ERROR");
+    }
+
+    #[test]
+    fn gate_leaves_a_result_below_the_threshold_untouched() {
+        let mut envelope = summary_envelope(
+            true,
+            vec![diagnostic(Severity::Warning)],
+            serde_json::json!([{"severity": "warning"}]),
+        );
+        gate(&mut envelope, Severity::Error);
+        assert!(!envelope.gated);
+        assert_eq!(envelope.exit, 0);
+        assert_eq!(summary_status(&envelope), "WARN");
+    }
+
+    #[test]
+    fn gate_leaves_a_clean_result_passing() {
+        let mut envelope = summary_envelope(true, Vec::new(), serde_json::json!([]));
+        gate(&mut envelope, Severity::Info);
+        assert!(!envelope.gated);
+        assert_eq!(envelope.exit, 0);
+        assert_eq!(summary_status(&envelope), "PASS");
+    }
+
+    #[test]
+    fn gate_reads_the_essential_projection_counts() {
+        // `analyze`/`lint` render an `EssentialResult`: severity totals live
+        // under `counts.<group>` after the essential projection.
+        let mut envelope = Envelope {
+            wright: wright_driver::result::VersionInfo {
+                version: "test".to_string(),
+                contract: "wright-result/v1".to_string(),
+            },
+            command: "analyze".to_string(),
+            ok: true,
+            exit: 0,
+            diagnostics: Vec::new(),
+            selection: None,
+            gated: false,
+            result: wright_driver::result::EssentialResult {
+                result: serde_json::json!({
+                    "counts": {"risks": {"total": 2, "warning": 2, "error": 0, "info": 0}}
+                }),
+                selection: None,
+            },
+            comparison: None,
+        };
+        gate(&mut envelope, Severity::Warning);
+        assert_eq!(envelope.exit, 1);
+        assert_eq!(summary_status(&envelope), "FAIL");
+    }
+
     fn check_envelope(
         diagnostics: Vec<wright_driver::Diagnostic>,
         selection: Option<wright_driver::SelectionOutcome>,
@@ -2668,6 +2872,7 @@ mod tests {
             exit: 0,
             diagnostics,
             selection,
+            gated: false,
             result: CheckResult::default(),
             comparison: None,
         }
