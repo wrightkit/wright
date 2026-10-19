@@ -625,6 +625,67 @@ fn lookup_answers_over_every_transport_and_a_broken_project() {
 }
 
 #[test]
+fn lookup_rejects_an_out_of_range_limit_on_every_transport() {
+    // #783: a `limit` outside the schema's 1..=10 is refused
+    // `malformed-request`, the same code every other schema violation
+    // produces — on stdio, on JSON-RPC `request`, and as an MCP
+    // tool-result error. The boundary `limit: 10` still answers.
+    let input = corpus_workshop("synthetic/basic-rule");
+    let stdio = run_lines(
+        "stdio",
+        &input,
+        &[
+            r#"{"op":"lookup","language":"workshop","query":"wait","limit":0}"#,
+            r#"{"op":"lookup","language":"workshop","query":"wait","limit":11}"#,
+            r#"{"op":"lookup","language":"workshop","query":"wait","limit":10}"#,
+        ],
+    );
+    assert_eq!(stdio[0]["error"]["code"], "malformed-request");
+    assert_eq!(stdio[1]["error"]["code"], "malformed-request");
+    assert!(
+        stdio[2]["result"]["entries"]
+            .as_array()
+            .is_some_and(|entries| !entries.is_empty()),
+        "limit 10 still answers: {}",
+        stdio[2]
+    );
+
+    let jsonrpc = run_lines(
+        "jsonrpc",
+        &input,
+        &[
+            r#"{"jsonrpc":"2.0","id":1,"method":"request","params":{"op":"lookup","language":"workshop","query":"wait","limit":0}}"#,
+            r#"{"jsonrpc":"2.0","id":2,"method":"request","params":{"op":"lookup","language":"workshop","query":"wait","limit":11}}"#,
+        ],
+    );
+    // A service refusal rides `result.error`, never the protocol `error`.
+    assert_eq!(jsonrpc[0]["result"]["error"]["code"], "malformed-request");
+    assert_eq!(jsonrpc[1]["result"]["error"]["code"], "malformed-request");
+    assert!(jsonrpc[0].get("error").is_none() && jsonrpc[1].get("error").is_none());
+
+    let mcp = run_lines(
+        "mcp",
+        &input,
+        &[
+            &mcp_call(
+                1,
+                "wright_lookup",
+                json!({"language": "workshop", "query": "wait", "limit": 0}),
+            ),
+            &mcp_call(
+                2,
+                "wright_lookup",
+                json!({"language": "workshop", "query": "wait", "limit": 11}),
+            ),
+        ],
+    );
+    for response in &mcp {
+        assert_eq!(response["result"]["isError"], true, "{response}");
+        assert_eq!(mcp_payload(response)["code"], "malformed-request");
+    }
+}
+
+#[test]
 fn stdio_transport_recovers_in_the_same_process() {
     // #512: a session that started over a missing input loads the repaired
     // project on the next program-reading request — no restart, no reload

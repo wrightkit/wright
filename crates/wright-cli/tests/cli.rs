@@ -4257,6 +4257,21 @@ fn lookup_within_rejects_an_unknown_scope() {
 }
 
 #[test]
+fn lookup_rejects_an_out_of_range_limit() {
+    // #783: `--limit` outside the contract's 1..=10 is a
+    // `malformed-request` refusal on the JSON surface, not a silent clamp;
+    // the boundary `--limit 10` still answers.
+    for limit in ["0", "11"] {
+        let output = run(&["lookup", "wait", "--limit", limit, "-f", "json"]);
+        assert_eq!(output.status.code(), Some(1), "--limit {limit}: {output:?}");
+        let result = parse_json(&output.stdout);
+        assert_eq!(result["error"]["code"], "malformed-request", "{result}");
+    }
+    let output = run(&["lookup", "wait", "--limit", "10"]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+}
+
+#[test]
 fn lookup_never_reads_stdin() {
     // `lookup` takes no input: a stdin that never reaches EOF (a held-open
     // pipe, like a terminal's) must not block the command — the session's

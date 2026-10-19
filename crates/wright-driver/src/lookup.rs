@@ -75,7 +75,17 @@ pub(crate) fn lookup(
     locale: Option<&str>,
     limit: Option<usize>,
 ) -> ToolResponse {
-    let limit = limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
+    // A `limit` outside the contract's 1..=10 is a schema violation and is
+    // rejected like one (`malformed-request`), never silently clamped
+    // (#783). The refusal comes from the service rather than transport
+    // deserialization so the CLI's in-process request rejects identically.
+    let limit = limit.unwrap_or(DEFAULT_LIMIT);
+    if !(1..=MAX_LIMIT).contains(&limit) {
+        return refusal(
+            "malformed-request",
+            format!("limit must be within 1..={MAX_LIMIT}; got {limit}"),
+        );
+    }
     if let Some(kind) = kind {
         if !KINDS.contains(&kind) {
             return refusal(
