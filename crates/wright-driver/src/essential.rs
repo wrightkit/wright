@@ -22,7 +22,28 @@ fn counts(items: &[Value]) -> Value {
     for item in items {
         n[severity(item) as usize] += 1;
     }
-    json!({"total":items.len(),"error":n[0],"warning":n[1],"info":n[2]})
+    let mut group = json!({"total":items.len(),"error":n[0],"warning":n[1],"info":n[2]});
+    // #791: per-code totals over the counted set — the same population
+    // `total` reports, broken down so a renderer need not recount a list
+    // it may only see capped.
+    if let Some(by_code) = by_code_counts(items) {
+        group["byCode"] = by_code;
+    }
+    group
+}
+
+/// Per-code totals over a coded list (`code` members: findings,
+/// diagnostics), counted on the set as passed — before any truncation the
+/// caller applies (#791). `None` for lists whose items carry no `code`
+/// (rules, symbols, cfg blocks); their truncation notes stay unchanged.
+fn by_code_counts(items: &[Value]) -> Option<Value> {
+    let mut counts = std::collections::BTreeMap::<String, usize>::new();
+    for item in items {
+        if let Some(code) = item["code"].as_str() {
+            *counts.entry(code.to_string()).or_default() += 1;
+        }
+    }
+    (!counts.is_empty()).then(|| json!(counts))
 }
 fn fields(value: &Value, keys: &[&str]) -> Value {
     let mut result = serde_json::Map::new();
@@ -39,7 +60,14 @@ fn findings(items: &[Value]) -> Vec<Value> {
         .map(|finding| {
             let mut item = fields(
                 finding,
-                &["code", "severity", "message", "evidence", "boundedness"],
+                &[
+                    "code",
+                    "severity",
+                    "message",
+                    "evidence",
+                    "boundedness",
+                    "repeated",
+                ],
             );
             if let Some(path) = finding["span"]["path"].as_str() {
                 let start = &finding["span"]["start"];
@@ -63,14 +91,26 @@ fn cap(result: &mut Value, key: &str, limit: usize, all: bool) {
     };
     let total = items.len();
     if !all && total > limit {
+        // #791: the note's per-code counts describe the full capped list,
+        // so `truncated` can be attributed per code.
+        let by_code = by_code_counts(items);
         items.truncate(limit);
-        result["truncation"][key] = json!({"total":total,"shown":limit,"truncated":total-limit,"expand":"--all / all: true"});
+        let mut note = json!({"total":total,"shown":limit,"truncated":total-limit,"expand":"--all / all: true"});
+        if let Some(by_code) = by_code {
+            note["byCode"] = by_code;
+        }
+        result["truncation"][key] = note;
     }
 }
 
 /// Pop `findings` until the serialized output fits the ~1.5k-token budget,
 /// recording the truncation so `--all` / `all: true` expands the full set.
+/// An item cap that already ran left its note — the fuller set's `total`
+/// and per-code counts (#791) survive; only `shown`/`truncated` move.
 fn fit_finding_bytes(output: &mut Value, total: usize) {
+    let by_code = output["findings"]
+        .as_array()
+        .and_then(|findings| by_code_counts(findings));
     while serde_json::to_vec(output)
         .expect("presentation serializes")
         .len()
@@ -85,7 +125,18 @@ fn fit_finding_bytes(output: &mut Value, total: usize) {
             }
             findings.len()
         };
-        output["truncation"]["findings"] = json!({"total":total,"shown":shown,"truncated":total-shown,"expand":"--all / all: true"});
+        let note = &mut output["truncation"]["findings"];
+        if note["total"].is_null() {
+            note["total"] = json!(total);
+        }
+        if note["byCode"].is_null() {
+            if let Some(by_code) = &by_code {
+                note["byCode"] = by_code.clone();
+            }
+        }
+        note["shown"] = json!(shown);
+        note["truncated"] = json!(note["total"].as_u64().unwrap_or(total as u64) - shown as u64);
+        note["expand"] = json!("--all / all: true");
     }
 }
 
@@ -300,6 +351,18 @@ mod tests {
         let result = lint(&input, false);
         assert_eq!(result["counts"]["findings"]["error"], 1);
         assert_eq!(result["findings"][0]["severity"], "error");
+        // #791: per-code counts describe the complete set in both the
+        // counts group and the truncation note — the cap cannot hide a
+        // code's real count.
+        assert_eq!(
+            result["counts"]["findings"]["byCode"]["c0"], 1,
+            "counts carry per-code totals: {}",
+            result["counts"]["findings"]
+        );
+        assert_eq!(
+            result["truncation"]["findings"]["byCode"],
+            result["counts"]["findings"]["byCode"]
+        );
         assert_eq!(result["truncation"]["findings"]["total"], DEFAULT_ITEMS + 1);
         assert!(
             result["truncation"]["findings"]["expand"]
@@ -356,7 +419,28 @@ mod tests {
             query(&bare, false)["truncation"]["items"]["total"],
             DEFAULT_ITEMS + 1
         );
+        // #791: uncoded lists keep the plain note — `byCode` only exists
+        // where items carry `code`.
+        assert!(query(&bare, false)["truncation"]["items"]["byCode"].is_null());
         assert_eq!(query(&bare, true), bare);
+    }
+    #[test]
+    fn byte_fit_keeps_the_full_set_per_code_counts() {
+        // #791: a byte-fit truncation merges into the note an item cap
+        // left — `total`/`byCode` still describe the complete set.
+        let findings = (0..6)
+            .map(|id| {
+                json!({"code":format!("risk-{}",id%2),"severity":"error","message":"long actionable evidence ".repeat(120)})
+            })
+            .collect::<Vec<_>>();
+        let result = lint(&json!({"findings": findings}), false);
+        let note = &result["truncation"]["findings"];
+        assert_eq!(note["total"], 6);
+        assert_eq!(note["byCode"], json!({"risk-0": 3, "risk-1": 3}));
+        assert_eq!(
+            note["shown"].as_u64().unwrap() + note["truncated"].as_u64().unwrap(),
+            6
+        );
     }
     #[test]
     fn cost_keeps_the_five_largest_rule_shares_by_default() {

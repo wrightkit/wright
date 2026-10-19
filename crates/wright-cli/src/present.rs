@@ -2789,6 +2789,7 @@ mod tests {
             Some(wright_driver::SelectionOutcome {
                 total: 2,
                 withheld: 0,
+                by_code: Default::default(),
                 max_severity: Some(Severity::Warning),
             }),
         );
@@ -2804,6 +2805,7 @@ mod tests {
         envelope.result.selection = Some(wright_driver::SelectionOutcome {
             total: 3,
             withheld: 2,
+            by_code: Default::default(),
             max_severity: Some(Severity::Warning),
         });
         gate(&mut envelope, Severity::Warning);
@@ -2922,6 +2924,7 @@ mod tests {
             Some(wright_driver::SelectionOutcome {
                 total: 5,
                 withheld: 2,
+                by_code: Default::default(),
                 max_severity: Some(Severity::Error),
             }),
         );
@@ -2969,6 +2972,7 @@ mod tests {
             Some(wright_driver::SelectionOutcome {
                 total: 7,
                 withheld: 6,
+                by_code: Default::default(),
                 max_severity: Some(Severity::Error),
             }),
         );

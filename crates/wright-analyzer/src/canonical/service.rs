@@ -358,7 +358,7 @@ fn symbol_json(symbol: &Symbol) -> JsonValue {
 fn finding_json(finding: &Finding) -> JsonValue {
     #[cfg(test)]
     tests::BUILDS.with(|count| count.set(count.get() + 1));
-    json!({"code": finding.code, "severity": finding.severity.as_str(), "message": finding.message, "span": span_json(finding.span), "rule": finding.rule, "action": finding.action, "value": finding.value, "evidence": finding.evidence.as_str(), "boundedness": finding.boundedness.map(Boundedness::as_str)})
+    json!({"code": finding.code, "severity": finding.severity.as_str(), "message": finding.message, "span": span_json(finding.span), "rule": finding.rule, "action": finding.action, "value": finding.value, "evidence": finding.evidence.as_str(), "boundedness": finding.boundedness.map(Boundedness::as_str), "repeated": finding.repeated})
 }
 fn reference_json(reference: &Reference) -> JsonValue {
     #[cfg(test)]

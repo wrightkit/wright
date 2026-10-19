@@ -29,10 +29,11 @@
       "required": ["total", "withheld"],
       "properties": {
         "total": { "type": "integer", "minimum": 0 },
-        "withheld": { "type": "integer", "minimum": 0 }
+        "withheld": { "type": "integer", "minimum": 0 },
+        "byCode": { "type": "object", "description": "Per-code finding counts over the filtered set before `max` truncation (#791).", "additionalProperties": { "type": "integer", "minimum": 0 } }
       }
     },
-    "truncation": { "type": "object", "additionalProperties": { "type": "object", "required": ["total", "shown", "truncated", "expand"], "properties": { "total": { "type": "integer", "minimum": 0 }, "shown": { "type": "integer", "minimum": 0 }, "truncated": { "type": "integer", "minimum": 0 }, "expand": { "type": "string" } } } },
+    "truncation": { "type": "object", "additionalProperties": { "type": "object", "required": ["total", "shown", "truncated", "expand"], "properties": { "total": { "type": "integer", "minimum": 0 }, "shown": { "type": "integer", "minimum": 0 }, "truncated": { "type": "integer", "minimum": 0 }, "expand": { "type": "string" }, "byCode": { "type": "object", "description": "Per-code totals over the capped list before truncation (#791); present when the capped items carry `code`.", "additionalProperties": { "type": "integer", "minimum": 0 } } } } },
     "result": { "type": "object" }
   },
   "$defs": {

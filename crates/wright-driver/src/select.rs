@@ -8,7 +8,7 @@
 //! [`SelectionOutcome`] keeps the true total, the truncation count, and the
 //! full set's highest severity so no surface can understate the result.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -40,15 +40,21 @@ pub struct FindingSelection {
 }
 
 /// The recorded outcome of applying a [`FindingSelection`]: the true total
-/// and the count dropped by `max`. `max_severity` preserves the full set's
-/// highest severity for verdict/exit computation and is not part of the wire
-/// payload.
+/// and the count dropped by `max`. `by_code` breaks the *filtered* set down
+/// per rule code before `max` truncates it, so a capped result still
+/// reports every code's real count (#791). `max_severity` preserves the
+/// full set's highest severity for verdict/exit computation and is not
+/// part of the wire payload.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SelectionOutcome {
     /// Findings present before selection.
     pub total: usize,
     /// Filtered findings dropped by `max`.
     pub withheld: usize,
+    /// Per-code counts over the filtered set before `max` truncation
+    /// (#791). Empty — and omitted — for selections that carry no code.
+    #[serde(rename = "byCode", skip_serializing_if = "BTreeMap::is_empty")]
+    pub by_code: BTreeMap<String, usize>,
     /// Highest severity over the full, unselected set.
     #[serde(skip)]
     pub max_severity: Option<Severity>,
@@ -164,6 +170,16 @@ impl FindingSelection {
                         .is_none_or(|matcher| matcher.matches(path))
             })
             .collect();
+        // #791: per-code counts describe the filtered set `max` is about
+        // to truncate, so a capped result still reports every code's real
+        // count; `total` alone cannot.
+        let mut by_code = BTreeMap::new();
+        for item in &kept {
+            let code = key(item).1;
+            if !code.is_empty() {
+                *by_code.entry(code.to_string()).or_insert(0) += 1;
+            }
+        }
         let withheld = self.max.map_or(0, |max| kept.len().saturating_sub(max));
         if let Some(max) = self.max {
             kept.truncate(max);
@@ -173,6 +189,7 @@ impl FindingSelection {
             Some(SelectionOutcome {
                 total,
                 withheld,
+                by_code,
                 max_severity,
             }),
         )
@@ -212,6 +229,7 @@ pub(crate) fn select_list<T>(
         SelectionOutcome {
             total,
             withheld,
+            by_code: BTreeMap::new(),
             max_severity: None,
         },
     )
@@ -415,6 +433,7 @@ mod tests {
         let outcome = SelectionOutcome {
             total: 4,
             withheld: 3,
+            by_code: BTreeMap::new(),
             max_severity: Some(Severity::Warning),
         };
         assert_eq!(

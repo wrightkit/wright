@@ -345,10 +345,13 @@ The CLI options `--severity`, `--rule-id`, `--file`, and `--max` on `lint`,
 surfaces return the same selected set for the same input and selection.
 
 When a request applies any selection field, the result reports
-`selection: {"total": <set before selection>, "withheld": <dropped by max>}`:
+`selection: {"total": <set before selection>, "withheld": <dropped by max>,
+"byCode": {<code>: <count>}}`:
 `findings` becomes `{"findings": [...], "selection": {...}}`, while `lint`
 and `costEstimate` add a `selection` member to their existing result objects.
-Requests without selection fields receive the previous shapes unchanged.
+`byCode` counts the filtered set per code before `max` truncates it, so a
+capped result still reports every code's real count (#791). Requests without
+selection fields receive the previous shapes unchanged.
 
 ### Rule content (ADR-0024)
 
@@ -410,7 +413,10 @@ diagnostics; `lint` reports severity counts and actionable findings;
 `analyze` reports overview, cost, hotspots, complexity, risks, and top
 variables; bare `inspect` reports the overview, rule names, and detail commands.
 Lint and risk findings carry code, severity, message, evidence, and a compact
-`location` (`path:line:column`) when mapped. Full spans and fix transactions
+`location` (`path:line:column`) when mapped; a `repeated-value` finding also
+carries `repeated` — `{expression, count, spanKind}` where `spanKind` is
+`expression` or `enclosing-loop` — stating as data what the message states in
+prose (#791). Full spans and fix transactions
 are available from `findings`; lint policy is available from `lintRules`.
 Persistent-object details are queried through `persistentObjects`.
 

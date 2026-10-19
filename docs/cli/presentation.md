@@ -85,7 +85,9 @@ complete set, so it can never turn a failing command into `exit 0` or a
 `WARN` verdict into `PASS`. Consecutive lint findings sharing a rule id and
 message render as one entry listing all locations; when `--max` withholds
 findings, text output states the withheld count and the JSON envelope carries
-`selection.total`/`selection.withheld` beside the filtered array.
+`selection.total`/`selection.withheld` beside the filtered array, plus
+`selection.byCode` counting the filtered set per code before `max` truncates
+it (#791).
 
 JSON output is one `wright-result/v1` envelope on stdout with no ANSI, progress,
 or workflow commands. The `convert` source artifact and the `compile -o -`

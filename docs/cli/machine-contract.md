@@ -127,6 +127,16 @@ the `lint` result's `rules` member lists only each rule's `id` and
 covering summary, rationale, documentation, known limits, evidence, and tags,
 instead of inlining it into every `lint` result.
 
+ADR-0030 prerequisites added two additive members (#791): a finding carries
+`repeated` — `{expression, count, spanKind}` where `spanKind` is
+`expression` or `enclosing-loop` — when a `repeated-value` rule produced it,
+stating as data what the message states in prose; and a `selection` summary
+carries `byCode`, per-code counts over the filtered set before `max`
+truncation, so a capped result still reports every code's real count. The
+same per-code totals appear where a list is truncated: a `truncation`
+record's `byCode` counts the capped list's full set, and a `counts` group's
+`byCode` counts the set the group totals — both computed before truncation.
+
 ## Determinism
 
 For identical inputs and configuration, JSON output is byte-deterministic

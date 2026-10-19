@@ -349,6 +349,7 @@ impl DeclarativeRule {
                 evidence: self.evidence(),
                 boundedness: None,
                 fix: None,
+                repeated: None,
             });
         }
         findings

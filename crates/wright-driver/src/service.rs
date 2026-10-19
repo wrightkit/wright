@@ -1557,6 +1557,7 @@ impl<'a> ToolService<'a> {
                     "severity": f.severity.as_str(),
                     "message": f.message,
                     "span": wright_analyzer::canonical::span_json(f.span),
+                    "repeated": f.repeated,
                 })
             })
             .collect::<Vec<_>>();

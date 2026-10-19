@@ -220,7 +220,7 @@ fn agent_finding_selection_filters_and_truncates_without_touching_defaults() {
     assert_eq!(lint["findings"].as_array().unwrap().len(), 2);
     assert_eq!(
         lint["selection"],
-        serde_json::json!({"total": 10, "withheld": 7})
+        serde_json::json!({"total": 10, "withheld": 7, "byCode": {"repeated-value": 9}})
     );
 
     let cost = result_of(ToolRequest::CostEstimate {
@@ -399,7 +399,7 @@ fn analyze_selection_narrows_risks_and_reports_the_outcome() {
     assert!(risks.iter().all(|risk| risk["code"] == "repeated-value"));
     assert_eq!(
         bounded["result"]["selection"],
-        serde_json::json!({"total": 10, "withheld": 7})
+        serde_json::json!({"total": 10, "withheld": 7, "byCode": {"repeated-value": 9}})
     );
 
     // `file` selects by resolved `span.path` identity: the input path as
@@ -432,7 +432,7 @@ fn analyze_selection_narrows_risks_and_reports_the_outcome() {
     assert_eq!(essential["result"]["counts"]["risks"]["total"], 9);
     assert_eq!(
         essential["result"]["selection"],
-        serde_json::json!({"total": 10, "withheld": 0})
+        serde_json::json!({"total": 10, "withheld": 0, "byCode": {"repeated-value": 9}})
     );
 
     let mut selected_session = CompilerSession::new(SessionConfig {
@@ -804,7 +804,7 @@ fn essential_lint_applies_selection_before_summarizing() {
     );
     assert_eq!(
         lint["selection"],
-        serde_json::json!({"total": 1, "withheld": 0})
+        serde_json::json!({"total": 1, "withheld": 0, "byCode": {"min-wait-loop": 1}})
     );
     assert_eq!(lint["counts"]["findings"]["total"], 1);
     assert_eq!(lint["findings"].as_array().unwrap().len(), 1);
