@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
+use serde::Serialize;
+
 use workshop_rs::catalog::{Catalog, Kind};
 use workshop_rs::source::{FileId, Position, SourceDocument, Span};
 use workshop_rs::{Action, Event, ModifyOp, Program, Rule, Value};
@@ -33,6 +35,37 @@ pub struct Finding {
     /// spans to rewrite; the driver materializes it into a validated
     /// source-edit transaction.
     pub fix: Option<LintFix>,
+    /// The repeated-expression facts behind a `repeated-value` finding
+    /// (#791): the expression, how often the loop scope evaluates it, and
+    /// which location `span` reports. Renderers consume these fields
+    /// instead of parsing `message`; `None` on every other finding.
+    pub repeated: Option<RepeatedValue>,
+}
+
+/// The structured facts a `repeated-value` finding carries (#791,
+/// ADR-0030): everything the message states, as data.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepeatedValue {
+    /// The canonical spelling of the repeated expression — the same text
+    /// the message quotes.
+    pub expression: String,
+    /// How many times the loop scope evaluates the expression.
+    pub count: usize,
+    /// Which location the finding's `span` reports (#735).
+    pub span_kind: RepeatedValueSpan,
+}
+
+/// Which location a `repeated-value` finding's `span` reports (#791).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RepeatedValueSpan {
+    /// The repeated expression's own span.
+    Expression,
+    /// The enclosing loop action's span — the expression's own span is
+    /// not recorded (provider-compiled programs carry no nested value
+    /// spans, #735).
+    EnclosingLoop,
 }
 
 /// A mechanically determined correction for a lint finding (#556): the
@@ -73,7 +106,7 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
             if config.is_enabled(MIN_WAIT_LOOP.id)
                 && live_actions(body).any(|(_, action)| is_wait(action, true))
             {
-                findings.push(Finding { code: MIN_WAIT_LOOP.id.into(), severity: MIN_WAIT_LOOP.default_severity, message: "loop body waits at the workshop minimum rate; the loop runs at maximum frequency".into(), span: program.action_span(rule_id, action_id), rule: rule_id, action: Some(action_id), value: None, evidence: MIN_WAIT_LOOP.evidence, boundedness: None, fix: None });
+                findings.push(Finding { code: MIN_WAIT_LOOP.id.into(), severity: MIN_WAIT_LOOP.default_severity, message: "loop body waits at the workshop minimum rate; the loop runs at maximum frequency".into(), span: program.action_span(rule_id, action_id), rule: rule_id, action: Some(action_id), value: None, evidence: MIN_WAIT_LOOP.evidence, boundedness: None, fix: None, repeated: None });
             }
             if config.is_enabled(EXPENSIVE_LOOP_CHECK.id) {
                 for (offset, body_action) in live_actions(body) {
@@ -107,6 +140,7 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
                             evidence: EXPENSIVE_LOOP_CHECK.evidence,
                             boundedness: None,
                             fix: None,
+                        repeated: None,
                         });
                     }
                 }
@@ -133,6 +167,7 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
                         evidence: WHILE_WITHOUT_WAIT.evidence,
                         boundedness: Some(boundedness),
                         fix: None,
+                        repeated: None,
                     });
                 }
             }
@@ -322,6 +357,7 @@ fn ongoing_condition_findings(
                 evidence: ONGOING_CONDITION_HOT_PATH.evidence,
                 boundedness: None,
                 fix: None,
+                        repeated: None,
             });
         }
     }
@@ -420,6 +456,7 @@ fn nested_binder_findings(
             evidence: NESTED_BINDER_LAMBDA.evidence,
             boundedness: None,
             fix: None,
+            repeated: None,
         })
         .collect()
 }
@@ -500,6 +537,7 @@ fn duplicate_condition_findings(
                         evidence: DUPLICATE_CONDITION.evidence,
                         boundedness: None,
                         fix: dead_branch_fix(program, rule_id, rule, action_id, condition),
+                        repeated: None,
                     });
                 } else {
                     seen.push(condition);
@@ -1084,9 +1122,10 @@ fn repeated_value_findings(
             // says so, or the loop header would be mistaken for the
             // expression's own position (#735).
             let member_span = family.iter().find_map(|&member| collected.spans[member]);
+            let expression = value_text(collected.values[first]);
             let mut message = format!(
                 "`{}` is evaluated {} times within the same loop scope",
-                value_text(collected.values[first]),
+                expression,
                 family.len()
             );
             if member_span.is_none() {
@@ -1115,6 +1154,15 @@ fn repeated_value_findings(
                     &collected,
                     &family,
                 ),
+                repeated: Some(RepeatedValue {
+                    expression,
+                    count: family.len(),
+                    span_kind: if member_span.is_none() {
+                        RepeatedValueSpan::EnclosingLoop
+                    } else {
+                        RepeatedValueSpan::Expression
+                    },
+                }),
             }
         })
         .collect()

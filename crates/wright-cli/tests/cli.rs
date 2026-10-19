@@ -1357,6 +1357,23 @@ fn lint_selection_filters_findings_and_reports_withheld() {
     assert!(findings.iter().all(|f| f["code"] == "repeated-value"));
     assert_eq!(envelope["result"]["selection"]["total"], 10);
     assert_eq!(envelope["result"]["selection"]["withheld"], 7);
+    // #791: `byCode` counts the filtered set `max` truncated, so the cap
+    // cannot hide a code's real count; `repeated` carries the facts the
+    // finding message states, as data a renderer can consume.
+    assert_eq!(
+        envelope["result"]["selection"]["byCode"]["repeated-value"],
+        9
+    );
+    assert!(findings.iter().all(|f| {
+        f["repeated"]["expression"].is_string()
+            && f["repeated"]["count"]
+                .as_u64()
+                .is_some_and(|count| count >= 2)
+            && matches!(
+                f["repeated"]["spanKind"].as_str(),
+                Some("expression") | Some("enclosing-loop")
+            )
+    }));
 
     // --severity is a threshold: `error` selects none of the warning findings
     // while the envelope records the full set.
