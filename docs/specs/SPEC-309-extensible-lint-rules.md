@@ -86,10 +86,13 @@ the canonical identity, not the spelling in the YAML file.
 
 ## Project configuration
 
-The project lint file is local YAML and has no registry or package-manager
-behavior:
+The project lint file is local YAML; a `packages` entry selects rule
+packages and `rules` configures the effective rules:
 
 ```yaml
+packages:
+  - repo: community/example-rules       # owner/repo or a github.com URL
+    sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   # a full commit SHA
 rules:
   community/minimum-wait:
     enabled: true
@@ -98,6 +101,16 @@ rules:
       min-matches: 1
       max-matches: 10
 ```
+
+A `packages` entry pins a lint rule package — one GitHub repository's
+`rules/` directory — to a full commit SHA; the configuration is the lock,
+so there is no second lock file and installing a package never activates
+it. A listed package missing from the local store is fetched by its SHA,
+including in CI; an unfetchable SHA fails with an explicit diagnostic and
+produces no lint findings. Rule ID collisions between packages are errors.
+The first-party package repository is the only source allowed bare rule
+IDs, and listing it with a SHA replaces the embedded default rules it
+covers instead of colliding.
 
 `enabled` defaults to `true`; `severity` may be `off`, `warn`, or `error`; the
 only shared rule options are the bounded `min-matches` and `max-matches`

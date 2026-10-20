@@ -35,6 +35,14 @@ const DEFAULT_API_BASE: &str = "https://api.github.com";
 const DEFAULT_CODELOAD_BASE: &str = "https://codeload.github.com";
 const STORE_DIR_ENV: &str = "WRIGHT_LINT_PACKAGE_DIR";
 
+/// The first-party lint rule package repository (`owner/repo`), matched
+/// case-insensitively — the only package source allowed bare rule IDs; a
+/// project entry for it replaces the embedded default rules it covers
+/// instead of colliding (issue #843). The repository name is provisional:
+/// choosing and creating the first-party package repository is an owner
+/// action tracked by wrightkit/wright#845.
+pub const FIRST_PARTY_PACKAGE: &str = "wrightkit/lint-rules";
+
 /// One installed package directory in the store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstalledPackage {
@@ -193,7 +201,7 @@ impl LintPackageStore {
         };
         let dir = self.package_dir(source, &sha);
         if dir.exists() {
-            let rules = rules::validate_stored(&dir)?;
+            let rules = rules::validate_stored(&dir, source.is_first_party())?;
             return Ok(InstalledPackage {
                 source: source.clone(),
                 sha,
@@ -210,7 +218,8 @@ impl LintPackageStore {
         let staging = self.staging_dir(&sha)?;
         let result = (|| -> Result<Vec<String>, LintPackageError> {
             rules::extract_rules(&archive, &staging)?;
-            let validated = rules::validate_package(&staging.join("rules"))?;
+            let validated =
+                rules::validate_package(&staging.join("rules"), source.is_first_party())?;
             self.promote(&staging, &dir)?;
             Ok(validated)
         })();
@@ -298,12 +307,82 @@ impl LintPackageStore {
     }
 }
 
+/// Activate the packages `lint.packages` pins on `registry` (issue #843):
+/// each pin names a repository and a full commit SHA — the configuration is
+/// the lock. A package missing from the store is fetched by its SHA; the
+/// first-party source loads with replacement semantics, every other package
+/// as external SPEC-309 rules. On any failure — a malformed pin, an
+/// unfetchable SHA, a refused package, or a rule-ID collision — the caller
+/// gets one diagnostic and the lint run produces no findings.
+pub(crate) fn activate_pinned(
+    lint: &wright_analyzer::registry::LintConfig,
+    packages: &crate::config::LintPackageConfig,
+    registry: &mut wright_analyzer::registry::LintRegistry,
+) -> Result<(), crate::diag::Diagnostic> {
+    use crate::diag::{Diagnostic, Stage};
+    if lint.packages.is_empty() {
+        return Ok(());
+    }
+    let pin_error = |message: String| {
+        let error = LintPackageError::source(message);
+        Diagnostic::error(error.code(), Stage::Discovery, error.to_string())
+    };
+    let store = packages.store();
+    for pin in &lint.packages {
+        let (source, reference) = LintPackageSource::parse(&pin.repo).map_err(|error| {
+            Diagnostic::error(
+                error.code(),
+                Stage::Discovery,
+                format!("lint package pin '{}': {error}", pin.repo),
+            )
+        })?;
+        if let Some(reference) = reference {
+            return Err(pin_error(format!(
+                "lint package pin '{}' carries the ref '{reference}'; pin the commit in `sha`",
+                pin.repo
+            )));
+        }
+        if !is_full_sha(&pin.sha) {
+            return Err(pin_error(format!(
+                "lint package '{source}' must be pinned by a full 40-hex commit SHA, got '{}'",
+                pin.sha
+            )));
+        }
+        let installed = store.install(&source, Some(&pin.sha)).map_err(|error| {
+            let stage = match error {
+                LintPackageError::Source(_) => Stage::Discovery,
+                LintPackageError::Invalid { .. } => Stage::Analysis,
+                _ => Stage::Internal,
+            };
+            Diagnostic::error(
+                error.code(),
+                stage,
+                format!("lint package '{source}' at {}: {error}", pin.sha),
+            )
+        })?;
+        let rules_dir = installed.rules_dir();
+        let loaded = if source.is_first_party() {
+            registry.load_first_party_path(&rules_dir)
+        } else {
+            registry.load_path(&rules_dir)
+        };
+        loaded.map_err(|error| {
+            Diagnostic::error(
+                "lint-rule-error",
+                Stage::Analysis,
+                format!("lint package '{source}' at {}: {error}", pin.sha),
+            )
+        })?;
+    }
+    Ok(())
+}
+
 fn normalize_ref(reference: Option<&str>) -> Option<&str> {
     reference.map(str::trim).filter(|r| !r.is_empty())
 }
 
 /// A full commit SHA needs no API resolution and keys the store directory.
-fn is_full_sha(value: &str) -> bool {
+pub(crate) fn is_full_sha(value: &str) -> bool {
     value.len() == 40 && value.bytes().all(|b| b.is_ascii_hexdigit())
 }
 

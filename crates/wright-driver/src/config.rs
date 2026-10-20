@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
+use crate::lint_package::LintPackageStore;
 use crate::source_provider::SourceBackend;
-pub use wright_analyzer::registry::LintConfig;
+pub use wright_analyzer::registry::{LintConfig, LintPackagePin};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SourceKind {
@@ -96,6 +97,11 @@ pub struct SessionConfig {
     pub format: OutputFormat,
     pub profile: wright_transform::Profile,
     pub lint: LintConfig,
+    /// Lint rule package store/fetch overrides (issue #843). The default is
+    /// the platform store (`WRIGHT_LINT_PACKAGE_DIR` or the OS data dir)
+    /// talking to github.com; the endpoint fields exist for tests and
+    /// GitHub Enterprise deployments.
+    pub lint_package: LintPackageConfig,
     pub lint_rule_paths: Vec<PathBuf>,
     /// Finding/diagnostic selection applied to reported output (#430).
     /// Selection narrows presentation only; verdicts and exit codes are
@@ -128,6 +134,39 @@ pub struct RunOptions {
     /// total exceeds N and names the overage. It reads no cache, so it
     /// behaves identically with and without history.
     pub max_total: Option<usize>,
+}
+
+/// Lint rule package store and fetch endpoints (issue #843). Every field
+/// defaults to the production behavior; overrides exist for tests and
+/// GitHub Enterprise deployments.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LintPackageConfig {
+    /// Store root override — defaults to [`LintPackageStore::default_root`],
+    /// which honors `WRIGHT_LINT_PACKAGE_DIR`.
+    pub store_dir: Option<PathBuf>,
+    /// GitHub API base URL override.
+    pub api_base: Option<String>,
+    /// codeload tarball base URL override.
+    pub codeload_base: Option<String>,
+}
+
+impl LintPackageConfig {
+    /// The store this configuration describes: default endpoints unless a
+    /// field overrides one.
+    pub(crate) fn store(&self) -> LintPackageStore {
+        let mut store = LintPackageStore::new(
+            self.store_dir
+                .clone()
+                .unwrap_or_else(LintPackageStore::default_root),
+        );
+        if let Some(base) = &self.api_base {
+            store = store.with_api_base(base.clone());
+        }
+        if let Some(base) = &self.codeload_base {
+            store = store.with_codeload_base(base.clone());
+        }
+        store
+    }
 }
 
 impl SessionConfig {
@@ -165,6 +204,9 @@ impl SessionConfig {
         }
         if self.lint != other.lint {
             changed.push("lint");
+        }
+        if self.lint_package != other.lint_package {
+            changed.push("lint_package");
         }
         if self.lint_rule_paths != other.lint_rule_paths {
             changed.push("lint_rule_paths");

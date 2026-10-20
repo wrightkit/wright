@@ -22,7 +22,10 @@ pub mod session;
 pub mod source_provider;
 pub mod workshop_compat;
 
-pub use config::{InputSpec, LintConfig, OutputFormat, RunOptions, SessionConfig, SourceKind};
+pub use config::{
+    InputSpec, LintConfig, LintPackageConfig, LintPackagePin, OutputFormat, RunOptions,
+    SessionConfig, SourceKind,
+};
 pub use diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage, Status};
 pub use input::{InputTarget, ResolvedInput, sha256_hex};
 pub use lint_package::{

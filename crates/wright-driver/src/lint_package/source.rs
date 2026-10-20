@@ -104,6 +104,13 @@ impl LintPackageSource {
     pub fn slug(&self) -> String {
         format!("{}/{}", self.owner, self.repo)
     }
+
+    /// Whether this source names the first-party package repository
+    /// ([`super::FIRST_PARTY_PACKAGE`]) — the only source allowed bare rule
+    /// IDs (issue #843).
+    pub fn is_first_party(&self) -> bool {
+        self.slug().eq_ignore_ascii_case(super::FIRST_PARTY_PACKAGE)
+    }
 }
 
 impl fmt::Display for LintPackageSource {
