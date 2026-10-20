@@ -68,6 +68,7 @@
         summary,
         state: ruleStateFromSummary(summary),
       }))
+      selected ??= rules[0]?.summary.id ?? null
     } else {
       const list = await call({ op: 'rules', all: true })
       if ('error' in list) {
@@ -84,13 +85,15 @@
           ? (result as { snapshot?: number }).snapshot
           : undefined
       rules = summaries.map((summary) => ({ summary, state: { phase: 'loading' } }))
+      // Select before the per-rule reads finish: the list is clickable
+      // already, and a click must not be overwritten when they land.
+      selected ??= rules[0]?.summary.id ?? null
       await Promise.all(
         rules.map(async (entry) => {
           entry.state = await loadOne(entry.summary.id, snapshot)
         }),
       )
     }
-    selected = rules[0]?.summary.id ?? null
   }
 
   void load()
