@@ -247,17 +247,19 @@ def _numeric_fields(result: dict, fields: list[str], prefix: str = "") -> dict:
     }
 
 
+_LISTING_KEYS = ("symbols", "rules", "persistentObjects", "findings", "items")
+
+
 def _snapshot_listing(result):
     """The id list a `{key: [...], snapshot}` listing carries (#595)."""
     if not isinstance(result, dict) or "snapshot" not in result:
         return None
-    lists = [value for value in result.values() if isinstance(value, list)]
-    return lists[0] if len(lists) == 1 else None
+    lists = [key for key, value in result.items() if isinstance(value, list)]
+    return result[lists[0]] if len(lists) == 1 and lists[0] in _LISTING_KEYS else None
 
 
 def _listing_measurement(result):
-    """Stamped listings measure in the legacy `items`/`truncation.items`
-    vocabulary; other metadata keeps its own name (#595)."""
+    """Stamped listings measure in the legacy `items` vocabulary (#595)."""
     listed = _snapshot_listing(result)
     if listed is None:
         return None
@@ -275,10 +277,8 @@ def agent_counts(op: str, result) -> dict:
     """Result-shape counts for one agent operation's `result` payload."""
     if not isinstance(result, (list, dict)):
         return {}
-    if op in ("symbols", "rules", "persistentObjects", "findings"):
-        measured = _listing_measurement(result)
-        if measured is not None:
-            result = measured
+    if op in _LISTING_KEYS[:4] and (measured := _listing_measurement(result)) is not None:
+        result = measured
     if isinstance(result, list):
         if op == "symbols":
             return _typed_items(result, "symbol")
