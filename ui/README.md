@@ -20,7 +20,7 @@ npm ci                  # install the locked dependencies
 npm run dev             # dev server
 npm run build           # production build -> dist/ (ignored, never committed)
 npm run check           # svelte-check + tsc
-npm test                # vitest unit tests
+npm test                # vitest unit and jsdom component tests
 npm run check:size      # dist/ JS+CSS must be < 100 KiB gzipped (fails over)
 ```
 
