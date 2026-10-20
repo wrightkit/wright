@@ -105,7 +105,13 @@ cmd_install() {
   [[ "$(printf %s "$actual" | tr A-F a-f)" == "$(printf %s "$expected" | tr A-F a-f)" ]] \
     || fail "checksum mismatch for $archive (published $expected, got $actual); nothing was installed"
 
-  tar -xf "$work/$archive" -C "$work" || fail "failed to extract $archive"
+  if [[ "$ext" == zip ]]; then
+    # Git Bash's GNU tar cannot read zip; Windows ships bsdtar, which needs native paths.
+    "${SYSTEMROOT:-C:/Windows}/System32/tar.exe" -xf "$(cygpath -w "$work/$archive")" -C "$(cygpath -w "$work")" \
+      || fail "failed to extract $archive"
+  else
+    tar -xf "$work/$archive" -C "$work" || fail "failed to extract $archive"
+  fi
   [[ -f "$work/$name/$exe" ]] || fail "unexpected archive layout: $name/$exe missing from $archive"
 
   rm -rf "$dir"
