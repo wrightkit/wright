@@ -52,4 +52,5 @@ its audit date.
 * [ADR-0030: One result model, three renderers, and the CLI/action boundary](0030-renderers-and-the-cli-action-boundary.md)
 * [ADR-0031: Paginated vocabulary listing for structured editors](0031-paginated-vocabulary-listing.md)
 * [ADR-0032: The structured Workshop editor: form factor, ownership, and stack](0032-structured-editor-form-factor.md)
+* [ADR-0033: The simulate operation in the driver and `wright-agent/v1`](0033-simulate-operation.md)
 * [Post-ADR-0010 decision inventory](post-0010-inventory.md)
