@@ -281,28 +281,8 @@ jobs:
           target/debug/wright compile tests/fixtures/opy/basic-rule.opy
           -o "$RUNNER_TEMP/basic-rule.ow"
 
-      # #787: a postCompileHook can introduce a member spelling the active
-      # locale never produced; check must reject what compile rejects.
-      - name: Check rejects the spelling compile rejects
-        run: |
-          if target/debug/wright check -f json \
-              tests/fixtures/opy/locale-hook/main.opy \
-              > "$RUNNER_TEMP/locale-hook-check.json"; then
-            echo "check passed a project compile rejects"
-            exit 1
-          fi
-          grep -q '"unknown-enum-member"' "$RUNNER_TEMP/locale-hook-check.json"
-          grep -q 'Map.格里姆火山' "$RUNNER_TEMP/locale-hook-check.json"
-          if target/debug/wright compile -f json \
-              tests/fixtures/opy/locale-hook/main.opy \
-              -o "$RUNNER_TEMP/locale-hook.ow" \
-              > "$RUNNER_TEMP/locale-hook-compile.json"; then
-            echo "compile accepted the spelling after all"
-            exit 1
-          fi
-          grep -q '"unknown-enum-member"' "$RUNNER_TEMP/locale-hook-compile.json"
-          target/debug/wright check -f json --locale zh-CN \
-            tests/fixtures/opy/locale-hook/main.opy >/dev/null
+      - name: Run provider-backed CLI tests
+        run: cargo test --locked -p wright-cli --test opy_locale_hook
 
   lpp-integration:
     name: LPP integration
