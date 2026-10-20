@@ -1,10 +1,32 @@
-# Gate definitions: what counts as passing. Changes need owner review.
-# Ordinary code and tests stay unowned.
+# Human review is required for what defines "passing": CI and release gates,
+# public contracts, compatibility references, and agent instructions.
+# Ordinary code, tests, and docs stay unowned, so agents may review and merge them.
 /.github/CODEOWNERS @Teakowa
 /.github/workflows/ @Teakowa
+/.github/dependabot.yml @Teakowa
+/AGENTS.md @Teakowa
+/docs/adr/ @Teakowa
+
+# Public contracts
+/schemas/ @Teakowa
+/docs/agent-contract.md @Teakowa
+# Committed expectation of the `wright check --json` contract
+/crates/wright-cli/tests/snapshots/*.snap @Teakowa
+
+# Upstream reference pins
+/docs/compatibility/upstream-references.md @Teakowa
+/agent-guide/UPSTREAM.md @Teakowa
+
+# Benchmark gate definitions
 /benchmarks/metrics/baseline-*.json @Teakowa
 /benchmarks/metrics/corpus.json @Teakowa
 # Token budgets and blocking-change rules are defined here
 /benchmarks/metrics/metrics.py @Teakowa
-# Committed expectation of the `wright check --json` contract
-/crates/wright-cli/tests/snapshots/*.snap @Teakowa
+
+# Toolchain, release, and distribution
+/rust-toolchain.toml @Teakowa
+/release-please-config.json @Teakowa
+/.release-please-manifest.json @Teakowa
+/dist/ @Teakowa
+/install.sh @Teakowa
+/install.ps1 @Teakowa
