@@ -397,6 +397,72 @@ pub struct ConvertResult {
     pub sha256: String,
 }
 
+/// `lint package` result (#844): the outcome of one package lifecycle
+/// command — a repository search, an install/list/outdated/update/remove —
+/// as one row per repository or store entry, plus the store root the
+/// command ran against.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct LintPackageResult {
+    /// The lint package store root (`WRIGHT_LINT_PACKAGE_DIR` or the
+    /// platform application-data dir) the command ran against.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub store: String,
+    /// One row per package or repository the command reported on.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub packages: Vec<LintPackageRow>,
+    /// `package search`: the `total_count` GitHub reported across pages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+    /// `package search`: GitHub's `incomplete_results` flag.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incomplete: Option<bool>,
+    /// The shared follow-up commands (#792).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub next: Vec<String>,
+}
+
+/// One package row in a `lint package` result: `source` + `status` are
+/// always present; every other member appears only when the command that
+/// produced the row establishes it.
+///
+/// `status` is one of: `found` (search hits), `installed` (install/list
+/// rows and reused store entries), `unchanged`, `updated`, `unavailable`,
+/// `error` (outdated/update remote checks), `damaged` (list rows that fail
+/// store-entry validation), `removed`, or `pruned` (remove rows whose
+/// entry directory survives because unrelated files remain).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct LintPackageRow {
+    /// The `owner/repo` source identity.
+    pub source: String,
+    /// The row's outcome status.
+    pub status: String,
+    /// The store entry's full commit SHA.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha: Option<String>,
+    /// The resolved default-branch head on `outdated`/`update` rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<String>,
+    /// The entry's directory in the store.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dir: Option<String>,
+    /// The entry's validated SPEC-309 rule IDs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<String>,
+    /// Whether the archive was downloaded by this command (`false` when an
+    /// intact store entry was reused).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub downloaded: Option<bool>,
+    /// The repository description on `found` rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// The stable error code on `error`/`unavailable`/`damaged` rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    /// The failure detail on `error`/`unavailable`/`damaged` rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
 pub fn version_info() -> VersionInfo {
     VersionInfo {
         version: DRIVER_VERSION.to_string(),

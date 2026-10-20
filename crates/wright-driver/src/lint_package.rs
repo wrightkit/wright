@@ -43,6 +43,64 @@ const STORE_DIR_ENV: &str = "WRIGHT_LINT_PACKAGE_DIR";
 /// action tracked by wrightkit/wright#845.
 pub const FIRST_PARTY_PACKAGE: &str = "wrightkit/lint-rules";
 
+/// One store entry directory discovered under `<root>/<owner>/<repo>/<sha>/`.
+/// The directory names carry the source identity and the immutable revision;
+/// an intact entry validates as a package, a `damaged` entry carries the
+/// reason it does not (`lint-package-install`).
+#[derive(Debug)]
+pub struct StoreEntry {
+    /// The package source, from the `<owner>/<repo>` directory names.
+    pub source: LintPackageSource,
+    /// The full commit SHA the entry is keyed by.
+    pub sha: String,
+    /// The entry directory `<root>/<owner>/<repo>/<sha>/`.
+    pub dir: PathBuf,
+    /// The validated SPEC-309 rule IDs of an intact entry; empty for a
+    /// damaged one.
+    pub rules: Vec<String>,
+    /// Why the entry does not validate as a package, when it is damaged —
+    /// missing `rules/`, no rule files, or locally edited managed content
+    /// that no longer loads.
+    pub damage: Option<LintPackageError>,
+}
+
+/// The outcome of `LintPackageStore::remove`: the entry's managed `rules/`
+/// tree is gone, and `dir_removed` reports whether the entry directory was
+/// deleted too — it survives when unrelated, non-managed files remain.
+#[derive(Debug)]
+pub struct RemovedPackage {
+    /// The package source.
+    pub source: LintPackageSource,
+    /// The removed entry's full commit SHA.
+    pub sha: String,
+    /// The entry directory.
+    pub dir: PathBuf,
+    /// Whether the entry directory was removed. `false` means unrelated
+    /// files beside `rules/` keep it — managed content is still gone.
+    pub dir_removed: bool,
+}
+
+/// One repository found by `LintPackageStore::search` on the
+/// `wrightkit-lint` topic.
+#[derive(Debug)]
+pub struct PackageSearchHit {
+    /// The `owner/repo` source identity.
+    pub source: LintPackageSource,
+    /// The repository description, when GitHub returns one.
+    pub description: Option<String>,
+}
+
+/// The paged result of a `topic:wrightkit-lint` repository search.
+#[derive(Debug)]
+pub struct PackageSearch {
+    /// The `total_count` GitHub reported across all pages.
+    pub total: u64,
+    /// Whether GitHub reported incomplete results.
+    pub incomplete: bool,
+    /// The repositories found, in API order.
+    pub hits: Vec<PackageSearchHit>,
+}
+
 /// One installed package directory in the store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstalledPackage {
@@ -231,6 +289,179 @@ impl LintPackageStore {
             dir,
             rules: validated,
             downloaded: true,
+        })
+    }
+
+    /// Every store entry — `<root>/<owner>/<repo>/<full-sha>/` directories
+    /// still carrying a `rules/` tree — in stable `owner/repo/sha` order.
+    /// Damaged entries (an unloadable or empty `rules/`) are included and
+    /// carry their refusal reason in `damage`; directories that cannot be
+    /// package entries (invalid names, non-SHA names, leftover staging, or
+    /// an entry dir whose `rules/` is already gone) are skipped. A missing
+    /// store root reports an empty store.
+    pub fn entries(&self) -> Result<Vec<StoreEntry>, LintPackageError> {
+        let read = |dir: &Path| -> Result<Vec<PathBuf>, LintPackageError> {
+            match std::fs::read_dir(dir) {
+                Ok(d) => Ok(d
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| p.is_dir())
+                    .collect()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+                Err(e) => Err(LintPackageError::install(format!(
+                    "cannot read the lint package store '{}': {e}",
+                    dir.display()
+                ))),
+            }
+        };
+        let mut entries = Vec::new();
+        for owner in read(&self.root)? {
+            let Some(owner_name) = owner.file_name().map(|n| n.to_string_lossy()) else {
+                continue;
+            };
+            for repo in read(&owner)? {
+                let Some(repo_name) = repo.file_name().map(|n| n.to_string_lossy()) else {
+                    continue;
+                };
+                let Ok(source) = LintPackageSource::new(&owner_name, &repo_name) else {
+                    continue;
+                };
+                for dir in read(&repo)? {
+                    let Some(sha) = dir.file_name().map(|n| n.to_string_lossy()) else {
+                        continue;
+                    };
+                    // An entry without its managed `rules/` tree is not a
+                    // package — leftover debris from `remove` (the entry dir
+                    // a user-owned file kept) or an abandoned partial write.
+                    if !is_full_sha(&sha) || !dir.join("rules").is_dir() {
+                        continue;
+                    }
+                    let sha = sha.to_lowercase();
+                    let (rules, damage) =
+                        match rules::validate_stored(&dir, source.is_first_party()) {
+                            Ok(rules) => (rules, None),
+                            Err(error) => (Vec::new(), Some(error)),
+                        };
+                    entries.push(StoreEntry {
+                        source: source.clone(),
+                        sha,
+                        dir,
+                        rules,
+                        damage,
+                    });
+                }
+            }
+        }
+        entries.sort_by(|a, b| {
+            a.source
+                .slug()
+                .cmp(&b.source.slug())
+                .then_with(|| a.sha.cmp(&b.sha))
+        });
+        Ok(entries)
+    }
+
+    /// Remove one store entry's managed content: its `rules/` tree, then
+    /// the entry directory itself only when nothing else remains — a
+    /// user-owned file beside `rules/` keeps the directory. Empty
+    /// `<owner>/<repo>` parent directories are pruned.
+    pub fn remove(
+        &self,
+        source: &LintPackageSource,
+        sha: &str,
+    ) -> Result<RemovedPackage, LintPackageError> {
+        let dir = self.package_dir(source, sha);
+        if !dir.is_dir() {
+            return Err(LintPackageError::NotFound(format!(
+                "lint package '{source}' has no store entry at commit {sha}"
+            )));
+        }
+        let rules_dir = dir.join("rules");
+        if rules_dir.is_dir() {
+            std::fs::remove_dir_all(&rules_dir).map_err(|e| {
+                LintPackageError::install(format!(
+                    "cannot remove managed lint rules '{}': {e}",
+                    rules_dir.display()
+                ))
+            })?;
+        }
+        let remaining = std::fs::read_dir(&dir)
+            .map_err(|e| {
+                LintPackageError::install(format!(
+                    "cannot inspect lint package entry '{}': {e}",
+                    dir.display()
+                ))
+            })?
+            .next();
+        let dir_removed = remaining.is_none();
+        if dir_removed {
+            std::fs::remove_dir(&dir).map_err(|e| {
+                LintPackageError::install(format!(
+                    "cannot remove lint package entry '{}': {e}",
+                    dir.display()
+                ))
+            })?;
+            // Prune the `<owner>/<repo>` parents once they are empty.
+            let mut parent = dir.parent();
+            while let Some(path) = parent {
+                if path == self.root || std::fs::remove_dir(path).is_err() {
+                    break;
+                }
+                parent = path.parent();
+            }
+        }
+        Ok(RemovedPackage {
+            source: source.clone(),
+            sha: sha.to_lowercase(),
+            dir,
+            dir_removed,
+        })
+    }
+
+    /// Search GitHub for lint rule packages: the
+    /// `topic:wrightkit-lint archived:false fork:false` repository query,
+    /// paged at `per_page=100`. `terms`, when given, narrow the query
+    /// further. Repositories whose `full_name` is not a valid package
+    /// source are skipped.
+    pub fn search(&self, terms: Option<&str>) -> Result<PackageSearch, LintPackageError> {
+        let client = remote::package_client()?;
+        let mut hits = Vec::new();
+        let mut total = 0u64;
+        let mut incomplete = false;
+        // GitHub's search API caps at 1000 results: 10 pages of 100.
+        for page in 1..=10u32 {
+            let url = remote::search_url(&self.api_base, terms, page);
+            let body = remote::api_get(&client, &url, self.token.as_deref(), &self.resolved)?;
+            let page_data = remote::search_page(&body)?;
+            total = page_data.total;
+            incomplete |= page_data.incomplete;
+            let count = page_data.items.len();
+            for item in page_data.items {
+                let Some(full_name) = item.get("full_name").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                let Some((owner, repo)) = full_name.split_once('/') else {
+                    continue;
+                };
+                let Ok(source) = LintPackageSource::new(owner, repo) else {
+                    continue;
+                };
+                hits.push(PackageSearchHit {
+                    source,
+                    description: item
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                });
+            }
+            if count < 100 || hits.len() as u64 >= total {
+                break;
+            }
+        }
+        Ok(PackageSearch {
+            total,
+            incomplete,
+            hits,
         })
     }
 

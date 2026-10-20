@@ -23,6 +23,14 @@ const REF_ENCODE: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUME
     .remove(b'-')
     .remove(b'_');
 
+/// Query-string spellings keep the search qualifier colon plus `.`, `-`,
+/// and `_` readable; spaces and other characters are percent-encoded.
+const QUERY_ENCODE: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+    .remove(b':')
+    .remove(b'.')
+    .remove(b'-')
+    .remove(b'_');
+
 /// An ETag-conditional resolution cache: request URL → the entity tag GitHub
 /// issued and the response body it was issued for.
 pub(super) type ResolutionCache = Mutex<HashMap<String, ResolvedEntry>>;
@@ -62,6 +70,44 @@ pub(super) fn archive_url(codeload_base: &str, source: &LintPackageSource, sha: 
         source.owner(),
         source.repo()
     )
+}
+
+/// The repository Search API endpoint: the `wrightkit-lint` topic filter
+/// plus optional caller terms, paged at `per_page=100` (1-based `page`).
+pub(super) fn search_url(api_base: &str, terms: Option<&str>, page: u32) -> String {
+    let mut query = "topic:wrightkit-lint archived:false fork:false".to_string();
+    if let Some(terms) = terms.map(str::trim).filter(|t| !t.is_empty()) {
+        query.push(' ');
+        query.push_str(terms);
+    }
+    format!(
+        "{}/search/repositories?q={}&per_page=100&page={page}",
+        api_base.trim_end_matches('/'),
+        percent_encoding::utf8_percent_encode(&query, QUERY_ENCODE)
+    )
+}
+
+/// One parsed search page: `total_count`, `incomplete_results`, and the
+/// raw `items` array.
+pub(super) struct SearchPage {
+    pub(super) total: u64,
+    pub(super) incomplete: bool,
+    pub(super) items: Vec<serde_json::Value>,
+}
+
+/// Parse one Search API page; a malformed or non-object answer is a
+/// `lint-package-remote` error, matching `resolved_sha`.
+pub(super) fn search_page(body: &[u8]) -> Result<SearchPage, LintPackageError> {
+    let unexpected =
+        || LintPackageError::remote("GitHub returned an unexpected repository search response");
+    let value: serde_json::Value = serde_json::from_slice(body).map_err(|_| unexpected())?;
+    let total = value["total_count"].as_u64().ok_or_else(unexpected)?;
+    let items = value["items"].as_array().ok_or_else(unexpected)?.clone();
+    Ok(SearchPage {
+        total,
+        incomplete: value["incomplete_results"].as_bool().unwrap_or(false),
+        items,
+    })
 }
 
 pub(super) fn package_client() -> Result<reqwest::blocking::Client, LintPackageError> {

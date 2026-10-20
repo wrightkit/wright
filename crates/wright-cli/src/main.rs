@@ -2,6 +2,7 @@ mod agent;
 mod agenttools;
 mod cli;
 mod completion;
+mod lint;
 mod mcp;
 mod plain;
 mod present;
@@ -215,44 +216,7 @@ fn run_workflow(command: Command) -> ExitCode {
                 },
             )
         }
-        Command::Lint(args) => {
-            let mut config = config_from_common(&args.common);
-            config.selection = selection_from_args(&args.select);
-            if let Err(message) = args.policy.apply_to(&mut config) {
-                present::terminal::report_error(
-                    present::Presentation::from_common(&args.common),
-                    "USAGE",
-                    "lint",
-                    &message,
-                );
-                return ExitCode::from(exit::USAGE);
-            }
-            let presentation = present::Presentation::from_common(&args.common);
-            if args.fix {
-                return run_configured(
-                    "lint",
-                    config,
-                    presentation,
-                    fail_on(&args.common),
-                    None,
-                    move |session| session.lint_fix(args.write),
-                );
-            }
-            run_configured(
-                "lint",
-                config,
-                presentation.with_all(args.all),
-                fail_on(&args.common),
-                None,
-                |session| {
-                    essential_envelope(
-                        session.lint(),
-                        |value| wright_driver::essential::lint(value, args.all),
-                        |result| result.selection.clone(),
-                    )
-                },
-            )
-        }
+        Command::Lint(args) => lint::run(args),
         Command::Inspect(args) => match args.query {
             None => run_configured(
                 "inspect",
@@ -424,7 +388,7 @@ fn run_workflow(command: Command) -> ExitCode {
 }
 
 /// Apply the same essential result projection as the agent service.
-fn essential_envelope<T: serde::Serialize>(
+pub(crate) fn essential_envelope<T: serde::Serialize>(
     envelope: wright_driver::Envelope<T>,
     form: impl FnOnce(&serde_json::Value) -> serde_json::Value,
     outcome: impl FnOnce(&T) -> Option<wright_driver::SelectionOutcome>,
@@ -435,7 +399,7 @@ fn essential_envelope<T: serde::Serialize>(
     })
 }
 
-fn run_configured<
+pub(crate) fn run_configured<
     T: serde::Serialize
         + present::ResultPresentation
         + plain::PlainReport
@@ -777,7 +741,7 @@ fn run_semantic_compare(args: cli::SemanticCompareArgs) -> ExitCode {
     }
 }
 
-fn config_from_common(common: &CommonArgs) -> SessionConfig {
+pub(crate) fn config_from_common(common: &CommonArgs) -> SessionConfig {
     let input = match &common.input {
         Some(path) if path.as_os_str() != "-" => InputSpec::Path(path.clone()),
         Some(_) => InputSpec::Stdin,
@@ -820,13 +784,13 @@ fn config_from_common(common: &CommonArgs) -> SessionConfig {
 
 /// `--fail-on` (ADR-0030 decision 13): the CLI gating threshold applied to
 /// the finished envelope — `None` leaves the default exit codes untouched.
-fn fail_on(common: &CommonArgs) -> Option<wright_driver::Severity> {
+pub(crate) fn fail_on(common: &CommonArgs) -> Option<wright_driver::Severity> {
     common.fail_on.map(cli::SeverityArg::as_severity)
 }
 
 /// Map the CLI finding-selection flags onto the shared driver selection
 /// model; the driver applies it to diagnostics and lint findings alike (#430).
-fn selection_from_args(select: &cli::SelectArgs) -> wright_driver::FindingSelection {
+pub(crate) fn selection_from_args(select: &cli::SelectArgs) -> wright_driver::FindingSelection {
     wright_driver::FindingSelection {
         severity: select.severity.map(cli::SeverityArg::as_severity),
         rule: select.rule_id.clone(),

@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
-use crate::serve::{LintPolicyArgs, ServeArgs};
+mod lint;
+pub(crate) use lint::*;
+
+use crate::serve::ServeArgs;
 use crate::ui::UiArgs;
 use crate::update::UpdateArgs;
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -21,6 +24,13 @@ pub(crate) struct Cli {
     /// Print the implementation and driver versions.
     #[arg(long, action = clap::ArgAction::SetTrue)]
     pub(crate) version: bool,
+}
+
+/// A command whose clean verdict is its own name — the read-only query
+/// commands, not a judging word (ADR-0030 decision 4).
+pub(crate) fn is_query_command(command: &str) -> bool {
+    const QUERIES: &str = "inspect rules symbols refs cfg callgraph cost lookup package-search package-list package-outdated";
+    QUERIES.split(' ').any(|query| query == command)
 }
 
 pub(crate) const LONG_ABOUT: &str = "Wright compiler and Workshop tooling CLI.
@@ -91,7 +101,12 @@ pub(crate) enum Command {
     /// Summarize Workshop cost, complexity hotspots, risk indicators, and
     /// cross-cutting state.
     Analyze(AnalyzeArgs),
-    /// Parse, lower, and report lint findings.
+    /// Parse, lower, and report lint findings. The `package` subcommand
+    /// manages GitHub lint rule packages (#844).
+    #[command(
+        args_conflicts_with_subcommands = true,
+        subcommand_precedence_over_arg = true
+    )]
     Lint(LintArgs),
     /// Parse, lower, and inspect semantic facts: the bare command prints the
     /// summary, and its query subcommands expose each detail area (#429).
@@ -531,28 +546,6 @@ pub(crate) struct CallgraphArgs {
     /// dropped.
     #[arg(long, value_name = "N")]
     pub(crate) max: Option<usize>,
-}
-
-#[derive(Debug, Args)]
-pub(crate) struct LintArgs {
-    #[command(flatten)]
-    pub(crate) common: CommonArgs,
-    #[command(flatten)]
-    pub(crate) select: SelectArgs,
-    /// Return every finding.
-    #[arg(long)]
-    pub(crate) all: bool,
-    /// Show the automated fixes lint offers for fixable findings as a
-    /// validated diff, without writing (#556).
-    #[arg(long, conflicts_with = "all")]
-    pub(crate) fix: bool,
-    /// Apply the fixes `--fix` previews: each fix is re-validated against
-    /// the current source before writing; a stale source refuses and
-    /// writes nothing (#556).
-    #[arg(long, requires = "fix")]
-    pub(crate) write: bool,
-    #[command(flatten)]
-    pub(crate) policy: LintPolicyArgs,
 }
 
 #[derive(Debug, Args)]

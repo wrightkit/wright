@@ -61,10 +61,7 @@ fn tag_word<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) ->
 /// Commands that report facts rather than judge a program: their tag is
 /// their name, drawn in the neutral hue.
 fn is_query(command: &str) -> bool {
-    matches!(
-        command,
-        "inspect" | "rules" | "symbols" | "refs" | "cfg" | "callgraph" | "cost" | "lookup"
-    )
+    crate::cli::is_query_command(command)
 }
 
 /// The tag cell — ` WORD ` filled with the semantic hue under colour. The
@@ -133,7 +130,7 @@ pub(crate) fn exit_word(code: u8) -> &'static str {
 }
 
 /// `{n} {singular}` or `{n} {plural}` — counts never carry `(s)` suffixes.
-fn plural(n: usize, singular: &str, plural: &str) -> String {
+pub(crate) fn plural(n: usize, singular: &str, plural: &str) -> String {
     if n == 1 {
         format!("{n} {singular}")
     } else {
@@ -154,17 +151,17 @@ fn pad(ctx: &RenderContext<'_>, depth: usize) -> String {
     }
 }
 
-fn line(ctx: &RenderContext<'_>, depth: usize, text: &str) {
+pub(crate) fn line(ctx: &RenderContext<'_>, depth: usize, text: &str) {
     println!("{}{text}", pad(ctx, depth));
 }
 
-fn note(ctx: &RenderContext<'_>, depth: usize, text: &str) {
+pub(crate) fn note(ctx: &RenderContext<'_>, depth: usize, text: &str) {
     println!("{}{}", pad(ctx, depth), dim(text, ctx.presentation.color));
 }
 
 /// A named section at the report's top level, one blank line before it.
 /// Headings are bold under colour — a text style, not a filled element.
-fn heading(ctx: &RenderContext<'_>, text: &str) {
+pub(crate) fn heading(ctx: &RenderContext<'_>, text: &str) {
     if ctx.presentation.color {
         println!("\n\x1b[1m{text}\x1b[0m");
     } else {
@@ -644,7 +641,7 @@ fn withheld_note(ctx: &RenderContext<'_>, value: &Value, noun: &str) {
 
 /// `Next` — the follow-up commands a result recommends (ADR-0030): last in
 /// the report, one command per line.
-fn next(ctx: &RenderContext<'_>, value: &Value) {
+pub(crate) fn next(ctx: &RenderContext<'_>, value: &Value) {
     let Some(commands) = value["next"]
         .as_array()
         .filter(|commands| !commands.is_empty())
