@@ -43,3 +43,27 @@ Short review queue of reusable failure classes from merged Wright work. Each ent
 - **Why:** `write_previews` replaced files one at a time under an atomic contract, so a failure on a later file left earlier files committed and the diagnostic silent about which — a half-edited project.
 - **Prevention home:** stage-then-commit with rollback plus the mid-failure tests landed in #742.
 - **Incidents:** [wright#742](https://github.com/wrightkit/wright/pull/742) (fixes [wright#734](https://github.com/wrightkit/wright/issues/734)) — observed 2026-10-18
+
+### An async result lands only while the state it answers is still current
+- **Rule:** An async load or read must tag its result with the generation or identity it was issued under and apply it conditionally; an unconditional write on completion overwrites whatever happened during the await.
+- **Why:** `load()` assigned `selected = rules[0]` only after every per-rule read finished, erasing a rule the user clicked while loading; a first cut of the fix then wrote `warmedFor` unconditionally, letting a superseded read resolving last hide the newer rule's body.
+- **Prevention home:** the generation/identity-gated application landed in #863; escalation [wright#868](https://github.com/wrightkit/wright/issues/868).
+- **Incidents:** [wright#829](https://github.com/wrightkit/wright/pull/829) defect fixed by [wright#863](https://github.com/wrightkit/wright/pull/863) (reported in [wright#862](https://github.com/wrightkit/wright/issues/862)); [wright#863](https://github.com/wrightkit/wright/pull/863) round-1 review finding — observed 2026-10-19, 2026-10-20
+
+### A server must not advertise connection semantics that drop in-flight client work
+- **Rule:** Match response connection headers to how the client actually uses the socket: a browser may dispatch a POST on a keep-alive connection, so `Connection: close` on every response drops already-dispatched, non-retried requests.
+- **Why:** `wright ui` answered every response with `Connection: close`; Chrome closed sockets it had already dispatched the next POST onto, the fetch hung, and the pane stayed on "Loading rule…".
+- **Prevention home:** the keep-alive handling landed in #864; authoring review of transport headers against client behavior.
+- **Incidents:** [wright#827](https://github.com/wrightkit/wright/pull/827) defect fixed by [wright#864](https://github.com/wrightkit/wright/pull/864) (reported in [wright#862](https://github.com/wrightkit/wright/issues/862)) — observed 2026-10-20
+
+### A check waits for the state it asserts on, not a fixed window
+- **Rule:** An end-to-end check must poll for the concrete state it asserts — the loaded rule body, the flushed render; a fixed wall-clock window fails on slow runners and unrelated PRs.
+- **Why:** The UI E2E read rendered statements before the selected rule's content flushed and bounded each check by a fixed 15s window, so it flaked on `main` and unrelated PRs until the job left CI.
+- **Prevention home:** the wait-for-state checks landed in #863's `e2e.mjs`; the job runs locally only (#865) until it is deterministic.
+- **Incidents:** [wright#829](https://github.com/wrightkit/wright/pull/829) E2E reported in [wright#862](https://github.com/wrightkit/wright/issues/862), fixed by [wright#863](https://github.com/wrightkit/wright/pull/863), CI gate removed by [wright#865](https://github.com/wrightkit/wright/pull/865) — observed 2026-10-20
+
+### A version bump re-audits the resolved dependency footprint
+- **Rule:** On a dependency upgrade, diff the resolved feature set and lockfile additions and disable default features the use does not need; a bump is not only an API port.
+- **Why:** The jsonschema 0.18→0.58 bump took default features enabling HTTP/file `$ref` resolution and pulling in `reqwest`, `aws-lc-sys`, `cmake`, and `jni` — about 262 new lock entries for a CLI that validates local schemas.
+- **Prevention home:** `default-features = false` landed in #866; review check of `cargo tree` and lockfile additions on bumps.
+- **Incidents:** [wright#866](https://github.com/wrightkit/wright/pull/866) review finding — observed 2026-10-20
