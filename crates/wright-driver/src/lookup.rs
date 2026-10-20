@@ -86,20 +86,20 @@ pub(crate) fn lookup(
             format!("limit must be within 1..={MAX_LIMIT}; got {limit}"),
         );
     }
-    if let Some(kind) = kind {
-        if !KINDS.contains(&kind) {
-            return refusal(
-                "invalid-kind",
-                format!(
-                    "kind must be one of {}; got '{kind}'",
-                    KINDS
-                        .iter()
-                        .map(|kind| format!("'{kind}'"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-            );
-        }
+    if let Some(kind) = kind
+        && !KINDS.contains(&kind)
+    {
+        return refusal(
+            "invalid-kind",
+            format!(
+                "kind must be one of {}; got '{kind}'",
+                KINDS
+                    .iter()
+                    .map(|kind| format!("'{kind}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        );
     }
     match language {
         "workshop" => workshop_lookup(session, query, kind, within, locale, limit),
@@ -445,10 +445,10 @@ fn workshop_param<'a>(
 }
 
 fn workshop_default(catalog: &Catalog, locale: &Locale, default: &str) -> String {
-    if let Some((domain, member)) = default.split_once('.') {
-        if let Some(spelling) = catalog.enum_spelling(domain, locale, member) {
-            return spelling.to_string();
-        }
+    if let Some((domain, member)) = default.split_once('.')
+        && let Some(spelling) = catalog.enum_spelling(domain, locale, member)
+    {
+        return spelling.to_string();
     }
     catalog
         .spelling(Kind::Value, locale, default)
@@ -623,10 +623,10 @@ fn opy_lookup(
         }
     };
     for entry in &mut entries {
-        if let Some(callable) = entry.get("callable").cloned() {
-            if let Some(signature) = lpp_signature(entry, &callable) {
-                entry["signature"] = json!(signature);
-            }
+        if let Some(callable) = entry.get("callable").cloned()
+            && let Some(signature) = lpp_signature(entry, &callable)
+        {
+            entry["signature"] = json!(signature);
         }
     }
     result("opy", OWNER_OPY, entries)

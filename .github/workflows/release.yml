@@ -117,7 +117,7 @@ jobs:
       - name: Set up Rust
         uses: wrightkit/.github/.github/actions/setup-rust@main
         with:
-          toolchain: stable
+          toolchain: 1.97.1
 
       - name: Verify release identity
         id: identity
@@ -195,7 +195,7 @@ jobs:
       - name: Set up Rust
         uses: wrightkit/.github/.github/actions/setup-rust@main
         with:
-          toolchain: stable
+          toolchain: 1.97.1
           targets: ${{ matrix.target }}
           cache-shared-key: release-${{ matrix.target }}-stable-release
           cache-targets: false
@@ -365,7 +365,7 @@ jobs:
       - name: Set up Rust
         uses: wrightkit/.github/.github/actions/setup-rust@main
         with:
-          toolchain: stable
+          toolchain: 1.97.1
           cache-shared-key: release-metrics-stable
       - name: Build wright
         run: cargo build --locked --release -p wright-cli

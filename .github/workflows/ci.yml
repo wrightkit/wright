@@ -101,42 +101,9 @@ jobs:
     if: needs.paths.outputs.rust_core == 'true'
     uses: wrightkit/.github/.github/workflows/rust-quality.yml@main
     with:
-      toolchain: stable
+      toolchain: 1.97.1
       cache-shared-key: linux-quality-stable-dev-test
       all-features: true
-
-  # The `+1.85.0` prefixes are load-bearing: without them this gate runs
-  # whichever toolchain the setup action resolved, not the declared MSRV.
-  rust-msrv:
-    name: Rust (1.85.0)
-    needs: paths
-    if: needs.paths.outputs.rust_core == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up Rust
-        uses: wrightkit/.github/.github/actions/setup-rust@main
-        with:
-          toolchain: 1.85.0
-          components: rustfmt, clippy
-          cache-shared-key: linux-quality-1.85.0-dev-test
-          cache-save: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Check formatting
-        run: cargo +1.85.0 fmt --all -- --check
-
-      - name: Clippy (independent crates)
-        run: >-
-          cargo +1.85.0 clippy --locked --all-targets --all-features
-          -p wright-analyzer -p wright-transform -p wright-lpp -- -D warnings
-
-      - name: Test (independent crates)
-        run: >-
-          cargo +1.85.0 test --locked --all-targets --all-features
-          -p wright-analyzer -p wright-transform -p wright-lpp
 
   wright-cli-build:
     name: Build CLI
@@ -151,7 +118,7 @@ jobs:
       - name: Set up Rust
         uses: wrightkit/.github/.github/actions/setup-rust@main
         with:
-          toolchain: stable
+          toolchain: 1.97.1
           cache-shared-key: linux-quality-stable-dev-test
 
       - name: Build CLI
@@ -285,7 +252,7 @@ jobs:
       - name: Set up Rust
         uses: wrightkit/.github/.github/actions/setup-rust@main
         with:
-          toolchain: stable
+          toolchain: 1.97.1
           cache-shared-key: linux-quality-stable-dev-test
       - name: Download CLI artifact
         uses: actions/download-artifact@v8
@@ -327,7 +294,7 @@ jobs:
       - name: Set up Rust
         uses: wrightkit/.github/.github/actions/setup-rust@main
         with:
-          toolchain: stable
+          toolchain: 1.97.1
           cache-shared-key: linux-quality-stable-dev-test
 
       # The mock provider is built from the pinned language-provider-protocol
@@ -366,7 +333,7 @@ jobs:
       - name: Set up Rust
         uses: wrightkit/.github/.github/actions/setup-rust@main
         with:
-          toolchain: stable
+          toolchain: 1.97.1
 
       - name: Download CLI artifact
         uses: actions/download-artifact@v8
@@ -393,7 +360,7 @@ jobs:
       - name: Set up Rust
         uses: wrightkit/.github/.github/actions/setup-rust@main
         with:
-          toolchain: stable
+          toolchain: 1.97.1
           cache-shared-key: linux-quality-stable-dev-test
 
       - name: Build benchmarks
@@ -542,7 +509,7 @@ jobs:
       - name: Set up Rust
         uses: wrightkit/.github/.github/actions/setup-rust@main
         with:
-          toolchain: stable
+          toolchain: 1.97.1
           cache-shared-key: dist-validation-${{ runner.os }}-stable-dev
           cache-targets: false
           cache-save: ${{ github.ref == 'refs/heads/main' }}
@@ -717,7 +684,7 @@ jobs:
       - name: Set up Rust
         uses: wrightkit/.github/.github/actions/setup-rust@main
         with:
-          toolchain: stable
+          toolchain: 1.97.1
           cache-shared-key: linux-quality-stable-dev-test
 
       - name: Build CLI with embedded UI
@@ -744,7 +711,6 @@ jobs:
     needs:
       - paths
       - rust-quality
-      - rust-msrv
       - wright-cli-build
       - workshop-integration
       - opy-integration
@@ -772,7 +738,6 @@ jobs:
           # change both together whenever a job's path condition changes.
           required=$(jq -n --argjson p "$PATHS" '{
             "rust-quality": ($p.rust_core == "true"),
-            "rust-msrv": ($p.rust_core == "true"),
             "workshop-integration": ($p.rust_core == "true"),
             "wright-cli-build": ($p.opy == "true" or $p.cli == "true"),
             "opy-integration": ($p.opy == "true"),

@@ -145,31 +145,30 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
                     }
                 }
             }
-            if let Action::While { condition } = action {
-                if config.is_enabled(WHILE_WITHOUT_WAIT.id)
-                    && !live_actions(body).any(|(_, action)| is_wait(action, false))
-                {
-                    let boundedness = while_boundedness(condition, body, &dead[start..end]);
-                    let severity = match boundedness {
-                        Boundedness::StaticallyBounded => Severity::Info,
-                        Boundedness::ObviouslyUnbounded | Boundedness::Unknown => {
-                            WHILE_WITHOUT_WAIT.default_severity
-                        }
-                    };
-                    findings.push(Finding {
-                        code: WHILE_WITHOUT_WAIT.id.into(),
-                        severity,
-                        message: while_without_wait_message(boundedness),
-                        span: program.action_span(rule_id, action_id),
-                        rule: rule_id,
-                        action: Some(action_id),
-                        value: None,
-                        evidence: WHILE_WITHOUT_WAIT.evidence,
-                        boundedness: Some(boundedness),
-                        fix: None,
-                        repeated: None,
-                    });
-                }
+            if let Action::While { condition } = action
+                && config.is_enabled(WHILE_WITHOUT_WAIT.id)
+                && !live_actions(body).any(|(_, action)| is_wait(action, false))
+            {
+                let boundedness = while_boundedness(condition, body, &dead[start..end]);
+                let severity = match boundedness {
+                    Boundedness::StaticallyBounded => Severity::Info,
+                    Boundedness::ObviouslyUnbounded | Boundedness::Unknown => {
+                        WHILE_WITHOUT_WAIT.default_severity
+                    }
+                };
+                findings.push(Finding {
+                    code: WHILE_WITHOUT_WAIT.id.into(),
+                    severity,
+                    message: while_without_wait_message(boundedness),
+                    span: program.action_span(rule_id, action_id),
+                    rule: rule_id,
+                    action: Some(action_id),
+                    value: None,
+                    evidence: WHILE_WITHOUT_WAIT.evidence,
+                    boundedness: Some(boundedness),
+                    fix: None,
+                    repeated: None,
+                });
             }
             if config.is_enabled(REPEATED_VALUE.id)
                 && matches!(
@@ -367,10 +366,10 @@ fn ongoing_condition_findings(
 fn collect_expensive_values(value: &Value) -> Vec<(Vec<usize>, &Value)> {
     let mut out = Vec::new();
     visit_value_tree(value, None, &mut |value, _, path| {
-        if let Value::Call { name, .. } = value {
-            if ["distance", "raycast", "isInLoS"].contains(&name.as_str()) {
-                out.push((path.to_vec(), value));
-            }
+        if let Value::Call { name, .. } = value
+            && ["distance", "raycast", "isInLoS"].contains(&name.as_str())
+        {
+            out.push((path.to_vec(), value));
         }
         0
     });
@@ -1206,10 +1205,10 @@ fn value_text(value: &Value) -> String {
         Value::Call { name, args } => {
             // `__ambiguous_enum` is the workshop-rs sentinel for an unresolved
             // bare enum spelling; its first argument is the authored phrase.
-            if name == "__ambiguous_enum" {
-                if let Some(Value::String(spelling)) = args.first() {
-                    return spelling.clone();
-                }
+            if name == "__ambiguous_enum"
+                && let Some(Value::String(spelling)) = args.first()
+            {
+                return spelling.clone();
             }
             format!(
                 "{name}({})",

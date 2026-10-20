@@ -171,10 +171,10 @@ fn verdict_line<T: serde::Serialize + ResultPresentation + PlainReport>(
 /// The include root spelled for an agent: `.` when it is the working
 /// directory, else the display path (deterministic under a fixed cwd).
 pub(crate) fn display_root(root: &Path) -> String {
-    if let Ok(cwd) = std::env::current_dir() {
-        if root == cwd {
-            return ".".to_string();
-        }
+    if let Ok(cwd) = std::env::current_dir()
+        && root == cwd
+    {
+        return ".".to_string();
     }
     display_location_path(&root.display().to_string())
 }
@@ -838,10 +838,10 @@ impl PlainReport for LintResult {
                 wright_driver::result::LintFixStatus::Refused => "refused",
             };
             let mut items = vec![status.to_string(), fix.code.clone()];
-            if let Some(span) = fix.span.as_ref().filter(|span| span.is_object()) {
-                if let Some(at) = at_field(span) {
-                    items.push(at);
-                }
+            if let Some(span) = fix.span.as_ref().filter(|span| span.is_object())
+                && let Some(at) = at_field(span)
+            {
+                items.push(at);
             }
             items.push(field("summary", &fix.summary));
             out.push((Stream::Out, format!("fix: {}", items.join(" "))));

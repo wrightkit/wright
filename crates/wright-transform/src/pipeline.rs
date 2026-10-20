@@ -276,11 +276,11 @@ fn fold_value_once(value: &mut workshop_rs::Value, nodes: &mut usize) -> bool {
                         *value = Value::Number(result);
                         changed = true;
                     }
-                } else if name == "not" {
-                    if let Value::Bool(operand) = args[0] {
-                        *value = Value::Bool(!operand);
-                        changed = true;
-                    }
+                } else if name == "not"
+                    && let Value::Bool(operand) = args[0]
+                {
+                    *value = Value::Bool(!operand);
+                    changed = true;
                 }
             }
             changed

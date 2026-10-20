@@ -663,10 +663,10 @@ impl<'a> ToolService<'a> {
     /// `None`), so snapshot queries keep refusing `load()`'s explicit
     /// unsupported state rather than inheriting a placeholder program.
     fn adopt_session_snapshot(&mut self) {
-        if self.snapshot.is_none() {
-            if let Some(loaded) = self.session.cached_loaded() {
-                self.adopt(loaded);
-            }
+        if self.snapshot.is_none()
+            && let Some(loaded) = self.session.cached_loaded()
+        {
+            self.adopt(loaded);
         }
     }
 
@@ -1166,17 +1166,16 @@ impl<'a> ToolService<'a> {
         max: &Option<usize>,
         content: bool,
     ) -> ToolResponse {
-        if let Some(name) = name {
-            if !self
+        if let Some(name) = name
+            && !self
                 .snapshot()
                 .loaded
                 .program
                 .rules
                 .iter()
                 .any(|rule| rule.name == *name)
-            {
-                return invalid_selection(format!("unknown rule '{name}'"));
-            }
+        {
+            return invalid_selection(format!("unknown rule '{name}'"));
         }
         let rule_id = match rule {
             Some(address) => match self.rule_address(address) {
@@ -1250,17 +1249,17 @@ impl<'a> ToolService<'a> {
     /// result in `{"symbols": [...], "selection": {...}}` with the
     /// pre-selection total.
     fn symbols(&self, kind: Option<&str>, file: Option<&str>, max: Option<usize>) -> ToolResponse {
-        if let Some(kind) = kind {
-            if !SymbolKind::ALL.iter().any(|known| known.as_str() == kind) {
-                return invalid_selection(format!(
-                    "unknown symbol kind '{kind}' (expected one of: {})",
-                    SymbolKind::ALL
-                        .iter()
-                        .map(|known| known.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
-            }
+        if let Some(kind) = kind
+            && !SymbolKind::ALL.iter().any(|known| known.as_str() == kind)
+        {
+            return invalid_selection(format!(
+                "unknown symbol kind '{kind}' (expected one of: {})",
+                SymbolKind::ALL
+                    .iter()
+                    .map(|known| known.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
         }
         match self.semantic_query_with_resolved_span_paths(Request::ListSymbols { kind: None }) {
             ToolResponse::Ok { result } => self.select_result(
@@ -1286,20 +1285,19 @@ impl<'a> ToolService<'a> {
         file: Option<&str>,
         max: Option<usize>,
     ) -> ToolResponse {
-        if let Some(kind) = kind {
-            if !ReferenceKind::ALL
+        if let Some(kind) = kind
+            && !ReferenceKind::ALL
                 .iter()
                 .any(|known| known.as_str() == kind)
-            {
-                return invalid_selection(format!(
-                    "unknown reference kind '{kind}' (expected one of: {})",
-                    ReferenceKind::ALL
-                        .iter()
-                        .map(|known| known.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
-            }
+        {
+            return invalid_selection(format!(
+                "unknown reference kind '{kind}' (expected one of: {})",
+                ReferenceKind::ALL
+                    .iter()
+                    .map(|known| known.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
         }
         let rule_id = match rule {
             Some(address) => match self.rule_address(address) {
@@ -1340,13 +1338,13 @@ impl<'a> ToolService<'a> {
     /// address the full graph — and add a `selection` member with the
     /// pre-selection total.
     fn cfg(&self, rule: u32, kind: Option<&str>, max: Option<usize>) -> ToolResponse {
-        if let Some(kind) = kind {
-            if !BLOCK_KINDS.contains(&kind) {
-                return invalid_selection(format!(
-                    "unknown cfg block kind '{kind}' (expected one of: {})",
-                    BLOCK_KINDS.join(", ")
-                ));
-            }
+        if let Some(kind) = kind
+            && !BLOCK_KINDS.contains(&kind)
+        {
+            return invalid_selection(format!(
+                "unknown cfg block kind '{kind}' (expected one of: {})",
+                BLOCK_KINDS.join(", ")
+            ));
         }
         match self.semantic_query(Request::GetCfg { rule }) {
             ToolResponse::Ok { mut result } => {
@@ -1380,19 +1378,18 @@ impl<'a> ToolService<'a> {
         max: Option<usize>,
     ) -> ToolResponse {
         let program = &self.snapshot().loaded.program;
-        if let Some(caller) = caller {
-            if !program.rules.iter().any(|rule| rule.name == caller) {
-                return invalid_selection(format!("unknown caller rule '{caller}'"));
-            }
+        if let Some(caller) = caller
+            && !program.rules.iter().any(|rule| rule.name == caller)
+        {
+            return invalid_selection(format!("unknown caller rule '{caller}'"));
         }
-        if let Some(callee) = callee {
-            if !program
+        if let Some(callee) = callee
+            && !program
                 .subroutines
                 .iter()
                 .any(|subroutine| subroutine.name == callee)
-            {
-                return invalid_selection(format!("unknown callee subroutine '{callee}'"));
-            }
+        {
+            return invalid_selection(format!("unknown callee subroutine '{callee}'"));
         }
         let edges = program
             .rules
@@ -1668,16 +1665,15 @@ impl<'a> ToolService<'a> {
         // `--max-total`: exit 1 below the current total, naming the
         // overage; identical with and without a cache (decision 2).
         if let (Some(max), Some(total)) = (run.max_total, result["elementCount"]["total"].as_u64())
+            && total as usize > max
         {
-            if total as usize > max {
-                return Err(ToolErrorInfo {
-                    code: "cost-over-budget".to_string(),
-                    message: format!(
-                        "element total {total} exceeds --max-total {max} by {}",
-                        total as usize - max
-                    ),
-                });
-            }
+            return Err(ToolErrorInfo {
+                code: "cost-over-budget".to_string(),
+                message: format!(
+                    "element total {total} exceeds --max-total {max} by {}",
+                    total as usize - max
+                ),
+            });
         }
         let cost_run = self.session.cost_run(loaded);
         if run.baseline.is_some()

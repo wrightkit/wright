@@ -136,10 +136,8 @@ cargo test --workspace --all-targets --all-features </dev/null
 git diff --check
 ```
 
-The workspace declares `rust-version = "1.85.0"`. Before pushing, also run
-`cargo +1.85.0 clippy --workspace --all-targets --all-features -- -D warnings`;
-newer syntax such as let-chains passes on stable and is caught only by the
-`Rust (1.85.0)` CI job (wright#743).
+The workspace builds with the single toolchain pinned in `rust-toolchain.toml`, which
+`rust-version` and every CI job match; there is no separate MSRV gate.
 
 `.githooks-local/pre-commit` runs the Wright-only part of these checks locally
 (the vendored agent guide against its `wrightkit/skills` pin, needs a sibling

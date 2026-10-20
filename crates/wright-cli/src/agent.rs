@@ -169,10 +169,10 @@ pub(crate) fn install(args: &AgentInstallArgs) -> Result<InstallStatus, AgentErr
             target.display()
         )));
     }
-    if let Some(record) = &record {
-        if up_to_date(&target, record) {
-            return Ok(InstallStatus::UpToDate(target));
-        }
+    if let Some(record) = &record
+        && up_to_date(&target, record)
+    {
+        return Ok(InstallStatus::UpToDate(target));
     }
     if args.dry_run {
         return Ok(InstallStatus::DryRun(target));

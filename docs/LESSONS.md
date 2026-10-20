@@ -20,12 +20,6 @@ Short review queue of reusable failure classes from merged Wright work. Each ent
 - **Prevention home:** test, owned by the consuming component (analyzer and benchmark grader tests).
 - **Incidents:** [wright#625](https://github.com/wrightkit/wright/pull/625), [wright#644](https://github.com/wrightkit/wright/pull/644), observed 2026-10-11, 2026-10-13. #644 fixed older code reported through an Issue rather than a review finding, so an owner should confirm it counts as the second independent incident.
 
-### The MSRV gate catches syntax the local toolchain accepts
-- **Rule:** Code must compile on the declared `rust-version` (1.85.0), so the workspace gates run on that toolchain — `cargo +1.85.0 clippy --workspace --all-targets --all-features -- -D warnings` — before pushing. Syntax stabilized after the MSRV (for example let-chains in 1.88) compiles under a newer local toolchain and fails only in the `Rust (1.85.0)` CI job.
-- **Why:** Two PRs written under a newer local toolchain shipped let-chains; each needed a pushed fix after the MSRV job failed. `workshop-rs` already carried the same rule in its `AGENTS.md` since 2026-10-15, but the rule had not propagated to sibling repositories.
-- **Prevention home:** the `cargo +1.85.0` pre-push gate now stated in `AGENTS.md` (ported from workshop-rs#457); the `Rust (1.85.0)` CI job remains the backstop.
-- **Incidents:** [wright#743](https://github.com/wrightkit/wright/pull/743), [wright#763](https://github.com/wrightkit/wright/pull/763) (a let-chain in the refactor batch needed an unwrap commit after the MSRV job), observed 2026-10-18; same class in [opy-rs#574](https://github.com/wrightkit/opy-rs/pull/574) the same day, recorded in opy-rs's `docs/LESSONS.md` and the escalation issue `wrightkit/.github#101`.
-
 ### Usage validation that needs no loaded state runs before project load
 - **Rule:** A new flag's or argument's usage-error check must run where its inputs exist. When the verdict needs only session-construction fields (catalog, declared locales), gate before `load_with_operation`, not after.
 - **Why:** `compile --to <bad-locale>` spawned the provider and loaded the project before reporting `invalid-locale`; a review follow-up moved the gate first.

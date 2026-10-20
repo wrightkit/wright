@@ -505,12 +505,11 @@ fn kind_from_stdin(text: &str) -> Result<SourceKind, Diagnostic> {
 }
 
 pub fn display_path(path: &Path) -> String {
-    if let Ok(cwd) = std::env::current_dir() {
-        if let Ok(rel) = path.strip_prefix(&cwd) {
-            if !rel.as_os_str().is_empty() {
-                return rel.display().to_string();
-            }
-        }
+    if let Ok(cwd) = std::env::current_dir()
+        && let Ok(rel) = path.strip_prefix(&cwd)
+        && !rel.as_os_str().is_empty()
+    {
+        return rel.display().to_string();
     }
     path.display().to_string()
 }

@@ -100,11 +100,10 @@ fn canonicalize_debug_action(action: &mut workshop_rs::Action) {
                 name: body_name,
                 args: body_args,
             }) = args.get_mut(2)
+                && body_name == "customString"
             {
-                if body_name == "customString" {
-                    for value in body_args {
-                        canonicalize_debug_strings(value);
-                    }
+                for value in body_args {
+                    canonicalize_debug_strings(value);
                 }
             }
         }

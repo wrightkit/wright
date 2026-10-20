@@ -236,12 +236,11 @@ fn collect_refs(value: &Value, defs: &Map<String, Value>, needed: &mut Vec<Strin
                     if let Some(name) = child
                         .as_str()
                         .and_then(|reference| reference.strip_prefix("#/$defs/"))
+                        && !needed.iter().any(|seen| seen == name)
                     {
-                        if !needed.iter().any(|seen| seen == name) {
-                            needed.push(name.to_string());
-                            if let Some(def) = defs.get(name) {
-                                collect_refs(def, defs, needed);
-                            }
+                        needed.push(name.to_string());
+                        if let Some(def) = defs.get(name) {
+                            collect_refs(def, defs, needed);
                         }
                     }
                 } else {

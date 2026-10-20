@@ -232,10 +232,10 @@ fn completion_candidates(
             dirs.push(home.join(".bash_completion.d"));
         }
         ShellArg::Zsh => {
-            if let Ok(custom) = std::env::var("ZSH_CUSTOM") {
-                if !custom.is_empty() {
-                    dirs.push(PathBuf::from(custom).join("completions"));
-                }
+            if let Ok(custom) = std::env::var("ZSH_CUSTOM")
+                && !custom.is_empty()
+            {
+                dirs.push(PathBuf::from(custom).join("completions"));
             }
             dirs.push(home.join(".oh-my-zsh/custom/completions"));
             dirs.push(home.join(".zfunc"));

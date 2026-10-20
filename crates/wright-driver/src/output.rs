@@ -48,17 +48,17 @@ pub(crate) fn write_program(
         OutputDest::Default => default_path(entry)?,
     };
     if path.exists() {
-        if let Some(entry) = entry {
-            if same_file(&path, entry) {
-                return Err(Diagnostic::error(
-                    "output-is-input",
-                    Stage::Discovery,
-                    format!(
-                        "refusing to overwrite the input '{}'; choose another path with -o",
-                        display_path(&path)
-                    ),
-                ));
-            }
+        if let Some(entry) = entry
+            && same_file(&path, entry)
+        {
+            return Err(Diagnostic::error(
+                "output-is-input",
+                Stage::Discovery,
+                format!(
+                    "refusing to overwrite the input '{}'; choose another path with -o",
+                    display_path(&path)
+                ),
+            ));
         }
         let replace = match write.overwrite {
             Overwrite::Force => true,

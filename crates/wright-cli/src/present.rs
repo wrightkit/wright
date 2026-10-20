@@ -2079,10 +2079,10 @@ fn render_lint(result: &LintResult, ctx: &RenderContext<'_>) {
         render_finding_group(&findings[index..end], ctx, &marks);
         index = end;
     }
-    if let Some(selection) = &result.selection {
-        if selection.withheld > 0 {
-            println!("  ... {} finding(s) withheld (--max)", selection.withheld);
-        }
+    if let Some(selection) = &result.selection
+        && selection.withheld > 0
+    {
+        println!("  ... {} finding(s) withheld (--max)", selection.withheld);
     }
     let files: BTreeSet<&str> = findings
         .iter()

@@ -922,24 +922,24 @@ fn assert_default_surface_parity_on_input(
                     );
                 }
             }
-            if *key == "references" {
-                if let (Some(line), Some(col)) = (
+            if *key == "references"
+                && let (Some(line), Some(col)) = (
                     item["span"]["start"]["line"].as_u64(),
                     item["span"]["start"]["col"].as_u64(),
-                ) {
-                    assert!(
-                        text.contains(&format!(":{line}:{col}")),
-                        "reference location absent: {text}"
-                    );
-                }
+                )
+            {
+                assert!(
+                    text.contains(&format!(":{line}:{col}")),
+                    "reference location absent: {text}"
+                );
             }
-            if *key == "blocks" {
-                if let Some(id) = item["id"].as_u64() {
-                    assert!(
-                        text.contains(&format!("block: id={id}")),
-                        "cfg block absent: {text}"
-                    );
-                }
+            if *key == "blocks"
+                && let Some(id) = item["id"].as_u64()
+            {
+                assert!(
+                    text.contains(&format!("block: id={id}")),
+                    "cfg block absent: {text}"
+                );
             }
         }
     }
