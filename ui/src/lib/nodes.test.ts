@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { nodeClass, statementDepths } from './nodes'
-import type { Action } from './types/generated/rule-content-v1'
+import type { Action } from './types/rule-content-v1'
 
 describe('nodeClass', () => {
   it('classifies every rule-content-v1 node kind', () => {

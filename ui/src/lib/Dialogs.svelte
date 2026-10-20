@@ -4,7 +4,7 @@
    * `findings` with severity, code, message, and location. Both are
    * read-only views of the service results.
    */
-  import type { Finding, Symbol } from './types/generated/wright-agent-v1'
+  import type { Finding, Symbol } from './types/wright-agent-v1'
 
   let {
     which,

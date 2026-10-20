@@ -19,7 +19,7 @@
     type RuleState,
     type RuleSummary,
   } from './lib/view'
-  import type { ToolErrorInfo } from './lib/types/generated/wright-agent-v1'
+  import type { ToolErrorInfo } from './lib/types/wright-agent-v1'
 
   interface RuleEntry {
     summary: RuleSummary

@@ -8,7 +8,7 @@
   import Expr from './Expr.svelte'
   import { enumIdentity, nodeClass, VALUE_KINDS } from './nodes'
   import type { Names } from './names'
-  import type { Node, VariableNode, SubroutineNode } from './types/generated/rule-content-v1'
+  import type { Node, VariableNode, SubroutineNode } from './types/rule-content-v1'
 
   let {
     node,

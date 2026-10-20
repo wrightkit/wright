@@ -122,7 +122,6 @@ export type AgentResult =
   | EditValidationPayload
   | ProviderMutationPayload
   | LookupResult
-  | ListEntriesResult
 export type CompileResult = WorkflowEnvelope & {
   command?: 'compile'
   result?: CompilePayload
@@ -179,7 +178,6 @@ export type ToolRequest =
   | ValidateEditTransactionRequest
   | ProviderValidateEditRequest
   | LookupRequest
-  | ListEntriesRequest
 export type ToolResponse =
   | {
       result: AgentResult
@@ -216,7 +214,6 @@ export interface WrightAgentContractV1 {
     | ValidateEditTransactionRequest
     | ProviderValidateEditRequest
     | LookupRequest
-    | ListEntriesRequest
   /**
    * A wright-agent/v1 result envelope.
    */
@@ -487,24 +484,6 @@ export interface LookupRequest {
   within?: string | null
   locale?: string | null
   limit?: number | null
-}
-export interface ListEntriesRequest {
-  op: 'listEntries'
-  language: 'workshop' | 'opy'
-  kind: 'action' | 'value' | 'event' | 'enum' | 'enumMember'
-  /**
-   * An enum domain identity as `lookup` returns it. Required for `enumMember`, refused for other kinds.
-   */
-  within?: string | null
-  locale?: string | null
-  /**
-   * Entries per page; default 100.
-   */
-  pageSize?: number | null
-  /**
-   * The previous page's `nextCursor`; omitted for the first page.
-   */
-  cursor?: string | null
 }
 /**
  * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
@@ -1118,25 +1097,6 @@ export interface LookupEntry {
     [k: string]: unknown
   }
   setting?: {
-    [k: string]: unknown
-  }
-  [k: string]: unknown
-}
-export interface ListEntriesResult {
-  language: string
-  owner: string
-  entries: LookupEntry[]
-  /**
-   * Entries the request lists across all pages.
-   */
-  total: number
-  /**
-   * Opaque; present when more entries follow. Pass it back as `cursor` with the same request.
-   */
-  nextCursor?: string
-  unavailable?: {
-    capability: string
-    message: string
     [k: string]: unknown
   }
   [k: string]: unknown
