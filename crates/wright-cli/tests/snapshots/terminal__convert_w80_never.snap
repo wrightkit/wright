@@ -4,6 +4,8 @@ expression: transcript(&out)
 ---
 exit: 0
 --- stdout ---
+#!optimizeStrict
+
 globalvar index 0
 
 rule "bounded while":
