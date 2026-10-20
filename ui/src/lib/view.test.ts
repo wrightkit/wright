@@ -6,7 +6,7 @@ import {
   ruleStateFromSummary,
   type RuleContent,
 } from './view'
-import type { RuleSummary, ToolResponse } from './types/wright-agent-v1'
+import type { RuleSummary, ToolResponse } from './types/generated/wright-agent-v1'
 
 const content: RuleContent = {
   format: 'workshop-rs/rule-content-v1',

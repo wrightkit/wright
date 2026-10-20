@@ -5,7 +5,7 @@
  * reserved call forms and the flat action stream whose nesting is
  * recoverable from `If`/`Else If`/`Else`/`While`/`For` openers and `End`.
  */
-import type { Action, CallNode, Condition, Event, Node } from './types/rule-content-v1'
+import type { Action, CallNode, Condition, Event, Node } from './types/generated/rule-content-v1'
 
 /** The eight syntax classes the issue's palette names. */
 export type SyntaxClass =

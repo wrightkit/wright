@@ -25,7 +25,8 @@
         { "$ref": "#/$defs/TargetMetadataRequest" },
         { "$ref": "#/$defs/ValidateEditTransactionRequest" },
         { "$ref": "#/$defs/ProviderValidateEditRequest" },
-        { "$ref": "#/$defs/LookupRequest" }
+        { "$ref": "#/$defs/LookupRequest" },
+        { "$ref": "#/$defs/ListEntriesRequest" }
       ]
     },
     "ToolResponse": {
@@ -77,7 +78,8 @@
         { "$ref": "#/$defs/TargetMetadataResult" },
         { "$ref": "#/$defs/ValidateEditTransactionResult" },
         { "$ref": "#/$defs/ProviderValidateEditResult" },
-        { "$ref": "#/$defs/LookupResult" }
+        { "$ref": "#/$defs/LookupResult" },
+        { "$ref": "#/$defs/ListEntriesResult" }
       ]
     },
     "WorkflowEnvelope": {
@@ -771,6 +773,30 @@
       },
       "additionalProperties": true
     },
+    "ListEntriesResult": {
+      "type": "object",
+      "required": ["language", "owner", "entries", "total"],
+      "properties": {
+        "language": { "type": "string" },
+        "owner": { "type": "string" },
+        "entries": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/LookupEntry" }
+        },
+        "total": { "type": "integer", "minimum": 0, "description": "Entries the request lists across all pages." },
+        "nextCursor": { "type": "string", "description": "Opaque; present when more entries follow. Pass it back as `cursor` with the same request." },
+        "unavailable": {
+          "type": "object",
+          "required": ["capability", "message"],
+          "properties": {
+            "capability": { "type": "string" },
+            "message": { "type": "string" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
     "CompilePayload": {
       "type": "object",
       "properties": {
@@ -1316,6 +1342,20 @@
         "limit": { "type": ["integer", "null"], "minimum": 1, "maximum": 10 }
       },
       "required": ["op", "language"],
+      "additionalProperties": false
+    },
+    "ListEntriesRequest": {
+      "type": "object",
+      "properties": {
+        "op": { "const": "listEntries" },
+        "language": { "enum": ["workshop", "opy"] },
+        "kind": { "enum": ["action", "value", "event", "enum", "enumMember"] },
+        "within": { "type": ["string", "null"], "description": "An enum domain identity as `lookup` returns it. Required for `enumMember`, refused for other kinds." },
+        "locale": { "type": ["string", "null"] },
+        "pageSize": { "type": ["integer", "null"], "minimum": 1, "maximum": 500, "description": "Entries per page; default 100." },
+        "cursor": { "type": ["string", "null"], "description": "The previous page's `nextCursor`; omitted for the first page." }
+      },
+      "required": ["op", "language", "kind"],
       "additionalProperties": false
     }
   },

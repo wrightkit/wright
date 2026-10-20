@@ -8,13 +8,13 @@ import type {
   Action,
   Condition,
   WorkshopRsRuleContentV1,
-} from './types/rule-content-v1'
+} from './types/generated/rule-content-v1'
 import type {
   RuleSummary,
   Span,
   ToolErrorInfo,
   ToolResponse,
-} from './types/wright-agent-v1'
+} from './types/generated/wright-agent-v1'
 
 export type SpannedCondition = Condition & { span?: Span }
 export type SpannedAction = Action & { span?: Span }

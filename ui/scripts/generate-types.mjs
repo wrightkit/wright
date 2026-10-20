@@ -1,8 +1,8 @@
 // Regenerates the TypeScript contract types from the committed JSON schemas
 // (ADR-0032 decision 8):
 //
-//   - schemas/wright-agent-v1.schema.json        -> src/lib/types/wright-agent-v1.ts
-//   - workshop-rs schemas/rule-content-v1.schema.json -> src/lib/types/rule-content-v1.ts
+//   - schemas/wright-agent-v1.schema.json        -> src/lib/types/generated/wright-agent-v1.ts
+//   - workshop-rs schemas/rule-content-v1.schema.json -> src/lib/types/generated/rule-content-v1.ts
 //
 // The rule-content schema ships in the published workshop-rs crate; the version
 // pinned in Cargo.lock is downloaded from static.crates.io so the types always
@@ -150,7 +150,7 @@ const workshopRsVersion = pinnedWorkshopRsVersion()
 
 const outputs = [
   {
-    file: 'src/lib/types/wright-agent-v1.ts',
+    file: 'src/lib/types/generated/wright-agent-v1.ts',
     schema: agentEnvelope(
       JSON.parse(readFileSync(join(repoRoot, 'schemas/wright-agent-v1.schema.json'), 'utf8')),
     ),
@@ -158,7 +158,7 @@ const outputs = [
     sourceNote: 'schemas/wright-agent-v1.schema.json',
   },
   {
-    file: 'src/lib/types/rule-content-v1.ts',
+    file: 'src/lib/types/generated/rule-content-v1.ts',
     schema: await fetchPublishedSchema(
       'workshop-rs',
       workshopRsVersion,
