@@ -68,6 +68,7 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
             max: None,
             all: true,
             rule: None,
+            snapshot: None,
             content: false,
         },
         ToolRequest::Findings {

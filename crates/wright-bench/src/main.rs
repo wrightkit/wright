@@ -280,6 +280,9 @@ fn semantic_query_trial(
         let mut service = ToolService::new(&mut session).map_err(|e| e.message)?;
         let initialization = start.elapsed();
 
+        let generation = service
+            .snapshot_generation()
+            .expect("a loaded fixture adopts generation 1");
         let requests = [
             ToolRequest::Rules {
                 name: None,
@@ -287,6 +290,7 @@ fn semantic_query_trial(
                 max: None,
                 all: true,
                 rule: None,
+                snapshot: None,
                 content: false,
             },
             ToolRequest::Symbols {
@@ -297,15 +301,20 @@ fn semantic_query_trial(
             },
             ToolRequest::References {
                 symbol: 0.into(),
+                snapshot: Some(generation),
                 kind: None,
                 rule: None,
                 file: None,
                 max: None,
                 all: true,
             },
-            ToolRequest::Usage { symbol: 0.into() },
+            ToolRequest::Usage {
+                symbol: 0.into(),
+                snapshot: Some(generation),
+            },
             ToolRequest::Cfg {
                 rule: 0.into(),
+                snapshot: Some(generation),
                 kind: None,
                 max: None,
                 all: true,

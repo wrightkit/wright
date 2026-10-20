@@ -148,6 +148,12 @@ command lines a renderer prints as `next:` records or a summary footer; and
 each reference in `inspect`/`refs` results carries `owningRule` — `{id,
 name, span}` or null — the owning rule's identity without a `rules` lookup.
 
+ADR-0034 scopes numeric symbol/rule addresses to an explicit `snapshot`
+generation (#595): `analyze` and `inspect` envelopes carry `snapshot` on the
+envelope, `lint` carries it in the result, and `costEstimate` reports it —
+each names the program generation the ids in that result belong to, matching
+the `wright-agent/v1` responses the CLI surfaces mirror.
+
 ## Determinism
 
 For identical inputs and configuration, JSON output is byte-deterministic

@@ -50,7 +50,7 @@
       "type": "object",
       "required": ["code", "message"],
       "properties": {
-        "code": { "type": "string", "description": "Machine-readable refusal code. `stale-id` reports a numeric symbol id or rule index issued by an earlier program: after the loaded project changed on disk, the id must be re-read from a fresh `symbols`/`rules` listing or replaced by the declared name." },
+        "code": { "type": "string", "description": "Machine-readable refusal code. `stale-id` reports a numeric symbol id or rule index whose `snapshot` does not match the served program's generation — either absent or issued by an earlier program. Re-issue the id from a current response's `snapshot` and id members, or address by declared name." },
         "message": { "type": "string" }
       },
       "additionalProperties": true
@@ -89,9 +89,15 @@
         "ok": { "type": "boolean" },
         "exit": { "type": "integer", "minimum": 0 },
         "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/Diagnostic" } },
-        "result": { "type": "object" }
+        "result": { "type": "object" },
+        "snapshot": { "$ref": "#/$defs/Snapshot", "description": "Present on `analyze` and `inspect`: the program generation that issued the ids in `result` (#595)." }
       },
       "additionalProperties": true
+    },
+    "Snapshot": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "The served program's generation (#595): increments each time a program snapshot is adopted — the initial load, every content-changing reload, and recovery after a failed load. Every response that issues numeric `symbol`/`rule` addresses reports it, and a request carrying a numeric address must send that value back or be refused `stale-id`. It is a generation counter, not a content digest — `inputIdentity` keeps its own semantics. A request whose addresses are all declared names ignores it."
     },
     "ResultContract": {
       "type": "object",
@@ -384,8 +390,9 @@
     },
     "ProjectResult": {
       "type": "object",
-      "required": ["origin", "inputIdentity", "files", "globalVariables", "playerVariables", "subroutines", "rules", "symbols", "findings"],
+      "required": ["origin", "inputIdentity", "files", "globalVariables", "playerVariables", "subroutines", "rules", "symbols", "findings", "snapshot"],
       "properties": {
+        "snapshot": { "$ref": "#/$defs/Snapshot" },
         "origin": { "$ref": "#/$defs/Origin" },
         "inputIdentity": { "type": "string", "description": "SHA-256 hex digest of the input's primary entry source (the provider's `sourceIdentity` for provider projects). For a single-file input it covers the whole input; for a provider directory project it hashes only the entry file, so member-file edits do not change it — use `stale-id` refusals for freshness, not this value." },
         "files": { "type": "integer", "minimum": 0 },
@@ -398,42 +405,28 @@
       },
       "additionalProperties": true
     },
-    "RulesResult": {
-      "anyOf": [
-        {
-          "type": "array",
-          "items": { "$ref": "#/$defs/RuleSummary" }
-        },
-        { "$ref": "#/$defs/RulesSelectionResult" },
-        { "$ref": "#/$defs/CappedListResult" }
-      ]
-    },
-    "RulesSelectionResult": {
+    "RulesResult": { "$ref": "#/$defs/RulesListingResult" },
+    "RulesListingResult": {
       "type": "object",
-      "required": ["rules", "selection"],
+      "required": ["rules", "snapshot"],
       "properties": {
         "rules": { "type": "array", "items": { "$ref": "#/$defs/RuleSummary" } },
+        "snapshot": { "$ref": "#/$defs/Snapshot" },
         "selection": { "$ref": "#/$defs/SelectionSummary" },
-        "unavailable": { "type": "object", "description": "ADR-0024: result members the result should carry but cannot for this input. `names` names the owner that must serve target-language spellings (today `opy-rs` for an OverPy input, until its provider capability exists); raw Workshop results carry no `unavailable`." }
+        "unavailable": { "type": "object", "description": "ADR-0024: result members the result should carry but cannot for this input. `names` names the owner that must serve target-language spellings (today `opy-rs` for an OverPy input, until its provider capability exists); raw Workshop results carry no `unavailable`." },
+        "truncation": { "$ref": "#/$defs/Truncation" }
       },
       "additionalProperties": true
     },
-    "SymbolsResult": {
-      "anyOf": [
-        {
-          "type": "array",
-          "items": { "$ref": "#/$defs/Symbol" }
-        },
-        { "$ref": "#/$defs/SymbolsSelectionResult" },
-        { "$ref": "#/$defs/CappedListResult" }
-      ]
-    },
-    "SymbolsSelectionResult": {
+    "SymbolsResult": { "$ref": "#/$defs/SymbolsListingResult" },
+    "SymbolsListingResult": {
       "type": "object",
-      "required": ["symbols", "selection"],
+      "required": ["symbols", "snapshot"],
       "properties": {
         "symbols": { "type": "array", "items": { "$ref": "#/$defs/Symbol" } },
-        "selection": { "$ref": "#/$defs/SelectionSummary" }
+        "snapshot": { "$ref": "#/$defs/Snapshot" },
+        "selection": { "$ref": "#/$defs/SelectionSummary" },
+        "truncation": { "$ref": "#/$defs/Truncation" }
       },
       "additionalProperties": true
     },
@@ -449,8 +442,7 @@
           "type": "array",
           "items": { "$ref": "#/$defs/Reference" }
         },
-        { "$ref": "#/$defs/ReferencesSelectionResult" },
-        { "$ref": "#/$defs/CappedListResult" }
+        { "$ref": "#/$defs/ReferencesSelectionResult" }
       ]
     },
     "ReferencesSelectionResult": {
@@ -464,7 +456,7 @@
     },
     "UsageResult": {
       "type": "object",
-      "required": ["id", "kind", "symbol", "reads", "writes", "calls", "rules"],
+      "required": ["id", "kind", "symbol", "reads", "writes", "calls", "rules", "snapshot"],
       "properties": {
         "id": { "type": "integer", "minimum": 0 },
         "kind": { "type": "string" },
@@ -472,7 +464,8 @@
         "reads": { "type": "integer", "minimum": 0 },
         "writes": { "type": "integer", "minimum": 0 },
         "calls": { "type": "integer", "minimum": 0 },
-        "rules": { "type": "integer", "minimum": 0 }
+        "rules": { "type": "integer", "minimum": 0 },
+        "snapshot": { "$ref": "#/$defs/Snapshot" }
       },
       "additionalProperties": true
     },
@@ -520,28 +513,23 @@
       },
       "additionalProperties": true
     },
-    "FindingsResult": {
-      "anyOf": [
-        {
-          "type": "array",
-          "items": { "$ref": "#/$defs/Finding" }
-        },
-        { "$ref": "#/$defs/FindingsSelectionResult" },
-        { "$ref": "#/$defs/CappedListResult" }
-      ]
-    },
-    "FindingsSelectionResult": {
+    "FindingsResult": { "$ref": "#/$defs/FindingsListingResult" },
+    "FindingsListingResult": {
       "type": "object",
-      "required": ["findings", "selection"],
+      "required": ["findings", "snapshot"],
       "properties": {
         "findings": { "type": "array", "items": { "$ref": "#/$defs/Finding" } },
-        "selection": { "$ref": "#/$defs/SelectionSummary" }
+        "snapshot": { "$ref": "#/$defs/Snapshot" },
+        "selection": { "$ref": "#/$defs/SelectionSummary" },
+        "truncation": { "$ref": "#/$defs/Truncation" }
       },
       "additionalProperties": true
     },
     "PersistentObjectsResult": {
-      "anyOf": [
-        {
+      "type": "object",
+      "required": ["persistentObjects", "snapshot"],
+      "properties": {
+        "persistentObjects": {
           "type": "array",
           "items": {
             "type": "object",
@@ -586,8 +574,10 @@
             "additionalProperties": true
           }
         },
-        { "$ref": "#/$defs/CappedListResult" }
-      ]
+        "snapshot": { "$ref": "#/$defs/Snapshot" },
+        "truncation": { "$ref": "#/$defs/Truncation" }
+      },
+      "additionalProperties": true
     },
     "LintResult": { "$ref": "#/$defs/LintPayload" },
     "LintPayload": {
@@ -596,9 +586,11 @@
         "counts",
         "findings",
         "expand",
-        "next"
+        "next",
+        "snapshot"
       ],
       "properties": {
+        "snapshot": { "$ref": "#/$defs/Snapshot" },
         "ok": { "type": "boolean" },
         "exit": { "type": "integer", "minimum": 0 },
         "inputIdentity": { "type": "string" },
@@ -649,11 +641,12 @@
     },
     "LintRulesResult": {
       "type": "object",
-      "required": ["rules", "config", "skipped"],
+      "required": ["rules", "config", "skipped", "snapshot"],
       "properties": {
         "rules": { "type": "array", "items": { "$ref": "#/$defs/LintRule" } },
         "config": { "$ref": "#/$defs/LintConfiguration" },
-        "skipped": { "type": "array", "items": { "$ref": "#/$defs/SkippedRule" } }
+        "skipped": { "type": "array", "items": { "$ref": "#/$defs/SkippedRule" } },
+        "snapshot": { "$ref": "#/$defs/Snapshot" }
       },
       "additionalProperties": true
     },
@@ -684,8 +677,9 @@
     },
     "CostEstimateResult": {
       "type": "object",
-      "required": ["exact", "findings", "kind"],
+      "required": ["exact", "findings", "kind", "snapshot"],
       "properties": {
+        "snapshot": { "$ref": "#/$defs/Snapshot" },
         "exact": {
           "type": "object",
           "required": ["emittedBytes", "programActions", "programRules", "waitActions"],
@@ -1015,6 +1009,10 @@
           ],
           "description": "Selection (ADR-0024): exactly this rule, addressed by id or declared name."
         },
+        "snapshot": {
+          "$ref": "#/$defs/Snapshot",
+          "description": "Required when `rule` is a numeric index: the generation that issued the id. A string `rule` name ignores it."
+        },
         "file": { "type": "string", "description": "Selection (#531): only rules located in this source file; any spelling that resolves to the same file selects it." },
         "max": { "type": "integer", "minimum": 0, "description": "Selection (#531): report at most this many rules; the response's `selection.withheld` counts what the bound dropped." },
         "content": { "type": "boolean", "description": "ADR-0024: add each returned rule's canonical content (`workshop-rs/rule-content-v1`). Without `max`, at most 20 rules are returned; the selection-wrapped result is always used." },
@@ -1022,6 +1020,15 @@
       },
       "required": [
         "op"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": { "rule": { "type": "integer" } },
+            "required": ["rule"]
+          },
+          "then": { "required": ["snapshot"] }
+        }
       ],
       "additionalProperties": false
     },
@@ -1059,7 +1066,7 @@
           ],
           "minimum": 0,
           "maximum": 4294967295,
-          "description": "Symbol id or declared name. A numeric id captured before the project changed on disk is refused `stale-id` until a `symbols` listing re-establishes the space; names are always current."
+          "description": "Symbol id or declared name. A numeric id must carry the `snapshot` generation that issued it; a missing or mismatched `snapshot` is refused `stale-id`. Names are always current and ignore `snapshot`."
         },
         "kind": {
           "enum": [
@@ -1078,7 +1085,11 @@
           ],
           "minimum": 0,
           "maximum": 4294967295,
-          "description": "Selection (#531): only references inside this rule, addressed by index or declared name."
+          "description": "Selection (#531): only references inside this rule, addressed by index or declared name. A numeric index is scoped by the same `snapshot` requirement as `symbol`."
+        },
+        "snapshot": {
+          "$ref": "#/$defs/Snapshot",
+          "description": "Required when `symbol` or `rule` is a numeric address: the generation that issued the id. Ignored when every address is a declared name."
         },
         "file": { "type": "string", "description": "Selection (#531): only references located in this source file; any spelling that resolves to the same file selects it." },
         "max": { "type": "integer", "minimum": 0, "description": "Selection (#531): report at most this many references; the response's `selection.withheld` counts what the bound dropped." },
@@ -1088,15 +1099,44 @@
         "op",
         "symbol"
       ],
+      "allOf": [
+        {
+          "if": {
+            "properties": { "symbol": { "type": "integer" } },
+            "required": ["symbol"]
+          },
+          "then": { "required": ["snapshot"] }
+        },
+        {
+          "if": {
+            "properties": { "rule": { "type": "integer" } },
+            "required": ["rule"]
+          },
+          "then": { "required": ["snapshot"] }
+        }
+      ],
       "additionalProperties": false
     },
     "UsageRequest": {
       "type": "object",
       "properties": {
         "op": { "const": "usage" },
-        "symbol": { "type": ["integer", "string"], "minimum": 0, "maximum": 4294967295, "description": "Symbol id or declared name. A numeric id captured before the project changed on disk is refused `stale-id` until a `symbols` listing re-establishes the space; names are always current." }
+        "symbol": { "type": ["integer", "string"], "minimum": 0, "maximum": 4294967295, "description": "Symbol id or declared name. A numeric id must carry the `snapshot` generation that issued it; a missing or mismatched `snapshot` is refused `stale-id`. Names are always current and ignore `snapshot`." },
+        "snapshot": {
+          "$ref": "#/$defs/Snapshot",
+          "description": "Required when `symbol` is a numeric id: the generation that issued the id. A string `symbol` name ignores it."
+        }
       },
       "required": ["op", "symbol"],
+      "allOf": [
+        {
+          "if": {
+            "properties": { "symbol": { "type": "integer" } },
+            "required": ["symbol"]
+          },
+          "then": { "required": ["snapshot"] }
+        }
+      ],
       "additionalProperties": false
     },
     "CfgRequest": {
@@ -1110,7 +1150,11 @@
           ],
           "minimum": 0,
           "maximum": 4294967295,
-          "description": "Rule index or declared name. A numeric index captured before the project changed on disk is refused `stale-id` until a `rules` listing re-establishes the space; names are always current."
+          "description": "Rule index or declared name. A numeric index must carry the `snapshot` generation that issued it; a missing or mismatched `snapshot` is refused `stale-id`. Names are always current and ignore `snapshot`."
+        },
+        "snapshot": {
+          "$ref": "#/$defs/Snapshot",
+          "description": "Required when `rule` is a numeric index: the generation that issued the id. A string `rule` name ignores it."
         },
         "kind": {
           "enum": [
@@ -1129,6 +1173,15 @@
       "required": [
         "op",
         "rule"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": { "rule": { "type": "integer" } },
+            "required": ["rule"]
+          },
+          "then": { "required": ["snapshot"] }
+        }
       ],
       "additionalProperties": false
     },

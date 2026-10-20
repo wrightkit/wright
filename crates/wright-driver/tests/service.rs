@@ -28,6 +28,7 @@ fn tool_service_queries_canonical_workshop() {
         ToolRequest::Capabilities,
         ToolRequest::Project,
         ToolRequest::Rules {
+            snapshot: None,
             name: None,
             file: None,
             max: None,
@@ -121,7 +122,7 @@ fn tool_service_lint_queries_keep_the_session_configuration() {
         ToolResponse::Ok { result } => result,
         ToolResponse::Error { error } => panic!("findings failed: {error:?}"),
     };
-    let default_finding = default_findings
+    let default_finding = default_findings["findings"]
         .as_array()
         .unwrap()
         .iter()
@@ -193,8 +194,9 @@ fn agent_finding_selection_filters_and_truncates_without_touching_defaults() {
         selection: FindingSelection::default(),
         all: true,
     });
-    assert!(plain.is_array(), "the default result stays a bare array");
-    assert_eq!(plain.as_array().unwrap().len(), 10);
+    // #595: the findings list carries its issuing generation alongside.
+    assert_eq!(plain["snapshot"], 1, "{plain}");
+    assert_eq!(plain["findings"].as_array().unwrap().len(), 10);
 
     let errors = result_of(ToolRequest::Findings {
         selection: FindingSelection {
@@ -940,6 +942,7 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
 
+    let generation = service.snapshot_generation().expect("loaded");
     let symbols = result_of(
         &mut service,
         &ToolRequest::Symbols {
@@ -949,8 +952,12 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
             all: true,
         },
     );
+    assert_eq!(
+        symbols["snapshot"], generation,
+        "symbols report their generation"
+    );
     let symbol_id = |name: &str| {
-        symbols
+        symbols["symbols"]
             .as_array()
             .unwrap()
             .iter()
@@ -961,6 +968,7 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
     let rules = result_of(
         &mut service,
         &ToolRequest::Rules {
+            snapshot: None,
             name: None,
             file: None,
             max: None,
@@ -969,8 +977,12 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
             all: true,
         },
     );
+    assert_eq!(
+        rules["snapshot"], generation,
+        "rules report their generation"
+    );
     let rule_index = |name: &str| {
-        rules
+        rules["rules"]
             .as_array()
             .unwrap()
             .iter()
@@ -982,6 +994,7 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
     for (by_name, by_id) in [
         (
             ToolRequest::References {
+                snapshot: None,
                 symbol: "score".into(),
                 kind: None,
                 rule: None,
@@ -990,6 +1003,7 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
                 all: true,
             },
             ToolRequest::References {
+                snapshot: Some(generation),
                 symbol: symbol_id("score").into(),
                 kind: None,
                 rule: None,
@@ -1000,20 +1014,24 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
         ),
         (
             ToolRequest::Usage {
+                snapshot: None,
                 symbol: "score".into(),
             },
             ToolRequest::Usage {
+                snapshot: Some(generation),
                 symbol: symbol_id("score").into(),
             },
         ),
         (
             ToolRequest::Cfg {
+                snapshot: None,
                 rule: "player starts".into(),
                 kind: None,
                 max: None,
                 all: true,
             },
             ToolRequest::Cfg {
+                snapshot: Some(generation),
                 rule: rule_index("player starts").into(),
                 kind: None,
                 max: None,
@@ -1030,6 +1048,7 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
     let usage = result_of(
         &mut service,
         &ToolRequest::Usage {
+            snapshot: None,
             symbol: "score".into(),
         },
     );
@@ -1040,6 +1059,7 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
     assert_eq!(symbol_id("player starts"), 4);
     assert_eq!(rule_index("player starts"), 1);
     match service.handle(&ToolRequest::Cfg {
+        snapshot: Some(generation),
         rule: 4.into(),
         kind: None,
         max: None,
@@ -1053,6 +1073,7 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
     let references = result_of(
         &mut service,
         &ToolRequest::References {
+            snapshot: None,
             symbol: "score".into(),
             kind: None,
             rule: None,
@@ -1070,7 +1091,7 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
     }
     // Symbols whose model carries a span (rules, subroutine symbols) resolve
     // the same path; declaration-less spans stay `null`.
-    let spanned: Vec<_> = symbols
+    let spanned: Vec<_> = symbols["symbols"]
         .as_array()
         .unwrap()
         .iter()
@@ -1118,6 +1139,7 @@ rule ("dup") {
     for (request, code) in [
         (
             ToolRequest::References {
+                snapshot: None,
                 symbol: "nope".into(),
                 kind: None,
                 rule: None,
@@ -1129,12 +1151,14 @@ rule ("dup") {
         ),
         (
             ToolRequest::Usage {
+                snapshot: None,
                 symbol: "nope".into(),
             },
             "unknown-symbol",
         ),
         (
             ToolRequest::Cfg {
+                snapshot: None,
                 rule: "nope".into(),
                 kind: None,
                 max: None,
@@ -1144,6 +1168,7 @@ rule ("dup") {
         ),
         (
             ToolRequest::References {
+                snapshot: None,
                 symbol: "dup".into(),
                 kind: None,
                 rule: None,
@@ -1155,6 +1180,7 @@ rule ("dup") {
         ),
         (
             ToolRequest::Cfg {
+                snapshot: None,
                 rule: "dup".into(),
                 kind: None,
                 max: None,
@@ -1179,12 +1205,14 @@ rule ("dup") {
     for (request, needle) in [
         (
             ToolRequest::Usage {
+                snapshot: None,
                 symbol: "dupp".into(),
             },
             "unknown symbol 'dupp'; nearest declared: 'dup'",
         ),
         (
             ToolRequest::Cfg {
+                snapshot: None,
                 rule: "Dup".into(),
                 kind: None,
                 max: None,
@@ -1194,12 +1222,14 @@ rule ("dup") {
         ),
         (
             ToolRequest::Usage {
+                snapshot: None,
                 symbol: "nope".into(),
             },
             "the 'symbols' operation lists them",
         ),
         (
             ToolRequest::Cfg {
+                snapshot: None,
                 rule: "nope".into(),
                 kind: None,
                 max: None,
@@ -1243,11 +1273,12 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             all: true,
         },
     );
-    assert!(all.is_array());
-    let total = all.as_array().unwrap().len();
+    // #595: the listing carries its issuing generation beside the list.
+    assert_eq!(all["snapshot"], 1, "{all}");
+    let total = all["symbols"].as_array().unwrap().len();
 
-    // `kind` predates #531: alone it keeps the filtered bare array; combined
-    // with `file`/`max` it joins the selection and wraps.
+    // `kind` predates #531: alone it keeps the filtered list; combined with
+    // `file`/`max` it joins the selection members.
     let rules_only = result_of(
         &mut service,
         &ToolRequest::Symbols {
@@ -1257,8 +1288,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             all: true,
         },
     );
-    assert!(rules_only.is_array(), "kind alone keeps the bare array");
-    let rules_only = rules_only.as_array().unwrap();
+    let rules_only = rules_only["symbols"].as_array().unwrap();
     assert!(rules_only.iter().all(|symbol| symbol["kind"] == "rule"));
     assert!(!rules_only.is_empty());
     assert!(rules_only.len() < total);
@@ -1315,6 +1345,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
     let rules = result_of(
         &mut service,
         &ToolRequest::Rules {
+            snapshot: None,
             name: None,
             file: None,
             max: None,
@@ -1323,9 +1354,9 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             all: true,
         },
     );
-    assert!(rules.is_array());
-    let rule_total = rules.as_array().unwrap().len();
-    for rule in rules.as_array().unwrap() {
+    assert_eq!(rules["snapshot"], 1, "{rules}");
+    let rule_total = rules["rules"].as_array().unwrap().len();
+    for rule in rules["rules"].as_array().unwrap() {
         if rule["span"].is_object() {
             assert!(
                 rule["span"]["path"].is_string(),
@@ -1336,6 +1367,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
     let named = result_of(
         &mut service,
         &ToolRequest::Rules {
+            snapshot: None,
             name: Some("player starts".to_string()),
             file: None,
             max: None,
@@ -1352,6 +1384,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
     let bounded_rules = result_of(
         &mut service,
         &ToolRequest::Rules {
+            snapshot: None,
             name: None,
             file: Some("declarations-rules.ws".to_string()),
             max: Some(1),
@@ -1369,6 +1402,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
     let references = result_of(
         &mut service,
         &ToolRequest::References {
+            snapshot: None,
             symbol: "score".into(),
             kind: None,
             rule: None,
@@ -1381,6 +1415,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
     let writes = result_of(
         &mut service,
         &ToolRequest::References {
+            snapshot: None,
             symbol: "score".into(),
             kind: Some("write".to_string()),
             rule: None,
@@ -1399,6 +1434,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
     let inside = result_of(
         &mut service,
         &ToolRequest::References {
+            snapshot: None,
             symbol: "score".into(),
             kind: None,
             rule: Some("Subroutine showStatus".into()),
@@ -1410,9 +1446,11 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
     let kept = inside["references"].as_array().unwrap();
     assert!(!kept.is_empty());
     assert!(kept.iter().all(|reference| reference["rule"] == 0));
+    let generation = service.snapshot_generation();
     let outside = result_of(
         &mut service,
         &ToolRequest::References {
+            snapshot: generation,
             symbol: "score".into(),
             kind: None,
             rule: Some(1_u32.into()),
@@ -1430,6 +1468,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
     let cfg = result_of(
         &mut service,
         &ToolRequest::Cfg {
+            snapshot: None,
             rule: "player starts".into(),
             kind: None,
             max: None,
@@ -1441,6 +1480,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
     let entries = result_of(
         &mut service,
         &ToolRequest::Cfg {
+            snapshot: None,
             rule: "player starts".into(),
             kind: Some("entry".to_string()),
             max: None,
@@ -1455,6 +1495,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
     let bounded_cfg = result_of(
         &mut service,
         &ToolRequest::Cfg {
+            snapshot: None,
             rule: "player starts".into(),
             kind: None,
             max: Some(1),
@@ -1606,6 +1647,7 @@ disabled rule ("disabled caller") {
     // `references` stays an authored-occurrence index: it still reports
     // both call sites, so callGraph is exactly its live-call subset.
     let references = result_of(ToolRequest::References {
+        snapshot: None,
         symbol: "reset".into(),
         kind: Some("call".to_string()),
         rule: None,
@@ -1677,6 +1719,7 @@ fn semantic_query_selection_refuses_unknown_filter_values() {
 
     for request in [
         ToolRequest::Rules {
+            snapshot: None,
             name: Some("nope".to_string()),
             file: None,
             max: None,
@@ -1691,6 +1734,7 @@ fn semantic_query_selection_refuses_unknown_filter_values() {
             all: true,
         },
         ToolRequest::References {
+            snapshot: None,
             symbol: "score".into(),
             kind: Some("nope".to_string()),
             rule: None,
@@ -1699,6 +1743,7 @@ fn semantic_query_selection_refuses_unknown_filter_values() {
             all: true,
         },
         ToolRequest::References {
+            snapshot: None,
             symbol: "score".into(),
             kind: None,
             rule: Some("nope".into()),
@@ -1707,6 +1752,7 @@ fn semantic_query_selection_refuses_unknown_filter_values() {
             all: true,
         },
         ToolRequest::References {
+            snapshot: service.snapshot_generation(),
             symbol: "score".into(),
             kind: None,
             rule: Some(99_u32.into()),
@@ -1715,6 +1761,7 @@ fn semantic_query_selection_refuses_unknown_filter_values() {
             all: true,
         },
         ToolRequest::Cfg {
+            snapshot: None,
             rule: "player starts".into(),
             kind: Some("nope".to_string()),
             max: None,
@@ -1752,6 +1799,7 @@ fn semantic_query_selection_refuses_unknown_filter_values() {
         ),
         (
             ToolRequest::References {
+                snapshot: None,
                 symbol: "score".into(),
                 kind: Some("nope".to_string()),
                 rule: None,
@@ -1763,6 +1811,7 @@ fn semantic_query_selection_refuses_unknown_filter_values() {
         ),
         (
             ToolRequest::Cfg {
+                snapshot: None,
                 rule: "player starts".into(),
                 kind: Some("nope".to_string()),
                 max: None,
@@ -1806,6 +1855,7 @@ fn session_query_workflows_return_the_agent_operation_payloads() {
     let agent_references = result_of(
         &mut service,
         &ToolRequest::References {
+            snapshot: None,
             symbol: "score".into(),
             kind: None,
             rule: None,
@@ -1817,12 +1867,14 @@ fn session_query_workflows_return_the_agent_operation_payloads() {
     let agent_usage = result_of(
         &mut service,
         &ToolRequest::Usage {
+            snapshot: None,
             symbol: "score".into(),
         },
     );
     let agent_cfg = result_of(
         &mut service,
         &ToolRequest::Cfg {
+            snapshot: None,
             rule: "player starts".into(),
             kind: None,
             max: None,
@@ -2141,7 +2193,7 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
     let mut service = ToolService::new(&mut session).unwrap();
 
     let names = |result: serde_json::Value| {
-        result
+        result["symbols"]
             .as_array()
             .unwrap()
             .iter()
@@ -2161,6 +2213,7 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
 
     for request in [
         ToolRequest::References {
+            snapshot: service.snapshot_generation(),
             symbol: 0.into(),
             kind: None,
             rule: None,
@@ -2189,6 +2242,8 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
         {
             let mut expected = serde_json::to_value(service.analyze()).unwrap();
             expected["result"] = wright_driver::essential::analyze(&expected["result"], true);
+            // #595: the operation result reports the serving generation.
+            expected["snapshot"] = serde_json::json!(service.snapshot_generation().unwrap());
             expected
         },
         result_of(
@@ -2249,6 +2304,7 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
     result_of(
         &mut service,
         &ToolRequest::Rules {
+            snapshot: None,
             name: None,
             file: None,
             max: None,
@@ -2277,6 +2333,7 @@ fn an_unchanged_input_is_never_reloaded() {
     for request in [
         ToolRequest::Project,
         ToolRequest::Rules {
+            snapshot: None,
             name: None,
             file: None,
             max: None,
@@ -2327,6 +2384,7 @@ fn an_unchanged_input_is_never_reloaded() {
     result_of(
         &mut service,
         &ToolRequest::Rules {
+            snapshot: None,
             name: None,
             file: None,
             max: None,
@@ -2355,6 +2413,7 @@ fn directory_inputs_observe_added_and_removed_sources() {
         result_of(
             service,
             &ToolRequest::Rules {
+                snapshot: None,
                 name: None,
                 file: None,
                 max: None,
@@ -2363,10 +2422,10 @@ fn directory_inputs_observe_added_and_removed_sources() {
 
                 all: true,
             },
-        )
-        .as_array()
-        .unwrap()
-        .len()
+        )["rules"]
+            .as_array()
+            .unwrap()
+            .len()
     };
     assert_eq!(rules(&mut service), 1);
 
@@ -2374,12 +2433,14 @@ fn directory_inputs_observe_added_and_removed_sources() {
     std::fs::write(dir.join("program.ws"), FRESHNESS_V2).unwrap();
     assert_eq!(rules(&mut service), 2);
     assert_eq!(service.reload_count(), 1);
+    let dropped = service.snapshot_generation().expect("loaded");
 
     std::fs::write(dir.join("other.ws"), FRESHNESS_V1).unwrap();
     assert_eq!(
         refusal_code(
             &mut service,
             &ToolRequest::Rules {
+                snapshot: None,
                 name: None,
                 file: None,
                 max: None,
@@ -2399,12 +2460,20 @@ fn directory_inputs_observe_added_and_removed_sources() {
     std::fs::remove_file(dir.join("other.ws")).unwrap();
     // The failed refresh invalidated the served snapshot (#512): restoring
     // the exact previous disk state still reloads a fresh program — the
-    // fingerprint-identical bytes do not resurrect it — and ids issued by
-    // the dropped program refuse `stale-id` until the space is re-observed.
+    // fingerprint-identical bytes do not resurrect it — and the dropped
+    // program's generation stays refused (#595): the recovered program is
+    // a new generation, so the request that triggers the recovery still
+    // carries the old one.
+    assert_eq!(
+        service.snapshot_generation(),
+        None,
+        "the failed refresh dropped the snapshot"
+    );
     assert_eq!(
         refusal_code(
             &mut service,
             &ToolRequest::Cfg {
+                snapshot: Some(dropped),
                 rule: 0.into(),
                 kind: None,
                 max: None,
@@ -2415,9 +2484,12 @@ fn directory_inputs_observe_added_and_removed_sources() {
     );
     assert_eq!(rules(&mut service), 2);
     assert_eq!(service.reload_count(), 2);
+    let v2 = service.snapshot_generation();
+    assert_ne!(v2, Some(dropped), "recovery adopts a new generation");
     result_of(
         &mut service,
         &ToolRequest::Cfg {
+            snapshot: v2,
             rule: 0.into(),
             kind: None,
             max: None,
@@ -2460,6 +2532,7 @@ fn a_failed_reload_refuses_requests_until_the_input_heals() {
             all: true,
         },
         ToolRequest::Rules {
+            snapshot: None,
             name: None,
             file: None,
             max: None,
@@ -2495,7 +2568,7 @@ fn a_failed_reload_refuses_requests_until_the_input_heals() {
         },
     );
     assert!(
-        symbols
+        symbols["symbols"]
             .as_array()
             .unwrap()
             .iter()
@@ -2510,8 +2583,13 @@ fn a_failed_reload_refuses_requests_until_the_input_heals() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #595: numeric `symbol`/`rule` addresses are scoped to the snapshot
+/// generation that issued them. A request carrying a numeric address must
+/// send `snapshot` back; a missing token or a different generation refuses
+/// `stale-id`, no listing ever "unlocks" a space, and `symbols {max:0}`
+/// has no side effect beyond reporting the generation.
 #[test]
-fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
+fn numeric_ids_are_scoped_to_the_issuing_snapshot() {
     let dir = freshness_dir("stale");
     let input = dir.join("program.ws");
     std::fs::write(&input, FRESHNESS_V1).unwrap();
@@ -2522,10 +2600,15 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
     })
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
+    let v1 = service
+        .snapshot_generation()
+        .expect("the initial load adopts");
 
+    // The token — not a prior listing — is what a numeric address needs.
     result_of(
         &mut service,
         &ToolRequest::References {
+            snapshot: Some(v1),
             symbol: 0.into(),
             kind: None,
             rule: None,
@@ -2537,6 +2620,7 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
     result_of(
         &mut service,
         &ToolRequest::Cfg {
+            snapshot: Some(v1),
             rule: 0.into(),
             kind: None,
             max: None,
@@ -2544,10 +2628,22 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
         },
     );
 
-    std::fs::write(&input, FRESHNESS_V2).unwrap();
-
+    // A numeric address without `snapshot` refuses — a listing just before
+    // it changes nothing.
+    let capped = result_of(
+        &mut service,
+        &ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: Some(0),
+            all: true,
+        },
+    );
+    assert_eq!(capped["symbols"].as_array().unwrap().len(), 0);
+    assert_eq!(capped["snapshot"], v1, "the listing reports its generation");
     for request in [
         ToolRequest::References {
+            snapshot: None,
             symbol: 0.into(),
             kind: None,
             rule: None,
@@ -2555,8 +2651,12 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
             max: None,
             all: true,
         },
-        ToolRequest::Usage { symbol: 0.into() },
+        ToolRequest::Usage {
+            symbol: 0.into(),
+            snapshot: None,
+        },
         ToolRequest::Cfg {
+            snapshot: None,
             rule: 0.into(),
             kind: None,
             max: None,
@@ -2569,9 +2669,93 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
             "{request:?}"
         );
     }
+
+    std::fs::write(&input, FRESHNESS_V2).unwrap();
+
+    // After the content-changing reload the served generation is new: ids
+    // scoped to generation `v1` refuse even though `0` is still in range.
+    for request in [
+        ToolRequest::References {
+            snapshot: Some(v1),
+            symbol: 0.into(),
+            kind: None,
+            rule: None,
+            file: None,
+            max: None,
+            all: true,
+        },
+        ToolRequest::Usage {
+            symbol: 0.into(),
+            snapshot: Some(v1),
+        },
+        ToolRequest::Cfg {
+            snapshot: Some(v1),
+            rule: 0.into(),
+            kind: None,
+            max: None,
+            all: true,
+        },
+        ToolRequest::Rules {
+            snapshot: Some(v1),
+            name: None,
+            rule: Some(0.into()),
+            file: None,
+            max: None,
+            content: false,
+            all: true,
+        },
+    ] {
+        assert_eq!(
+            refusal_code(&mut service, &request),
+            "stale-id",
+            "{request:?}"
+        );
+    }
+
+    // A listing reports the new generation but does not rescue ids scoped
+    // to the old one — the stale request keeps refusing.
+    let symbols = result_of(
+        &mut service,
+        &ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+            all: true,
+        },
+    );
+    let v2 = symbols["snapshot"]
+        .as_u64()
+        .expect("the listing reports it");
+    assert_ne!(v2, v1, "a new snapshot was adopted");
+    assert_eq!(service.snapshot_generation(), Some(v2));
+    assert_eq!(
+        refusal_code(
+            &mut service,
+            &ToolRequest::Usage {
+                symbol: 0.into(),
+                snapshot: Some(v1),
+            }
+        ),
+        "stale-id",
+        "re-observing the listing does not make generation {v1} current"
+    );
+
+    // Ids re-issued under the current generation work; names resolve
+    // against the current program and ignore `snapshot` entirely.
+    let usage = result_of(
+        &mut service,
+        &ToolRequest::Usage {
+            symbol: 0.into(),
+            snapshot: Some(v2),
+        },
+    );
+    assert_eq!(usage["id"], 0);
+    assert_eq!(usage["symbol"], "points");
+    assert_eq!(usage["snapshot"], v2);
     let references = result_of(
         &mut service,
         &ToolRequest::References {
+            snapshot: Some(v1),
             symbol: "points".into(),
             kind: None,
             rule: None,
@@ -2582,56 +2766,22 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
     );
     assert!(
         references["references"].as_array().unwrap().len() >= 2,
-        "{references}"
+        "a name address ignores the stale snapshot: {references}"
     );
     result_of(
         &mut service,
         &ToolRequest::Cfg {
+            snapshot: Some(999),
             rule: "extra".into(),
             kind: None,
             max: None,
             all: true,
         },
     );
-
-    result_of(
-        &mut service,
-        &ToolRequest::Symbols {
-            kind: None,
-            file: None,
-            max: None,
-            all: true,
-        },
-    );
-    let usage = result_of(&mut service, &ToolRequest::Usage { symbol: 0.into() });
-    assert_eq!(usage["id"], 0);
-    assert_eq!(usage["symbol"], "points");
-    assert_eq!(
-        refusal_code(
-            &mut service,
-            &ToolRequest::Cfg {
-                rule: 1.into(),
-                kind: None,
-                max: None,
-                all: true,
-            }
-        ),
-        "stale-id"
-    );
-    result_of(
-        &mut service,
-        &ToolRequest::Rules {
-            name: None,
-            file: None,
-            max: None,
-            rule: None,
-            content: false,
-            all: true,
-        },
-    );
     result_of(
         &mut service,
         &ToolRequest::Cfg {
+            snapshot: Some(v2),
             rule: 1.into(),
             kind: None,
             max: None,
@@ -2703,6 +2853,9 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
     })
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
+    let v1 = service
+        .snapshot_generation()
+        .expect("the initial load adopts");
 
     std::fs::write(&input, REORDER_V2).unwrap();
 
@@ -2710,6 +2863,7 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
         refusal_code(
             &mut service,
             &ToolRequest::References {
+                snapshot: Some(v1),
                 symbol: "score".into(),
                 kind: None,
                 rule: Some(0.into()),
@@ -2728,6 +2882,7 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
     let filtered = result_of(
         &mut service,
         &ToolRequest::References {
+            snapshot: None,
             symbol: "score".into(),
             kind: None,
             rule: Some("first".into()),
@@ -2747,6 +2902,7 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
 
     for request in [
         ToolRequest::References {
+            snapshot: Some(v1),
             symbol: 0.into(),
             kind: None,
             rule: None,
@@ -2755,6 +2911,7 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
             all: true,
         },
         ToolRequest::References {
+            snapshot: Some(v1),
             symbol: 0.into(),
             kind: None,
             rule: Some(0.into()),
@@ -2763,6 +2920,7 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
             all: true,
         },
         ToolRequest::Rules {
+            snapshot: Some(v1),
             name: None,
             rule: Some(0.into()),
             file: None,
@@ -2779,7 +2937,9 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
         );
     }
 
-    result_of(
+    // Re-observing `symbols` reports the new generation; the old one stays
+    // refused — listings carry the token, they do not unlock anything.
+    let symbols = result_of(
         &mut service,
         &ToolRequest::Symbols {
             kind: None,
@@ -2788,10 +2948,15 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
             all: true,
         },
     );
+    let v2 = symbols["snapshot"]
+        .as_u64()
+        .expect("the listing reports it");
+    assert_ne!(v2, v1);
     assert_eq!(
         refusal_code(
             &mut service,
             &ToolRequest::References {
+                snapshot: Some(v1),
                 symbol: "score".into(),
                 kind: None,
                 rule: Some(0.into()),
@@ -2806,6 +2971,7 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
     result_of(
         &mut service,
         &ToolRequest::Rules {
+            snapshot: None,
             name: None,
             file: None,
             max: None,
@@ -2817,6 +2983,7 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
     let filtered = result_of(
         &mut service,
         &ToolRequest::References {
+            snapshot: Some(v2),
             symbol: "score".into(),
             kind: None,
             rule: Some(0.into()),
@@ -2837,8 +3004,11 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #595: an `ambiguous-*` refusal reports the current candidates but is not
+/// an id-space observation — it changes nothing about the generation, and
+/// numeric addresses still need the served `snapshot`.
 #[test]
-fn ambiguous_refusals_re_establish_the_current_id_space() {
+fn ambiguous_refusals_do_not_unlock_numeric_ids() {
     let dir = freshness_dir("ambiguous");
     let input = dir.join("program.ws");
     std::fs::write(&input, FRESHNESS_V1).unwrap();
@@ -2849,6 +3019,9 @@ fn ambiguous_refusals_re_establish_the_current_id_space() {
     })
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
+    let v1 = service
+        .snapshot_generation()
+        .expect("the initial load adopts");
     result_of(
         &mut service,
         &ToolRequest::Symbols {
@@ -2865,6 +3038,7 @@ fn ambiguous_refusals_re_establish_the_current_id_space() {
         refusal_code(
             &mut service,
             &ToolRequest::References {
+                snapshot: None,
                 symbol: "dup".into(),
                 kind: None,
                 rule: None,
@@ -2875,11 +3049,28 @@ fn ambiguous_refusals_re_establish_the_current_id_space() {
         ),
         "ambiguous-symbol"
     );
-    result_of(&mut service, &ToolRequest::Usage { symbol: 0.into() });
+    // The refusal observed the reloaded program — generation `v1` ids stay
+    // refused; only the new token resolves.
+    let v2 = service
+        .snapshot_generation()
+        .expect("a snapshot is adopted");
+    assert_ne!(v2, v1);
+    assert_eq!(
+        refusal_code(
+            &mut service,
+            &ToolRequest::Usage {
+                symbol: 0.into(),
+                snapshot: Some(v1),
+            }
+        ),
+        "stale-id",
+        "the ambiguous-symbol refusal unlocked nothing"
+    );
     assert_eq!(
         refusal_code(
             &mut service,
             &ToolRequest::Cfg {
+                snapshot: Some(v1),
                 rule: 0.into(),
                 kind: None,
                 max: None,
@@ -2887,12 +3078,13 @@ fn ambiguous_refusals_re_establish_the_current_id_space() {
             }
         ),
         "stale-id",
-        "the rule space is untouched by a symbol-space observation"
+        "the ambiguous-symbol refusal unlocked nothing"
     );
     assert_eq!(
         refusal_code(
             &mut service,
             &ToolRequest::Cfg {
+                snapshot: None,
                 rule: "dup".into(),
                 kind: None,
                 max: None,
@@ -2904,6 +3096,7 @@ fn ambiguous_refusals_re_establish_the_current_id_space() {
     result_of(
         &mut service,
         &ToolRequest::Cfg {
+            snapshot: Some(v2),
             rule: 0.into(),
             kind: None,
             max: None,
@@ -2930,10 +3123,14 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
     result_of(&mut service, &ToolRequest::Project);
+    let v1 = service
+        .snapshot_generation()
+        .expect("the initial load adopts");
     std::fs::write(&input, FRESHNESS_V2).unwrap();
 
     for request in [
         ToolRequest::References {
+            snapshot: Some(v1),
             symbol: 0.into(),
             kind: None,
             rule: None,
@@ -2941,8 +3138,12 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
             max: None,
             all: true,
         },
-        ToolRequest::Usage { symbol: 0.into() },
+        ToolRequest::Usage {
+            symbol: 0.into(),
+            snapshot: Some(v1),
+        },
         ToolRequest::Cfg {
+            snapshot: Some(v1),
             rule: 0.into(),
             kind: None,
             max: None,
@@ -2975,6 +3176,10 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
     let project = result_of(&mut service, &ToolRequest::Project);
     assert_eq!(project["rules"], 2);
     assert_eq!(project["symbols"], 3);
+    let v2 = service.snapshot_generation().expect("the reload adopted");
+    assert_ne!(v2, v1);
+    // Every response that issues numeric ids reports that generation (#595).
+    assert_eq!(project["snapshot"], v2, "{project}");
     let symbols = result_of(
         &mut service,
         &ToolRequest::Symbols {
@@ -2984,8 +3189,9 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
             all: true,
         },
     );
+    assert_eq!(symbols["snapshot"], v2);
     assert!(
-        symbols
+        symbols["symbols"]
             .as_array()
             .unwrap()
             .iter()
@@ -2994,32 +3200,32 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
     let usage = result_of(
         &mut service,
         &ToolRequest::Usage {
+            snapshot: None,
             symbol: "points".into(),
         },
     );
     assert_eq!(usage["id"], 0);
     assert_eq!(usage["symbol"], "points");
-    assert_eq!(
-        result_of(
-            &mut service,
-            &ToolRequest::Rules {
-                name: None,
-                file: None,
-                max: None,
-                rule: None,
-                content: false,
+    assert_eq!(usage["snapshot"], v2);
+    let rules = result_of(
+        &mut service,
+        &ToolRequest::Rules {
+            snapshot: None,
+            name: None,
+            file: None,
+            max: None,
+            rule: None,
+            content: false,
 
-                all: true,
-            }
-        )
-        .as_array()
-        .unwrap()
-        .len(),
-        2
+            all: true,
+        },
     );
+    assert_eq!(rules["snapshot"], v2);
+    assert_eq!(rules["rules"].as_array().unwrap().len(), 2);
     let references = result_of(
         &mut service,
         &ToolRequest::References {
+            snapshot: None,
             symbol: "points".into(),
             kind: None,
             rule: None,
@@ -3028,6 +3234,7 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
             all: true,
         },
     );
+    assert_eq!(references["snapshot"], v2);
     assert!(
         references["references"]
             .as_array()
@@ -3043,22 +3250,25 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
             all: true,
         },
     );
+    assert_eq!(findings["snapshot"], v2);
     assert!(
-        findings
+        findings["findings"]
             .as_array()
             .unwrap()
             .iter()
             .any(|finding| finding["code"] == "min-wait-loop" && finding["rule"].is_number())
     );
-    result_of(
+    let lint = result_of(
         &mut service,
         &ToolRequest::Lint {
             selection: FindingSelection::default(),
             all: true,
         },
     );
+    assert_eq!(lint["snapshot"], v2);
     result_of(&mut service, &ToolRequest::LintRules);
-    result_of(&mut service, &ToolRequest::PersistentObjects { all: true });
+    let objects = result_of(&mut service, &ToolRequest::PersistentObjects { all: true });
+    assert_eq!(objects["snapshot"], v2, "{objects}");
     result_of(
         &mut service,
         &ToolRequest::CallGraph {
@@ -3079,6 +3289,7 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
     assert_eq!(cost["exact"]["programRules"], 2);
     let inspect = result_of(&mut service, &ToolRequest::Inspect { all: true });
     assert_eq!(inspect["result"]["rules"].as_array().unwrap().len(), 2);
+    assert_eq!(inspect["snapshot"], v2, "{inspect}");
     let analyze = result_of(
         &mut service,
         &ToolRequest::Analyze {
@@ -3086,6 +3297,7 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
             all: true,
         },
     );
+    assert_eq!(analyze["snapshot"], v2, "{analyze}");
     assert!(
         analyze["result"]["variables"]
             .as_array()
@@ -3153,6 +3365,7 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
     for request in [
         ToolRequest::Project,
         ToolRequest::Rules {
+            snapshot: None,
             name: None,
             file: None,
             max: None,
@@ -3167,6 +3380,7 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
             all: true,
         },
         ToolRequest::References {
+            snapshot: Some(0),
             symbol: 0.into(),
             kind: None,
             rule: None,
@@ -3241,7 +3455,7 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
         },
     );
     assert!(
-        symbols
+        symbols["symbols"]
             .as_array()
             .unwrap()
             .iter()
@@ -3324,9 +3538,9 @@ fn a_malformed_input_defers_the_load_and_recovers_in_place() {
 }
 
 /// Ids issued before a failed refresh must not silently validate against
-/// the repaired program (#512 + #471): a failed load invalidates the id
-/// space, so numeric addresses issued by the previous snapshot refuse
-/// `stale-id` until the new space is observed.
+/// the repaired program (#512 + #595): a failed load drops the served
+/// snapshot, the recovered program adopts a fresh generation, and numeric
+/// addresses carrying the old `snapshot` keep refusing `stale-id`.
 #[test]
 fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
     let dir = freshness_dir("stale-recovery");
@@ -3339,6 +3553,9 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
     })
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
+    let v1 = service
+        .snapshot_generation()
+        .expect("the initial load adopts");
     result_of(
         &mut service,
         &ToolRequest::Symbols {
@@ -3351,6 +3568,7 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
     result_of(
         &mut service,
         &ToolRequest::Rules {
+            snapshot: None,
             name: None,
             file: None,
             max: None,
@@ -3362,6 +3580,7 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
     result_of(
         &mut service,
         &ToolRequest::References {
+            snapshot: Some(v1),
             symbol: 0.into(),
             kind: None,
             rule: None,
@@ -3382,10 +3601,13 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
     );
 
     std::fs::write(&input, FRESHNESS_V2).unwrap();
+    // The recovery adopts a new generation: every numeric address scoped to
+    // `v1` stays refused even after the healed program is fully served.
     assert_eq!(
         refusal_code(
             &mut service,
             &ToolRequest::References {
+                snapshot: Some(v1),
                 symbol: 0.into(),
                 kind: None,
                 rule: None,
@@ -3400,6 +3622,7 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
         refusal_code(
             &mut service,
             &ToolRequest::Cfg {
+                snapshot: Some(v1),
                 rule: 1.into(),
                 kind: None,
                 max: None,
@@ -3408,7 +3631,7 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
         ),
         "stale-id"
     );
-    result_of(
+    let symbols = result_of(
         &mut service,
         &ToolRequest::Symbols {
             kind: None,
@@ -3417,22 +3640,22 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
             all: true,
         },
     );
-    let usage = result_of(&mut service, &ToolRequest::Usage { symbol: 0.into() });
+    let v2 = symbols["snapshot"]
+        .as_u64()
+        .expect("the listing reports it");
+    assert_ne!(v2, v1, "recovery adopts a new generation");
+    let usage = result_of(
+        &mut service,
+        &ToolRequest::Usage {
+            symbol: 0.into(),
+            snapshot: Some(v2),
+        },
+    );
     assert_eq!(usage["symbol"], "points");
     result_of(
         &mut service,
-        &ToolRequest::Rules {
-            name: None,
-            file: None,
-            max: None,
-            rule: None,
-            content: false,
-            all: true,
-        },
-    );
-    result_of(
-        &mut service,
         &ToolRequest::Cfg {
+            snapshot: Some(v2),
             rule: 1.into(),
             kind: None,
             max: None,
@@ -3445,8 +3668,8 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
 /// A failed refresh invalidates the served snapshot even when the input is
 /// restored to byte-identical content (#512): recovery reloads a fresh
 /// program instead of fingerprint-matching the pre-failure snapshot back to
-/// life, and ids it issued refuse `stale-id` until the new space is
-/// observed.
+/// life — `adopt` mints a new generation even for identical bytes (#595),
+/// so ids carrying the old `snapshot` stay refused.
 #[test]
 fn a_failed_refresh_invalidates_the_snapshot_even_when_bytes_return() {
     let dir = freshness_dir("invalidate");
@@ -3459,6 +3682,9 @@ fn a_failed_refresh_invalidates_the_snapshot_even_when_bytes_return() {
     })
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
+    let v1 = service
+        .snapshot_generation()
+        .expect("the initial load adopts");
     result_of(
         &mut service,
         &ToolRequest::Symbols {
@@ -3471,6 +3697,7 @@ fn a_failed_refresh_invalidates_the_snapshot_even_when_bytes_return() {
     result_of(
         &mut service,
         &ToolRequest::References {
+            snapshot: Some(v1),
             symbol: 0.into(),
             kind: None,
             rule: None,
@@ -3498,11 +3725,14 @@ fn a_failed_refresh_invalidates_the_snapshot_even_when_bytes_return() {
 
     result_of(&mut service, &ToolRequest::Project);
     assert_eq!(service.semantic_build_count(), builds + 1);
+    let v2 = service.snapshot_generation().expect("recovery adopts");
+    assert_ne!(v2, v1, "byte-identical recovery is still a new generation");
 
     assert_eq!(
         refusal_code(
             &mut service,
             &ToolRequest::References {
+                snapshot: Some(v1),
                 symbol: 0.into(),
                 kind: None,
                 rule: None,
@@ -3515,16 +3745,8 @@ fn a_failed_refresh_invalidates_the_snapshot_even_when_bytes_return() {
     );
     result_of(
         &mut service,
-        &ToolRequest::Symbols {
-            kind: None,
-            file: None,
-            max: None,
-            all: true,
-        },
-    );
-    result_of(
-        &mut service,
         &ToolRequest::References {
+            snapshot: Some(v2),
             symbol: 0.into(),
             kind: None,
             rule: None,
@@ -3948,7 +4170,11 @@ fn rules_content_serves_bounded_canonical_call_trees() {
     })
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
+    let generation = service.snapshot_generation().expect("loaded");
     let request = |rule: Option<Address>, max: Option<usize>| ToolRequest::Rules {
+        // #595: numeric `rule` addresses carry the generation; names and
+        // `None` ignore the field.
+        snapshot: Some(generation),
         name: None,
         rule,
         file: None,
@@ -4026,6 +4252,7 @@ fn rules_content_serves_bounded_canonical_call_trees() {
     let plain = result_of(
         &mut service,
         &ToolRequest::Rules {
+            snapshot: None,
             name: None,
             rule: None,
             file: None,
@@ -4034,8 +4261,9 @@ fn rules_content_serves_bounded_canonical_call_trees() {
             all: true,
         },
     );
-    assert!(plain.is_array());
-    assert!(plain[0].get("content").is_none());
+    // #595: the bare listing wraps under `rules` beside `snapshot`.
+    assert!(plain["rules"][0].get("content").is_none());
+    assert_eq!(plain["snapshot"], generation);
 }
 
 /// A `content` request without `max` applies the default bound of 20 rules
@@ -4065,6 +4293,7 @@ fn rules_content_defaults_to_twenty_rules_and_names_ambiguity() {
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
     let request = |rule: Option<Address>, max: Option<usize>| ToolRequest::Rules {
+        snapshot: None,
         name: None,
         rule,
         file: None,
@@ -4159,6 +4388,7 @@ fn short_circuit_folds_preserve_occurrences_for_references() {
         result_of(
             &mut service,
             &ToolRequest::References {
+                snapshot: None,
                 symbol: "g".into(),
                 kind: None,
                 rule: None,
