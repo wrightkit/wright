@@ -1,0 +1,15 @@
+#!/bin/sh
+# Wright-specific pre-commit checks. Repository-independent checks run from the
+# global hook; this file adds only what CI checks for Wright alone.
+set -eu
+
+# CI job "Agent guide sync" checks the vendored guide against its pin.
+skills="$(git rev-parse --show-toplevel)/../skills"
+if [ -d "$skills/.git" ] &&
+  git diff --cached --name-only |
+    grep -q -E '^(agent-guide/|scripts/sync-agent-guide\.py$|crates/wright-cli/src/agent\.rs$)'; then
+  # git exports GIT_DIR to hooks; the script must query the skills clone, not this repository.
+  env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE \
+    python3 -I scripts/sync-agent-guide.py --skills-dir "$skills" --check >/dev/null ||
+    { echo 'pre-commit: agent guide is out of sync with wrightkit/skills; see scripts/sync-agent-guide.py.' >&2; exit 1; }
+fi
