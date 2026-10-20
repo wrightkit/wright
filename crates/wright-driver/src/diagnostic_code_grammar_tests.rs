@@ -27,6 +27,7 @@
 //! be constructed here, so their mappings are exercised through the
 //! engine's public producers (`inspect`) and the fixed-literal census.
 
+mod classify;
 mod driver_codes;
 mod engine_kinds;
 mod source;
@@ -139,13 +140,24 @@ fn fixed_codes_obey_the_declared_grammar() {
     // - `lookup-failed` sits in a `return refusal(` call the earlier guard
     //   skipped;
     // - `clipboard-failed`, `ambiguous-symbol`, and `rename-refused` pin the
-    //   wright-cli, wright-analyzer, and wright-language trees.
+    //   wright-cli, wright-analyzer, and wright-language trees;
+    // - `unknown-rule`/`invalid-id` enter only through the string-`code`-
+    //   parameter callsite sink (`unknown(code: &str)`, `self.error(code)`);
+    // - `min-wait-loop` enters only through the analyzer `id:` registry
+    //   literal scan;
+    // - `malformed-request` enters only through the `"code":` envelope-key
+    //   scan in `serve.rs`.
     for (path_part, code) in [
         ("lint/package.rs", "lint-package-not-found"),
         ("lint/package.rs", "lint-package-remote"),
         ("lookup.rs", "lookup-failed"),
         ("wright-cli", "clipboard-failed"),
-        ("wright-analyzer", "ambiguous-symbol"),
+        ("resolve.rs", "unknown-rule"),
+        ("resolve.rs", "ambiguous-symbol"),
+        ("canonical/service.rs", "invalid-id"),
+        ("canonical/service.rs", "rule-content-unavailable"),
+        ("registry.rs", "min-wait-loop"),
+        ("serve.rs", "malformed-request"),
         ("wright-language", "rename-refused"),
     ] {
         assert!(

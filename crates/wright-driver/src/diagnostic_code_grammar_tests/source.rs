@@ -403,56 +403,279 @@ pub(super) fn rhs_span(masked: &[u8], eq: usize, limit: usize) -> (usize, usize)
     (start, end)
 }
 
-/// Whether every `=>` arm of a `match` RHS produces a `, Stage::` tuple —
-/// the shape the tuple-arm scan covers. A `match`-free RHS or an
-/// unparseable shape defers to passthrough; a mixed match fails closed.
-pub(super) fn match_arms_stage_ok(masked_rhs: &str) -> bool {
-    let Some(m) = masked_rhs.find("match") else {
-        return true;
-    };
-    let Some(brace) = masked_rhs[m..].find('{').map(|i| m + i) else {
-        return true;
-    };
-    let bytes = masked_rhs.as_bytes();
-    let mut depth = 1i32;
-    let mut i = brace + 1;
-    while i < bytes.len() && depth > 0 {
-        match bytes[i] {
-            b'{' => depth += 1,
-            b'}' => {
-                depth -= 1;
+/// The span `(open_brace, close)` of each `match` body inside `masked`,
+/// searched from `from`. The scrutinee expression may itself contain
+/// braces (closures, struct literals), so the body brace is the first
+/// `{` at depth 0 after the `match` keyword.
+fn match_bodies(masked: &[u8], from: usize) -> Vec<(usize, usize)> {
+    let mut bodies = Vec::new();
+    let mut i = from;
+    while i + 5 <= masked.len() {
+        if &masked[i..i + 5] == b"match"
+            && (i == 0 || !(masked[i - 1].is_ascii_alphanumeric() || masked[i - 1] == b'_'))
+            && masked
+                .get(i + 5)
+                .is_none_or(|b| !(b.is_ascii_alphanumeric() || *b == b'_'))
+        {
+            let mut j = i + 5;
+            let mut depth = 0i32;
+            let mut brace = None;
+            while j < masked.len() {
+                match masked[j] {
+                    b'{' if depth == 0 => {
+                        brace = Some(j);
+                        break;
+                    }
+                    b'(' | b'[' | b'{' => depth += 1,
+                    b')' | b']' | b'}' => {
+                        depth -= 1;
+                        if depth < 0 {
+                            break;
+                        }
+                    }
+                    b';' if depth == 0 => break,
+                    _ => {}
+                }
+                j += 1;
             }
-            b'=' if bytes.get(i + 1) == Some(&b'>') && depth == 1 => {
-                // The arm value runs to a depth-1 `,` or the closing `}`.
-                let vstart = i + 2;
-                let mut vend = bytes.len();
-                let mut arm_depth = depth;
-                for (j, &b) in bytes.iter().enumerate().skip(vstart) {
-                    match b {
-                        b'{' => arm_depth += 1,
-                        b'}' => {
-                            if arm_depth == 1 {
+            if let Some(open) = brace
+                && let Some(close) = match_bracket(masked, open)
+            {
+                bodies.push((open, close));
+                // Continue inside the body so nested `match`es in the
+                // scrutinee or arm values are collected too.
+                i = open + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    bodies
+}
+
+/// Whether every `=>` arm of every `match` inside `masked_rhs` produces a
+/// `, Stage::` tuple — the shape the tuple-arm scan covers. A `match`-free
+/// RHS defers to passthrough; a `match` with any unmarked arm fails
+/// closed.
+pub(super) fn match_arms_stage_ok(masked_rhs: &str) -> bool {
+    let bytes = masked_rhs.as_bytes();
+    for (open, close) in match_bodies(bytes, 0) {
+        let mut depth = 1i32;
+        let mut i = open + 1;
+        while i < close {
+            match bytes[i] {
+                b'{' | b'(' | b'[' => depth += 1,
+                b'}' | b')' | b']' => depth -= 1,
+                b'=' if depth == 1 && bytes.get(i + 1) == Some(&b'>') => {
+                    // The arm value runs to a depth-1 `,` or `close`.
+                    let vstart = i + 2;
+                    let mut vend = close;
+                    let mut arm_depth = 1i32;
+                    for (j, &b) in bytes.iter().enumerate().take(close).skip(vstart) {
+                        match b {
+                            b'{' | b'(' | b'[' => arm_depth += 1,
+                            b'}' | b')' | b']' => arm_depth -= 1,
+                            b',' if arm_depth == 1 => {
                                 vend = j;
                                 break;
                             }
-                            arm_depth -= 1;
+                            _ => {}
                         }
-                        b',' if arm_depth == 1 => {
+                    }
+                    if !masked_rhs[vstart..vend].contains(", Stage::") {
+                        return false;
+                    }
+                    i = vend;
+                    continue;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+    true
+}
+
+/// Whether `name` is bound by the pattern of the innermost match arm
+/// containing `pos` — e.g. `Some(code) if pred(code) => (code, …)` binds
+/// `code` in the pattern, the guard, and the value.
+pub(super) fn arm_pattern_binds(masked: &[u8], pos: usize, name: &str) -> bool {
+    let bytes = masked;
+    // Find the innermost `=>` whose value span contains `pos`.
+    let mut best: Option<(usize, usize, usize)> = None; // (pattern_start, arrow, vend)
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'=' && bytes[i + 1] == b'>' {
+            // The arm's level is the bracket depth just before `=>`.
+            let mut depth = 0i32;
+            for &b in &bytes[..i] {
+                match b {
+                    b'{' | b'(' | b'[' => depth += 1,
+                    b'}' | b')' | b']' => depth -= 1,
+                    _ => {}
+                }
+            }
+            // Arm value: from after `=>` to a `,` at the same depth, or
+            // the closing `}` that drops below it.
+            let mut vend = bytes.len();
+            let mut d = depth;
+            for (j, &b) in bytes.iter().enumerate().skip(i + 2) {
+                match b {
+                    b'{' | b'(' | b'[' => d += 1,
+                    b'}' | b')' | b']' => {
+                        if d == depth {
                             vend = j;
+                            break;
+                        }
+                        d -= 1;
+                    }
+                    b',' if d == depth => {
+                        vend = j;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            // Pattern start: the `,`/`{` at `depth` before the arrow.
+            let mut pstart = 0;
+            {
+                let mut pd = depth;
+                for j in (0..i).rev() {
+                    match bytes[j] {
+                        b'}' | b')' | b']' => pd += 1,
+                        b'{' | b'(' | b'[' => {
+                            if pd == depth {
+                                pstart = j + 1;
+                                break;
+                            }
+                            pd -= 1;
+                        }
+                        b',' if pd == depth => {
+                            pstart = j + 1;
                             break;
                         }
                         _ => {}
                     }
                 }
-                if !masked_rhs[vstart..vend.min(masked_rhs.len())].contains(", Stage::") {
-                    return false;
-                }
-                i = vend;
-                continue;
             }
-            _ => {}
+            // The arm binds `name` across pattern, guard, and value.
+            if pos >= pstart && pos <= vend {
+                let span = vend - pstart;
+                if best.is_none_or(|(s, _, e)| span < e - s) {
+                    best = Some((pstart, i, vend));
+                }
+            }
+            i += 2;
+            continue;
         }
         i += 1;
     }
-    true
+    let Some((pstart, arrow, _)) = best else {
+        return false;
+    };
+    let pattern = as_str(masked, pstart..arrow);
+    pattern.match_indices(name).any(|(idx, _)| {
+        let before = pattern[..idx].chars().last();
+        let after = pattern[idx + name.len()..].chars().next();
+        !before.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+            && !after.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+    })
+}
+
+/// Whether `name` is bound by a `|…|` closure parameter list whose body
+/// contains `pos` — e.g. `|code: &str| { …code… }` inside a fn.
+pub(super) fn closure_param_binds(masked: &[u8], pos: usize, name: &str) -> bool {
+    let mut i = 0;
+    while i < pos && i < masked.len() {
+        if masked[i] != b'|' || masked.get(i + 1) == Some(&b'|') {
+            i += 1;
+            continue;
+        }
+        // Find the closing `|` of the param list (params are idents,
+        // `mut`, types, commas — no `|` and no operators).
+        let mut j = i + 1;
+        let mut close = None;
+        while j < masked.len() && masked[j] != b'\n' {
+            match masked[j] {
+                b'|' => {
+                    close = Some(j);
+                    break;
+                }
+                b'(' | b'[' | b'{' | b')' | b']' | b'}' | b';' | b'=' | b'<' | b'>' | b'&'
+                | b'*' => {
+                    // Not a param list — or a `&`/`Type<…>` we can still
+                    // parse; `(`/`{`/`;`/`=` end it.
+                    if matches!(
+                        masked[j],
+                        b'(' | b'[' | b'{' | b')' | b']' | b'}' | b';' | b'='
+                    ) {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            j += 1;
+        }
+        let Some(close) = close else {
+            i += 1;
+            continue;
+        };
+        // The closure body: `{…}` to its match, else a single expression
+        // to the next top-level `,`/`;`/`)`/`]`/`}` at the closure's depth.
+        let mut k = close + 1;
+        while k < masked.len() && masked[k].is_ascii_whitespace() {
+            k += 1;
+        }
+        let body_end = if masked.get(k) == Some(&b'{') {
+            match_bracket(masked, k).unwrap_or(masked.len())
+        } else {
+            // Expression: it ends at a separator at the depth the closure
+            // sits at — approximate with the depth at `i`.
+            let mut depth = 0i32;
+            for &b in &masked[..i] {
+                match b {
+                    b'{' | b'(' | b'[' => depth += 1,
+                    b'}' | b')' | b']' => depth -= 1,
+                    _ => {}
+                }
+            }
+            let mut end = masked.len();
+            let mut d = depth;
+            for (n, &b) in masked.iter().enumerate().skip(close + 1) {
+                match b {
+                    b'{' | b'(' | b'[' => d += 1,
+                    b'}' | b')' | b']' => {
+                        if d == depth {
+                            end = n;
+                            break;
+                        }
+                        d -= 1;
+                    }
+                    b',' | b';' if d == depth => {
+                        end = n;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            end
+        };
+        if pos > close && pos < body_end {
+            let param_text = as_str(masked, i + 1..close);
+            if param_text.split(',').any(|p| {
+                p.trim()
+                    .split(':')
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .trim_start_matches("mut ")
+                    .trim()
+                    == name
+            }) {
+                return true;
+            }
+        }
+        i = close + 1;
+    }
+    false
 }
