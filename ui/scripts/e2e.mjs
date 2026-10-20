@@ -284,6 +284,9 @@ async function main() {
       page,
       `document.readyState === 'complete' && document.querySelectorAll('[data-e2e=rule-item]').length > 0`,
     )
+    // The list renders before the per-rule reads land; the first rule's
+    // body is the page's own signal that the initial load has settled.
+    await cdp.waitFor(page, `document.querySelectorAll('[data-e2e=statement]').length > 0`)
 
     // Rule list order and names come straight from `rules`.
     const names = await cdp.evaluate(

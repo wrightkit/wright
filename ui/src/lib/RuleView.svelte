@@ -20,16 +20,18 @@
 
   // The rule's identities resolve before its statements render, so a name
   // never flashes its raw id: `peek` answers synchronously once warmed.
-  // `warmedFor` names the exact content the cache was warmed for, so a rule
-  // switch cannot render the new content before its own warm completes.
-  let warmedFor = $state<unknown>(null)
-  const namesReady = $derived(ruleState.phase === 'ready' && warmedFor === ruleState.content)
+  let namesReady = $state(false)
+  let generation = 0
   $effect(() => {
-    if (ruleState.phase !== 'ready') return
-    const content = ruleState.content
-    const identities = collectIdentities(content).map((item) => item.identity)
+    if (ruleState.phase !== 'ready') {
+      namesReady = false
+      return
+    }
+    const identities = collectIdentities(ruleState.content).map((item) => item.identity)
+    namesReady = false
+    const gen = ++generation
     void names.warm(identities).then(() => {
-      warmedFor = content
+      if (gen === generation) namesReady = true
     })
   })
 
