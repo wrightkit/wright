@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.29.0](https://github.com/wrightkit/wright/compare/v0.28.0...v0.29.0) (2026-10-20)
+
+
+### Features
+
+* add ui/ Svelte 5 toolchain with generated types and UI CI job ([#813](https://github.com/wrightkit/wright/issues/813)) ([d3e3787](https://github.com/wrightkit/wright/commit/d3e37879c2751a60da574b6abd25af9cbcc51a1c)), closes [#802](https://github.com/wrightkit/wright/issues/802)
+* add wright lint package commands ([#861](https://github.com/wrightkit/wright/issues/861)) ([328eb80](https://github.com/wrightkit/wright/commit/328eb8067d8f3478e9fdf35a2fb904e31a535d10))
+* **cli:** add wright ui command and loopback endpoint ([#827](https://github.com/wrightkit/wright/issues/827)) ([6e774f6](https://github.com/wrightkit/wright/commit/6e774f66ca95d0ded4f52fee09a8bcf2f61743a3))
+* **cli:** bounded GitHub Actions annotations, step summary, and log group ([#830](https://github.com/wrightkit/wright/issues/830)) ([5db4ae3](https://github.com/wrightkit/wright/commit/5db4ae3b5020fe575612ba8042cd24c13e14e911))
+* **cli:** opt-in --fail-on gate that raises the verdict at a severity threshold ([#810](https://github.com/wrightkit/wright/issues/810)) ([a2d6dd4](https://github.com/wrightkit/wright/commit/a2d6dd477fa6b19348b191b03000eb14b65c64ff)), closes [#796](https://github.com/wrightkit/wright/issues/796)
+* **cli:** plain line-record renderer for agents and CI ([#828](https://github.com/wrightkit/wright/issues/828)) ([2c62751](https://github.com/wrightkit/wright/commit/2c6275167250063c962eb427df53903bd3094955))
+* **cli:** replace the terminal rail with the verdict-tag report ([#831](https://github.com/wrightkit/wright/issues/831)) ([74d3bae](https://github.com/wrightkit/wright/commit/74d3bae9ee0f13dbb786c7565bc70fb0c69dcf21))
+* **driver:** add the listEntries operation for structured editors ([#856](https://github.com/wrightkit/wright/issues/856)) ([126a104](https://github.com/wrightkit/wright/commit/126a10443c0adb95aed886ca7b196824c8577cf2)), closes [#854](https://github.com/wrightkit/wright/issues/854)
+* **driver:** expose repeated-value facts and pre-truncation per-code counts ([#820](https://github.com/wrightkit/wright/issues/820)) ([2843ffd](https://github.com/wrightkit/wright/commit/2843ffd66db925d66cb7606c85134dc15830f28b)), closes [#791](https://github.com/wrightkit/wright/issues/791)
+* **driver:** report check's program summary, shared follow-ups, and ref rule identity ([#821](https://github.com/wrightkit/wright/issues/821)) ([68f9f50](https://github.com/wrightkit/wright/commit/68f9f5089a82a1857d22599b23f4deeba1ee26c6))
+* **driver:** scope numeric symbol/rule addresses to a snapshot generation ([#847](https://github.com/wrightkit/wright/issues/847)) ([02cd5e7](https://github.com/wrightkit/wright/commit/02cd5e7a05bd52d9e7c092c29b3d0488bd4fe92a))
+* fetch and store GitHub lint rule packages by commit SHA ([#857](https://github.com/wrightkit/wright/issues/857)) ([05c3537](https://github.com/wrightkit/wright/commit/05c3537820bb7da5a030f7ef37ead5b9e1c1286e))
+* pin lint rule packages per project by commit SHA ([#858](https://github.com/wrightkit/wright/issues/858)) ([aa2e184](https://github.com/wrightkit/wright/commit/aa2e184a9cbdba557a61574418b16bb12e04b7af))
+* **ui:** structured read-only Workshop rule view ([#829](https://github.com/wrightkit/wright/issues/829)) ([8435938](https://github.com/wrightkit/wright/commit/8435938aa6ef6b5796f7a5e1b7d348456d74f572))
+
+
+### Bug Fixes
+
+* **cost:** report failed computations as unavailable, never zero ([#816](https://github.com/wrightkit/wright/issues/816)) ([8f92809](https://github.com/wrightkit/wright/commit/8f9280960cefc5cbbec20d0b4ecb44f4c4efa07e)), closes [#790](https://github.com/wrightkit/wright/issues/790)
+* **driver:** reconcile analyze and inspect cost counts ([#819](https://github.com/wrightkit/wright/issues/819)) ([abf6baf](https://github.com/wrightkit/wright/commit/abf6baf314fb7709cdf792e7b765e4f99fb45cb4))
+* **lookup:** reject an out-of-range limit instead of clamping silently ([#811](https://github.com/wrightkit/wright/issues/811)) ([58ae2cb](https://github.com/wrightkit/wright/commit/58ae2cba31216260617fcee3c4b7e7f1042c02d6)), closes [#783](https://github.com/wrightkit/wright/issues/783)
+* **ui:** keep connections alive in `wright ui` ([#864](https://github.com/wrightkit/wright/issues/864)) ([b957ce9](https://github.com/wrightkit/wright/commit/b957ce9a8c7852f30d1a96469c7d89415044ab04))
+* **ui:** keep the selected rule and wait for the initial load in E2E ([#863](https://github.com/wrightkit/wright/issues/863)) ([53e4e19](https://github.com/wrightkit/wright/commit/53e4e1907f51563780d6008d6782a823c26e80d3))
+
 ## [0.28.0](https://github.com/wrightkit/wright/compare/v0.27.0...v0.28.0) (2026-10-19)
 
 
