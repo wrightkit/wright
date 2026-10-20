@@ -111,13 +111,15 @@ fn lint_findings_carry_fix_transactions_on_session_and_service() {
             .any(|finding| finding["code"] == "duplicate-condition"
                 && finding["message"].is_string())
     );
+    // #595: the listing is wrapped — `{findings, snapshot}`.
+    let findings = &findings["findings"];
     assert_eq!(
-        fixed(&findings, "duplicate-condition"),
+        fixed(findings, "duplicate-condition"),
         duplicate,
         "the findings operation returns the same fix"
     );
     assert_eq!(
-        fixed(&findings, "repeated-value"),
+        fixed(findings, "repeated-value"),
         repeated,
         "the findings operation returns the same fix"
     );

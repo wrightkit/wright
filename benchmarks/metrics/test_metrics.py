@@ -215,6 +215,38 @@ class BandTest(unittest.TestCase):
         self.assertEqual(metrics.unique_name([{"name": "duplicate"}, {"name": "unique"}, {"name": "duplicate"}]), "unique")
         self.assertIsNone(metrics.unique_name([{"name": "same"}, {"name": "same"}]))
 
+    def test_snapshot_wrapped_listings_still_measure_the_list(self):
+        wrapped = {"symbols": [{"id": 0, "name": "a"}, {"id": 1, "name": "b"}], "snapshot": 1}
+        self.assertEqual(metrics._snapshot_listing(wrapped), wrapped["symbols"])
+        self.assertEqual(metrics._first_id(wrapped), 0)
+        self.assertEqual(metrics.unique_name(wrapped), "a")
+        dup = {"rules": [{"name": "same"}, {"name": "same"}], "snapshot": 3}
+        self.assertIsNone(metrics.unique_name(dup))
+        self.assertEqual(metrics.agent_counts("symbols", wrapped), {"items": 2})
+        # `snapshot` is contract metadata, never a counted field.
+        self.assertNotIn("snapshot", metrics.default_counts({"snapshot": 2, "reads": 3}))
+        # A capped listing keeps `truncation`/`selection` members; the list is
+        # still found among them and measures in the legacy `items` vocabulary.
+        capped = {
+            "rules": [{"id": 0}, {"id": 1}],
+            "selection": {"withheld": 5},
+            "truncation": {"rules": {"total": 7, "shown": 2, "truncated": 5}},
+            "snapshot": 2,
+        }
+        self.assertEqual(metrics._snapshot_listing(capped), capped["rules"])
+        self.assertEqual(metrics._first_id(capped), 0)
+        self.assertEqual(
+            metrics._listing_measurement(capped),
+            {
+                "items": capped["rules"],
+                "selection": {"withheld": 5},
+                "truncation": {"items": {"total": 7, "shown": 2, "truncated": 5}},
+            },
+        )
+        # Two list members make the payload ambiguous — no unwrapping.
+        self.assertIsNone(metrics._snapshot_listing({"rules": [], "symbols": [], "snapshot": 1}))
+        self.assertIsNone(metrics._snapshot_listing([{"id": 0}]))
+
     def test_default_counts_retains_complete_totals(self):
         result = {"counts": {"findings": {"total": 90, "error": 1}}, "findings": [{}, {}]}
         expected = {"counts.findings.total": 90, "counts.findings.error": 1, "findings": 2}

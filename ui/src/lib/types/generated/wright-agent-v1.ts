@@ -4,10 +4,102 @@
  * Regenerate: npm run generate-types
  */
 
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "AgentResult".
- */
+export type RulesRequest = {
+  op: 'rules'
+  /**
+   * Selection (#531): only the rule with this declared name.
+   */
+  name?: string
+  /**
+   * Selection (ADR-0024): exactly this rule, addressed by id or declared name.
+   */
+  rule?: number | string
+  /**
+   * Required when `rule` is a numeric index: the generation that issued the id. A string `rule` name ignores it.
+   */
+  snapshot?: number
+  /**
+   * Selection (#531): only rules located in this source file; any spelling that resolves to the same file selects it.
+   */
+  file?: string
+  /**
+   * Selection (#531): report at most this many rules; the response's `selection.withheld` counts what the bound dropped.
+   */
+  max?: number
+  /**
+   * ADR-0024: add each returned rule's canonical content (`workshop-rs/rule-content-v1`). Without `max`, at most 20 rules are returned; the selection-wrapped result is always used.
+   */
+  content?: boolean
+  /**
+   * Return every list item instead of the default cap; explicit filters and max still apply.
+   */
+  all?: boolean
+}
+export type ReferencesRequest = {
+  op: 'references'
+  /**
+   * Symbol id or declared name. A numeric id must carry the `snapshot` generation that issued it; a missing or mismatched `snapshot` is refused `stale-id`. Names are always current and ignore `snapshot`.
+   */
+  symbol: number | string
+  /**
+   * Selection (#531): only references of this kind.
+   */
+  kind?: 'declaration' | 'definition' | 'read' | 'write' | 'call'
+  /**
+   * Selection (#531): only references inside this rule, addressed by index or declared name. A numeric index is scoped by the same `snapshot` requirement as `symbol`.
+   */
+  rule?: number | string
+  /**
+   * Required when `symbol` or `rule` is a numeric address: the generation that issued the id. Ignored when every address is a declared name.
+   */
+  snapshot?: number
+  /**
+   * Selection (#531): only references located in this source file; any spelling that resolves to the same file selects it.
+   */
+  file?: string
+  /**
+   * Selection (#531): report at most this many references; the response's `selection.withheld` counts what the bound dropped.
+   */
+  max?: number
+  /**
+   * Return every list item instead of the default cap; explicit filters and max still apply.
+   */
+  all?: boolean
+}
+export type UsageRequest = {
+  op: 'usage'
+  /**
+   * Symbol id or declared name. A numeric id must carry the `snapshot` generation that issued it; a missing or mismatched `snapshot` is refused `stale-id`. Names are always current and ignore `snapshot`.
+   */
+  symbol: number | string
+  /**
+   * Required when `symbol` is a numeric id: the generation that issued the id. A string `symbol` name ignores it.
+   */
+  snapshot?: number
+}
+export type CfgRequest = {
+  op: 'cfg'
+  /**
+   * Rule index or declared name. A numeric index must carry the `snapshot` generation that issued it; a missing or mismatched `snapshot` is refused `stale-id`. Names are always current and ignore `snapshot`.
+   */
+  rule: number | string
+  /**
+   * Required when `rule` is a numeric index: the generation that issued the id. A string `rule` name ignores it.
+   */
+  snapshot?: number
+  /**
+   * Selection (#531): only blocks of this kind.
+   */
+  kind?: 'entry' | 'exit' | 'block' | 'if' | 'while' | 'for'
+  /**
+   * Selection (#531): report at most this many blocks; the response's `selection.withheld` counts what the bound dropped.
+   */
+  max?: number
+  /**
+   * Return every list item instead of the default cap; explicit filters and max still apply.
+   */
+  all?: boolean
+}
 export type AgentResult =
   | Capabilities
   | CompileResult
@@ -15,12 +107,12 @@ export type AgentResult =
   | AnalyzeResult
   | InspectResult
   | ProjectResult
-  | RulesResult
-  | SymbolsResult
+  | RulesListingResult
+  | SymbolsListingResult
   | ReferencesResult
   | UsageResult
   | CfgResult
-  | FindingsResult
+  | FindingsListingResult
   | PersistentObjectsResult
   | LintPayload
   | LintRulesResult
@@ -31,106 +123,40 @@ export type AgentResult =
   | ProviderMutationPayload
   | LookupResult
   | ListEntriesResult
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "CompileResult".
- */
 export type CompileResult = WorkflowEnvelope & {
   command?: 'compile'
   result?: CompilePayload
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "CheckResult".
- */
 export type CheckResult = WorkflowEnvelope & {
   command?: 'check'
   result?: CheckPayload
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "AnalyzeResult".
- */
 export type AnalyzeResult = WorkflowEnvelope & {
   command?: 'analyze'
   result?: AnalyzePayload
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "InspectResult".
- */
 export type InspectResult = WorkflowEnvelope & {
   command?: 'inspect'
   result?: InspectPayload
   [k: string]: unknown
 }
 /**
+ * The served program's generation (#595): increments each time a program snapshot is adopted — the initial load, every content-changing reload, and recovery after a failed load. Every response that issues numeric `symbol`/`rule` addresses reports it, and a request carrying a numeric address must send that value back or be refused `stale-id`. It is a generation counter, not a content digest — `inputIdentity` keeps its own semantics. A request whose addresses are all declared names ignores it.
+ *
  * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "RulesResult".
+ * via the `definition` "Snapshot".
  */
-export type RulesResult = RuleSummary[] | RulesSelectionResult | CappedListResult
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "Span".
- */
+export type Snapshot = number
 export type Span = null | SourceSpan
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "SymbolsResult".
- */
-export type SymbolsResult = Symbol[] | SymbolsSelectionResult | CappedListResult
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "ReferencesResult".
- */
 export type ReferencesResult = UsageResult & {
   references: ReferencesListResult
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "ReferencesListResult".
- */
-export type ReferencesListResult = Reference[] | ReferencesSelectionResult | CappedListResult
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "FindingsResult".
- */
-export type FindingsResult = Finding[] | FindingsSelectionResult | CappedListResult
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "PersistentObjectsResult".
- */
-export type PersistentObjectsResult =
-  | {
-      kind: string
-      rule: number
-      action: number
-      executionScope: string
-      visibility: string
-      reevaluation: null | {
-        domain: string
-        mode: string
-        [k: string]: unknown
-      }
-      identityRetained: boolean
-      sameKindCleanupInRule: boolean
-      span: Span
-      [k: string]: unknown
-    }[]
-  | CappedListResult
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "CallGraphResult".
- */
+export type ReferencesListResult = Reference[] | ReferencesSelectionResult
 export type CallGraphResult = CallGraphEdge[] | CallGraphSelectionResult | CappedListResult
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "ToolRequest".
- */
 export type ToolRequest =
   | CapabilitiesRequest
   | CompileRequest
@@ -154,10 +180,6 @@ export type ToolRequest =
   | ProviderValidateEditRequest
   | LookupRequest
   | ListEntriesRequest
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "ToolResponse".
- */
 export type ToolResponse =
   | {
       result: AgentResult
@@ -208,17 +230,9 @@ export interface WrightAgentContractV1 {
         [k: string]: unknown
       }
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "CapabilitiesRequest".
- */
 export interface CapabilitiesRequest {
   op: 'capabilities'
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "CompileRequest".
- */
 export interface CompileRequest {
   op: 'compile'
   /**
@@ -234,10 +248,6 @@ export interface CompileRequest {
    */
   to?: string
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "CheckRequest".
- */
 export interface CheckRequest {
   op: 'check'
   /**
@@ -245,10 +255,6 @@ export interface CheckRequest {
    */
   all?: boolean
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "AnalyzeRequest".
- */
 export interface AnalyzeRequest {
   op: 'analyze'
   severity?: 'error' | 'warning' | 'info'
@@ -260,10 +266,6 @@ export interface AnalyzeRequest {
    */
   all?: boolean
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "InspectRequest".
- */
 export interface InspectRequest {
   op: 'inspect'
   /**
@@ -271,48 +273,9 @@ export interface InspectRequest {
    */
   all?: boolean
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "ProjectRequest".
- */
 export interface ProjectRequest {
   op: 'project'
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "RulesRequest".
- */
-export interface RulesRequest {
-  op: 'rules'
-  /**
-   * Selection (#531): only the rule with this declared name.
-   */
-  name?: string
-  /**
-   * Selection (ADR-0024): exactly this rule, addressed by id or declared name.
-   */
-  rule?: number | string
-  /**
-   * Selection (#531): only rules located in this source file; any spelling that resolves to the same file selects it.
-   */
-  file?: string
-  /**
-   * Selection (#531): report at most this many rules; the response's `selection.withheld` counts what the bound dropped.
-   */
-  max?: number
-  /**
-   * ADR-0024: add each returned rule's canonical content (`workshop-rs/rule-content-v1`). Without `max`, at most 20 rules are returned; the selection-wrapped result is always used.
-   */
-  content?: boolean
-  /**
-   * Return every list item instead of the default cap; explicit filters and max still apply.
-   */
-  all?: boolean
-}
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "SymbolsRequest".
- */
 export interface SymbolsRequest {
   op: 'symbols'
   /**
@@ -332,75 +295,6 @@ export interface SymbolsRequest {
    */
   all?: boolean
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "ReferencesRequest".
- */
-export interface ReferencesRequest {
-  op: 'references'
-  /**
-   * Symbol id or declared name. A numeric id captured before the project changed on disk is refused `stale-id` until a `symbols` listing re-establishes the space; names are always current.
-   */
-  symbol: number | string
-  /**
-   * Selection (#531): only references of this kind.
-   */
-  kind?: 'declaration' | 'definition' | 'read' | 'write' | 'call'
-  /**
-   * Selection (#531): only references inside this rule, addressed by index or declared name.
-   */
-  rule?: number | string
-  /**
-   * Selection (#531): only references located in this source file; any spelling that resolves to the same file selects it.
-   */
-  file?: string
-  /**
-   * Selection (#531): report at most this many references; the response's `selection.withheld` counts what the bound dropped.
-   */
-  max?: number
-  /**
-   * Return every list item instead of the default cap; explicit filters and max still apply.
-   */
-  all?: boolean
-}
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "UsageRequest".
- */
-export interface UsageRequest {
-  op: 'usage'
-  /**
-   * Symbol id or declared name. A numeric id captured before the project changed on disk is refused `stale-id` until a `symbols` listing re-establishes the space; names are always current.
-   */
-  symbol: number | string
-}
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "CfgRequest".
- */
-export interface CfgRequest {
-  op: 'cfg'
-  /**
-   * Rule index or declared name. A numeric index captured before the project changed on disk is refused `stale-id` until a `rules` listing re-establishes the space; names are always current.
-   */
-  rule: number | string
-  /**
-   * Selection (#531): only blocks of this kind.
-   */
-  kind?: 'entry' | 'exit' | 'block' | 'if' | 'while' | 'for'
-  /**
-   * Selection (#531): report at most this many blocks; the response's `selection.withheld` counts what the bound dropped.
-   */
-  max?: number
-  /**
-   * Return every list item instead of the default cap; explicit filters and max still apply.
-   */
-  all?: boolean
-}
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "FindingsRequest".
- */
 export interface FindingsRequest {
   op: 'findings'
   severity?: 'error' | 'warning' | 'info'
@@ -412,10 +306,6 @@ export interface FindingsRequest {
    */
   all?: boolean
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "PersistentObjectsRequest".
- */
 export interface PersistentObjectsRequest {
   op: 'persistentObjects'
   /**
@@ -423,10 +313,6 @@ export interface PersistentObjectsRequest {
    */
   all?: boolean
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "LintRequest".
- */
 export interface LintRequest {
   op: 'lint'
   severity?: 'error' | 'warning' | 'info'
@@ -438,17 +324,9 @@ export interface LintRequest {
    */
   all?: boolean
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "LintRulesRequest".
- */
 export interface LintRulesRequest {
   op: 'lintRules'
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "CallGraphRequest".
- */
 export interface CallGraphRequest {
   op: 'callGraph'
   /**
@@ -468,10 +346,6 @@ export interface CallGraphRequest {
    */
   all?: boolean
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "CostEstimateRequest".
- */
 export interface CostEstimateRequest {
   op: 'costEstimate'
   severity?: 'error' | 'warning' | 'info'
@@ -486,17 +360,9 @@ export interface CostEstimateRequest {
    */
   all?: boolean
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "TargetMetadataRequest".
- */
 export interface TargetMetadataRequest {
   op: 'targetMetadata'
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "ValidateEditTransactionRequest".
- */
 export interface ValidateEditTransactionRequest {
   op: 'validateEditTransaction'
   /**
@@ -514,10 +380,6 @@ export interface ValidateEditTransactionRequest {
 export interface Sources {
   [k: string]: string
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "EditTransaction".
- */
 export interface EditTransaction {
   /**
    * The transaction's edits, applied atomically; edits in one source must not overlap, and two zero-width edits at the same position refuse `edit-zero-width-conflict`.
@@ -526,10 +388,6 @@ export interface EditTransaction {
    */
   edits: [SourceEdit, ...SourceEdit[]]
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "SourceEdit".
- */
 export interface SourceEdit {
   /**
    * The edit kind: `edit` for a caller-proposed replacement; other kinds may appear on service-computed results.
@@ -561,10 +419,6 @@ export interface EditRange {
   end_line: number
   end_col: number
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "ProviderValidateEditRequest".
- */
 export interface ProviderValidateEditRequest {
   op: 'providerValidateEdit'
   /**
@@ -594,10 +448,6 @@ export interface ProviderValidateEditRequest {
 export interface DocumentSet {
   [k: string]: Document
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "Document".
- */
 export interface Document {
   /**
    * The document's URI — also its key in `documents`; provider edit results address documents by it.
@@ -616,10 +466,6 @@ export interface Document {
    */
   text: string
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "LookupRequest".
- */
 export interface LookupRequest {
   op: 'lookup'
   language: 'workshop' | 'opy'
@@ -642,10 +488,6 @@ export interface LookupRequest {
   locale?: string | null
   limit?: number | null
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "ListEntriesRequest".
- */
 export interface ListEntriesRequest {
   op: 'listEntries'
   language: 'workshop' | 'opy'
@@ -687,10 +529,6 @@ export interface Capabilities {
   profiles: string[]
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "WorkflowEnvelope".
- */
 export interface WorkflowEnvelope {
   wright: ResultContract
   command: string
@@ -700,21 +538,17 @@ export interface WorkflowEnvelope {
   result: {
     [k: string]: unknown
   }
+  /**
+   * Present on `analyze` and `inspect`: the program generation that issued the ids in `result` (#595).
+   */
+  snapshot?: number
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "ResultContract".
- */
 export interface ResultContract {
   version: string
   contract: 'wright-result/v1'
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "Diagnostic".
- */
 export interface Diagnostic {
   code: string
   stage: 'discovery' | 'frontend' | 'lowering' | 'validation' | 'emission' | 'analysis' | 'reconstruction' | 'internal'
@@ -725,10 +559,6 @@ export interface Diagnostic {
   source?: Origin
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "SourceSpan".
- */
 export interface SourceSpan {
   file: number
   path?: string
@@ -736,28 +566,16 @@ export interface SourceSpan {
   end: Position1Based
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "Position1Based".
- */
 export interface Position1Based {
   line: number
   col: number
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "Origin".
- */
 export interface Origin {
   kind: string
   locale?: string
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "CompilePayload".
- */
 export interface CompilePayload {
   output?: {
     /**
@@ -777,10 +595,6 @@ export interface CompilePayload {
   }
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "CheckPayload".
- */
 export interface CheckPayload {
   program: AnalyzedProgramSummary
   /**
@@ -801,10 +615,6 @@ export interface AnalyzedProgramSummary {
   rules: number
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "AnalyzePayload".
- */
 export interface AnalyzePayload {
   program: AnalyzedProgramSummary1
   cost: {
@@ -831,10 +641,6 @@ export interface AnalyzePayload {
   truncation?: Truncation
   selection?: SelectionSummary
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "AnalyzedProgramSummary".
- */
 export interface AnalyzedProgramSummary1 {
   origin: Origin
   files: number
@@ -844,10 +650,6 @@ export interface AnalyzedProgramSummary1 {
   rules: number
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "ActionableFinding".
- */
 export interface ActionableFinding {
   code: string
   severity: 'error' | 'warning' | 'info'
@@ -877,10 +679,6 @@ export interface RepeatedValue {
    */
   spanKind: 'expression' | 'enclosing-loop'
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "Truncation".
- */
 export interface Truncation {
   [k: string]: {
     total: number
@@ -895,10 +693,6 @@ export interface Truncation {
     }
   }
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "SelectionSummary".
- */
 export interface SelectionSummary {
   total: number
   withheld: number
@@ -910,10 +704,6 @@ export interface SelectionSummary {
   }
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "InspectPayload".
- */
 export interface InspectPayload {
   program: ProgramSummary
   counts: {
@@ -932,10 +722,6 @@ export interface InspectPayload {
   truncation?: Truncation
   selection?: SelectionSummary
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "ProgramSummary".
- */
 export interface ProgramSummary {
   origin: Origin
   files: number
@@ -946,11 +732,8 @@ export interface ProgramSummary {
   findings: number
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "ProjectResult".
- */
 export interface ProjectResult {
+  snapshot: Snapshot
   origin: Origin
   /**
    * SHA-256 hex digest of the input's primary entry source (the provider's `sourceIdentity` for provider projects). For a single-file input it covers the whole input; for a provider directory project it hashes only the entry file, so member-file edits do not change it — use `stale-id` refusals for freshness, not this value.
@@ -967,8 +750,24 @@ export interface ProjectResult {
 }
 /**
  * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "RuleSummary".
+ * via the `definition` "RulesResult".
+ *
+ * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
+ * via the `definition` "RulesListingResult".
  */
+export interface RulesListingResult {
+  rules: RuleSummary[]
+  snapshot: Snapshot
+  selection?: SelectionSummary
+  /**
+   * ADR-0024: result members the result should carry but cannot for this input. `names` names the owner that must serve target-language spellings (today `opy-rs` for an OverPy input, until its provider capability exists); raw Workshop results carry no `unavailable`.
+   */
+  unavailable?: {
+    [k: string]: unknown
+  }
+  truncation?: Truncation
+  [k: string]: unknown
+}
 export interface RuleSummary {
   id: number
   name: string
@@ -997,31 +796,18 @@ export interface RuleSummary {
 }
 /**
  * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "RulesSelectionResult".
+ * via the `definition` "SymbolsResult".
+ *
+ * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
+ * via the `definition` "SymbolsListingResult".
  */
-export interface RulesSelectionResult {
-  rules: RuleSummary[]
-  selection: SelectionSummary
-  /**
-   * ADR-0024: result members the result should carry but cannot for this input. `names` names the owner that must serve target-language spellings (today `opy-rs` for an OverPy input, until its provider capability exists); raw Workshop results carry no `unavailable`.
-   */
-  unavailable?: {
-    [k: string]: unknown
-  }
+export interface SymbolsListingResult {
+  symbols: Symbol[]
+  snapshot: Snapshot
+  selection?: SelectionSummary
+  truncation?: Truncation
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "CappedListResult".
- */
-export interface CappedListResult {
-  items: unknown[]
-  truncation: Truncation
-}
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "Symbol".
- */
 export interface Symbol {
   id: number
   kind: string
@@ -1029,19 +815,6 @@ export interface Symbol {
   span: Span
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "SymbolsSelectionResult".
- */
-export interface SymbolsSelectionResult {
-  symbols: Symbol[]
-  selection: SelectionSummary
-  [k: string]: unknown
-}
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "UsageResult".
- */
 export interface UsageResult {
   id: number
   kind: string
@@ -1050,12 +823,9 @@ export interface UsageResult {
   writes: number
   calls: number
   rules: number
+  snapshot: Snapshot
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "Reference".
- */
 export interface Reference {
   kind: 'declaration' | 'definition' | 'read' | 'write' | 'call'
   span: Span
@@ -1070,19 +840,11 @@ export interface Reference {
   } | null
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "ReferencesSelectionResult".
- */
 export interface ReferencesSelectionResult {
   references: Reference[]
   selection: SelectionSummary
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "CfgResult".
- */
 export interface CfgResult {
   entry: number
   exit: number
@@ -1104,8 +866,18 @@ export interface CfgResult {
 }
 /**
  * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "Finding".
+ * via the `definition` "FindingsResult".
+ *
+ * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
+ * via the `definition` "FindingsListingResult".
  */
+export interface FindingsListingResult {
+  findings: Finding[]
+  snapshot: Snapshot
+  selection?: SelectionSummary
+  truncation?: Truncation
+  [k: string]: unknown
+}
 export interface Finding {
   code: string
   severity: 'error' | 'warning' | 'info'
@@ -1124,13 +896,25 @@ export interface Finding {
   } | null
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "FindingsSelectionResult".
- */
-export interface FindingsSelectionResult {
-  findings: Finding[]
-  selection: SelectionSummary
+export interface PersistentObjectsResult {
+  persistentObjects: {
+    kind: string
+    rule: number
+    action: number
+    executionScope: string
+    visibility: string
+    reevaluation: null | {
+      domain: string
+      mode: string
+      [k: string]: unknown
+    }
+    identityRetained: boolean
+    sameKindCleanupInRule: boolean
+    span: Span
+    [k: string]: unknown
+  }[]
+  snapshot: Snapshot
+  truncation?: Truncation
   [k: string]: unknown
 }
 /**
@@ -1141,6 +925,7 @@ export interface FindingsSelectionResult {
  * via the `definition` "LintPayload".
  */
 export interface LintPayload {
+  snapshot: Snapshot
   ok?: boolean
   exit?: number
   inputIdentity?: string
@@ -1157,20 +942,13 @@ export interface LintPayload {
   truncation?: Truncation
   selection?: SelectionSummary
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "LintRulesResult".
- */
 export interface LintRulesResult {
   rules: LintRule[]
   config: LintConfiguration
   skipped: SkippedRule[]
+  snapshot: Snapshot
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "LintRule".
- */
 export interface LintRule {
   id: string
   defaultSeverity: string
@@ -1185,10 +963,6 @@ export interface LintRule {
   kind: string
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "LintConfiguration".
- */
 export interface LintConfiguration {
   rules: {
     [k: string]: {
@@ -1197,39 +971,28 @@ export interface LintConfiguration {
   }
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "SkippedRule".
- */
 export interface SkippedRule {
   id: string
   rule: number
   reason: string
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "CallGraphEdge".
- */
 export interface CallGraphEdge {
   caller: string
   callee: string
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "CallGraphSelectionResult".
- */
 export interface CallGraphSelectionResult {
   edges: CallGraphEdge[]
   selection: SelectionSummary
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "CostEstimateResult".
- */
+export interface CappedListResult {
+  items: unknown[]
+  truncation: Truncation
+}
 export interface CostEstimateResult {
+  snapshot: Snapshot
   exact: {
     /**
      * Emitted artifact size in bytes; null when emission fails — emittedBytesUnavailable names the reason (ADR-0030 decision 3: unknown is not a value).
@@ -1270,10 +1033,6 @@ export interface CostEstimateResult {
   selection?: SelectionSummary
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "TargetMetadataResult".
- */
 export interface TargetMetadataResult {
   catalogVersion: string
   locales: string[]
@@ -1302,10 +1061,6 @@ export interface EditValidationPayload {
   preview?: SourcePreview[]
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "SourcePreview".
- */
 export interface SourcePreview {
   source: string
   source_identity: string
@@ -1328,10 +1083,6 @@ export interface ProviderMutationPayload {
   provider_message?: string
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "LookupResult".
- */
 export interface LookupResult {
   language: string
   owner: string
@@ -1343,10 +1094,6 @@ export interface LookupResult {
   }
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "LookupEntry".
- */
 export interface LookupEntry {
   identity: string
   kind: string
@@ -1375,10 +1122,6 @@ export interface LookupEntry {
   }
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "ListEntriesResult".
- */
 export interface ListEntriesResult {
   language: string
   owner: string
@@ -1398,22 +1141,14 @@ export interface ListEntriesResult {
   }
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "ToolErrorInfo".
- */
 export interface ToolErrorInfo {
   /**
-   * Machine-readable refusal code. `stale-id` reports a numeric symbol id or rule index issued by an earlier program: after the loaded project changed on disk, the id must be re-read from a fresh `symbols`/`rules` listing or replaced by the declared name.
+   * Machine-readable refusal code. `stale-id` reports a numeric symbol id or rule index whose `snapshot` does not match the served program's generation — either absent or issued by an earlier program. Re-issue the id from a current response's `snapshot` and id members, or address by declared name.
    */
   code: string
   message: string
   [k: string]: unknown
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "RepeatedValue".
- */
 export interface RepeatedValue1 {
   /**
    * The canonical spelling of the repeated expression.
@@ -1428,16 +1163,15 @@ export interface RepeatedValue1 {
    */
   spanKind: 'expression' | 'enclosing-loop'
 }
-/**
- * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
- * via the `definition` "LintRuleSummary".
- */
 export interface LintRuleSummary {
   id: string
   effectiveSeverity: string
   [k: string]: unknown
 }
 export type CapabilitiesResult = Capabilities
+export type RulesResult = RulesListingResult
+export type SymbolsResult = SymbolsListingResult
+export type FindingsResult = FindingsListingResult
 export type LintResult = LintPayload
 export type ValidateEditTransactionResult = EditValidationPayload
 export type ProviderValidateEditResult = ProviderMutationPayload

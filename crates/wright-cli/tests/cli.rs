@@ -1763,7 +1763,11 @@ fn essential_reports_bound_lists_and_expose_expansion() {
         );
         let text = run(&["inspect", query, path.to_str().unwrap()]);
         let stdout = String::from_utf8_lossy(&text.stdout);
-        assert!(stdout.contains("truncated: items=20/21"), "{stdout}");
+        // The truncation record sits on the wrapped list member (#595).
+        assert!(
+            stdout.contains(&format!("truncated: {query}=20/21")),
+            "{stdout}"
+        );
         let all = parse_json(
             &run(&[
                 "inspect",
@@ -3325,7 +3329,7 @@ for line in sys.stdin:
     ]);
     assert_eq!(envelope["command"], "symbols");
     assert_eq!(envelope["ok"], true);
-    let symbols = envelope["result"].as_array().unwrap();
+    let symbols = envelope["result"]["symbols"].as_array().unwrap();
     assert!(
         symbols.iter().any(|symbol| symbol["name"] == "setup"),
         "{envelope}"
@@ -3619,7 +3623,7 @@ fn symbols_lists_program_symbols_and_filters_by_kind() {
     let envelope = parse_json(&output.stdout);
     assert_eq!(envelope["command"], "symbols");
     assert_eq!(envelope["wright"]["contract"], "wright-result/v1");
-    let symbols = envelope["result"].as_array().unwrap();
+    let symbols = envelope["result"]["symbols"].as_array().unwrap();
     assert_eq!(symbols.len(), 5);
     let rule = symbols
         .iter()
@@ -3629,11 +3633,11 @@ fn symbols_lists_program_symbols_and_filters_by_kind() {
     assert_eq!(rule["span"]["path"], "cake.txt");
 
     // --only narrows to one symbol kind; --kind stays the input frontend.
-    // `kind` predates #531: alone it keeps the bare array, while --max (or
-    // --file) wraps the list in `{symbols, selection}` (#531).
+    // The listing always reports `{symbols, snapshot}` (#595); --max (or
+    // --file) adds `selection` (#531).
     let output = run(&["inspect", "symbols", path, "--only", "rule", "-f", "json"]);
     let envelope = parse_json(&output.stdout);
-    let symbols = envelope["result"].as_array().unwrap();
+    let symbols = envelope["result"]["symbols"].as_array().unwrap();
     assert_eq!(symbols.len(), 2);
     assert!(symbols.iter().all(|symbol| symbol["kind"] == "rule"));
 
@@ -4382,7 +4386,7 @@ fn cost_rule_drilldown_reconciles_to_the_rule_total() {
 
     let rules_json = run(&["inspect", "rules", path, "-f", "json"]);
     let rules_json = parse_json(&rules_json.stdout);
-    let inspect_span = rules_json["result"]
+    let inspect_span = rules_json["result"]["rules"]
         .as_array()
         .unwrap()
         .iter()

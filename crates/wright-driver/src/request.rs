@@ -7,10 +7,12 @@ use serde::{Deserialize, Serialize};
 /// declared name.
 ///
 /// Numeric ids keep their established meaning — the semantic index's symbol
-/// id for `references`/`usage`, the rule index for `cfg` — so existing
-/// numeric requests are unchanged. A name resolves against the loaded
-/// program's semantic index: unmatched or ambiguous names produce a
-/// structured error, never a guess.
+/// id for `references`/`usage`, the rule index for `cfg`/`rules` — and are
+/// scoped to the program generation that issued them (#595): a request
+/// carrying a numeric address must also carry that response's `snapshot`
+/// value, or the request is refused `stale-id`. A name resolves against the
+/// loaded program's semantic index: unmatched or ambiguous names produce a
+/// structured error, never a guess, and `snapshot` is ignored for them.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged, expecting = "a numeric id or a declared name string")]
 pub enum Address {
@@ -91,6 +93,11 @@ pub enum ToolRequest {
         name: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rule: Option<Address>,
+        /// The program generation a numeric `rule` was issued under (#595):
+        /// required with a numeric address, refused `stale-id` when absent
+        /// or mismatched, and ignored for a declared name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         file: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -117,6 +124,12 @@ pub enum ToolRequest {
     /// `file`, `max`; #531).
     References {
         symbol: Address,
+        /// The program generation a numeric `symbol`/`rule` was issued
+        /// under (#595): required with a numeric address, refused
+        /// `stale-id` when absent or mismatched, and ignored when every
+        /// address in the request is a declared name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         kind: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -130,12 +143,24 @@ pub enum ToolRequest {
     },
     /// Usage counts for a symbol, addressed by its numeric id or its name
     /// (#429).
-    Usage { symbol: Address },
+    Usage {
+        symbol: Address,
+        /// The program generation a numeric `symbol` was issued under
+        /// (#595): required with a numeric address, refused `stale-id` when
+        /// absent or mismatched, and ignored for a declared name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot: Option<u64>,
+    },
     /// The control-flow graph of one rule, addressed by its numeric index or
     /// its name (#429); optionally narrowed by an inline selection (`kind`,
     /// `max`; #531).
     Cfg {
         rule: Address,
+        /// The program generation a numeric `rule` was issued under (#595):
+        /// required with a numeric address, refused `stale-id` when absent
+        /// or mismatched, and ignored for a declared name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         kind: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]

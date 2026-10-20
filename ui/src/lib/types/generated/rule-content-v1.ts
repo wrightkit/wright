@@ -77,10 +77,6 @@ export interface Event {
    */
   subroutine?: string
 }
-/**
- * This interface was referenced by `WorkshopRsRuleContentV1`'s JSON-Schema
- * via the `definition` "Condition".
- */
 export interface Condition {
   value: Node
   /**
@@ -88,30 +84,18 @@ export interface Condition {
    */
   disabled?: true
 }
-/**
- * This interface was referenced by `WorkshopRsRuleContentV1`'s JSON-Schema
- * via the `definition` "StringNode".
- */
 export interface StringNode {
   /**
    * A custom string literal's text.
    */
   string: string
 }
-/**
- * This interface was referenced by `WorkshopRsRuleContentV1`'s JSON-Schema
- * via the `definition` "LocalizedStringNode".
- */
 export interface LocalizedStringNode {
   /**
    * A preset localized string's catalog id.
    */
   localizedString: string
 }
-/**
- * This interface was referenced by `WorkshopRsRuleContentV1`'s JSON-Schema
- * via the `definition` "EnumNode".
- */
 export interface EnumNode {
   /**
    * The canonical enum domain name, e.g. `Status`.
@@ -122,38 +106,22 @@ export interface EnumNode {
    */
   member: string
 }
-/**
- * This interface was referenced by `WorkshopRsRuleContentV1`'s JSON-Schema
- * via the `definition` "VariableNode".
- */
 export interface VariableNode {
   /**
    * A declared global or player variable name used as an argument.
    */
   variable: string
 }
-/**
- * This interface was referenced by `WorkshopRsRuleContentV1`'s JSON-Schema
- * via the `definition` "SubroutineNode".
- */
 export interface SubroutineNode {
   /**
    * A declared subroutine name used as an argument.
    */
   subroutine: string
 }
-/**
- * This interface was referenced by `WorkshopRsRuleContentV1`'s JSON-Schema
- * via the `definition` "CallNode".
- */
 export interface CallNode {
   call: CallId
   args: Node[]
 }
-/**
- * This interface was referenced by `WorkshopRsRuleContentV1`'s JSON-Schema
- * via the `definition` "Action".
- */
 export interface Action {
   call: CallId
   args: Node[]

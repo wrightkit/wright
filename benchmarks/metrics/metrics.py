@@ -247,10 +247,38 @@ def _numeric_fields(result: dict, fields: list[str], prefix: str = "") -> dict:
     }
 
 
+_LISTING_KEYS = ("symbols", "rules", "persistentObjects", "findings", "items")
+
+
+def _snapshot_listing(result):
+    """The id list a `{key: [...], snapshot}` listing carries (#595)."""
+    if not isinstance(result, dict) or "snapshot" not in result:
+        return None
+    lists = [key for key, value in result.items() if isinstance(value, list)]
+    return result[lists[0]] if len(lists) == 1 and lists[0] in _LISTING_KEYS else None
+
+
+def _listing_measurement(result):
+    """Stamped listings measure in the legacy `items` vocabulary (#595)."""
+    listed = _snapshot_listing(result)
+    if listed is None:
+        return None
+    measured = {"items": listed}
+    for key, value in result.items():
+        if key == "snapshot" or isinstance(value, list):
+            continue
+        if key == "truncation" and isinstance(value, dict) and len(value) == 1:
+            value = {"items": next(iter(value.values()))}
+        measured[key] = value
+    return listed if len(measured) == 1 else measured
+
+
 def agent_counts(op: str, result) -> dict:
     """Result-shape counts for one agent operation's `result` payload."""
     if not isinstance(result, (list, dict)):
         return {}
+    if op in _LISTING_KEYS[:4] and (measured := _listing_measurement(result)) is not None:
+        result = measured
     if isinstance(result, list):
         if op == "symbols":
             return _typed_items(result, "symbol")
@@ -315,6 +343,9 @@ def cli_counts(command: str, envelope: dict) -> dict:
         return {}
     counts: dict[str, float] = {"diagnostics": len(envelope.get("diagnostics") or [])}
     result = envelope.get("result")
+    listed = _listing_measurement(result)
+    if listed is not None:
+        result = listed
     if isinstance(result, list):
         counts["items"] = len(result)
         return counts
@@ -388,15 +419,17 @@ def run_agent_ops(
                     }
                     continue
                 metrics[key] = metric_record(lines_bytes, latencies, counts)
+                # Numeric addresses echo the listing's generation (#595).
+                snap = last_result.get("snapshot") if isinstance(last_result, dict) else None
                 if op == "symbols":
                     sid = _first_id(last_result)
-                    if sid is not None:
-                        targets["references"] = {"symbol": sid}
-                        targets["usage"] = {"symbol": sid}
+                    if sid is not None and snap is not None:
+                        targets["references"] = {"symbol": sid, "snapshot": snap}
+                        targets["usage"] = {"symbol": sid, "snapshot": snap}
                 if op == "rules":
                     rid = _first_id(last_result)
-                    if rid is not None:
-                        targets["cfg"] = {"rule": rid}
+                    if rid is not None and snap is not None:
+                        targets["cfg"] = {"rule": rid, "snapshot": snap}
             except (queue.Empty, TimeoutError):
                 metrics[key] = {"error": "timeout"}
                 break
@@ -407,7 +440,7 @@ def _first_id(items) -> int | None:
     """Numeric id of the first listed item — unambiguous within the session
     where a name may resolve to several rules/symbols (`ambiguous-rule`)."""
     if isinstance(items, dict):
-        items = items.get("items", [])
+        items = _snapshot_listing(items) or items.get("items", [])
     for item in items if isinstance(items, list) else []:
         ident = item.get("id") if isinstance(item, dict) else None
         if isinstance(ident, int):
@@ -418,7 +451,7 @@ def _first_id(items) -> int | None:
 def unique_name(items) -> str | None:
     """Choose an address that stays unambiguous across the complete query."""
     if isinstance(items, dict):
-        items = items.get("items", [])
+        items = _snapshot_listing(items) or items.get("items", [])
     names = [item.get("name") for item in items if isinstance(item, dict)] if isinstance(items, list) else []
     counts = Counter(names)
     return next((name for name in names if isinstance(name, str) and counts[name] == 1), None)
@@ -439,7 +472,8 @@ def default_counts(payload) -> dict:
         elif isinstance(value, dict):
             counts.update({f"{key}.{k}": v for k, v in default_counts(value).items()})
         elif isinstance(value, (int, float)) and not isinstance(value, bool):
-            counts[key] = value
+            if key != "snapshot":  # generation stamp is metadata, not content
+                counts[key] = value
     return counts
 
 

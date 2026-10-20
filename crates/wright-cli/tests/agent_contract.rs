@@ -139,15 +139,19 @@ fn service_responses() -> Vec<(String, Value)> {
     .expect("session starts");
     let mut service = ToolService::new(&mut session).expect("service loads the project");
 
-    let rule = match service.handle(&ToolRequest::Rules {
+    let (rule, generation) = match service.handle(&ToolRequest::Rules {
         name: None,
         file: None,
         max: None,
         rule: None,
+        snapshot: None,
         content: false,
         all: false,
     }) {
-        ToolResponse::Ok { result } => result[0]["id"].as_u64().unwrap(),
+        ToolResponse::Ok { result } => (
+            result["rules"][0]["id"].as_u64().unwrap(),
+            result["snapshot"].as_u64().unwrap(),
+        ),
         ToolResponse::Error { error } => panic!("rules failed: {error:?}"),
     };
     let symbol = match service.handle(&ToolRequest::Symbols {
@@ -156,7 +160,7 @@ fn service_responses() -> Vec<(String, Value)> {
         max: None,
         all: false,
     }) {
-        ToolResponse::Ok { result } => result[0]["id"].as_u64().unwrap(),
+        ToolResponse::Ok { result } => result["symbols"][0]["id"].as_u64().unwrap(),
         ToolResponse::Error { error } => panic!("symbols failed: {error:?}"),
     };
 
@@ -165,8 +169,16 @@ fn service_responses() -> Vec<(String, Value)> {
         .map(|mut request| {
             let operation = request["op"].as_str().unwrap().to_string();
             match operation.as_str() {
-                "references" | "usage" => request["symbol"] = json!(symbol),
-                "cfg" => request["rule"] = json!(rule),
+                // #595: a numeric address carries the generation that issued
+                // it — the `snapshot` the id-reporting response returned.
+                "references" | "usage" => {
+                    request["symbol"] = json!(symbol);
+                    request["snapshot"] = json!(generation);
+                }
+                "cfg" => {
+                    request["rule"] = json!(rule);
+                    request["snapshot"] = json!(generation);
+                }
                 _ => {}
             }
             let parsed =
@@ -259,15 +271,19 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
         serde_json::from_value::<ToolRequest>(request).expect("request deserializes");
     }
 
-    // #429: both address spellings validate and deserialize; other types are
-    // rejected rather than coerced.
+    // #429 + #595: both address spellings validate and deserialize; a
+    // numeric address requires its issuing `snapshot` while a declared name
+    // ignores it. Other types are rejected rather than coerced.
     for request in [
-        json!({"op":"references","symbol":0}),
+        json!({"op":"references","symbol":0,"snapshot":1}),
         json!({"op":"references","symbol":"counter"}),
-        json!({"op":"usage","symbol":1}),
+        json!({"op":"references","symbol":"counter","snapshot":1}),
+        json!({"op":"usage","symbol":1,"snapshot":1}),
         json!({"op":"usage","symbol":"counter"}),
-        json!({"op":"cfg","rule":0}),
+        json!({"op":"cfg","rule":0,"snapshot":1}),
         json!({"op":"cfg","rule":"intro"}),
+        json!({"op":"rules","rule":0,"snapshot":1}),
+        json!({"op":"rules","rule":"intro"}),
     ] {
         assert!(
             request_schema.is_valid(&request),
@@ -279,10 +295,17 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
         json!({"op":"references","symbol":true}),
         json!({"op":"usage","symbol":1.5}),
         json!({"op":"cfg","rule":null}),
+        // #595: a numeric address without its issuing snapshot is invalid —
+        // and even where a request still parses, the service refuses it
+        // `stale-id`.
+        json!({"op":"references","symbol":0}),
+        json!({"op":"usage","symbol":1}),
+        json!({"op":"cfg","rule":0}),
+        json!({"op":"rules","rule":0}),
     ] {
         assert!(
             !request_schema.is_valid(&request),
-            "schema accepted a non-id/name address: {request}"
+            "schema accepted a non-id/name address or a snapshot-less id: {request}"
         );
     }
 
@@ -547,6 +570,7 @@ fn cli_and_agent_selections_return_the_same_set() {
             ToolRequest::Rules {
                 name: None,
                 rule: None,
+                snapshot: None,
                 file: None,
                 max: Some(1),
                 content: true,
@@ -558,6 +582,7 @@ fn cli_and_agent_selections_return_the_same_set() {
             ToolRequest::Rules {
                 name: None,
                 rule: Some("player starts".into()),
+                snapshot: None,
                 file: None,
                 max: None,
                 content: true,
@@ -614,6 +639,10 @@ fn cli_and_agent_selections_return_the_same_set() {
                 if !envelope {
                     result.as_object_mut().unwrap().remove("ok");
                     result.as_object_mut().unwrap().remove("exit");
+                    // #595: the service stamps its serving `snapshot`;
+                    // the one-shot `lint` command has no session
+                    // generation and reports none.
+                    result.as_object_mut().unwrap().remove("snapshot");
                 }
                 if envelope {
                     result["result"].clone()
@@ -653,6 +682,7 @@ fn rule_content_conforms_to_the_owner_schema() {
     let ToolResponse::Ok { result } = service.handle(&ToolRequest::Rules {
         name: None,
         rule: None,
+        snapshot: None,
         file: None,
         max: None,
         content: true,
@@ -835,6 +865,13 @@ fn assert_default_surface_parity_on_input(
     };
     let output = run(true);
     let cli: Value = serde_json::from_slice(&output.stdout).unwrap();
+    // #595: `snapshot` scopes a long-lived service's generation; the
+    // one-shot `lint` command builds its own payload without a session, so
+    // its result carries none. The CLI query subcommands do carry it — they
+    // run `ToolService` internally, so the member compares equal there.
+    if operation == "lint" {
+        result.as_object_mut().unwrap().remove("snapshot");
+    }
     if result.get("result").is_some() && result.get("command").is_some() {
         assert_eq!(result["ok"], cli["ok"], "{operation} verdict");
         assert_eq!(result["exit"], cli["exit"], "{operation} exit");

@@ -485,6 +485,7 @@ impl CompilerSession {
             tool_result(service.handle_full(&ToolRequest::Rules {
                 name,
                 rule: rule.map(Address::Name),
+                snapshot: None,
                 file,
                 max,
                 content,
@@ -531,13 +532,17 @@ impl CompilerSession {
         self.service_query("refs", move |service| {
             let references = tool_result(service.handle_full(&ToolRequest::References {
                 symbol: symbol.clone(),
+                snapshot: None,
                 kind,
                 rule,
                 file,
                 max,
                 all: true,
             }))?;
-            let usage = tool_result(service.handle_full(&ToolRequest::Usage { symbol }))?;
+            let usage = tool_result(service.handle_full(&ToolRequest::Usage {
+                symbol,
+                snapshot: None,
+            }))?;
             let mut result = usage.as_object().cloned().unwrap_or_default();
             match references {
                 serde_json::Value::Object(mut selected) => {
@@ -569,6 +574,7 @@ impl CompilerSession {
         self.service_query("cfg", move |service| {
             tool_result(service.handle_full(&ToolRequest::Cfg {
                 rule,
+                snapshot: None,
                 kind,
                 max,
                 all: true,
