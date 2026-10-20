@@ -3,6 +3,8 @@
 pub mod cache;
 pub mod config;
 pub mod diag;
+#[cfg(test)]
+mod diagnostic_code_grammar_tests;
 pub mod edit;
 pub mod essential;
 pub mod fix;

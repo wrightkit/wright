@@ -66,6 +66,19 @@ Stable contract fields: `wright.contract`, `command`, `ok`, `exit`,
 `result` shape. Human-readable `message` wording is explicitly not part of the
 machine contract.
 
+A diagnostic code is a single whitespace-free token of `.`-separated
+segments of lowercase ASCII letters, digits, and hyphens
+(`[a-z0-9]+(-[a-z0-9]+)*` per segment). Most codes are one segment
+(`parse-error`, `unknown-enum-member`); Workshop completeness residuals
+carry the owner classification namespaced as `workshop.<kind>.<name>`
+(`workshop.unknown-value.sqrt`). Codes embedding an owner- or
+provider-typed token keep the owner's spelling verbatim:
+`provider-refusal-<refusalCode>` carries the LPP refusal code
+(`provider-refusal-compile.tooLarge`), provider diagnostics keep the
+provider's `code`, and owner reconstructor or refusal codes keep the
+owner's spelling; only the Wright-owned part of such a code follows this
+grammar.
+
 Diagnostic codes are stable per stage: `parse-error`, `unknown-*`,
 `unsupported-construct`, `settings-invalid`, `settings-placement` (frontend),
 `settings-unknown-key`, `settings-unknown-value` (validation), `convert-error`/
