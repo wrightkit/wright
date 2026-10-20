@@ -177,18 +177,18 @@ the successful `result` payload.
 | `capabilities` | none | Service name/version, `wright-agent/v1`, result contract, operation names, `result_schemas` (operation to committed-schema definition), languages, and profiles |
 | `compile` | optional `output` (file path), optional `force`, optional `to` (output locale) | `wright-result/v1` compile envelope: verdict, diagnostics, `output.written_to` and `output.sha256`; the program text is written to the file and never returned. See [Compile output](#compile-output-adr-0025) |
 | `check` | optional `all` | `wright-result/v1` check envelope |
-| `analyze` | optional selection, optional `all` | `wright-result/v1` essential analysis envelope |
-| `inspect` | optional `all` | `wright-result/v1` overview and rule names |
-| `project` | none | Loaded program origin, files, counts, and findings summary |
-| `rules` | optional selection, optional `content` | Canonical Workshop rules. Each entry carries `id`, `name`, `event` (the rule's event binding, `subroutine:<name>` for subroutine rules), and `span`; `{"rules": [...], "selection": {...}}` when a selection is applied. See [Rule content](#rule-content-adr-0024) |
-| `symbols` | optional selection, optional `all` | Symbols; `{"symbols": [...], "selection": {...}}` when `file`/`max` is applied (a `kind`-only request keeps the bare array) |
-| `references` | required `symbol` (id or name), optional selection and `all` | Usage header and references for the symbol; `{"references": [...], "selection": {...}}` when a selection is applied. Each reference carries `owningRule` — the owning rule's `{id, name, span}` — so a consumer renders a rule location without a `rules` lookup (#792) |
-| `usage` | required `symbol` (id or name) | Usage counts for the symbol, plus its resolved `id` and `kind` |
-| `cfg` | required `rule` (index or name), optional selection and `all` | Control-flow graph for the rule, plus `selection` when a selection is applied |
-| `findings` | optional selection, optional `all` | Wright static-analysis findings; `{"findings": [...], "selection": {...}}` when a selection is applied |
-| `persistentObjects` | optional `all` | Persistent Workshop object facts |
-| `lint` | optional selection, optional `all` | Finding counts by severity and actionable findings; effective policy is available from `lintRules` |
-| `lintRules` | none | Registered lint rules with full metadata and effective configuration |
+| `analyze` | optional selection, optional `all` | `wright-result/v1` essential analysis envelope; the envelope's `snapshot` scopes the ids `result` issues (#595) |
+| `inspect` | optional `all` | `wright-result/v1` overview and rule names; the envelope's `snapshot` scopes the ids `result` issues |
+| `project` | none | Loaded program origin, files, counts, and findings summary; `snapshot` scopes the ids it reports |
+| `rules` | optional selection, optional `content`, `snapshot` when `rule` is numeric | `{"rules": [...], "snapshot": n}` — canonical Workshop rules. Each entry carries `id`, `name`, `event` (the rule's event binding, `subroutine:<name>` for subroutine rules), and `span`; `selection` joins when a selection is applied. See [Rule content](#rule-content-adr-0024) |
+| `symbols` | optional selection, optional `all` | `{"symbols": [...], "snapshot": n}` — symbols; `selection` joins when `file`/`max` is applied |
+| `references` | required `symbol` (id or name), `snapshot` when an address is numeric, optional selection and `all` | Usage header and references for the symbol, with `snapshot` scoping the ids; `{"references": [...], "selection": {...}}` when a selection is applied. Each reference carries `owningRule` — the owning rule's `{id, name, span}` — so a consumer renders a rule location without a `rules` lookup (#792) |
+| `usage` | required `symbol` (id or name), `snapshot` when `symbol` is numeric | Usage counts for the symbol, plus its resolved `id`, `kind`, and the `snapshot` scoping them |
+| `cfg` | required `rule` (index or name), `snapshot` when `rule` is numeric, optional selection and `all` | Control-flow graph for the rule, plus `selection` when a selection is applied |
+| `findings` | optional selection, optional `all` | `{"findings": [...], "snapshot": n}` — Wright static-analysis findings; `selection` joins when applied |
+| `persistentObjects` | optional `all` | `{"persistentObjects": [...], "snapshot": n}` — persistent Workshop object facts |
+| `lint` | optional selection, optional `all` | Finding counts by severity and actionable findings, with `snapshot` scoping the rule indexes it reports; effective policy is available from `lintRules` |
+| `lintRules` | none | Registered lint rules with full metadata and effective configuration; `snapshot` scopes the rule indexes `skipped` reports |
 | `callGraph` | optional selection, optional `all` | Subroutine call graph; `{"edges": [...], "selection": {...}}` when a selection is applied |
 | `costEstimate` | optional selection, optional `rule`, optional `all` | Exact generated-resource counts (`programRules` counts every declared rule, disabled included — the same inventory `program.rules` reports; `exact.emittedBytes` reports `null` plus `emittedBytesUnavailable` when emission fails, never `0`), `elementCount` (the canonical Workshop structure counted against the client element budget; `rules` ranked by count, largest first. `index` is the canonical rule position and each entry carries a resolved `span`; the 5 largest by default, `all: true` for every rule; when the count cannot run `elementCount` carries only `budget` — the known limit still reports — and `elementCountUnavailable` names the reason, never a zero (ADR-0030 decision 3)), findings (the same configured-registry set `lint` serves, each with a resolved `span`), `skipped` rule evaluations (canonical CFG unavailable — the same disclosure `lint` carries), and `selection` when applied. With `rule` the result is the rule drill-down (#724): `rule` (identity, `count`, `span`), `statements[]` (direct children ranked by recursive `count`, each with `name`, `count`, `span`) and `byNode[]` (each node's own `base_count + adjustment` cost summed per canonical node name with `occurrences`; the entries sum to the rule's `count`) | The default result carries no run-cache comparison — an agent requests one explicitly by passing the reference record as inline data, not a file path (ADR-0027, #723). |
 | `targetMetadata` | none | Canonical target/catalog metadata |
@@ -271,19 +271,36 @@ surfaces inside the `wright-result/v1` envelope's diagnostics (the same
 diagnostic a snapshot query refuses with), matching the embedding API's
 `service.check()`/`service.compile()` outcomes.
 
-Numeric symbol ids and rule indexes are valid only for the program that
-issued them. After a content-changing reload, a request carrying a numeric
-`symbol` or `rule` is refused `stale-id` until
-the client observes the new space: a successful `symbols` response
-re-establishes symbol ids, a successful `rules` response re-establishes
-rule indexes, and an `ambiguous-symbol`/`ambiguous-rule` refusal
-re-establishes its own space because it already names the current
-candidates. Every numeric address a request carries is checked, including
-a `references` request's numeric `rule` filter (#592). A reload that
-succeeds after earlier attempts failed is no exception: ids issued by the
-last served program do not silently validate against the repaired one.
-Name addressing resolves against the current program in both states and is
-never stale.
+Numeric symbol ids and rule indexes are scoped to the program generation
+that issued them, identified by `snapshot` (#595). `snapshot` is an opaque
+integer the service increments each time it adopts a program: the initial
+load, every content-changing reload, and every recovery after a failed
+load — a failed attempt invalidates the served snapshot, so even restoring
+the input to byte-identical content adopts a fresh generation and ids
+issued under the dropped one stay refused. It is a generation counter, not
+a content digest.
+
+Every response that issues numeric `symbol`/`rule` addresses reports the
+generation they belong to in a `snapshot` member: `symbols`, `rules`,
+`references`, `usage`, `findings`, `lint`, `lintRules`,
+`persistentObjects`, `inspect`, `analyze`, `project`, and `costEstimate`
+all carry it (on the `wright-result/v1` envelope for `inspect`/`analyze`,
+in the result object elsewhere). A request that addresses a symbol or rule
+numerically must echo that value: `references` and `usage` require
+`snapshot` when `symbol` is an integer, `cfg` and `rules` when `rule` is an
+integer, and `references` requires it when its `rule` filter is an integer
+too — every numeric address a request carries is checked (#592). A numeric
+address without `snapshot`, or with a generation other than the served
+one, is refused `stale-id`; the client re-issues the id from a current
+response's `snapshot` and id members, or addresses by declared name.
+Listing `symbols` or `rules` has no side effect on id validity — a
+`symbols {max: 0}` response still reports `snapshot`, and it is the value,
+not the act of listing, that scopes the ids it reports.
+
+`snapshot` is ignored when every address in the request is a declared
+name: name addressing resolves against the current program in both states
+and is never stale, so a name-addressed request may carry a stale or
+absent `snapshot` without error.
 
 `inputIdentity` labels the input, not its freshness: it is the SHA-256
 digest of the input's primary entry source (the provider's
@@ -295,9 +312,10 @@ The `stale-id` refusals above, not this value, report freshness.
 The responses that issue numeric ids or indexes into the loaded program are
 `symbols` (symbol ids), `rules` (rule indexes), `usage` (the resolved `id`),
 `references`, `findings`, `lint`, `persistentObjects`, `inspect`, `analyze`,
-and the `ambiguous-*` refusal candidates, plus `skipped[].rule` in `lint`
-and `lintRules`. `cfg` block ids are local to that one response and are not
-program addresses; `project`, `callGraph`, `costEstimate`, `targetMetadata`,
+`project`, `costEstimate`, and the `ambiguous-*` refusal candidates, plus
+`skipped[].rule` in `lint` and `lintRules`. `cfg` block ids are local to
+that one response and are not
+program addresses; `callGraph`, `targetMetadata`,
 `capabilities`, the `compile`/`check` envelopes, and the edit/provider
 payloads issue no program ids. Positional fields such as `rule`, `action`,
 `value`, and `span.file` inside findings and references are coordinates into
@@ -312,7 +330,9 @@ declared rule name. Names resolve against the loaded program's semantic index
 in the driver, so a request never has to learn the program's numbering.
 Symbol ids and rule indexes are different spaces (a rule's symbol id is not
 its rule index). Numeric ids keep their established meaning, and both
-addressings return the same payload for the same target.
+addressings return the same payload for the same target. A `snapshot` on a
+name-addressed request is ignored (#595): names always resolve against the
+served program, whatever generation the caller last observed.
 
 An unmatched name returns a structured `unknown-symbol` or `unknown-rule`
 error whose message names up to three nearest declared names (case-insensitive edit

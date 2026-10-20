@@ -2017,6 +2017,7 @@ fn opy_rules_content_reports_names_unavailable() {
     let ToolResponse::Ok { result } = service.handle(&ToolRequest::Rules {
         name: None,
         rule: None,
+        snapshot: None,
         file: None,
         max: None,
         content: true,

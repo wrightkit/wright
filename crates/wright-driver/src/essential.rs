@@ -143,7 +143,7 @@ fn fit_finding_bytes(output: &mut Value, total: usize) {
 pub fn lint(result: &Value, all: bool) -> Value {
     let items = list(result, "findings");
     let mut output = json!({"counts":{"findings":counts(items)},"findings":findings(items),"expand":"lint --all / all: true; lintRules for effective configuration and rule metadata","next":crate::result::next::LINT});
-    for key in ["ok", "exit", "selection", "fixes", "next"] {
+    for key in ["ok", "exit", "selection", "fixes", "next", "snapshot"] {
         if let Some(value) = result.get(key) {
             output[key] = value.clone();
         }

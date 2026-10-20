@@ -111,7 +111,11 @@ fn jsonrpc_transport_serves_requests_and_workflows() {
     );
     assert_eq!(responses.len(), 6);
     assert_eq!(responses[0]["id"], 1);
-    assert_eq!(responses[0]["result"].as_array().unwrap().len(), 2);
+    assert_eq!(responses[0]["result"]["rules"].as_array().unwrap().len(), 2);
+    assert!(
+        responses[0]["result"]["snapshot"].is_u64(),
+        "the rules listing reports the generation that issued the indexes"
+    );
     assert_eq!(responses[1]["id"], 2);
     assert_eq!(responses[2]["id"], 3);
     assert_eq!(responses[2]["result"]["command"], "compile");
@@ -246,7 +250,7 @@ fn jsonrpc_transport_preserves_application_errors_and_protocol_errors() {
         "jsonrpc",
         &corpus_workshop("synthetic/control-flow"),
         &[
-            r#"{"jsonrpc":"2.0","id":1,"method":"request","params":{"op":"references","symbol":999999}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"method":"request","params":{"op":"references","symbol":999999,"snapshot":1}}"#,
             r#"{"jsonrpc":"2.0","id":2,"method":"missing"}"#,
             "not json",
             r#"{"jsonrpc":"2.0","id":4,"method":"request"}"#,
@@ -788,7 +792,7 @@ fn stdio_transport_recovers_in_the_same_process() {
     .unwrap();
     let healed = exchange(r#"{"op":"symbols"}"#);
     assert!(
-        healed["result"]
+        healed["result"]["symbols"]
             .as_array()
             .unwrap()
             .iter()
@@ -851,9 +855,11 @@ fn stdio_transport_serves_mutation_operations() {
 fn a_long_lived_session_observes_disk_changes_and_enforces_fresh_ids() {
     // #471: `wright serve` is long-lived, so an agent mutating the project on
     // disk between requests must observe the new program — while numeric ids
-    // issued before the reload refuse `stale-id` until the new space is
-    // listed. Stdio `writeln!` flushes per line, so requests and edits can
-    // interleave on one live process.
+    // are scoped to the `snapshot` generation that issued them (#595): a
+    // numeric address without it, or carrying the generation a reload
+    // dropped, refuses `stale-id`, and only the value — never the act of
+    // listing — scopes the ids a response reports. Stdio `writeln!` flushes
+    // per line, so requests and edits can interleave on one live process.
     use std::io::{BufRead, BufReader};
     let dir = std::env::temp_dir().join(format!("wright-serve-471-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -922,43 +928,67 @@ rule ("extra") {
     };
 
     let names = |response: &serde_json::Value| {
-        response["result"]
+        response["result"]["symbols"]
             .as_array()
             .unwrap()
             .iter()
             .map(|symbol| symbol["name"].as_str().unwrap().to_string())
             .collect::<Vec<_>>()
     };
-    assert_eq!(names(&exchange(r#"{"op":"symbols"}"#)), ["score", "setup"]);
-    assert!(
-        exchange(r#"{"op":"references","symbol":0}"#)
-            .get("result")
-            .is_some()
+    let listed = exchange(r#"{"op":"symbols"}"#);
+    assert_eq!(names(&listed), ["score", "setup"]);
+    let snapshot = listed["result"]["snapshot"].as_u64().unwrap();
+
+    // A numeric address without the issuing generation refuses `stale-id`,
+    // and `symbols {max:0}` — a pure query — does not unlock the space.
+    let empty = exchange(r#"{"op":"symbols","max":0}"#);
+    assert_eq!(empty["result"]["snapshot"], snapshot, "{empty}");
+    assert_eq!(
+        exchange(r#"{"op":"references","symbol":0}"#)["error"]["code"],
+        "stale-id"
     );
+    assert_eq!(
+        exchange(r#"{"op":"usage","symbol":0}"#)["error"]["code"],
+        "stale-id"
+    );
+    let live = format!(r#"{{"op":"references","symbol":0,"snapshot":{snapshot}}}"#);
+    assert!(exchange(&live).get("result").is_some(), "{}", live);
 
     std::fs::write(&input, v2).unwrap();
 
-    let stale = exchange(r#"{"op":"references","symbol":0}"#);
+    let stale = exchange(&live);
     assert_eq!(stale["error"]["code"], "stale-id", "{stale}");
     let by_name = exchange(r#"{"op":"references","symbol":"points"}"#);
     assert!(by_name.get("result").is_some(), "{by_name}");
+    let name_stale = format!(r#"{{"op":"references","symbol":"points","snapshot":{snapshot}}}"#);
+    assert!(
+        exchange(&name_stale).get("result").is_some(),
+        "a name ignores the stale generation: {name_stale}"
+    );
     assert_eq!(
         exchange(r#"{"op":"cfg","rule":1}"#)["error"]["code"],
         "stale-id"
     );
 
-    // Listings re-establish their own spaces.
-    assert_eq!(
-        names(&exchange(r#"{"op":"symbols"}"#)),
-        ["points", "setup", "extra"]
-    );
+    // The new generation's listing scopes the ids it reports.
+    let listed = exchange(r#"{"op":"symbols"}"#);
+    assert_eq!(names(&listed), ["points", "setup", "extra"]);
+    let snapshot = listed["result"]["snapshot"].as_u64().unwrap();
     assert!(
-        exchange(r#"{"op":"references","symbol":0}"#)
+        exchange(&format!(
+            r#"{{"op":"references","symbol":0,"snapshot":{snapshot}}}"#
+        ))
+        .get("result")
+        .is_some()
+    );
+    let rules = exchange(r#"{"op":"rules"}"#);
+    let rule_generation = rules["result"]["snapshot"].as_u64().unwrap();
+    assert_eq!(rule_generation, snapshot, "{rules}");
+    assert!(
+        exchange(&format!(r#"{{"op":"cfg","rule":1,"snapshot":{snapshot}}}"#))
             .get("result")
             .is_some()
     );
-    assert!(exchange(r#"{"op":"rules"}"#).get("result").is_some());
-    assert!(exchange(r#"{"op":"cfg","rule":1}"#).get("result").is_some());
 
     let check = exchange(r#"{"op":"check"}"#);
     assert_eq!(check["result"]["ok"], false, "{check}");
@@ -1311,16 +1341,21 @@ rule ("dup") {
             serde_json::json!({"symbol": "nope"}),
         ),
         mcp_call(2, "wright_usage", serde_json::json!({"symbol": "nope"})),
-        mcp_call(3, "wright_references", serde_json::json!({"symbol": 42})),
+        mcp_call(
+            3,
+            "wright_references",
+            serde_json::json!({"symbol": 42, "snapshot": 1}),
+        ),
         mcp_call(4, "wright_not_a_tool", serde_json::json!({})),
         mcp_call(5, "wright_symbols", serde_json::json!("not-an-object")),
+        mcp_call(6, "wright_references", serde_json::json!({"symbol": 0})),
     ];
     let responses = run_lines(
         "mcp",
         &input,
         &lines.iter().map(String::as_str).collect::<Vec<_>>(),
     );
-    assert_eq!(responses.len(), 5);
+    assert_eq!(responses.len(), 6);
     let refused = |response: &serde_json::Value| -> serde_json::Value {
         assert_eq!(response["result"]["isError"], true, "{response}");
         mcp_payload(response)
@@ -1328,6 +1363,8 @@ rule ("dup") {
     assert_eq!(refused(&responses[0])["code"], "unknown-symbol");
     assert_eq!(refused(&responses[1])["code"], "unknown-symbol");
     assert_eq!(refused(&responses[2])["code"], "invalid-id");
+    // A numeric address without its issuing `snapshot` refuses `stale-id` (#595).
+    assert_eq!(refused(&responses[5])["code"], "stale-id");
     assert_eq!(responses[3]["error"]["code"], -32602);
     assert_eq!(responses[4]["error"]["code"], -32602);
 
@@ -1374,9 +1411,11 @@ rule ("dup") {
 
 #[test]
 fn mcp_transport_observes_disk_changes_and_enforces_fresh_ids() {
-    // #473 + #471: an MCP session is long-lived like `serve` stdio — a file
-    // edit on disk is reflected by the next tools/call, and numeric ids
-    // issued before the reload refuse `stale-id` until re-listed.
+    // #473 + #471 + #595: an MCP session is long-lived like `serve` stdio —
+    // a file edit on disk is reflected by the next tools/call, and numeric
+    // ids are scoped to the `snapshot` generation the response reported:
+    // absent or carried over from a dropped generation, a numeric address
+    // refuses `stale-id`.
     use std::io::{BufRead, BufReader};
     let dir = std::env::temp_dir().join(format!("wright-serve-mcp-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -1419,36 +1458,55 @@ fn mcp_transport_observes_disk_changes_and_enforces_fresh_ids() {
         })
     };
     let symbols = exchange(call("wright_symbols", serde_json::json!({})));
-    let names: Vec<String> = mcp_payload(&symbols)
+    let names: Vec<String> = mcp_payload(&symbols)["symbols"]
         .as_array()
         .unwrap()
         .iter()
         .map(|symbol| symbol["name"].as_str().unwrap().to_string())
         .collect();
     assert_eq!(names, ["score", "setup"]);
-    let numeric = exchange(call("wright_references", serde_json::json!({"symbol": 0})));
+    let snapshot = mcp_payload(&symbols)["snapshot"].as_u64().unwrap();
+
+    // A numeric address without its issuing generation refuses `stale-id`;
+    // echoing the generation resolves.
+    let bare = exchange(call("wright_references", serde_json::json!({"symbol": 0})));
+    assert_eq!(mcp_payload(&bare)["code"], "stale-id", "{bare}");
+    let numeric = exchange(call(
+        "wright_references",
+        serde_json::json!({"symbol": 0, "snapshot": snapshot}),
+    ));
     assert!(numeric["result"].get("isError").is_none(), "{numeric}");
 
     std::fs::write(&input, v2).unwrap();
 
-    let stale = exchange(call("wright_references", serde_json::json!({"symbol": 0})));
+    let stale = exchange(call(
+        "wright_references",
+        serde_json::json!({"symbol": 0, "snapshot": snapshot}),
+    ));
     assert_eq!(mcp_payload(&stale)["code"], "stale-id", "{stale}");
     assert_eq!(stale["result"]["isError"], true);
     let by_name = exchange(call(
         "wright_references",
-        serde_json::json!({"symbol": "points"}),
+        serde_json::json!({"symbol": "points", "snapshot": snapshot}),
     ));
-    assert!(by_name["result"].get("isError").is_none(), "{by_name}");
+    assert!(
+        by_name["result"].get("isError").is_none(),
+        "a name ignores the dropped generation: {by_name}"
+    );
 
     let symbols = exchange(call("wright_symbols", serde_json::json!({})));
-    let names: Vec<String> = mcp_payload(&symbols)
+    let names: Vec<String> = mcp_payload(&symbols)["symbols"]
         .as_array()
         .unwrap()
         .iter()
         .map(|symbol| symbol["name"].as_str().unwrap().to_string())
         .collect();
     assert_eq!(names, ["points", "setup"]);
-    let numeric = exchange(call("wright_references", serde_json::json!({"symbol": 0})));
+    let snapshot = mcp_payload(&symbols)["snapshot"].as_u64().unwrap();
+    let numeric = exchange(call(
+        "wright_references",
+        serde_json::json!({"symbol": 0, "snapshot": snapshot}),
+    ));
     assert!(numeric["result"].get("isError").is_none(), "{numeric}");
 
     drop(stdin);

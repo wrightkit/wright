@@ -68,10 +68,12 @@ pub const OPERATIONS: &[&str] = &[
 /// declared name.
 ///
 /// Numeric ids keep their established meaning — the semantic index's symbol
-/// id for `references`/`usage`, the rule index for `cfg` — so existing
-/// numeric requests are unchanged. A name resolves against the loaded
-/// program's semantic index: unmatched or ambiguous names produce a
-/// structured error, never a guess.
+/// id for `references`/`usage`, the rule index for `cfg`/`rules` — and are
+/// scoped to the program generation that issued them (#595): a request
+/// carrying a numeric address must also carry that response's `snapshot`
+/// value, or the request is refused `stale-id`. A name resolves against the
+/// loaded program's semantic index: unmatched or ambiguous names produce a
+/// structured error, never a guess, and `snapshot` is ignored for them.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged, expecting = "a numeric id or a declared name string")]
 pub enum Address {
@@ -152,6 +154,11 @@ pub enum ToolRequest {
         name: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rule: Option<Address>,
+        /// The program generation a numeric `rule` was issued under (#595):
+        /// required with a numeric address, refused `stale-id` when absent
+        /// or mismatched, and ignored for a declared name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         file: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -178,6 +185,12 @@ pub enum ToolRequest {
     /// `file`, `max`; #531).
     References {
         symbol: Address,
+        /// The program generation a numeric `symbol`/`rule` was issued
+        /// under (#595): required with a numeric address, refused
+        /// `stale-id` when absent or mismatched, and ignored when every
+        /// address in the request is a declared name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         kind: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -191,12 +204,24 @@ pub enum ToolRequest {
     },
     /// Usage counts for a symbol, addressed by its numeric id or its name
     /// (#429).
-    Usage { symbol: Address },
+    Usage {
+        symbol: Address,
+        /// The program generation a numeric `symbol` was issued under
+        /// (#595): required with a numeric address, refused `stale-id` when
+        /// absent or mismatched, and ignored for a declared name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot: Option<u64>,
+    },
     /// The control-flow graph of one rule, addressed by its numeric index or
     /// its name (#429); optionally narrowed by an inline selection (`kind`,
     /// `max`; #531).
     Cfg {
         rule: Address,
+        /// The program generation a numeric `rule` was issued under (#595):
+        /// required with a numeric address, refused `stale-id` when absent
+        /// or mismatched, and ignored for a declared name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         kind: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -369,13 +394,13 @@ pub struct ToolService<'a> {
     /// than failing the service, so `None` is the unloaded state — never an
     /// empty placeholder program.
     snapshot: Option<Snapshot>,
-    /// Whether the symbol ids a client holds were issued by the current
-    /// program (#471): a reload clears it until a `symbols` listing or an
-    /// `ambiguous-symbol` refusal names the current space.
-    symbol_ids_current: bool,
-    /// The rule-index counterpart of `symbol_ids_current`, re-established by
-    /// `rules` and `ambiguous-rule` (#471).
-    rule_ids_current: bool,
+    /// The served program's generation (#595): `adopt` increments it, so
+    /// every adopted snapshot — the deferred initial load, a
+    /// content-changing reload, a recovery after a failed load — is a
+    /// distinct generation. Responses that issue numeric `symbol`/`rule`
+    /// addresses report it as `snapshot`, and a request carrying a numeric
+    /// address must send that value back or be refused `stale-id`.
+    generation: u64,
     /// How many times an observed disk change reloaded the program — the
     /// observable hook for "unchanged inputs are not reloaded" (#471).
     reloads: usize,
@@ -406,8 +431,7 @@ impl<'a> ToolService<'a> {
         let mut service = ToolService {
             session,
             snapshot: None,
-            symbol_ids_current: true,
-            rule_ids_current: true,
+            generation: 0,
             reloads: 0,
             invalidated: false,
         };
@@ -430,6 +454,14 @@ impl<'a> ToolService<'a> {
     /// The first successful program-reading request populates it.
     pub fn loaded(&self) -> Option<&Loaded> {
         self.snapshot.as_ref().map(|snapshot| &snapshot.loaded)
+    }
+
+    /// The served program's generation (#595) — the value responses report
+    /// as `snapshot` and the value a numeric `symbol`/`rule` request must
+    /// carry. `None` while no snapshot is adopted (deferred initial load or
+    /// the invalidated state after a failed load).
+    pub fn snapshot_generation(&self) -> Option<u64> {
+        self.snapshot.as_ref().map(|_| self.generation)
     }
 
     /// Full semantic-service builds behind this service's session (#513) —
@@ -516,6 +548,7 @@ impl<'a> ToolService<'a> {
                     other => return other,
                 };
                 let mut payload = usage;
+                payload["snapshot"] = json!(self.generation);
                 if let Some(selected) = result.as_object_mut() {
                     payload["references"] = selected.remove("references").unwrap_or_default();
                     if let Some(selection) = selected.remove("selection") {
@@ -552,9 +585,8 @@ impl<'a> ToolService<'a> {
             _ => {}
         }
         let response = hotpath::measure_block!(request_label(request), self.dispatch(request));
-        self.note_id_space(request, &response);
         self.adopt_session_snapshot();
-        response
+        self.stamp_snapshot(request, response)
     }
 
     /// Whether the request requires a canonical snapshot to answer (#471,
@@ -591,8 +623,9 @@ impl<'a> ToolService<'a> {
         let Some(snapshot) = &self.snapshot else {
             // The deferred initial load, or recovery after an invalidated
             // snapshot (#512). Recovery counts as a reload — an observed
-            // disk change brought the project back — and keeps the dropped
-            // snapshot's id space stale until it is re-observed.
+            // disk change brought the project back — and `adopt` gives it a
+            // fresh generation, so ids issued by the dropped program stay
+            // refused (#595).
             let loaded = self.session.load().map_err(Self::loader_error)?;
             self.adopt(loaded);
             if self.invalidated {
@@ -614,16 +647,14 @@ impl<'a> ToolService<'a> {
         };
         self.adopt(loaded);
         self.reloads += 1;
-        self.symbol_ids_current = false;
-        self.rule_ids_current = false;
         Ok(())
     }
 
     /// Drop the served snapshot after a failed refresh (#512). The next
     /// program-reading request must load again — restoring the input's exact
     /// previous bytes must not fingerprint-match the pre-failure snapshot
-    /// back to life — and ids issued by the dropped program refuse
-    /// `stale-id` until the new space is observed.
+    /// back to life — and ids it issued keep their old generation, so they
+    /// refuse `stale-id` against the recovered program (#595).
     fn invalidate(&mut self) {
         self.clear_snapshot();
         self.invalidated = true;
@@ -631,8 +662,6 @@ impl<'a> ToolService<'a> {
 
     fn clear_snapshot(&mut self) {
         self.snapshot = None;
-        self.symbol_ids_current = false;
-        self.rule_ids_current = false;
     }
 
     /// The freshness gate for `check`/`compile` (#591): like [`Self::refresh`]
@@ -677,11 +706,16 @@ impl<'a> ToolService<'a> {
         }
     }
 
+    /// Adopt a successfully loaded program: every adoption is a new
+    /// generation (#595), so numeric addresses a previous generation issued
+    /// refuse `stale-id` — including the byte-identical recovery case, which
+    /// is still a new program even though `inputIdentity` is unchanged.
     fn adopt(&mut self, loaded: Loaded) {
         let semantic = self.session.shared_semantic(&loaded);
         let lint_semantic = (!self.session.config.lint.rules.is_empty())
             .then(|| semantic.with_lint_config(self.session.config.lint.clone()));
         let fingerprint = input::disk_fingerprint(&self.session.config, &loaded.input);
+        self.generation += 1;
         self.snapshot = Some(Snapshot {
             loaded,
             semantic,
@@ -732,51 +766,94 @@ impl<'a> ToolService<'a> {
         &self.snapshot().semantic
     }
 
-    /// Refuse a numeric id that was issued by an earlier program (#471):
-    /// `stale-id` until the client observes the current space. Every
-    /// numeric address a request carries is checked — a `references` rule
-    /// filter is the same rule-space address `cfg` consumes (#592). Name
-    /// addressing resolves against the loaded index and is always fresh.
+    /// The snapshot gate for numeric addresses (#595): every numeric
+    /// symbol/rule address a request carries must be scoped to the served
+    /// program's generation — the request's `snapshot` member must match
+    /// `self.generation`. A missing token or a different generation is
+    /// refused `stale-id`, so a numeric id captured from an earlier program
+    /// can never silently resolve against a reloaded or recovered one. A
+    /// `references` request's numeric `rule` filter is checked like its
+    /// `symbol` (#592). A request whose addresses are all declared names is
+    /// generation-agnostic: it ignores `snapshot` and resolves against the
+    /// current program.
     fn stale_id(&self, request: &ToolRequest) -> Option<ToolErrorInfo> {
-        let stale = match request {
-            ToolRequest::References { symbol, rule, .. } => {
-                (matches!(symbol, Address::Id(_)) && !self.symbol_ids_current)
-                    || (matches!(rule, Some(Address::Id(_))) && !self.rule_ids_current)
-            }
-            ToolRequest::Usage { symbol } => {
-                matches!(symbol, Address::Id(_)) && !self.symbol_ids_current
-            }
-            ToolRequest::Cfg { rule, .. } => {
-                matches!(rule, Address::Id(_)) && !self.rule_ids_current
-            }
-            ToolRequest::Rules {
-                rule: Some(Address::Id(_)),
+        let (numeric, snapshot) = match request {
+            ToolRequest::References {
+                symbol,
+                rule,
+                snapshot,
                 ..
-            } => !self.rule_ids_current,
-            _ => false,
+            } => (
+                matches!(symbol, Address::Id(_)) || matches!(rule, Some(Address::Id(_))),
+                *snapshot,
+            ),
+            ToolRequest::Usage { symbol, snapshot } => {
+                (matches!(symbol, Address::Id(_)), *snapshot)
+            }
+            ToolRequest::Cfg { rule, snapshot, .. } => (matches!(rule, Address::Id(_)), *snapshot),
+            ToolRequest::Rules { rule, snapshot, .. } => {
+                (matches!(rule, Some(Address::Id(_))), *snapshot)
+            }
+            _ => (false, None),
         };
-        stale.then(|| ToolErrorInfo {
-            code: "stale-id".to_string(),
-            message: "the loaded project changed on disk; numeric symbol ids and rule indexes issued before the reload are no longer valid — list `symbols` or `rules` again, or address by name".to_string(),
-        })
+        if !numeric {
+            return None;
+        }
+        match snapshot {
+            Some(issued) if issued == self.generation => None,
+            Some(issued) => Some(ToolErrorInfo {
+                code: "stale-id".to_string(),
+                message: format!(
+                    "numeric symbol ids and rule indexes are scoped to the program generation that issued them: the served program is snapshot {} but this request's addresses were issued under snapshot {issued} — re-issue the ids from a current `symbols`/`rules` (or other id-reporting) response, or address by name",
+                    self.generation
+                ),
+            }),
+            None => Some(ToolErrorInfo {
+                code: "stale-id".to_string(),
+                message: format!(
+                    "a numeric `symbol`/`rule` address is scoped to the program generation that issued it: send the `snapshot` value an id-reporting response (`symbols`, `rules`, `inspect`, `project`, …) returned — the current generation is {}",
+                    self.generation
+                ),
+            }),
+        }
     }
 
-    /// A request that names the current id space re-establishes it (#471): a
-    /// successful `symbols`/`rules` listing, or an `ambiguous-*` refusal that
-    /// already reports the current candidates.
-    fn note_id_space(&mut self, request: &ToolRequest, response: &ToolResponse) {
-        match response {
-            ToolResponse::Ok { .. } => match request {
-                ToolRequest::Symbols { .. } => self.symbol_ids_current = true,
-                ToolRequest::Rules { .. } => self.rule_ids_current = true,
-                _ => {}
-            },
-            ToolResponse::Error { error } => match error.code.as_str() {
-                "ambiguous-symbol" => self.symbol_ids_current = true,
-                "ambiguous-rule" => self.rule_ids_current = true,
-                _ => {}
-            },
+    /// Report the serving generation on every response that issues numeric
+    /// `symbol`/`rule` addresses (#595): `snapshot` joins the result object
+    /// — or wraps a bare-array listing result under its key — so a client
+    /// always reads the generation the ids it holds belong to. It lands on
+    /// the `wright-result/v1` envelope for `analyze`/`inspect` and in the
+    /// payload for the query operations.
+    fn stamp_snapshot(&self, request: &ToolRequest, mut response: ToolResponse) -> ToolResponse {
+        let ToolResponse::Ok { result } = &mut response else {
+            return response;
+        };
+        let list_key = match request {
+            ToolRequest::Rules { .. } => Some("rules"),
+            ToolRequest::Symbols { .. } => Some("symbols"),
+            ToolRequest::Findings { .. } => Some("findings"),
+            ToolRequest::PersistentObjects { .. } => Some("persistentObjects"),
+            // `references` without selection fields answers a bare array —
+            // the `handle` merge then moves `references`/`selection` onto the
+            // usage payload and stamps `snapshot` there.
+            ToolRequest::References { .. } => Some("references"),
+            ToolRequest::Project
+            | ToolRequest::Usage { .. }
+            | ToolRequest::Lint { .. }
+            | ToolRequest::LintRules
+            | ToolRequest::CostEstimate { .. }
+            | ToolRequest::Analyze { .. }
+            | ToolRequest::Inspect { .. } => None,
+            _ => return response,
+        };
+        let generation = json!(self.generation);
+        if result.is_array() {
+            let items = std::mem::take(result);
+            *result = json!({ list_key.unwrap(): items, "snapshot": generation });
+        } else {
+            result["snapshot"] = generation;
         }
+        response
     }
 
     fn dispatch(&mut self, request: &ToolRequest) -> ToolResponse {
@@ -828,6 +905,7 @@ impl<'a> ToolService<'a> {
                 max,
                 content,
                 all,
+                ..
             } => self.rules(
                 name,
                 rule.as_ref(),
@@ -852,7 +930,7 @@ impl<'a> ToolService<'a> {
                 file.as_deref(),
                 *max,
             ),
-            ToolRequest::Usage { symbol } => match self.symbol_address(symbol) {
+            ToolRequest::Usage { symbol, .. } => match self.symbol_address(symbol) {
                 Ok(symbol) => self.semantic_query(Request::GetUsage { symbol }),
                 Err(error) => ToolResponse::Error { error },
             },
@@ -1524,9 +1602,10 @@ impl<'a> ToolService<'a> {
                         .to_string(),
                 });
             }
-            return self
-                .cost_estimate_rule(loaded, rule)
-                .map(|result| (result, None));
+            return self.cost_estimate_rule(loaded, rule).map(|mut result| {
+                result["snapshot"] = json!(self.generation);
+                (result, None)
+            });
         }
         let locale = CompilerSession::locale_for(loaded);
         let emitted = workshop_rs::emitter::emit(&loaded.program, self.session.catalog(), &locale);
@@ -1641,6 +1720,7 @@ impl<'a> ToolService<'a> {
         if let Some(outcome) = &outcome {
             result["selection"] = serde_json::to_value(outcome).expect("selection serializes");
         }
+        result["snapshot"] = json!(self.generation);
         Ok((result, outcome))
     }
 
