@@ -129,10 +129,10 @@ fn fit_finding_bytes(output: &mut Value, total: usize) {
         if note["total"].is_null() {
             note["total"] = json!(total);
         }
-        if note["byCode"].is_null() {
-            if let Some(by_code) = &by_code {
-                note["byCode"] = by_code.clone();
-            }
+        if note["byCode"].is_null()
+            && let Some(by_code) = &by_code
+        {
+            note["byCode"] = by_code.clone();
         }
         note["shown"] = json!(shown);
         note["truncated"] = json!(note["total"].as_u64().unwrap_or(total as u64) - shown as u64);

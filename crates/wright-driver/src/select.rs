@@ -90,10 +90,10 @@ impl FindingSelection {
     /// rule: silently selecting nothing would report a clean result for a
     /// typo'd id.
     pub fn validate(&self, registry: &LintRegistry) -> Result<(), String> {
-        if let Some(rule) = &self.rule {
-            if !registry.contains(rule) {
-                return Err(format!("unknown rule id '{rule}'"));
-            }
+        if let Some(rule) = &self.rule
+            && !registry.contains(rule)
+        {
+            return Err(format!("unknown rule id '{rule}'"));
         }
         Ok(())
     }

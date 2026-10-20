@@ -398,17 +398,17 @@ fn diagnostics<T: serde::Serialize + ResultPresentation>(
             &format!("diagnostics: showing 20 of {total}; --all to see every item"),
         );
     }
-    if let Some(selection) = &envelope.selection {
-        if selection.withheld > 0 {
-            dline(
-                ctx,
-                1,
-                &format!(
-                    "... {} withheld (--max)",
-                    plural(selection.withheld, "diagnostic", "diagnostics")
-                ),
-            );
-        }
+    if let Some(selection) = &envelope.selection
+        && selection.withheld > 0
+    {
+        dline(
+            ctx,
+            1,
+            &format!(
+                "... {} withheld (--max)",
+                plural(selection.withheld, "diagnostic", "diagnostics")
+            ),
+        );
     }
 }
 
@@ -457,10 +457,10 @@ fn diagnostic_item(ctx: &RenderContext<'_>, diagnostic: &wright_driver::Diagnost
         }
     }
     notes.push(diagnostic.stage.as_str().to_string());
-    if let Some(source) = &diagnostic.source {
-        if source.kind != "workshop" {
-            notes.push(format!("{kind} source", kind = source.kind));
-        }
+    if let Some(source) = &diagnostic.source
+        && source.kind != "workshop"
+    {
+        notes.push(format!("{kind} source", kind = source.kind));
     }
     dnote(ctx, 1, &format!("= {}", notes.join(" · ")));
 }
@@ -572,10 +572,10 @@ fn finding_section(
         if let Some(boundedness) = first.get("boundedness").and_then(Value::as_str) {
             notes.push(format!("boundedness: {boundedness}"));
         }
-        if let Some(repeated) = first.get("repeated").and_then(Value::as_u64) {
-            if repeated > 1 {
-                notes.push(format!("occurs at {repeated} sites"));
-            }
+        if let Some(repeated) = first.get("repeated").and_then(Value::as_u64)
+            && repeated > 1
+        {
+            notes.push(format!("occurs at {repeated} sites"));
         }
         if let Some(unmapped) = unmapped_positions_note(&unmapped_positions(group)) {
             notes.push(unmapped);
@@ -1734,10 +1734,10 @@ pub(crate) fn lookup(result: &Value, pres: Presentation) {
         if identity != spelling {
             line.push_str(&format!("  {identity}"));
         }
-        if let Some(display) = entry["displayName"].as_str() {
-            if display != spelling {
-                line.push_str(&format!("  — {display}"));
-            }
+        if let Some(display) = entry["displayName"].as_str()
+            && display != spelling
+        {
+            line.push_str(&format!("  — {display}"));
         }
         println!("  {line}");
     }

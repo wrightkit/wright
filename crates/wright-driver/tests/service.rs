@@ -473,10 +473,10 @@ fn inspect_results_resolve_span_paths() {
     fn collect(value: &serde_json::Value, spans: &mut Vec<serde_json::Value>) {
         match value {
             serde_json::Value::Object(object) => {
-                if let Some(span) = object.get("span") {
-                    if span.is_object() {
-                        spans.push(span.clone());
-                    }
+                if let Some(span) = object.get("span")
+                    && span.is_object()
+                {
+                    spans.push(span.clone());
                 }
                 object.values().for_each(|value| collect(value, spans));
             }

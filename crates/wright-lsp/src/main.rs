@@ -857,10 +857,10 @@ fn source_version(service: &LanguageService, source: &str) -> Option<i32> {
 
 #[allow(deprecated)]
 fn initialize_root(params: &InitializeParams) -> Option<PathBuf> {
-    if let Some(uri) = &params.root_uri {
-        if let Some(path) = uri_to_path(uri.as_str()) {
-            return Some(path);
-        }
+    if let Some(uri) = &params.root_uri
+        && let Some(path) = uri_to_path(uri.as_str())
+    {
+        return Some(path);
     }
     params
         .workspace_folders

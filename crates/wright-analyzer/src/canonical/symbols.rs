@@ -367,17 +367,17 @@ impl SemanticIndex {
             .map(|s| s.id)
     }
     fn walk_event(&mut self, event: &Event, rule: RuleId, program: &Program) {
-        if let Event::Subroutine(name) = event {
-            if let Some(symbol) = self.find_symbol(SymbolKind::Subroutine, name) {
-                self.push(
-                    symbol,
-                    ReferenceKind::Definition,
-                    Some(rule),
-                    None,
-                    None,
-                    program.rule_event_name_span(rule),
-                );
-            }
+        if let Event::Subroutine(name) = event
+            && let Some(symbol) = self.find_symbol(SymbolKind::Subroutine, name)
+        {
+            self.push(
+                symbol,
+                ReferenceKind::Definition,
+                Some(rule),
+                None,
+                None,
+                program.rule_event_name_span(rule),
+            );
         }
     }
     fn walk_action(
@@ -409,26 +409,26 @@ impl SemanticIndex {
             }
             _ => None,
         };
-        if let Some((kind, name, reads_old_value)) = variable {
-            if let Some(symbol) = self.find_symbol(kind, name) {
+        if let Some((kind, name, reads_old_value)) = variable
+            && let Some(symbol) = self.find_symbol(kind, name)
+        {
+            self.push(
+                symbol,
+                ReferenceKind::Write,
+                Some(rule),
+                Some(action_id),
+                None,
+                identifier,
+            );
+            if reads_old_value {
                 self.push(
                     symbol,
-                    ReferenceKind::Write,
+                    ReferenceKind::Read,
                     Some(rule),
                     Some(action_id),
                     None,
                     identifier,
                 );
-                if reads_old_value {
-                    self.push(
-                        symbol,
-                        ReferenceKind::Read,
-                        Some(rule),
-                        Some(action_id),
-                        None,
-                        identifier,
-                    );
-                }
             }
         }
         match action {

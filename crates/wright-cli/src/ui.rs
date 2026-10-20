@@ -247,16 +247,16 @@ mod server {
                     .to_vec(),
             );
         }
-        if let Some(sent) = header(request, "Origin") {
-            if sent != origin {
-                return respond(
-                    403,
-                    "text/plain; charset=utf-8",
-                    "forbidden: the request origin is not this UI"
-                        .as_bytes()
-                        .to_vec(),
-                );
-            }
+        if let Some(sent) = header(request, "Origin")
+            && sent != origin
+        {
+            return respond(
+                403,
+                "text/plain; charset=utf-8",
+                "forbidden: the request origin is not this UI"
+                    .as_bytes()
+                    .to_vec(),
+            );
         }
         let path = request.url().split(['?', '#']).next().unwrap_or("/");
         // An absolute-form request-target (`POST http://host/api`, legal

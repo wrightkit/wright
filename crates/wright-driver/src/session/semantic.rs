@@ -102,25 +102,25 @@ fn semantic_facts(
                     });
                     // Report rules keep canonical source/WIR order, so the
                     // element node at `index` belongs to this rule.
-                    if let Ok(report) = &element_count {
-                        if let Some(node) = report.rules.get(index) {
-                            let mut condition_elements = 0usize;
-                            let mut conditions = Vec::new();
-                            for child in &node.children {
-                                if child.kind != ElementNodeKind::Condition {
-                                    continue;
-                                }
-                                condition_elements += child.count;
-                                conditions.push(serde_json::json!({
-                                    "index": conditions.len(),
-                                    "elements": child.count,
-                                    "span": wright_analyzer::canonical::span_json(child.span),
-                                }));
+                    if let Ok(report) = &element_count
+                        && let Some(node) = report.rules.get(index)
+                    {
+                        let mut condition_elements = 0usize;
+                        let mut conditions = Vec::new();
+                        for child in &node.children {
+                            if child.kind != ElementNodeKind::Condition {
+                                continue;
                             }
-                            entry["elements"] = serde_json::json!(node.count);
-                            entry["conditionElements"] = serde_json::json!(condition_elements);
-                            entry["conditions"] = serde_json::Value::Array(conditions);
+                            condition_elements += child.count;
+                            conditions.push(serde_json::json!({
+                                "index": conditions.len(),
+                                "elements": child.count,
+                                "span": wright_analyzer::canonical::span_json(child.span),
+                            }));
                         }
+                        entry["elements"] = serde_json::json!(node.count);
+                        entry["conditionElements"] = serde_json::json!(condition_elements);
+                        entry["conditions"] = serde_json::Value::Array(conditions);
                     }
                     entry
                 })

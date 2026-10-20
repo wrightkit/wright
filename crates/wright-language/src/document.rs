@@ -155,10 +155,10 @@ pub fn path_to_uri(path: &Path) -> Option<String> {
 }
 
 pub fn source_to_uri(source: &str) -> Option<String> {
-    if let Ok(url) = url::Url::parse(source) {
-        if url.scheme() == "file" {
-            return Some(url.to_string());
-        }
+    if let Ok(url) = url::Url::parse(source)
+        && url.scheme() == "file"
+    {
+        return Some(url.to_string());
     }
     path_to_uri(Path::new(source))
 }

@@ -122,66 +122,65 @@ impl CanonicalCfgBuilder<'_> {
                 index += 1;
                 continue;
             }
-            if matches!(self.actions[index], Action::If { .. }) {
-                if let Some(parts) = if_parts(self.actions, index) {
-                    let merge = self.new_block("block");
-                    let mut false_target = if let Some((else_start, else_end)) = parts.else_body {
-                        let (else_entry, else_exit) = self.sequence(else_start, else_end, "block");
-                        self.edge(else_exit, merge, "fallthrough");
-                        Some(else_entry)
-                    } else {
-                        None
-                    };
-                    for branch_data in parts.branches.into_iter().rev() {
-                        let branch = self.new_block("if");
-                        self.blocks[branch]
-                            .actions
-                            .push(branch_data.condition_action);
-                        let (body_entry, body_exit) =
-                            self.sequence(branch_data.body_start, branch_data.body_end, "block");
-                        self.edge(branch, body_entry, "true");
-                        self.edge(body_exit, merge, "fallthrough");
-                        self.edge(branch, false_target.unwrap_or(merge), "false");
-                        false_target = Some(branch);
-                    }
-                    self.edge(current, false_target.unwrap_or(merge), "fallthrough");
-                    current = merge;
-                    index = parts.close + 1;
-                    continue;
+            if matches!(self.actions[index], Action::If { .. })
+                && let Some(parts) = if_parts(self.actions, index)
+            {
+                let merge = self.new_block("block");
+                let mut false_target = if let Some((else_start, else_end)) = parts.else_body {
+                    let (else_entry, else_exit) = self.sequence(else_start, else_end, "block");
+                    self.edge(else_exit, merge, "fallthrough");
+                    Some(else_entry)
+                } else {
+                    None
+                };
+                for branch_data in parts.branches.into_iter().rev() {
+                    let branch = self.new_block("if");
+                    self.blocks[branch]
+                        .actions
+                        .push(branch_data.condition_action);
+                    let (body_entry, body_exit) =
+                        self.sequence(branch_data.body_start, branch_data.body_end, "block");
+                    self.edge(branch, body_entry, "true");
+                    self.edge(body_exit, merge, "fallthrough");
+                    self.edge(branch, false_target.unwrap_or(merge), "false");
+                    false_target = Some(branch);
                 }
+                self.edge(current, false_target.unwrap_or(merge), "fallthrough");
+                current = merge;
+                index = parts.close + 1;
+                continue;
             }
             if matches!(
                 self.actions[index],
                 Action::While { .. }
                     | Action::ForGlobalVariable { .. }
                     | Action::ForPlayerVariable { .. }
-            ) {
-                if let Some(close) = matching_end(self.actions, index) {
-                    let kind = if matches!(self.actions[index], Action::While { .. }) {
-                        "while"
+            ) && let Some(close) = matching_end(self.actions, index)
+            {
+                let kind = if matches!(self.actions[index], Action::While { .. }) {
+                    "while"
+                } else {
+                    "for"
+                };
+                let header = self.new_block(kind);
+                self.blocks[header].actions.push(index);
+                self.edge(current, header, "fallthrough");
+                let (body_entry, body_exit) = self.sequence(index + 1, close, "block");
+                self.edge(
+                    header,
+                    body_entry,
+                    if kind == "while" {
+                        "true"
                     } else {
-                        "for"
-                    };
-                    let header = self.new_block(kind);
-                    self.blocks[header].actions.push(index);
-                    self.edge(current, header, "fallthrough");
-                    let (body_entry, body_exit) = self.sequence(index + 1, close, "block");
-                    self.edge(
-                        header,
-                        body_entry,
-                        if kind == "while" {
-                            "true"
-                        } else {
-                            "fallthrough"
-                        },
-                    );
-                    self.edge(body_exit, header, "back");
-                    let after = self.new_block("block");
-                    self.edge(header, after, "loop-exit");
-                    current = after;
-                    index = close + 1;
-                    continue;
-                }
+                        "fallthrough"
+                    },
+                );
+                self.edge(body_exit, header, "back");
+                let after = self.new_block("block");
+                self.edge(header, after, "loop-exit");
+                current = after;
+                index = close + 1;
+                continue;
             }
             match &self.actions[index] {
                 Action::Else | Action::ElseIf { .. } | Action::End => {}
