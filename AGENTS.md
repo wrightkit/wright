@@ -139,6 +139,11 @@ git diff --check
 The workspace builds with the single toolchain pinned in `rust-toolchain.toml`, which
 `rust-version` and every CI job match; there is no separate MSRV gate.
 
+`.githooks-local/pre-commit` runs the Wright-only part of these checks locally
+(the vendored agent guide against its `wrightkit/skills` pin, needs a sibling
+`skills` checkout). Shared checks come from the global hooks described in
+`wrightkit/.github` `docs/mechanical-guards.md`; CI remains the gate.
+
 Run relevant scenario/compatibility gates for the changed surface. Real-project
 support claims require real-project validation in addition to focused tests.
 
