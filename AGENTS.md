@@ -141,6 +141,11 @@ The workspace declares `rust-version = "1.85.0"`. Before pushing, also run
 newer syntax such as let-chains passes on stable and is caught only by the
 `Rust (1.85.0)` CI job (wright#743).
 
+`.githooks-local/pre-commit` runs the Wright-only part of these checks locally
+(the vendored agent guide against its `wrightkit/skills` pin, needs a sibling
+`skills` checkout). Shared checks come from the global hooks described in
+`wrightkit/.github` `docs/mechanical-guards.md`; CI remains the gate.
+
 Run relevant scenario/compatibility gates for the changed surface. Real-project
 support claims require real-project validation in addition to focused tests.
 
