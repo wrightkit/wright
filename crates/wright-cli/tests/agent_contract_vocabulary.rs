@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use jsonschema::JSONSchema;
+use jsonschema::validator_for;
 use serde_json::{Value, json};
 use wright_driver::service::{ToolRequest, ToolResponse, ToolService};
 use wright_driver::{CompilerSession, InputSpec, SessionConfig, SourceKind};
@@ -36,7 +36,7 @@ fn lookup_result_schema_covers_callable_returns_and_variadic() {
     .unwrap();
     let mut document = schema.clone();
     document["$ref"] = Value::String("#/$defs/LookupResult".to_string());
-    let result_schema = JSONSchema::compile(&document).expect("result schema compiles");
+    let result_schema = validator_for(&document).expect("result schema compiles");
 
     let ToolResponse::Ok { result } = service_response(&ToolRequest::Lookup {
         language: "workshop".to_string(),
@@ -73,7 +73,7 @@ fn list_entries_request_and_result_validate_against_the_committed_schema() {
     .unwrap();
     let mut request = schema.clone();
     request["$ref"] = Value::String("#/$defs/ListEntriesRequest".to_string());
-    let request_schema = JSONSchema::compile(&request).expect("request schema compiles");
+    let request_schema = validator_for(&request).expect("request schema compiles");
     let valid = json!({"op":"listEntries","language":"workshop","kind":"enumMember","within":"Hero","pageSize":500,"cursor":"a.b"});
     assert!(request_schema.is_valid(&valid));
     for invalid in [
@@ -88,7 +88,7 @@ fn list_entries_request_and_result_validate_against_the_committed_schema() {
 
     let mut result_document = schema.clone();
     result_document["$ref"] = Value::String("#/$defs/ListEntriesResult".to_string());
-    let result_schema = JSONSchema::compile(&result_document).expect("result schema compiles");
+    let result_schema = validator_for(&result_document).expect("result schema compiles");
     let ToolResponse::Ok { result } = service_response(&ToolRequest::ListEntries {
         language: "workshop".to_string(),
         kind: "action".to_string(),
