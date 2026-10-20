@@ -36,6 +36,7 @@ result.
 | `wright check [INPUT]` | Parse, lower, validate, and report correctness diagnostics | verdict and validation diagnostics |
 | `wright analyze [INPUT] [--all]` | Summarize Workshop cost, ranked complexity hotspots, performance/stability risk indicators, and cross-cutting state | overview, cost, top hotspots, complexity, risks, and top variables with exact/static/heuristic evidence labels; `--all` lifts list caps |
 | `wright lint [INPUT] [--all] [--fix [--write]]` | Parse, lower, lint; report findings | finding counts by severity and actionable findings; `--all` lifts list caps; `--fix` previews each offered fix's validated diff, `--write` applies them |
+| `wright lint package <search\|install\|list\|outdated\|update\|remove>` | Discover, install, and manage GitHub lint rule packages in the Wright-owned store keyed by commit SHA (#844); takes no `INPUT` and never activates a package | per-package rows: source, status, SHA, entry directory, rule ids, and error detail ([lint configuration and findings](lint.md#lint-rule-packages-wright-lint-package-844)) |
 | `wright inspect [INPUT] [--all]` | Parse, lower, and inspect the program overview | overview, rule names, and the detail commands; `--all` lifts the rule-list cap |
 | `wright inspect rules [INPUT] [--content] [--rule RULE] [--only NAME] [--file PATH] [--max N]` | List rules; `--content` adds each selected rule's conditions and actions as canonical call trees (ADR-0024) | the rule list, with content when requested |
 | `wright inspect symbols [INPUT] [--only KIND] [--file PATH] [--max N]` | List semantic symbols, optionally narrowed to one kind | the symbol list with resolved locations |
@@ -59,8 +60,8 @@ every `wright-result/v1` envelope. `wright --help` is the canonical help
 surface.
 
 Commands that take input accept a file path, a project directory, or `-` for
-stdin (`wright lookup`, `wright completion`, `wright update`, and `wright
-agent install` take none). An omitted input uses the current directory. Input kind is detected from the
+stdin (`wright lookup`, `wright lint package`, `wright completion`,
+`wright update`, and `wright agent install` take none). An omitted input uses the current directory. Input kind is detected from the
 extension (`.opy`, `.ostw`/`.del`, `.json`, `.txt`/`.ws`) or, for a directory,
 from the source files it contains; mixed source kinds fail with structured
 ambiguity guidance. Stdin content is auto-detected (protocol JSON starts with

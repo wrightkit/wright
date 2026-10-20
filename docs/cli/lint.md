@@ -265,3 +265,85 @@ writes nothing. Provider-backed findings carry a `fix` when their source
 map records authored positions. A mapped `duplicate-condition` edits the
 authored `elif`/`else` chain directly; unmapped provider artifacts have
 spans in generated text and carry no `fix`.
+
+## Lint rule packages: `wright lint package` (#844)
+
+`wright lint package` discovers, installs, and manages community lint rule
+packages hosted on GitHub. One repository carrying the `wrightkit-lint`
+topic is one package: the `rules/*.yaml|yml` files directly inside its
+`rules/` directory at one commit, each loading through the same SPEC-309
+declarative rule contract as a `--rule` file. Nested rule files, package
+code, and anything else in the archive are never extracted or executed.
+
+The Wright-owned store keeps one immutable directory per
+`<owner>/<repo>/<full-sha>/` under Wright's application-data directory;
+`WRIGHT_LINT_PACKAGE_DIR` relocates it. An intact store entry is never
+downloaded or overwritten again — only the full commit SHA is stored, never
+the ref it resolved from — and a failed fetch or validation leaves no
+partial entry. `GITHUB_TOKEN`, when set, raises the GitHub API limit and is
+sent to the API host only, never to the archive host.
+
+Installing a package never activates it: project configuration pins a
+package by commit SHA and opts it into the registry (#843), so a lint run
+is reproducible without re-resolving refs.
+
+```text
+wright lint package search [QUERY]         repositories carrying the wrightkit-lint topic
+wright lint package install SOURCE [--ref REF]
+wright lint package list                   every store entry, intact and damaged
+wright lint package outdated               check each entry against the remote head
+wright lint package update [SOURCE]        install the current remote head
+wright lint package remove SOURCE          delete the entry's managed rules
+```
+
+A `SOURCE` is `owner/repo`, a github.com URL (`https://github.com/owner/repo`,
+`git@github.com:owner/repo`, including `/tree/<ref>` and
+`/releases/tag/<ref>` spellings), or `owner/repo@<ref>`; `--ref` selects a
+branch, tag, or commit explicitly. Ref spellings that disagree are a usage
+error. A full 40-hex SHA needs no resolution and installs offline.
+
+* `search` runs the `topic:wrightkit-lint archived:false fork:false`
+  repository query paged at `per_page=100`; `QUERY` narrows it further. The
+  result reports GitHub's `total` and `incomplete` flags beside the found
+  rows.
+* `install` resolves the ref to a full SHA — the repository's
+  default-branch head when no ref is given — fetches the archive for that
+  SHA, validates it, and stores it. Reinstalling an intact entry makes no
+  download (`downloaded=false`).
+* `list` reports every store entry in `owner/repo/sha` order. An intact
+  entry reports `installed` with its rule ids; a damaged entry reports
+  `damaged` with the `lint-package-install` reason it does not validate —
+  local edits to managed content are damage, never silently replaced.
+* `outdated` checks each entry's installed SHA against the remote
+  default-branch head and reports `unchanged`, `updated`, `unavailable`
+  (the repository or ref is gone), or `error` — read-only; nothing applies
+  to the store and a damaged entry reports `error` without being checked.
+* `update` installs the current remote head for every installed entry, or
+  for the one repository `SOURCE` selects (`owner/repo@<ref>` updates only
+  the entry the ref resolves to). An `unchanged` entry is not re-fetched;
+  an `updated` row keeps the installed `sha` beside the new `remote` head,
+  and the previous entry stays in the store. `unavailable`/`error` rows
+  fail the command.
+* `remove` deletes each selected entry's managed `rules/` tree
+  (`owner/repo` removes every installed entry of the repository,
+  `owner/repo@<ref>` removes the one the ref resolves to). The entry
+  directory is deleted only when nothing else remains: unrelated files
+  beside `rules/` keep it, reported `pruned` instead of `removed`, and
+  empty `<owner>/<repo>` parents are pruned. A source with no matching
+  entry is a `lint-package-not-found` error.
+
+Every subcommand renders the shared `wright-result/v1` envelope —
+`package-search`, `package-install`, `package-list`, `package-outdated`,
+`package-update`, `package-remove` — through the same presentation options
+(`--format`, `--renderer`, `--color`, `--all`) as the workflow commands.
+`search`/`list`/`outdated` are read-only queries and lead with their own
+command-name tag; `install`/`update`/`remove` are lifecycle operations
+whose per-package failures produce a gated FAIL with one
+`lint-package-*` diagnostic per failed package. Package diagnostics use
+the `lint-package-*` codes: `lint-package-source` (a bad source/ref
+spelling, exit 2), `lint-package-invalid` (content the SPEC-309 loader
+refuses, exit 1), `lint-package-offline`, `lint-package-not-found`,
+`lint-package-rate-limited`, `lint-package-remote`, and
+`lint-package-install` (store damage or I/O, exit 4). Lint-policy flags,
+finding-selection flags, and `INPUT` belong to `wright lint` and are
+usage errors on `lint package`.

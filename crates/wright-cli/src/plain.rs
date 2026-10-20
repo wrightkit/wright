@@ -141,12 +141,8 @@ fn verdict_word<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>
     }
     match summary_status(envelope) {
         "WARN" => "WARN".to_string(),
-        _ => match envelope.command.as_str() {
-            "rules" | "symbols" | "refs" | "cfg" | "callgraph" | "cost" | "inspect" | "lookup" => {
-                envelope.command.to_uppercase()
-            }
-            _ => "PASS".to_string(),
-        },
+        _ if crate::cli::is_query_command(&envelope.command) => envelope.command.to_uppercase(),
+        _ => "PASS".to_string(),
     }
 }
 
@@ -415,7 +411,7 @@ fn scalar(value: &str) -> String {
 
 /// `truncated: <list>=<shown>/<total> … expand="<command>"` — the record a
 /// capped list is followed by.
-fn truncated_record(lists: &[(&str, usize, usize)], expand: &str) -> String {
+pub(crate) fn truncated_record(lists: &[(&str, usize, usize)], expand: &str) -> String {
     let mut parts: Vec<String> = lists
         .iter()
         .map(|(name, shown, total)| format!("{name}={shown}/{total}"))
@@ -429,7 +425,7 @@ fn truncated_record(lists: &[(&str, usize, usize)], expand: &str) -> String {
 /// The default expansion command for a capped list of this command's
 /// output: `--all` lifts the default cap; a `--max` selection is raised by
 /// `selected:`'s own expand field.
-fn expand_all<T: serde::Serialize>(envelope: &Envelope<T>) -> String {
+pub(crate) fn expand_all<T: serde::Serialize>(envelope: &Envelope<T>) -> String {
     format!("wright {} --all", cli_command(envelope))
 }
 
@@ -440,6 +436,7 @@ fn cli_command<T: serde::Serialize>(envelope: &Envelope<T>) -> String {
         name @ ("rules" | "symbols" | "refs" | "cfg" | "callgraph" | "cost") => {
             format!("inspect {name}")
         }
+        name if name.starts_with("package-") => format!("lint {}", name.replacen('-', " ", 1)),
         name => name.to_string(),
     }
 }

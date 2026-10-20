@@ -29,7 +29,8 @@ pub use config::{
 pub use diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage, Status};
 pub use input::{InputTarget, ResolvedInput, sha256_hex};
 pub use lint_package::{
-    InstalledPackage, LintPackageError, LintPackageSource, LintPackageStore, RemoteCheck,
+    InstalledPackage, LintPackageError, LintPackageSource, LintPackageStore, PackageSearch,
+    PackageSearchHit, RemoteCheck, RemovedPackage, StoreEntry,
 };
 pub use opy_provider::{
     OpyProviderConfig, OpyProviderError, OpyProviderResolver, ResolvedOpyProvider,
@@ -38,7 +39,8 @@ pub use output::{CompileWrite, OutputDest, Overwrite};
 pub use progress::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit};
 pub use result::{
     AnalyzeResult, CheckResult, CompileResult, CompiledOutput, ConvertResult, ConvertTarget,
-    Envelope, EssentialResult, InspectResult, LintResult, RESULT_CONTRACT,
+    Envelope, EssentialResult, InspectResult, LintPackageResult, LintPackageRow, LintResult,
+    RESULT_CONTRACT,
 };
 pub use select::{FindingSelection, SelectionOutcome};
 pub use session::{CompilerSession, Loaded, Provenance, WORKSHOP_CLIENT_ELEMENT_LIMIT};
