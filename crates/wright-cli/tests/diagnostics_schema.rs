@@ -69,9 +69,12 @@ fn check_json_matches_schema_and_snapshot() {
 
 fn validate_output(schema: &serde_json::Value, output: &[u8]) -> serde_json::Value {
     let value: serde_json::Value = serde_json::from_slice(output).expect("JSON output");
-    let validator = jsonschema::JSONSchema::compile(schema).expect("schema compiles");
-    if let Err(errors) = validator.validate(&value) {
-        let errors = errors.map(|error| error.to_string()).collect::<Vec<_>>();
+    let validator = jsonschema::validator_for(schema).expect("schema compiles");
+    let errors = validator
+        .iter_errors(&value)
+        .map(|error| error.to_string())
+        .collect::<Vec<_>>();
+    if !errors.is_empty() {
         panic!("check output does not validate: {errors:?}");
     }
     value
