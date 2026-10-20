@@ -1,0 +1,81 @@
+name: Set up Wright
+description: Install the Wright CLI from the verified release distribution and cache only the executable
+
+inputs:
+  version:
+    description: Exact Wright version (for example 0.28.0) or `latest`
+    required: false
+    default: latest
+  cache:
+    description: Cache the verified Wright executable with the Actions cache service
+    required: false
+    default: 'true'
+
+outputs:
+  version:
+    description: Concrete Wright version that was installed
+    value: ${{ steps.resolve.outputs.version }}
+  cache-hit:
+    description: '`true` when a valid cached executable avoided the release download'
+    value: ${{ steps.verify.outputs.valid }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve Wright release
+      id: resolve
+      shell: bash
+      env:
+        WRIGHT_VERSION: ${{ inputs.version }}
+      run: |
+        "$GITHUB_ACTION_PATH/setup-wright.sh" resolve
+
+    - name: Restore Wright executable
+      id: restore
+      if: inputs.cache == 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.resolve.outputs.cache-dir }}
+        key: ${{ steps.resolve.outputs.cache-key }}
+
+    - name: Verify cached executable
+      id: verify
+      shell: bash
+      env:
+        WRIGHT_SETUP_DIR: ${{ steps.resolve.outputs.cache-dir }}
+        WRIGHT_SETUP_VERSION: ${{ steps.resolve.outputs.version }}
+        WRIGHT_SETUP_TARGET: ${{ steps.resolve.outputs.target }}
+        CACHE_HIT: ${{ steps.restore.outputs.cache-hit }}
+      run: |
+        if [[ "$CACHE_HIT" == true ]]; then
+          "$GITHUB_ACTION_PATH/setup-wright.sh" verify-cache
+        else
+          echo "valid=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Download and verify Wright release
+      if: steps.verify.outputs.valid != 'true'
+      shell: bash
+      env:
+        WRIGHT_SETUP_DIR: ${{ steps.resolve.outputs.cache-dir }}
+        WRIGHT_SETUP_VERSION: ${{ steps.resolve.outputs.version }}
+        WRIGHT_SETUP_TARGET: ${{ steps.resolve.outputs.target }}
+        WRIGHT_SETUP_EXT: ${{ steps.resolve.outputs.archive-ext }}
+      run: |
+        "$GITHUB_ACTION_PATH/setup-wright.sh" install
+
+    # Only a freshly verified executable on a true miss is saved. An invalid
+    # entry under the same immutable key is not overwritten; see docs/setup-wright-action.md.
+    - name: Save Wright executable
+      if: inputs.cache == 'true' && steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.resolve.outputs.cache-dir }}
+        key: ${{ steps.resolve.outputs.cache-key }}
+
+    - name: Add Wright to PATH
+      shell: bash
+      env:
+        WRIGHT_SETUP_DIR: ${{ steps.resolve.outputs.cache-dir }}
+      run: |
+        "$GITHUB_ACTION_PATH/setup-wright.sh" activate

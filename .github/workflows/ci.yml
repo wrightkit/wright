@@ -23,6 +23,7 @@ jobs:
       cli: ${{ steps.filter.outputs.rust_core }}
       dist: ${{ steps.filter.outputs.dist }}
       agent_guide: ${{ steps.filter.outputs.agent_guide }}
+      setup_action: ${{ steps.filter.outputs.setup_action }}
       ui: ${{ steps.filter.outputs.ui }}
     steps:
       - name: Checkout
@@ -48,6 +49,10 @@ jobs:
               - 'benchmarks/**'
               - 'agent-guide/**'
               - 'schemas/**'
+              - '.github/workflows/**'
+            setup_action:
+              - '.github/actions/setup-wright/**'
+              - 'scripts/test-setup-wright.sh'
               - '.github/workflows/**'
             agent_guide:
               - 'agent-guide/**'
@@ -75,6 +80,57 @@ jobs:
               - 'schemas/**'
               - 'Cargo.lock'
               - '.github/workflows/**'
+  setup-wright-action:
+    name: setup-wright Action (${{ matrix.os }})
+    needs: paths
+    if: needs.paths.outputs.setup_action == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Test the helper script
+        if: runner.os != 'Windows'
+        run: scripts/test-setup-wright.sh
+
+      # Consumes the latest published release, so it needs no Wright build.
+      - name: Install Wright through the Action
+        id: first
+        uses: ./.github/actions/setup-wright
+
+      - name: Move the installed copy aside so the cache must restore it
+        shell: bash
+        run: mv "$RUNNER_TEMP/setup-wright" "$RUNNER_TEMP/setup-wright-first"
+
+      - name: Install Wright again from the cache
+        id: second
+        uses: ./.github/actions/setup-wright
+        with:
+          version: ${{ steps.first.outputs.version }}
+
+      # A fork PR has a read-only cache token, so it cannot seed the cache.
+      - name: Check the second install used the cache
+        if: github.event.pull_request.head.repo.fork != true
+        shell: bash
+        env:
+          CACHE_HIT: ${{ steps.second.outputs.cache-hit }}
+          VERSION: ${{ steps.first.outputs.version }}
+        run: |
+          [[ "$CACHE_HIT" == true ]] || { echo "::error::expected a cache hit"; exit 1; }
+          wright --version | grep -Fq "$VERSION"
+
+      - name: Run Wright as an ordinary step
+        shell: bash
+        run: |
+          printf 'rule ("setup smoke") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n' > "$RUNNER_TEMP/smoke.ws"
+          wright check "$RUNNER_TEMP/smoke.ws"
+          grep -Fq 'PASS' "$GITHUB_STEP_SUMMARY"
+
   agent-guide:
     name: Agent guide sync
     needs: paths
@@ -680,6 +736,7 @@ jobs:
       - dist-cli-build
       - dist-validation
       - agent-guide
+      - setup-wright-action
       - ui
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -706,6 +763,7 @@ jobs:
             "dist-cli-build": ($p.dist == "true"),
             "dist-validation": ($p.dist == "true"),
             "agent-guide": ($p.agent_guide == "true"),
+            "setup-wright-action": ($p.setup_action == "true"),
             "ui": ($p.ui == "true")
           }')
           for job in $(jq -r 'keys[]' <<<"$required"); do

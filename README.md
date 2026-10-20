@@ -45,6 +45,9 @@ On Windows, use the PowerShell installer at
 `https://install.wrightkit.dev/wright/install.ps1`. Archives, the nightly
 channel, and building from source are covered in [`docs/release.md`](docs/release.md).
 
+In GitHub Actions, use the cached
+[`setup-wright` Action](docs/setup-wright-action.md).
+
 Update with `wright update`.
 
 ## Usage

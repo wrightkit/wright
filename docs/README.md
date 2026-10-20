@@ -58,6 +58,8 @@ Issue contract.
 - [Lessons](LESSONS.md): short queue of reusable failure classes from merged
   work, pruned once promoted into tests or standards.
 - [Release/distribution](release.md): packaging and publication contract.
+- [`setup-wright` Action](setup-wright-action.md): installing and caching the
+  Wright CLI in GitHub Actions.
 - [Agent-team governance](agent-team.md): role/authority coordination where
   still applicable.
 
