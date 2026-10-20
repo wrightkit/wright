@@ -127,7 +127,7 @@
   }
 </script>
 
-<div class="layout" data-e2e="app">
+<div class="layout">
   <header class="top">
     <h1>wright ui</h1>
     <input
@@ -135,18 +135,17 @@
       type="search"
       placeholder="Filter rules…"
       bind:value={filter}
-      data-e2e="rule-filter"
     />
-    <button type="button" onclick={openVariables} data-e2e="open-variables">Variables</button>
-    <button type="button" onclick={openDiagnostics} data-e2e="open-diagnostics">
+    <button type="button" onclick={openVariables}>Variables</button>
+    <button type="button" onclick={openDiagnostics}>
       Diagnostics
     </button>
     {#if debug}<span class="debug" data-debug>debug</span>{/if}
   </header>
 
-  <nav class="rule-list" aria-label="Rules" data-e2e="rules">
+  <nav class="rule-list" aria-label="Rules">
     {#if loadError}
-      <p class="refusal" data-e2e="refusal">{loadError}</p>
+      <p class="refusal">{loadError}</p>
     {:else if rules === null}
       <p class="muted">Loading rules…</p>
     {:else if filtered.length === 0}
@@ -159,12 +158,11 @@
           class:selected={entry.summary.id === selected}
           class:disabled={entry.state.phase === 'ready' && entry.state.content.disabled}
           onclick={() => (selected = entry.summary.id)}
-          data-e2e="rule-item"
           data-rule-id={entry.summary.id}
         >
-          <span class="rule-name" data-e2e="rule-name">{entry.summary.name}</span>
+          <span class="rule-name">{entry.summary.name}</span>
           {#if entry.state.phase === 'ready' && entry.state.content.disabled}
-            <span class="disabled-badge" data-e2e="disabled">disabled</span>
+            <span class="disabled-badge">disabled</span>
           {/if}
           {#if debug}<span class="debug" data-debug>#{entry.summary.id}</span>{/if}
         </button>

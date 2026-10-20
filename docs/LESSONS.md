@@ -59,7 +59,7 @@ Short review queue of reusable failure classes from merged Wright work. Each ent
 ### A check waits for the state it asserts on, not a fixed window
 - **Rule:** An end-to-end check must poll for the concrete state it asserts — the loaded rule body, the flushed render; a fixed wall-clock window fails on slow runners and unrelated PRs.
 - **Why:** The UI E2E read rendered statements before the selected rule's content flushed and bounded each check by a fixed 15s window, so it flaked on `main` and unrelated PRs until the job left CI.
-- **Prevention home:** the wait-for-state checks landed in #863's `e2e.mjs`; the job runs locally only (#865) until it is deterministic.
+- **Prevention home:** the wait-for-state checks landed in #863; the UI browser E2E was removed from CI (#865) and then deleted.
 - **Incidents:** [wright#829](https://github.com/wrightkit/wright/pull/829) E2E reported in [wright#862](https://github.com/wrightkit/wright/issues/862), fixed by [wright#863](https://github.com/wrightkit/wright/pull/863), CI gate removed by [wright#865](https://github.com/wrightkit/wright/pull/865) — observed 2026-10-20
 
 ### A version bump re-audits the resolved dependency footprint

@@ -21,23 +21,8 @@ npm run dev             # dev server
 npm run build           # production build -> dist/ (ignored, never committed)
 npm run check           # svelte-check + tsc
 npm test                # vitest unit tests
-npm run test:e2e        # browser E2E: wright ui + headless Chromium-family
 npm run check:size      # dist/ JS+CSS must be < 100 KiB gzipped (fails over)
 ```
-
-`test:e2e` is a local check and does not run in CI. It builds nothing itself: it needs a `wright` binary built with
-`--features ui` after `npm run build` (debug builds embed `dist/` at
-compile time), and a Chromium-family browser. Overrides:
-
-```sh
-WRIGHT_BIN=target/debug/wright    # binary under test
-WRIGHT_UI_BROWSER=brave           # executable path or its name on PATH
-E2E_TRACE=1                       # echo browser stderr while diagnosing
-```
-
-The script spawns `wright ui --no-open tests/fixtures/workshop/synthetic/ui-view.ws`,
-launches the browser headless, and drives the real DOM over the DevTools
-protocol — no driver dependency.
 
 ## Generated types
 
