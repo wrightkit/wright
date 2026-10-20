@@ -1,5 +1,3 @@
-use std::fmt;
-
 use serde::Deserialize;
 use workshop_rs::catalog::{Catalog, Kind, Locale};
 use workshop_rs::source::Span;
@@ -7,6 +5,9 @@ use workshop_rs::{Action as PublicAction, Program as PublicProgram, Value as Pub
 
 use crate::analysis::{EvidenceClass, Severity};
 use crate::canonical::{Finding, matching_end};
+
+mod error;
+pub use error::RuleError;
 
 const DEFAULT_LOCALE: &str = "en-US";
 
@@ -207,10 +208,29 @@ impl RuleDefinition {
     }
 }
 
+/// Which rule-ID contract a declarative rule definition must satisfy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RuleIdentity {
+    /// External rule: exactly `namespace/rule-id` outside the reserved
+    /// `wright` namespace (SPEC-309).
+    External,
+    /// First-party package rule: a bare built-in ID or the reserved `wright`
+    /// namespace — the only source allowed bare IDs (issue #843).
+    FirstParty,
+}
+
 impl DeclarativeRule {
     pub fn from_definition(
         definition: RuleDefinition,
         catalog: &Catalog,
+    ) -> Result<Self, RuleError> {
+        Self::from_definition_with_identity(definition, catalog, RuleIdentity::External)
+    }
+
+    pub(crate) fn from_definition_with_identity(
+        definition: RuleDefinition,
+        catalog: &Catalog,
+        identity: RuleIdentity,
     ) -> Result<Self, RuleError> {
         let RuleDefinition {
             id,
@@ -218,7 +238,10 @@ impl DeclarativeRule {
             metadata,
             matcher,
         } = definition;
-        validate_identity(&id)?;
+        match identity {
+            RuleIdentity::External => validate_identity(&id)?,
+            RuleIdentity::FirstParty => validate_first_party_identity(&id)?,
+        }
         let locale = Locale::new(&locale_name);
         if !catalog.supports(&locale) {
             return Err(RuleError::UnsupportedLocale(locale_name));
@@ -759,6 +782,22 @@ fn validate_identity(id: &str) -> Result<(), RuleError> {
     Ok(())
 }
 
+/// The first-party package keeps the built-ins' bare IDs and may use the
+/// reserved `wright` namespace; any other namespace is a community ID
+/// (issue #843).
+fn validate_first_party_identity(id: &str) -> Result<(), RuleError> {
+    let valid = match id.split_once('/') {
+        None => !id.is_empty(),
+        Some(("wright", rule_id)) => !rule_id.is_empty() && id.matches('/').count() == 1,
+        _ => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(RuleError::InvalidFirstPartyIdentity(id.to_string()))
+    }
+}
+
 fn default_locale() -> String {
     DEFAULT_LOCALE.to_string()
 }
@@ -766,62 +805,3 @@ fn default_locale() -> String {
 pub(crate) fn default_true() -> bool {
     true
 }
-
-#[derive(Debug)]
-pub enum RuleError {
-    Yaml(yaml_serde::Error),
-    InvalidIdentity(String),
-    UnsupportedLocale(String),
-    UnknownSpelling {
-        kind: &'static str,
-        spelling: String,
-        locale: String,
-    },
-    UnknownParameter {
-        action: String,
-        parameter: String,
-        locale: String,
-    },
-    NamedParameterRequiresAction,
-    AmbiguousValuePattern,
-    ComparisonNeedsNumber,
-}
-
-impl fmt::Display for RuleError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            RuleError::Yaml(err) => write!(f, "invalid rule YAML: {err}"),
-            RuleError::InvalidIdentity(id) => write!(
-                f,
-                "invalid rule ID '{id}': must be '<namespace>/<id>' and '<namespace>' cannot be 'wright'"
-            ),
-            RuleError::UnsupportedLocale(locale) => {
-                write!(f, "unsupported catalog locale: {locale}")
-            }
-            RuleError::UnknownSpelling {
-                kind,
-                spelling,
-                locale,
-            } => write!(f, "unknown {kind} '{spelling}' for locale {locale}"),
-            RuleError::UnknownParameter {
-                action,
-                parameter,
-                locale,
-            } => write!(
-                f,
-                "unknown parameter '{parameter}' for action '{action}' in locale {locale}"
-            ),
-            RuleError::NamedParameterRequiresAction => {
-                write!(f, "parameter matchers require an exact action name")
-            }
-            RuleError::AmbiguousValuePattern => {
-                write!(f, "value pattern specifies more than one pattern kind")
-            }
-            RuleError::ComparisonNeedsNumber => {
-                write!(f, "comparison pattern value must be a number pattern")
-            }
-        }
-    }
-}
-
-impl std::error::Error for RuleError {}

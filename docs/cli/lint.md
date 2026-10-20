@@ -11,6 +11,18 @@ available. It reuses the lint registry, so rule enable/disable/severity
 configuration is deterministic and identical across CLI and programmatic
 (`CompilerSession::lint`, tool/agent `lint`) use.
 
+The lint configuration file may also pin lint rule packages under a
+`packages` entry (#843). Each entry names a `repo` (`owner/repo` or a
+github.com URL) and a full commit `sha`; the configuration is the lock.
+Rules from listed packages load through the same lint path under the
+project's severity and enablement policy — package rule files never set
+`severity` or `enabled`. A package missing from the local store is fetched
+by its SHA on activation, so a pinned project reproduces in CI without a
+separate install step; an unfetchable SHA fails with an explicit
+diagnostic and no lint findings. Packages live in a Wright-owned store
+(`WRIGHT_LINT_PACKAGE_DIR`, defaulting to the platform data directory);
+`GITHUB_TOKEN` is optional and raises GitHub API limits.
+
 The following lint-policy flags configure the registry and are repeatable:
 
 * `--lint-config <PATH>`: read project lint configuration YAML.

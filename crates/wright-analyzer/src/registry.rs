@@ -14,11 +14,12 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use workshop_rs::catalog::Catalog;
 
 use crate::analysis::{EvidenceClass, Finding, Severity};
-use crate::declarative::{DeclarativeRule, RuleDefinition, RuleError};
+pub use crate::config::{LintConfig, LintPackagePin, RuleConfig, RuleOptions, SeverityLabel};
+use crate::declarative::{DeclarativeRule, RuleDefinition, RuleError, RuleIdentity};
 
 /// Static metadata for one lint rule.
 ///
@@ -48,181 +49,6 @@ pub struct RuleMeta {
     /// Coarse classification tags (e.g. `"performance"`, `"correctness"`).
     pub tags: &'static [&'static str],
 }
-
-/// Configuration applied to one rule at registry execution time.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RuleConfig {
-    /// When `false` the rule is skipped entirely and produces no findings.
-    #[serde(default = "crate::declarative::default_true")]
-    pub enabled: bool,
-    /// When `Some`, replaces the rule's [`RuleMeta::default_severity`] in
-    /// every finding produced during this run.
-    #[serde(
-        rename = "severity",
-        alias = "severity_override",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub severity_override: Option<SeverityLabel>,
-    /// Bounded rule-specific match-count options.
-    #[serde(default, skip_serializing_if = "RuleOptions::is_empty")]
-    pub options: RuleOptions,
-}
-
-impl Default for RuleConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            severity_override: None,
-            options: RuleOptions::default(),
-        }
-    }
-}
-
-/// The intentionally small option surface shared by declarative rules.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RuleOptions {
-    /// Require at least this many matched nodes.
-    #[serde(
-        rename = "min-matches",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub min_matches: Option<usize>,
-    /// Require at most this many matched nodes.
-    #[serde(
-        rename = "max-matches",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub max_matches: Option<usize>,
-}
-
-impl RuleOptions {
-    fn is_empty(&self) -> bool {
-        self.min_matches.is_none() && self.max_matches.is_none()
-    }
-}
-
-/// A serialization-friendly severity label for use in configuration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SeverityLabel {
-    Off,
-    Warn,
-    Error,
-    Info,
-}
-
-impl SeverityLabel {
-    pub fn severity(self) -> Option<Severity> {
-        match self {
-            SeverityLabel::Off => None,
-            SeverityLabel::Warn => Some(Severity::Warning),
-            SeverityLabel::Error => Some(Severity::Error),
-            SeverityLabel::Info => Some(Severity::Info),
-        }
-    }
-}
-
-impl From<Severity> for SeverityLabel {
-    fn from(severity: Severity) -> Self {
-        match severity {
-            Severity::Warning => SeverityLabel::Warn,
-            Severity::Error => SeverityLabel::Error,
-            Severity::Info => SeverityLabel::Info,
-        }
-    }
-}
-
-/// The effective configuration for a lint run.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LintConfig {
-    /// Per-rule configuration overrides keyed by stable rule ID.
-    #[serde(default)]
-    pub rules: HashMap<String, RuleConfig>,
-}
-
-impl LintConfig {
-    pub fn from_yaml_path(path: &Path) -> Result<Self, std::io::Error> {
-        let input = std::fs::read_to_string(path)?;
-        yaml_serde::from_str(&input).map_err(std::io::Error::other)
-    }
-
-    pub fn from_yaml_str(input: &str) -> Result<Self, RuleError> {
-        yaml_serde::from_str(input).map_err(RuleError::Yaml)
-    }
-
-    /// Disable a rule by its stable ID.
-    pub fn disable(&mut self, rule_id: &str) {
-        self.rules.entry(rule_id.to_string()).or_default().enabled = false;
-    }
-
-    /// Enable a rule by its stable ID.
-    pub fn enable(&mut self, rule_id: &str) {
-        self.rules.entry(rule_id.to_string()).or_default().enabled = true;
-    }
-
-    /// Override the severity for a rule by its stable ID.
-    pub fn set_severity(&mut self, rule_id: &str, severity: Severity) {
-        self.rules
-            .entry(rule_id.to_string())
-            .or_default()
-            .severity_override = Some(severity.into());
-    }
-
-    /// Override the severity of a rule from its CLI spelling.
-    pub fn set_severity_by_name(&mut self, rule_id: &str, severity: &str) -> bool {
-        let label = match severity {
-            "off" => SeverityLabel::Off,
-            "warn" => SeverityLabel::Warn,
-            "error" => SeverityLabel::Error,
-            _ => return false,
-        };
-        self.rules
-            .entry(rule_id.to_string())
-            .or_default()
-            .severity_override = Some(label);
-        true
-    }
-
-    /// Whether a rule is enabled.
-    pub fn is_enabled(&self, rule_id: &str) -> bool {
-        self.rules.get(rule_id).is_none_or(|config| {
-            config.enabled && config.severity_override != Some(SeverityLabel::Off)
-        })
-    }
-
-    /// Effective severity for a rule given its metadata and this config.
-    pub fn effective_severity(&self, meta: &RuleMeta) -> Severity {
-        self.effective_severity_for(meta.id, meta.default_severity)
-    }
-
-    pub fn effective_severity_for(&self, id: &str, default: Severity) -> Severity {
-        self.severity_override(id).unwrap_or(default)
-    }
-
-    pub fn severity_override(&self, id: &str) -> Option<Severity> {
-        self.rules
-            .get(id)
-            .and_then(|config| config.severity_override)
-            .and_then(SeverityLabel::severity)
-    }
-
-    pub fn options(&self, id: &str) -> &RuleOptions {
-        self.rules
-            .get(id)
-            .map_or(&EMPTY_OPTIONS, |config| &config.options)
-    }
-}
-
-static EMPTY_OPTIONS: RuleOptions = RuleOptions {
-    min_matches: None,
-    max_matches: None,
-};
 
 /// Owned metadata used by CLI, agent, embedding, and documentation consumers.
 #[derive(Debug, Clone, Serialize)]
@@ -508,25 +334,53 @@ impl LintRegistry {
 
     /// Load one external declarative rule against the canonical Workshop catalog.
     pub fn load_yaml_str(&mut self, input: &str) -> Result<(), RuleRegistryError> {
+        self.load_yaml_str_as(input, RuleIdentity::External)
+    }
+
+    /// Load one first-party package rule; see [`Self::load_first_party_path`].
+    pub fn load_first_party_yaml_str(&mut self, input: &str) -> Result<(), RuleRegistryError> {
+        self.load_yaml_str_as(input, RuleIdentity::FirstParty)
+    }
+
+    fn load_yaml_str_as(
+        &mut self,
+        input: &str,
+        identity: RuleIdentity,
+    ) -> Result<(), RuleRegistryError> {
         let catalog = Catalog::builtin_ref()
             .map_err(|error| RuleRegistryError::Catalog(error.to_string()))?;
         let definition = RuleDefinition::from_yaml_str(input).map_err(RuleRegistryError::Rule)?;
-        let rule = DeclarativeRule::from_definition(definition, catalog)
+        let rule = DeclarativeRule::from_definition_with_identity(definition, catalog, identity)
             .map_err(RuleRegistryError::Rule)?;
-        self.insert_declarative(rule)
+        self.insert_declarative(rule, identity)
     }
 
     /// Load all `.yaml`/`.yml` files in a path, or one file, in lexical order.
     pub fn load_path(&mut self, path: &Path) -> Result<(), RuleRegistryError> {
+        self.load_path_as(path, RuleIdentity::External)
+    }
+
+    /// Load `.yaml`/`.yml` files as first-party rules (issue #843); see
+    /// [`RuleIdentity`] for the accepted IDs and native replacement.
+    pub fn load_first_party_path(&mut self, path: &Path) -> Result<(), RuleRegistryError> {
+        self.load_path_as(path, RuleIdentity::FirstParty)
+    }
+
+    fn load_path_as(
+        &mut self,
+        path: &Path,
+        identity: RuleIdentity,
+    ) -> Result<(), RuleRegistryError> {
         let catalog = Catalog::builtin_ref()
             .map_err(|error| RuleRegistryError::Catalog(error.to_string()))?;
-        self.load_path_with_catalog(path, catalog)
+        self.load_path_with_catalog(path, catalog, identity)
     }
 
     fn load_path_with_catalog(
         &mut self,
         path: &Path,
         catalog: &Catalog,
+        identity: RuleIdentity,
     ) -> Result<(), RuleRegistryError> {
         if path.is_dir() {
             let mut files = std::fs::read_dir(path)
@@ -542,21 +396,32 @@ impl LintRegistry {
                 .collect::<Vec<_>>();
             files.sort();
             for file in files {
-                self.load_path_with_catalog(&file, catalog)?;
+                self.load_path_with_catalog(&file, catalog, identity)?;
             }
             return Ok(());
         }
         let input = std::fs::read_to_string(path)
             .map_err(|error| RuleRegistryError::Io(path.to_path_buf(), error))?;
         let definition = RuleDefinition::from_yaml_str(&input).map_err(RuleRegistryError::Rule)?;
-        let rule = DeclarativeRule::from_definition(definition, catalog)
+        let rule = DeclarativeRule::from_definition_with_identity(definition, catalog, identity)
             .map_err(RuleRegistryError::Rule)?;
-        self.insert_declarative(rule)
+        self.insert_declarative(rule, identity)
     }
 
-    fn insert_declarative(&mut self, rule: DeclarativeRule) -> Result<(), RuleRegistryError> {
+    fn insert_declarative(
+        &mut self,
+        rule: DeclarativeRule,
+        identity: RuleIdentity,
+    ) -> Result<(), RuleRegistryError> {
         let id = rule.id().to_string();
-        if self.entries.iter().any(|entry| entry.id() == id) {
+        if let Some(position) = self.entries.iter().position(|entry| entry.id() == id) {
+            // First-party rules replace a native entry for the same ID (#843).
+            if identity == RuleIdentity::FirstParty
+                && matches!(self.entries[position], RegistryEntry::Native(_))
+            {
+                self.entries[position] = RegistryEntry::Declarative(Box::new(rule));
+                return Ok(());
+            }
             return Err(RuleRegistryError::DuplicateId(id));
         }
         self.entries
@@ -567,6 +432,13 @@ impl LintRegistry {
     /// Whether a native or declarative rule with this ID is registered.
     pub fn contains(&self, id: &str) -> bool {
         self.entries.iter().any(|entry| entry.id() == id)
+    }
+
+    /// Whether `id` still names an unreplaced native entry (issue #843).
+    fn native_owns(&self, id: &str) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| matches!(entry, RegistryEntry::Native(_)) && entry.id() == id)
     }
 
     /// Return metadata for native and declarative rules in deterministic order.
@@ -642,6 +514,8 @@ impl LintRegistry {
         let mut findings = hotpath::measure_block!("analyzer::lint_analyze", {
             crate::canonical::analyze(program, config)
         });
+        // A replaced native entry must not also report its ID (issue #843).
+        findings.retain(|finding| self.native_owns(&finding.code));
         findings.extend(hotpath::measure_block!("analyzer::lint_custom", {
             self.run_canonical_custom(program, config)
         }));
@@ -662,9 +536,8 @@ impl LintRegistry {
         report
     }
 
-    /// Run custom declarative rules over the canonical public Workshop model.
-    /// First-party rules are owned by `canonical::analyze`; this method only
-    /// supplies the registry-owned extension entries.
+    /// Run declarative rules over the canonical Workshop model; native
+    /// analysis is owned by `canonical::analyze`.
     pub fn run_canonical_custom(
         &self,
         program: &workshop_rs::Program,

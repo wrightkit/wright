@@ -138,29 +138,40 @@ pub(super) fn intact_package(dir: &Path) -> bool {
 
 /// Validate a stored package directory before reuse: an existing entry must
 /// still be a complete, loadable package.
-pub(super) fn validate_stored(dir: &Path) -> Result<Vec<String>, LintPackageError> {
+pub(super) fn validate_stored(
+    dir: &Path,
+    first_party: bool,
+) -> Result<Vec<String>, LintPackageError> {
     if !intact_package(dir) {
         return Err(LintPackageError::install(format!(
             "the lint package store entry '{}' is incomplete or damaged; remove it and retry",
             dir.display()
         )));
     }
-    validate_package(&dir.join("rules"))
+    validate_package(&dir.join("rules"), first_party)
 }
 
-/// Load every rule file through the existing SPEC-309 loader. The first
-/// failure is reported as a `lint-package-invalid` diagnostic naming the
-/// file; a passing package returns its declarative rule IDs in load order.
-pub(super) fn validate_package(rules_dir: &Path) -> Result<Vec<String>, LintPackageError> {
+/// Load every rule file through the existing SPEC-309 loader — the
+/// first-party package under its bare-ID contract, every other package
+/// under the external namespaced contract (issue #843). The first failure
+/// is reported as a `lint-package-invalid` diagnostic naming the file; a
+/// passing package returns its declarative rule IDs in load order.
+pub(super) fn validate_package(
+    rules_dir: &Path,
+    first_party: bool,
+) -> Result<Vec<String>, LintPackageError> {
     let files = rule_files(rules_dir)?;
     let mut registry = LintRegistry::default();
     for file in &files {
         let input = std::fs::read_to_string(file).map_err(|e| {
             LintPackageError::invalid(file, format!("cannot read the rule file: {e}"))
         })?;
-        registry
-            .load_yaml_str(&input)
-            .map_err(|error| LintPackageError::invalid(file, error))?;
+        let loaded = if first_party {
+            registry.load_first_party_yaml_str(&input)
+        } else {
+            registry.load_yaml_str(&input)
+        };
+        loaded.map_err(|error| LintPackageError::invalid(file, error))?;
     }
     Ok(registry
         .descriptors(&LintConfig::default())

@@ -1,8 +1,9 @@
 use workshop_rs::catalog::Catalog;
 use workshop_rs::{Action, Event, Program, Rule, Value};
+use wright_analyzer::analysis::EvidenceClass;
 use wright_analyzer::canonical::SemanticService;
 use wright_analyzer::declarative::{DeclarativeRule, RuleDefinition};
-use wright_analyzer::registry::{LintConfig, LintRegistry};
+use wright_analyzer::registry::{LintConfig, LintRegistry, RuleRegistryError};
 
 #[test]
 fn lint_config_yaml_round_trips_through_yaml_serialization() {
@@ -226,6 +227,141 @@ matcher:
             .iter()
             .any(|rule| { rule["id"] == "min-wait-loop" && rule["rule"] == 1 })
     );
+}
+
+#[test]
+fn lint_config_packages_round_trip_and_reject_unknown_fields() {
+    let config = LintConfig::from_yaml_str(
+        r#"
+packages:
+  - repo: community/example-rules
+    sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  - repo: https://github.com/wrightkit/lint-rules
+    sha: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+rules:
+  community/minimum-wait:
+    severity: error
+"#,
+    )
+    .expect("lint config YAML parses");
+
+    assert_eq!(config.packages.len(), 2);
+    assert_eq!(config.packages[0].repo, "community/example-rules");
+    assert_eq!(config.packages[0].sha, "a".repeat(40));
+    assert_eq!(
+        config.packages[1].repo,
+        "https://github.com/wrightkit/lint-rules"
+    );
+
+    let serialized = yaml_serde::to_string(&config).expect("lint config serializes");
+    let round_tripped =
+        LintConfig::from_yaml_str(&serialized).expect("serialized lint config parses");
+    assert_eq!(round_tripped, config);
+
+    // The `packages` entry is part of the same deny-unknown-fields
+    // contract — a stray key or a repo ref is not accepted (issue #843).
+    assert!(
+        LintConfig::from_yaml_str(
+            "packages:\n  - repo: community/x\n    sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n    ref: main\n"
+        )
+        .is_err()
+    );
+    assert!(LintConfig::from_yaml_str("lock-file: yes\n").is_err());
+}
+
+#[test]
+fn first_party_rule_loading_replaces_the_matching_native_id() {
+    // A first-party package rule may carry a bare built-in ID or the
+    // reserved `wright` namespace; community-style namespaces remain
+    // errors in first-party loading (issue #843).
+    let mut registry = LintRegistry::default();
+    registry
+        .load_first_party_yaml_str(
+            r#"
+id: min-wait-loop
+metadata:
+  summary: summary
+  rationale: rationale
+  documentation: documentation
+  known-limits: limits
+  tags: []
+matcher:
+  scope: while
+  actions:
+    - kind: call
+"#,
+        )
+        .unwrap();
+
+    let descriptors = registry.descriptors(&LintConfig::default());
+    let entries: Vec<_> = descriptors
+        .iter()
+        .filter(|d| d.id == "min-wait-loop")
+        .collect();
+    assert_eq!(entries.len(), 1, "the ID has one owner: {entries:?}");
+    assert_eq!(entries[0].kind, "declarative");
+
+    // The replaced native analysis does not double-report the ID.
+    let mut program = Program::new();
+    program.rule(
+        Rule::new("valid", Event::Global)
+            .action(Action::While {
+                condition: Value::Bool(true),
+            })
+            .action(Action::call("wait", [Value::Number(0.016)]))
+            .action(Action::End),
+    );
+    let findings = registry.run(&program, &LintConfig::default());
+    let hits: Vec<_> = findings
+        .iter()
+        .filter(|finding| finding.code == "min-wait-loop")
+        .collect();
+    assert_eq!(hits.len(), 1, "the ID reports once: {findings:?}");
+    assert_eq!(hits[0].evidence, EvidenceClass::Exact);
+    assert!(hits[0].message.contains("matched"));
+
+    // A second declarative rule with the same ID still collides.
+    assert!(matches!(
+        registry.load_first_party_yaml_str(
+            "id: min-wait-loop\nmetadata:\n  summary: s\n  rationale: r\n  documentation: d\n  known-limits: k\n  tags: []\nmatcher: {}\n"
+        ),
+        Err(RuleRegistryError::DuplicateId(id)) if id == "min-wait-loop"
+    ));
+
+    // The reserved `wright` namespace is accepted only for first-party
+    // loading; community-style and bare IDs follow the external contract.
+    registry
+        .load_first_party_yaml_str(
+            "id: wright/example\nmetadata:\n  summary: s\n  rationale: r\n  documentation: d\n  known-limits: k\n  tags: []\nmatcher: {}\n",
+        )
+        .unwrap();
+    assert!(
+        registry
+            .load_first_party_yaml_str(
+                "id: community/x\nmetadata:\n  summary: s\n  rationale: r\n  documentation: d\n  known-limits: k\n  tags: []\nmatcher: {}\n"
+            )
+            .is_err()
+    );
+    assert!(
+        registry
+            .load_yaml_str(
+                "id: bare-id\nmetadata:\n  summary: s\n  rationale: r\n  documentation: d\n  known-limits: k\n  tags: []\nmatcher: {}\n"
+            )
+            .is_err()
+    );
+    // Two `packages` entries whose effective rule IDs collide are errors
+    // through the ordinary external path as well.
+    registry
+        .load_yaml_str(
+            "id: community/dup\nmetadata:\n  summary: s\n  rationale: r\n  documentation: d\n  known-limits: k\n  tags: []\nmatcher: {}\n",
+        )
+        .unwrap();
+    assert!(matches!(
+        registry.load_yaml_str(
+            "id: community/dup\nmetadata:\n  summary: s\n  rationale: r\n  documentation: d\n  known-limits: k\n  tags: []\nmatcher: {}\n"
+        ),
+        Err(RuleRegistryError::DuplicateId(id)) if id == "community/dup"
+    ));
 }
 
 #[test]
