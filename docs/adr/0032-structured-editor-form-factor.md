@@ -73,7 +73,6 @@ Goal principle 1 makes `wright` the product the user runs. The goal keeps a gene
 
 10. **Verification.**
     - CI gains one UI job: `svelte-check`, unit tests, the production build, and a size budget of 100 KB gzipped for JavaScript and CSS together. A larger bundle fails the job.
-    - An end-to-end test drives `wright ui` on a committed raw Workshop fixture in a headless browser. The test opens a rule, edits a statement through the form, submits it, and checks that the file on disk equals the edit `editStatements` validated.
 
 11. **Delivery in layers.**
     - The first release is read-only: the rule list, the event row, and coloured conditions and actions.

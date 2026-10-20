@@ -57,7 +57,7 @@
   }
 </script>
 
-<section class="rule-view" data-e2e="rule-view">
+<section class="rule-view">
   <h2 class="rule-title">
     {summary.name}
     {#if debug}<span class="debug" data-debug>#{summary.id}</span>{/if}
@@ -65,20 +65,20 @@
   {#if ruleState.phase === 'loading' || (ruleState.phase === 'ready' && !namesReady)}
     <p class="muted">Loading rule…</p>
   {:else if ruleState.phase === 'refused'}
-    <div class="refusal" data-e2e="refusal">
+    <div class="refusal">
       <strong>The service could not express this rule's content.</strong>
       <code>{ruleState.refusal.code}</code>
       <p>{ruleState.refusal.message}</p>
     </div>
   {:else}
     {@const content = ruleState.content}
-    <header class="event" data-e2e="event">
+    <header class="event">
       <span class="tok value">{eventName(content.event)}</span>
       {#each filterNames(content.event) as filter (filter)}
         <span class="filter">{filter}</span>
       {/each}
       {#if content.disabled}
-        <span class="disabled-badge" data-e2e="disabled">disabled</span>
+        <span class="disabled-badge">disabled</span>
       {/if}
       {#if debug}
         <span class="debug" data-debug>event id: {content.event.id}</span>
@@ -89,12 +89,12 @@
       <h3>Conditions</h3>
       <ol class="statements">
         {#each content.conditions as condition, i (i)}
-          <li class="statement" class:disabled={condition.disabled} data-e2e="condition">
+          <li class="statement" class:disabled={condition.disabled}>
             {#if debug}
               <span class="debug" data-debug>line {condition.span?.start.line ?? '?'}</span>
             {/if}
             <Expr node={condition.value} {names} />
-            {#if condition.disabled}<span class="disabled-badge" data-e2e="disabled">disabled</span
+            {#if condition.disabled}<span class="disabled-badge">disabled</span
               >{/if}
             {#if debug}
               <details class="debug" data-debug>
@@ -117,7 +117,6 @@
             class="statement"
             class:disabled={action.disabled}
             style="--depth: {depth}"
-            data-e2e="statement"
           >
             {#if debug}
               <span class="debug" data-debug
@@ -125,7 +124,7 @@
               >
             {/if}
             <Expr node={action} kinds={STATEMENT_KINDS} {names} />
-            {#if action.disabled}<span class="disabled-badge" data-e2e="disabled">disabled</span
+            {#if action.disabled}<span class="disabled-badge">disabled</span
               >{/if}
             {#if debug}
               <details class="debug" data-debug>
