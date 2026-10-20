@@ -41,11 +41,11 @@ protocol — no driver dependency.
 
 ## Generated types
 
-`src/lib/types/` is generated from the committed schemas — never edited by
+`src/lib/types/generated/` is generated from the committed schemas — never edited by
 hand:
 
 ```sh
-npm run generate-types  # regenerate src/lib/types/*.ts
+npm run generate-types  # regenerate src/lib/types/generated/*.ts
 npm run check-types     # fail when the committed files are stale (CI)
 ```
 

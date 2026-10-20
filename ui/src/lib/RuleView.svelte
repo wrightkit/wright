@@ -8,7 +8,7 @@
   import Expr from './Expr.svelte'
   import type { Names } from './names'
   import { collectIdentities, isEventPlayerMember, statementDepths, STATEMENT_KINDS } from './nodes'
-  import type { Event } from './types/rule-content-v1'
+  import type { Event } from './types/generated/rule-content-v1'
   import type { RuleState, RuleSummary } from './view'
 
   let {

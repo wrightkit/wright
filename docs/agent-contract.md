@@ -24,7 +24,7 @@ the configured project and processes requests until standard input closes.
 Starting does not require the project to load successfully (#512): a project
 that is missing, unreadable, or malformed is retried by the next
 program-reading request, while `capabilities`, `targetMetadata`, `lookup`,
-and the `provider*` operations answer regardless. The default transport is
+`listEntries`, and the `provider*` operations answer regardless. The default transport is
 one JSON
 request per line on stdio:
 
@@ -195,6 +195,7 @@ the successful `result` payload.
 | `validateEditTransaction` | `transaction`, optional `sources` | Atomic validation status, diagnostics, and previews when valid |
 | `providerValidateEdit` | `language_id`, `transaction`, optional `documents`, `sources`, `project_root` | Provider-validated transaction or structured refusal |
 | `lookup` | required `language`; optional `query`, `kind`, `within`, `locale`, `limit` | Owner vocabulary entries with accepted spellings and rendered signatures, or an explicit `unavailable` payload naming the owner |
+| `listEntries` | required `language`, `kind`; optional `within`, `locale`, `pageSize`, `cursor` | One page of the owner's vocabulary of a kind, in owner order, with `total` and `nextCursor` (see [vocabulary operations](agent-contract-vocabulary.md#listing-vocabulary-adr-0031)) |
 
 ### Compile output (ADR-0025)
 
@@ -224,7 +225,8 @@ and `output.sha256`, without the program text.
 
 The service may exist without a program snapshot: construction over a
 project that cannot load succeeds, and `capabilities`, `targetMetadata`
-(the static catalog), `lookup` (the language vocabulary), and `provider*`
+(the static catalog), `lookup` and `listEntries` (the language vocabulary),
+and `provider*`
 operations carrying caller-supplied documents answer without consulting the
 project at all. They neither require nor trigger its load. A `provider*`
 request that omits `documents` derives the set from the loaded project
@@ -526,56 +528,9 @@ Operations carrying caller-supplied documents answer without consulting
 the session's loaded project (#471); the operation refuses cleanly when no
 provider is configured.
 
-### Name and signature lookup (#529, ADR-0021)
+### Name and signature lookup and vocabulary listing
 
-`lookup` resolves a free-text query, such as a display name, a near spelling,
-or a guess, against the language owner's vocabulary, so an agent can learn the
-accepted spelling and signature of a Workshop or OverPy name without
-external documentation, source inspection, or `wright convert`. The
-request's `language` selects the owner (`workshop` or `opy`, the ids
-`capabilities.languages` reports); the remaining fields narrow the answer:
-
-* `query`: the free text to resolve.
-* `kind`: any entry kind an owner emits (#563): `action`, `value`,
-  `event`, `enumMember`, `enum`, `setting`, `parameter`, `settingPath`,
-  `memberAction`, `memberValue`, `structural`, or `operator`. A kind one
-  language never emits answers `[]` on it.
-* `within`: the identity of an enum domain, a callable, or a settings path
-  prefix. The result then lists its members, parameters, or child segments,
-  which is how a caller enumerates an enum's accepted member spellings or
-  a callable's parameters.
-* `locale`: the Workshop display-name locale (session configuration, then
-  the catalog's primary locale when omitted).
-* `limit`: default 3, maximum 10. A `limit` outside that range is a
-  `malformed-request` refusal, never a silent clamp (#783).
-
-Each entry carries its owner `identity`, `kind`, accepted `spelling`, and
-`displayName`, plus the owner fact that describes it (`callable`, `enum`,
-`parameter`, or `setting`). The `callable` fact holds the ordered
-`parameters`; when the owner declares them it also carries `returns`, the
-callable's return type in the same vocabulary as parameter `type`s (a
-Workshop `value` such as `distance` declares one; actions carry none),
-and `variadic: true` when the last parameter repeats for extra arguments.
-Callables also carry `signature`, a human-readable call shape Wright
-renders from the owner's parameter facts: required parameters name their
-type, optional parameters show `name?` or `name=default`, and an enum
-domain lists its members inline (a domain above the member bound renders
-as `Domain(count members)`).
-
-Workshop answers come from the `workshop-rs` catalog in process. OverPy
-answers come from the configured `opy-rs` provider's LPP lookup
-capability; when the provider does not negotiate it, the result is an
-explicit `unavailable` payload naming `opy-rs`, never a Wright-side
-textual guess. An unmatched scope identity refuses with
-`lookup.unknownWithin`; an unknown `language` or `kind` is a usage error.
-The operation reads vocabulary alone, so it works over a session whose
-project cannot load.
-
-`wright lookup [QUERY]` exposes the same request on the CLI
-(`--language`, `--kind`, `--within`, `--locale`, `--limit`): text mode
-prints one signature or spelling per line, and `-f json` prints this
-result payload. Text `check`/`compile` output points at the command after
-an `unknown-*` diagnostic; structured payloads are unchanged.
+`lookup` (#529, ADR-0021) resolves a free-text name guess to the language owner's accepted spelling and signature, and `listEntries` (ADR-0031) lists a kind's vocabulary page by page for editors. Both read language vocabulary only and work over a session whose project cannot load. Their request and result rules are in [agent-contract-vocabulary.md](agent-contract-vocabulary.md).
 
 ## Results, diagnostics, and errors
 

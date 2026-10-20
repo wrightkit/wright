@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import type { WorkshopRsRuleContentV1 } from './types/rule-content-v1'
+import type { WorkshopRsRuleContentV1 } from './types/generated/rule-content-v1'
 import type {
   CapabilitiesRequest,
   CapabilitiesResult,
   ToolRequest,
   ToolResponse,
-} from './types/wright-agent-v1'
+} from './types/generated/wright-agent-v1'
 
 // Compile-time check that the generated contract types match the schemas:
 // assigning a non-conforming object must be a type error (see svelte-check).

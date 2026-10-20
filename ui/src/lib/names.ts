@@ -4,7 +4,7 @@
  * identity resolves once per session and the result is cached; `warm`
  * resolves a rule's identities in one pass so rendering stays synchronous.
  */
-import type { LookupEntry, LookupResult, ToolRequest, ToolResponse } from './types/wright-agent-v1'
+import type { LookupEntry, LookupResult, ToolRequest, ToolResponse } from './types/generated/wright-agent-v1'
 
 export interface ResolvedName {
   /** The session-locale display name. */

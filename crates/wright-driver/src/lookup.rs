@@ -38,8 +38,8 @@ const MAX_LIMIT: usize = 10;
 /// a larger domain reports its member count (ADR-0021).
 const INLINE_MEMBER_LIMIT: usize = 32;
 
-const OWNER_WORKSHOP: &str = "workshop-rs";
-const OWNER_OPY: &str = "opy-rs";
+pub(crate) const OWNER_WORKSHOP: &str = "workshop-rs";
+pub(crate) const OWNER_OPY: &str = "opy-rs";
 const LOOKUP_CAPABILITY: &str = "lookup";
 /// The entry kinds `kind` accepts — exactly the union of the kinds both
 /// owners emit (#563): the five originally admitted plus the emitted kinds
@@ -62,7 +62,7 @@ const KINDS: [&str; 12] = [
 /// The LPP refusal code an owner returns when `within` names no known
 /// scope; Wright's `within` identity tries each selector kind in order and
 /// this refusal is what moves resolution to the next kind.
-const UNKNOWN_WITHIN: &str = "lookup.unknownWithin";
+pub(crate) const UNKNOWN_WITHIN: &str = "lookup.unknownWithin";
 /// The `within` selector kinds tried for an identity, in order.
 const WITHIN_KINDS: [&str; 3] = ["enum", "callable", "settings"];
 
@@ -111,7 +111,7 @@ pub(crate) fn lookup(
     }
 }
 
-fn refusal(code: &str, message: impl Into<String>) -> ToolResponse {
+pub(crate) fn refusal(code: &str, message: impl Into<String>) -> ToolResponse {
     ToolResponse::Error {
         error: ToolErrorInfo {
             code: code.to_string(),
@@ -186,7 +186,7 @@ fn workshop_lookup(
     result("workshop", OWNER_WORKSHOP, entries)
 }
 
-fn workshop_locale(
+pub(crate) fn workshop_locale(
     session: &CompilerSession,
     catalog: &Catalog,
     locale: Option<&str>,
@@ -212,7 +212,11 @@ fn match_identity(found: &LookupMatch) -> Option<String> {
     }
 }
 
-fn workshop_entry(catalog: &Catalog, locale: &Locale, found: LookupMatch) -> Option<Value> {
+pub(crate) fn workshop_entry(
+    catalog: &Catalog,
+    locale: &Locale,
+    found: LookupMatch,
+) -> Option<Value> {
     let identity = match_identity(&found)?;
     Some(match found {
         LookupMatch::Builtin {
@@ -462,7 +466,7 @@ fn workshop_default(catalog: &Catalog, locale: &Locale, default: &str) -> String
 /// and Wright projects the result (`name-lookup.md` §21.3). `kind`
 /// narrows the entry kinds afterward; it is a result-shaping filter, not
 /// matching.
-fn workshop_within(
+pub(crate) fn workshop_within(
     catalog: &Catalog,
     locale: &Locale,
     within: &str,

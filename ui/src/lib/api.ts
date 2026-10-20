@@ -1,4 +1,4 @@
-import type { ToolRequest, ToolResponse } from './types/wright-agent-v1'
+import type { ToolRequest, ToolResponse } from './types/generated/wright-agent-v1'
 
 /**
  * The session token rides the URL fragment, which browsers never send back
