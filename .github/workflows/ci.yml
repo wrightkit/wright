@@ -281,6 +281,9 @@ jobs:
           target/debug/wright compile tests/fixtures/opy/basic-rule.opy
           -o "$RUNNER_TEMP/basic-rule.ow"
 
+      - name: Run provider-backed CLI tests
+        run: cargo test --locked -p wright-cli --test opy_locale_hook
+
   lpp-integration:
     name: LPP integration
     needs: [paths]
