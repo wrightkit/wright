@@ -488,7 +488,9 @@ async function main() {
     cdp?.close()
     chrome?.kill('SIGKILL')
     ui.kill()
-    rmSync(profile, { recursive: true, force: true })
+    // Chrome keeps writing profile files briefly after SIGKILL; retry the
+    // removal instead of flaking the run on a teardown race.
+    rmSync(profile, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
   }
 
   if (failures > 0) {
