@@ -7,7 +7,7 @@
 /AGENTS.md @Teakowa
 
 # Committed expectation of the `wright check --json` contract
-/crates/wright-cli/tests/snapshots/*.snap @Teakowa
+/crates/wright-cli/tests/snapshots/diagnostics_schema__check_json_matches_schema_and_snapshot.snap @Teakowa
 
 # Upstream reference pin
 /docs/compatibility/upstream-references.md @Teakowa
