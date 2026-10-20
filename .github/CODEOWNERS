@@ -1,21 +1,17 @@
-# Human review is required for what defines "passing": CI and release gates,
-# public contracts, compatibility references, and agent instructions.
-# Ordinary code, tests, and docs stay unowned, so agents may review and merge them.
+# Human review is required for what defines "passing" and for what publishes:
+# release workflows, public contracts, upstream pins, and agent instructions.
+# Rules stay narrow so review is rare. Ordinary code, tests, docs, and CI edits
+# stay unowned, so agents may review and merge them.
 /.github/CODEOWNERS @Teakowa
-/.github/workflows/ @Teakowa
-/.github/dependabot.yml @Teakowa
+/.github/workflows/release.yml @Teakowa
+/.github/workflows/release-please.yml @Teakowa
 /AGENTS.md @Teakowa
-/docs/adr/ @Teakowa
 
-# Public contracts
-/schemas/ @Teakowa
-/docs/agent-contract.md @Teakowa
 # Committed expectation of the `wright check --json` contract
 /crates/wright-cli/tests/snapshots/*.snap @Teakowa
 
-# Upstream reference pins
+# Upstream reference pin
 /docs/compatibility/upstream-references.md @Teakowa
-/agent-guide/UPSTREAM.md @Teakowa
 
 # Benchmark gate definitions
 /benchmarks/metrics/baseline-*.json @Teakowa
@@ -26,7 +22,6 @@
 # Toolchain, release, and distribution
 /rust-toolchain.toml @Teakowa
 /release-please-config.json @Teakowa
-/.release-please-manifest.json @Teakowa
 /dist/ @Teakowa
 /install.sh @Teakowa
 /install.ps1 @Teakowa
