@@ -36,7 +36,7 @@ tiny_http = { version = "0.12", optional = true }
 
 [dev-dependencies]
 insta = { version = "1", features = ["json"] }
-jsonschema = "0.58"
+jsonschema = { version = "0.58", default-features = false }
 sha2.workspace = true
 wright-analyzer.workspace = true
 workshop-rs.workspace = true
