@@ -44,9 +44,11 @@
   )
   const openRule = $derived(filtered.find((entry) => entry.summary.id === selected))
 
-  async function loadOne(id: number): Promise<RuleState> {
+  async function loadOne(id: number, snapshot?: number): Promise<RuleState> {
     try {
-      return ruleStateFromResponse(await call({ op: 'rules', rule: id, content: true }))
+      // `rule` is a numeric address the listing issued, so its `snapshot`
+      // generation rides along (#595).
+      return ruleStateFromResponse(await call({ op: 'rules', rule: id, snapshot, content: true }))
     } catch (error) {
       return ruleStateFromError(error)
     }
@@ -77,10 +79,14 @@
       const summaries = (
         Array.isArray(result) ? result : ((result as { rules?: RuleSummary[] }).rules ?? [])
       ) as RuleSummary[]
+      const snapshot =
+        result !== null && typeof result === 'object' && !Array.isArray(result)
+          ? (result as { snapshot?: number }).snapshot
+          : undefined
       rules = summaries.map((summary) => ({ summary, state: { phase: 'loading' } }))
       await Promise.all(
         rules.map(async (entry) => {
-          entry.state = await loadOne(entry.summary.id)
+          entry.state = await loadOne(entry.summary.id, snapshot)
         }),
       )
     }

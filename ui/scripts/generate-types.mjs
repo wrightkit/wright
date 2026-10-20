@@ -130,6 +130,13 @@ async function generate(schema, rootName, sourceNote) {
     unreachableDefinitions: true,
     style: STYLE,
   })
+  // The compiler stamps "referenced by `X`'s JSON-Schema via the definition
+  // `Y`." above every named type — four lines of noise per export that say
+  // nothing the export name does not. Strip them so the artifact stays small.
+  body = body.replaceAll(
+    /\/\*\*\n \* This interface was referenced by[^\n]*\n \* via the `definition` "[^"]+"\.\n \*\/\n/g,
+    '',
+  )
   for (const alias of refAliases(schema)) {
     if (alias.description) {
       body += `/**\n * ${alias.description.replaceAll('*/', '*\\/')}\n */\n`
