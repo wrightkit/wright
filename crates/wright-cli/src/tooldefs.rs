@@ -199,6 +199,14 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         description: "Resolve a display name, near spelling, or guess to the language owner's accepted spelling and signature. Use it before writing in an unfamiliar language and when a name is rejected.",
         result: "the ranked matches with owner spellings, signatures, and vocabulary facts",
     },
+    ToolSpec {
+        op: "listEntries",
+        request_def: "ListEntriesRequest",
+        drop_fields: &[],
+        mcp: false,
+        description: "List the owner's vocabulary of one kind in owner order, page by page, for editors; agents use `lookup`.",
+        result: "one page of entries in the `lookup` entry shape, with the total and the next cursor",
+    },
 ];
 
 /// The schema `$defs` of the committed agent contract.

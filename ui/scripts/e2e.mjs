@@ -198,8 +198,12 @@ class Cdp {
           sessionId,
           `document.querySelector('.rule-view')?.outerHTML ?? document.body.outerHTML`,
         ).catch(() => '<dom dump failed>')
+        const net = await this.evaluate(
+          sessionId,
+          `JSON.stringify(performance.getEntriesByType('resource').map(e => [e.name.split('/').pop(), Math.round(e.startTime), Math.round(e.duration), e.responseStatus]))`,
+        ).catch(() => '<net dump failed>')
         throw new Error(
-          `timed out waiting for: ${expression}\nrule-view: ${String(dom).slice(0, 2000)}`,
+          `timed out waiting for: ${expression}\nrule-view: ${String(dom).slice(0, 2000)}\nnet: ${net}`,
         )
       }
       await new Promise((resolve) => setTimeout(resolve, 100))
