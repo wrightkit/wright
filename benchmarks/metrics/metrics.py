@@ -248,15 +248,27 @@ def _numeric_fields(result: dict, fields: list[str], prefix: str = "") -> dict:
 
 
 def _snapshot_listing(result):
-    """The list a `{<key>: [...], "snapshot": n}` listing wrapper carries
-    (#595): id-issuing list results travel with the generation their ids
-    belong to. Returns None for any other shape."""
+    """The id list a `{key: [...], snapshot}` listing carries (#595)."""
     if not isinstance(result, dict) or "snapshot" not in result:
         return None
-    rest = [key for key in result if key != "snapshot"]
-    if len(rest) == 1 and isinstance(result[rest[0]], list):
-        return result[rest[0]]
-    return None
+    lists = [value for value in result.values() if isinstance(value, list)]
+    return lists[0] if len(lists) == 1 else None
+
+
+def _listing_measurement(result):
+    """Stamped listings measure in the legacy `items`/`truncation.items`
+    vocabulary; other metadata keeps its own name (#595)."""
+    listed = _snapshot_listing(result)
+    if listed is None:
+        return None
+    measured = {"items": listed}
+    for key, value in result.items():
+        if key == "snapshot" or isinstance(value, list):
+            continue
+        if key == "truncation" and isinstance(value, dict) and len(value) == 1:
+            value = {"items": next(iter(value.values()))}
+        measured[key] = value
+    return listed if len(measured) == 1 else measured
 
 
 def agent_counts(op: str, result) -> dict:
@@ -264,9 +276,9 @@ def agent_counts(op: str, result) -> dict:
     if not isinstance(result, (list, dict)):
         return {}
     if op in ("symbols", "rules", "persistentObjects", "findings"):
-        listed = _snapshot_listing(result)
-        if listed is not None:
-            result = listed
+        measured = _listing_measurement(result)
+        if measured is not None:
+            result = measured
     if isinstance(result, list):
         if op == "symbols":
             return _typed_items(result, "symbol")
@@ -331,7 +343,7 @@ def cli_counts(command: str, envelope: dict) -> dict:
         return {}
     counts: dict[str, float] = {"diagnostics": len(envelope.get("diagnostics") or [])}
     result = envelope.get("result")
-    listed = _snapshot_listing(result)
+    listed = _listing_measurement(result)
     if listed is not None:
         result = listed
     if isinstance(result, list):
@@ -407,25 +419,15 @@ def run_agent_ops(
                     }
                     continue
                 metrics[key] = metric_record(lines_bytes, latencies, counts)
-                # Numeric addresses echo the issuing response's `snapshot`
-                # generation (#595); name addressing ignores it.
+                # Numeric addresses echo the listing's generation (#595).
+                snap = last_result.get("snapshot") if isinstance(last_result, dict) else None
                 if op == "symbols":
                     sid = _first_id(last_result)
-                    snap = (
-                        last_result.get("snapshot")
-                        if isinstance(last_result, dict)
-                        else None
-                    )
                     if sid is not None and snap is not None:
                         targets["references"] = {"symbol": sid, "snapshot": snap}
                         targets["usage"] = {"symbol": sid, "snapshot": snap}
                 if op == "rules":
                     rid = _first_id(last_result)
-                    snap = (
-                        last_result.get("snapshot")
-                        if isinstance(last_result, dict)
-                        else None
-                    )
                     if rid is not None and snap is not None:
                         targets["cfg"] = {"rule": rid, "snapshot": snap}
             except (queue.Empty, TimeoutError):
@@ -470,9 +472,7 @@ def default_counts(payload) -> dict:
         elif isinstance(value, dict):
             counts.update({f"{key}.{k}": v for k, v in default_counts(value).items()})
         elif isinstance(value, (int, float)) and not isinstance(value, bool):
-            # `snapshot` is the #595 generation stamp on id-issuing results —
-            # contract metadata, not content, so it is not a counted field.
-            if key != "snapshot":
+            if key != "snapshot":  # generation stamp is metadata, not content
                 counts[key] = value
     return counts
 
