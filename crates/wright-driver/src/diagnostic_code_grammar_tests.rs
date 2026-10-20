@@ -129,22 +129,32 @@ fn fixed_codes_obey_the_declared_grammar() {
     for (file, line, code) in &unique {
         assert_wright_code(code, &format!("{}:{line}", file.display()));
     }
-    // Sites only reachable through the extended scans prove those scans
-    // run: `.code =` assignments (`lint-package-not-found`), and
-    // `wright-cli` `code:` fields — the cli emits Diagnostics into the
-    // same envelope.
-    assert!(
-        vocabulary
-            .iter()
-            .any(|code| code.as_str() == "lint-package-not-found"),
-        "the `.code =` scan did not reach lint/package.rs"
-    );
-    assert!(
-        unique.iter().any(|(file, _, code)| {
-            file.to_string_lossy().contains("wright-cli") && code.as_str() == "clipboard-failed"
-        }),
-        "the wright-cli scan did not reach `Diagnostic::warning` in main.rs"
-    );
+    // Sites only reachable through specific scans prove those scans run —
+    // pinned to file + code so vocabulary membership cannot satisfy them
+    // accidentally:
+    // - `lint-package-not-found` only enters via the `.code =` scan;
+    // - `lint-package-remote` only enters when the bare `code` argument of
+    //   `Diagnostic::error(code, …)` resolves to its `let` binding and the
+    //   binding's `unwrap_or("…")` fallback literal is censused;
+    // - `lookup-failed` sits in a `return refusal(` call the earlier guard
+    //   skipped;
+    // - `clipboard-failed`, `ambiguous-symbol`, and `rename-refused` pin the
+    //   wright-cli, wright-analyzer, and wright-language trees.
+    for (path_part, code) in [
+        ("lint/package.rs", "lint-package-not-found"),
+        ("lint/package.rs", "lint-package-remote"),
+        ("lookup.rs", "lookup-failed"),
+        ("wright-cli", "clipboard-failed"),
+        ("wright-analyzer", "ambiguous-symbol"),
+        ("wright-language", "rename-refused"),
+    ] {
+        assert!(
+            unique.iter().any(|(file, _, found)| {
+                file.to_string_lossy().contains(path_part) && found.as_str() == code
+            }),
+            "the census missed `{code}` at a `{path_part}` site"
+        );
+    }
 }
 
 /// `unknown-<kind>`: every `kind` the pinned engine can report, driven

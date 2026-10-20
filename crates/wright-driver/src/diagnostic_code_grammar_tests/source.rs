@@ -347,3 +347,112 @@ pub(super) fn enclosing_fn_body(mask: &[u8], pos: usize) -> Option<(usize, usize
 pub(super) fn line_of(src: &str, pos: usize) -> usize {
     src[..pos].matches('\n').count() + 1
 }
+
+/// `expr` with all whitespace and string-literal contents removed — the
+/// shape of a code-position expression, for the dynamic-producer rules.
+pub(super) fn skeleton(expr: &str) -> String {
+    let mut out = String::with_capacity(expr.len());
+    let mut chars = expr.chars();
+    while let Some(c) = chars.next() {
+        if c == '"' {
+            out.push('"');
+            out.push('"');
+            let mut escaped = false;
+            for inner in chars.by_ref() {
+                if escaped {
+                    escaped = false;
+                } else if inner == '\\' {
+                    escaped = true;
+                } else if inner == '"' {
+                    break;
+                }
+            }
+        } else if !c.is_whitespace() {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// The expression span following an `=` at `eq`, up to the statement's
+/// top-level `;` or `limit`.
+pub(super) fn rhs_span(masked: &[u8], eq: usize, limit: usize) -> (usize, usize) {
+    let mut depth = 0i32;
+    let mut end = limit;
+    for (j, &b) in masked.iter().enumerate().skip(eq + 1) {
+        if j >= limit {
+            break;
+        }
+        match b {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' if depth > 0 => depth -= 1,
+            b';' if depth == 0 => {
+                end = j;
+                break;
+            }
+            _ => {}
+        }
+    }
+    let mut start = eq + 1;
+    while start < end && masked[start].is_ascii_whitespace() {
+        start += 1;
+    }
+    while end > start && masked[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    (start, end)
+}
+
+/// Whether every `=>` arm of a `match` RHS produces a `, Stage::` tuple —
+/// the shape the tuple-arm scan covers. A `match`-free RHS or an
+/// unparseable shape defers to passthrough; a mixed match fails closed.
+pub(super) fn match_arms_stage_ok(masked_rhs: &str) -> bool {
+    let Some(m) = masked_rhs.find("match") else {
+        return true;
+    };
+    let Some(brace) = masked_rhs[m..].find('{').map(|i| m + i) else {
+        return true;
+    };
+    let bytes = masked_rhs.as_bytes();
+    let mut depth = 1i32;
+    let mut i = brace + 1;
+    while i < bytes.len() && depth > 0 {
+        match bytes[i] {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+            }
+            b'=' if bytes.get(i + 1) == Some(&b'>') && depth == 1 => {
+                // The arm value runs to a depth-1 `,` or the closing `}`.
+                let vstart = i + 2;
+                let mut vend = bytes.len();
+                let mut arm_depth = depth;
+                for (j, &b) in bytes.iter().enumerate().skip(vstart) {
+                    match b {
+                        b'{' => arm_depth += 1,
+                        b'}' => {
+                            if arm_depth == 1 {
+                                vend = j;
+                                break;
+                            }
+                            arm_depth -= 1;
+                        }
+                        b',' if arm_depth == 1 => {
+                            vend = j;
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+                if !masked_rhs[vstart..vend.min(masked_rhs.len())].contains(", Stage::") {
+                    return false;
+                }
+                i = vend;
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    true
+}
