@@ -25,7 +25,7 @@ npm run test:e2e        # browser E2E: wright ui + headless Chromium-family
 npm run check:size      # dist/ JS+CSS must be < 100 KiB gzipped (fails over)
 ```
 
-`test:e2e` builds nothing itself: it needs a `wright` binary built with
+`test:e2e` is a local check and does not run in CI. It builds nothing itself: it needs a `wright` binary built with
 `--features ui` after `npm run build` (debug builds embed `dist/` at
 compile time), and a Chromium-family browser. Overrides:
 
