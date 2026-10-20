@@ -71,7 +71,10 @@ segments of lowercase ASCII letters, digits, and hyphens
 (`[a-z0-9]+(-[a-z0-9]+)*` per segment). Most codes are one segment
 (`parse-error`, `unknown-enum-member`); Workshop completeness residuals
 carry the owner classification namespaced as `workshop.<kind>.<name>`
-(`workshop.unknown-value.sqrt`). Codes embedding an owner- or
+(`workshop.unknown-value.sqrt`). `<name>` is the owner's free-text
+identity sanitised into the grammar: a run of non-alphanumerics becomes
+one hyphen, edge hyphens trim, and an identity with no alphanumerics at
+all omits the name segment (`workshop.unknown-action`). Codes embedding an owner- or
 provider-typed token keep the owner's spelling verbatim:
 `provider-refusal-<refusalCode>` carries the LPP refusal code
 (`provider-refusal-compile.tooLarge`), provider diagnostics keep the

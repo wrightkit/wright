@@ -3,14 +3,18 @@
 //! position whose value cannot be classified. Scans the shapes that
 //! produce codes: `Diagnostic::error`/`warning`/`info` first arguments,
 //! `code:` field values, `(code, Stage::…)` tuple arms, `=>` arms inside
-//! string-returning `fn <name>code(` bodies, and `refusal(` first
-//! arguments (the `lookup` tool-error code).
+//! string-returning `fn <name>code(` bodies, `refusal(` first arguments
+//! (the `lookup` tool-error code), `.code =`/`code =` assignments, and
+//! `code` shorthand fields inside `Diagnostic { … }` literals (resolved
+//! through the binding's `let`/`fn` origin). `wright-cli` is scanned too:
+//! it emits `Diagnostic`s into the same envelope, so its code positions
+//! are part of this contract surface.
 
 use std::path::{Path, PathBuf};
 
 use super::source::{
-    as_str, blank_cfg_test_items, call_args, crate_src, line_of, mask_rust, match_bracket,
-    read_rs_tree,
+    as_str, blank_cfg_test_items, call_args, crate_src, enclosing_fn, enclosing_fn_body, line_of,
+    mask_rust, match_bracket, read_rs_tree,
 };
 
 /// `expr` with all whitespace and string-literal contents removed — the
@@ -44,7 +48,11 @@ fn skeleton(expr: &str) -> String {
 /// drives that producer exhaustively, so an expression not listed here
 /// fails the census instead of going unchecked.
 fn dynamic_code_ok(expr: &str) -> bool {
-    let normalized: String = expr.chars().filter(|c| !c.is_whitespace()).collect();
+    let mut normalized: String = expr.chars().filter(|c| !c.is_whitespace()).collect();
+    // `Some(<value>)` wraps an optional code position — classify the inner.
+    while normalized.starts_with("Some(") && normalized.ends_with(')') {
+        normalized = normalized["Some(".len()..normalized.len() - 1].to_string();
+    }
     // Wright-built shapes whose variable parts are enumerated by runtime
     // tests in this file.
     if normalized.ends_with("provider_failure_code(&error)") // provider/refusal census
@@ -59,7 +67,7 @@ fn dynamic_code_ok(expr: &str) -> bool {
     }
     // Passthroughs of already-enumerated or owner/provider-spelled codes:
     // `.code` reads, `code` parameters, and `.code()` methods.
-    let shape = skeleton(expr);
+    let shape = skeleton(&normalized);
     shape == "code"
         || shape == "code.to_string()"
         || shape == "code.into()"
@@ -132,6 +140,15 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
     let mut codes = Vec::new();
     let mut unclassified = Vec::new();
     let mut files = read_rs_tree(&crate_src());
+    // `wright-cli` emits Diagnostics into the same envelope — its code
+    // positions share this contract surface.
+    let cli_src = crate_src()
+        .parent()
+        .and_then(Path::parent)
+        .map(|crates| crates.join("wright-cli").join("src"));
+    if let Some(dir) = cli_src.filter(|dir| dir.is_dir()) {
+        files.extend(read_rs_tree(&dir));
+    }
     // The census's own source — this module and its directory — is not a
     // code position.
     files.retain(|path, _| {
@@ -407,6 +424,136 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
             }
         }
 
+        // `.code =` field assignments (not `.code ==` or `.code =>`): the
+        // assigned value runs to the statement's `;`.
+        for (at, _) in text.match_indices(".code") {
+            let mut i = at + ".code".len();
+            while i < text.len() && text.as_bytes()[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if masked.get(i) != Some(&b'=')
+                || masked.get(i + 1) == Some(&b'=')
+                || masked.get(i + 1) == Some(&b'>')
+            {
+                continue;
+            }
+            let (vstart, vend) = rhs_span(&masked, i, masked.len());
+            if vend <= vstart {
+                continue;
+            }
+            if !push_literal(&mut codes, original, path, (vstart, vend)) {
+                check_dynamic(
+                    &mut unclassified,
+                    original,
+                    path,
+                    &original[vstart..vend],
+                    vstart,
+                );
+            }
+        }
+
+        // `Diagnostic { …, code, … }` shorthand field inits: the field
+        // binds whatever `code` names — resolve that binding in the
+        // enclosing fn (a `code` parameter, a `let (mut )?code =` RHS, or
+        // a tuple/pattern binding whose `, Stage::` arms are scanned).
+        for (at, _) in text.match_indices("Diagnostic") {
+            if at > 0
+                && (text.as_bytes()[at - 1].is_ascii_alphanumeric()
+                    || text.as_bytes()[at - 1] == b'_')
+            {
+                continue;
+            }
+            let mut brace = at + "Diagnostic".len();
+            while brace < text.len() && text.as_bytes()[brace].is_ascii_whitespace() {
+                brace += 1;
+            }
+            if masked.get(brace) != Some(&b'{') {
+                continue;
+            }
+            // A top-level `=`/`=>` in the head puts `Diagnostic` in
+            // expression position (`let d = Diagnostic {`); without one a
+            // leading `let`/`if let`/`for` is a pattern and leading
+            // `impl`/`struct`/… is a declaration — all skip. Match-arm
+            // patterns `Diagnostic { … } =>` are excluded below.
+            let mut stmt = at;
+            while stmt > 0 && !b";{}".contains(&masked[stmt - 1]) {
+                stmt -= 1;
+            }
+            let head = text[stmt..at].trim_start();
+            let mut in_expr = false;
+            let mut head_depth = 0i32;
+            for &b in &masked[stmt..at] {
+                match b {
+                    b'(' | b'[' | b'{' => head_depth += 1,
+                    b')' | b']' | b'}' if head_depth > 0 => head_depth -= 1,
+                    b'=' if head_depth == 0 => {
+                        in_expr = true;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            let last_word = head
+                .rsplit(|c: char| c.is_ascii_whitespace() || c == ':')
+                .next();
+            if !in_expr
+                && (head.starts_with("let")
+                    || head.ends_with(" let")
+                    || head == "let"
+                    || head.starts_with("for ")
+                    || matches!(
+                        last_word,
+                        Some(
+                            "impl"
+                                | "struct"
+                                | "enum"
+                                | "union"
+                                | "trait"
+                                | "type"
+                                | "fn"
+                                | "mod"
+                                | "use"
+                        )
+                    ))
+            {
+                continue;
+            }
+            let Some(body_end) = match_bracket(&masked, brace) else {
+                continue;
+            };
+            // `Diagnostic { … } =>` is a match-arm pattern, not a literal.
+            let mut after_body = body_end + 1;
+            while after_body < text.len() && masked[after_body].is_ascii_whitespace() {
+                after_body += 1;
+            }
+            if masked.get(after_body) == Some(&b'=') && masked.get(after_body + 1) == Some(&b'>') {
+                continue;
+            }
+            // Top-level comma-separated fields: a bare `code` segment is a
+            // shorthand binding (`code:` is scanned as a named field).
+            let mut sites = Sites {
+                codes: &mut codes,
+                unclassified: &mut unclassified,
+                original,
+                masked: &masked,
+                file: path,
+            };
+            let mut depth = 0i32;
+            let mut field_start = brace + 1;
+            for (i, &b) in masked.iter().enumerate().take(body_end).skip(brace + 1) {
+                match b {
+                    b'(' | b'[' | b'{' => depth += 1,
+                    b')' | b']' | b'}' => depth -= 1,
+                    b',' if depth == 0 => {
+                        check_shorthand_field(&mut sites, field_start, i, at);
+                        field_start = i + 1;
+                    }
+                    _ => {}
+                }
+            }
+            check_shorthand_field(&mut sites, field_start, body_end, at);
+        }
+
         // `refusal(` first arguments (lookup tool-error codes).
         for (at, _) in text.match_indices("refusal(") {
             let before = text[..at].trim_end();
@@ -434,4 +581,180 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
         }
     }
     (codes, unclassified)
+}
+
+/// The census accumulators and the file under scan, shared by the
+/// code-position classifiers.
+struct Sites<'a> {
+    codes: &'a mut Vec<CodeSite>,
+    unclassified: &'a mut Vec<String>,
+    original: &'a str,
+    masked: &'a [u8],
+    file: &'a Path,
+}
+
+/// One top-level field segment of a `Diagnostic { … }` literal. A segment
+/// that trims to exactly `code` is a shorthand binding to resolve.
+fn check_shorthand_field(sites: &mut Sites<'_>, start: usize, end: usize, at: usize) {
+    if as_str(sites.masked, start..end).trim() == "code" {
+        check_shorthand_binding(sites, at);
+    }
+}
+
+/// The expression span following an `=` at `eq`, up to the statement's
+/// top-level `;` or `limit`.
+fn rhs_span(masked: &[u8], eq: usize, limit: usize) -> (usize, usize) {
+    let mut depth = 0i32;
+    let mut end = limit;
+    for (j, &b) in masked.iter().enumerate().skip(eq + 1) {
+        if j >= limit {
+            break;
+        }
+        match b {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' if depth > 0 => depth -= 1,
+            b';' if depth == 0 => {
+                end = j;
+                break;
+            }
+            _ => {}
+        }
+    }
+    let mut start = eq + 1;
+    while start < end && masked[start].is_ascii_whitespace() {
+        start += 1;
+    }
+    while end > start && masked[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    (start, end)
+}
+
+/// Classify one code-position RHS: a literal enters the census, a dynamic
+/// expression must match a verified producer.
+fn classify_rhs(sites: &mut Sites<'_>, start: usize, end: usize) {
+    if start >= end {
+        return;
+    }
+    if !push_literal(sites.codes, sites.original, sites.file, (start, end)) {
+        check_dynamic(
+            sites.unclassified,
+            sites.original,
+            sites.file,
+            &sites.original[start..end],
+            start,
+        );
+    }
+}
+
+/// Resolve what a bare `code` shorthand field binds inside the enclosing
+/// fn. A `code` parameter or a pattern destructuring a Diagnostic field
+/// passes through a value whose producer is already covered; a
+/// `let (mut )?code =`/`code =` RHS is classified like any other code
+/// position; a tuple/pattern `let (code, …) = match …` binding is covered
+/// when the match arms feed the `, Stage::` scan. Anything else is
+/// unclassified.
+fn check_shorthand_binding(sites: &mut Sites<'_>, at: usize) {
+    let unclassified_at = |sites: &mut Sites<'_>, why: &str| {
+        sites.unclassified.push(format!(
+            "{}:{}: `code` shorthand {why}",
+            sites.file.display(),
+            line_of(sites.original, at)
+        ));
+    };
+    let Some((_, params)) = enclosing_fn(sites.masked, at) else {
+        unclassified_at(sites, "outside a fn");
+        return;
+    };
+    if params.iter().any(|(param, _)| param == "code") {
+        return;
+    }
+    let Some((body, body_end)) = enclosing_fn_body(sites.masked, at) else {
+        unclassified_at(sites, "without an enclosing fn body");
+        return;
+    };
+    let text = as_str(sites.masked, 0..sites.masked.len());
+    let mut bound = false;
+    for (let_at, _) in text[body..body_end].match_indices("let ") {
+        let stmt = body + let_at + "let ".len();
+        // The `let` pattern runs to a top-level `=` or `;`.
+        let mut depth = 0i32;
+        let mut pend = stmt;
+        let mut rhs = None;
+        for j in stmt..body_end {
+            match sites.masked[j] {
+                b'(' | b'[' | b'{' => depth += 1,
+                b')' | b']' | b'}' if depth > 0 => depth -= 1,
+                b'=' if depth == 0 && sites.masked.get(j + 1) != Some(&b'=') => {
+                    pend = j;
+                    rhs = Some(j);
+                    break;
+                }
+                b';' if depth == 0 => {
+                    pend = j;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let pattern = text[stmt..pend].trim_end_matches(|c: char| c.is_ascii_whitespace());
+        let Some(eq) = rhs else {
+            continue;
+        };
+        // Find where the pattern binds `code` (if anywhere).
+        let Some(code_at) = pattern.match_indices("code").map(|(i, _)| i).find(|&i| {
+            let before = pattern[..i].chars().last();
+            let after = pattern[i + "code".len()..].chars().next();
+            !before.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+                && !after.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+        }) else {
+            continue;
+        };
+        bound = true;
+        // `code` inside `{…}`/`(…)` in the pattern destructures or reads an
+        // already-produced value — except a `let` whose pattern is only
+        // `mut code`/`code`/`code: Type` (a fresh binding to classify).
+        let shallow = !pattern[..code_at].trim_end().contains(['{', '(']);
+        let (rstart, rend) = rhs_span(sites.masked, eq, body_end);
+        if shallow {
+            classify_rhs(sites, rstart, rend);
+        } else {
+            // Destructuring binds an already-produced code — except when the
+            // RHS is a `match` producing `(code, Stage::…)` pairs, which the
+            // tuple-arm scan covers only when `, Stage::` is present.
+            let rhs_text = &text[eq + 1..rend];
+            if rhs_text.contains("match") && !rhs_text.contains(", Stage::") {
+                unclassified_at(sites, "bound by a match the Stage:: scan misses");
+            }
+        }
+    }
+    // A bare `code =` rebinds an uninitialised `let code;` (or a binding an
+    // outer block owns): classify the RHS like any other code position.
+    if !bound {
+        for (code_at, _) in text[body..body_end].match_indices("code") {
+            let a = body + code_at;
+            if a > 0
+                && (sites.masked[a - 1].is_ascii_alphanumeric()
+                    || sites.masked[a - 1] == b'_'
+                    || sites.masked[a - 1] == b'.')
+            {
+                continue;
+            }
+            let mut i = a + "code".len();
+            while i < body_end && sites.masked[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if sites.masked.get(i) == Some(&b'=')
+                && sites.masked.get(i + 1) != Some(&b'=')
+                && sites.masked.get(i + 1) != Some(&b'>')
+            {
+                bound = true;
+                let (rstart, rend) = rhs_span(sites.masked, i, body_end);
+                classify_rhs(sites, rstart, rend);
+            }
+        }
+    }
+    if !bound {
+        unclassified_at(sites, "has no `code` binding in its fn");
+    }
 }

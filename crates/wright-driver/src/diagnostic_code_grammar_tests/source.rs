@@ -322,6 +322,28 @@ pub(super) fn enclosing_fn(mask: &[u8], pos: usize) -> Option<(String, Vec<(Stri
     }
 }
 
+/// The `(start, end)` byte range of the `{…}` body of the `fn` enclosing
+/// `pos` — the same walk `enclosing_fn` performs, returning the span.
+pub(super) fn enclosing_fn_body(mask: &[u8], pos: usize) -> Option<(usize, usize)> {
+    let text = String::from_utf8_lossy(mask);
+    let mut search_end = pos;
+    loop {
+        let fn_at = text[..search_end].rfind("fn ")?;
+        let name_start = fn_at + 3;
+        let name_end = text[name_start..]
+            .find(|c: char| !c.is_alphanumeric() && c != '_')
+            .map(|n| name_start + n)?;
+        let paren = text[name_end..].find('(').map(|n| name_end + n)?;
+        let params_end = match_bracket(mask, paren)?;
+        let body = text[params_end..].find('{').map(|n| params_end + n)?;
+        let body_end = match_bracket(mask, body)?;
+        if pos > body && pos < body_end {
+            return Some((body, body_end));
+        }
+        search_end = fn_at;
+    }
+}
+
 pub(super) fn line_of(src: &str, pos: usize) -> usize {
     src[..pos].matches('\n').count() + 1
 }

@@ -129,6 +129,22 @@ fn fixed_codes_obey_the_declared_grammar() {
     for (file, line, code) in &unique {
         assert_wright_code(code, &format!("{}:{line}", file.display()));
     }
+    // Sites only reachable through the extended scans prove those scans
+    // run: `.code =` assignments (`lint-package-not-found`), and
+    // `wright-cli` `code:` fields — the cli emits Diagnostics into the
+    // same envelope.
+    assert!(
+        vocabulary
+            .iter()
+            .any(|code| code.as_str() == "lint-package-not-found"),
+        "the `.code =` scan did not reach lint/package.rs"
+    );
+    assert!(
+        unique.iter().any(|(file, _, code)| {
+            file.to_string_lossy().contains("wright-cli") && code.as_str() == "clipboard-failed"
+        }),
+        "the wright-cli scan did not reach `Diagnostic::warning` in main.rs"
+    );
 }
 
 /// `unknown-<kind>`: every `kind` the pinned engine can report, driven
@@ -209,9 +225,20 @@ fn completeness_residual_codes_obey_the_grammar() {
         Rule::new("probe", Event::Global)
             .action(Action::call("rawWorkshopAction", []))
             .action(Action::call("future Unknown Action", []))
+            // Identity is free text: repeated spaces, parentheses, edge
+            // punctuation, and a punctuation-only name must still emit a
+            // grammar-valid slug.
+            .action(Action::call("double  space", []))
+            .action(Action::call("paren(name)", []))
+            .action(Action::call("-leading -trailing-", []))
+            .action(Action::call("!*!", []))
             .action(Action::SetGlobalVariable {
                 variable: "g".to_string(),
                 value: Value::call("future Value", [Value::Number(1.0)]),
+            })
+            .action(Action::SetGlobalVariable {
+                variable: "h".to_string(),
+                value: Value::call("val(ue)  name", [Value::Number(1.0)]),
             }),
     );
     let issues = workshop_rs::rules::inspect(&program, catalog);
@@ -231,6 +258,7 @@ fn completeness_residual_codes_obey_the_grammar() {
     }
 
     let mut seen = Vec::new();
+    let mut codes = Vec::new();
     for issue in &issues {
         if !seen.contains(&issue.kind) {
             seen.push(issue.kind);
@@ -243,6 +271,21 @@ fn completeness_residual_codes_obey_the_grammar() {
             diag.code
         );
         assert_wright_code(&diag.code, &format!("residual {issue:?}"));
+        codes.push(diag.code);
+    }
+    for expected in [
+        "workshop.unknown-action.double-space",
+        "workshop.unknown-action.paren-name",
+        "workshop.unknown-action.leading-trailing",
+        // A punctuation-only name sanitises to an empty slug — the name
+        // segment is omitted rather than left dangling.
+        "workshop.unknown-action",
+        "workshop.unknown-value.val-ue-name",
+    ] {
+        assert!(
+            codes.iter().any(|code| code == expected),
+            "no code {expected}"
+        );
     }
     for kind in [
         workshop_rs::rules::IncompletenessKind::RawSetting,

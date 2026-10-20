@@ -58,19 +58,27 @@ pub(crate) fn status_for_classification(
 }
 
 fn diagnostic_code(kind: &str, identity: &str) -> String {
-    format!(
-        "workshop.{kind}.{}",
-        identity
-            .chars()
-            .map(|character| {
-                if character.is_ascii_alphanumeric() {
-                    character.to_ascii_lowercase()
-                } else {
-                    '-'
-                }
-            })
-            .collect::<String>()
-    )
+    // `<name>` is authored free text: a run of non-alphanumerics becomes
+    // one hyphen, and a hyphen is only emitted ahead of an alphanumeric,
+    // so the segment always obeys the declared grammar.
+    let mut slug = String::with_capacity(identity.len());
+    let mut hyphen = false;
+    for character in identity.chars() {
+        if character.is_ascii_alphanumeric() {
+            if hyphen && !slug.is_empty() {
+                slug.push('-');
+            }
+            slug.push(character.to_ascii_lowercase());
+            hyphen = false;
+        } else {
+            hyphen = true;
+        }
+    }
+    if slug.is_empty() {
+        format!("workshop.{kind}")
+    } else {
+        format!("workshop.{kind}.{slug}")
+    }
 }
 
 fn status_name(status: Status) -> &'static str {
