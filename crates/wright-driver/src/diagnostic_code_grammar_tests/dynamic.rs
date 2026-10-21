@@ -14,12 +14,12 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use super::brackets::in_pattern;
+use super::brackets::{enclosing_open, in_pattern};
 use super::positions::{
-    CodeSite, arg_names_code_channel, code_binding_name, is_code_field, mutates_string,
-    plausibly_string, single_literal,
+    CodeSite, arg_names_code_channel, code_binding_name, code_tail_field, is_code_field,
+    mutates_string, plausibly_string, single_literal,
 };
-use super::sinks::{AMBIGUOUS_SINKS, CodeSinks};
+use super::sinks::{AMBIGUOUS_SINKS, CalleeTables};
 use super::source::{
     as_str, call_args, enclosing_call, line_of, match_bracket, rhs_span, skeleton, stage_marker_at,
 };
@@ -107,7 +107,7 @@ fn note_string_args(
 /// literal-vs-dynamic entries.
 pub(super) fn enumerate_dynamic(
     files: &BTreeMap<PathBuf, (String, Vec<u8>)>,
-    sinks: &CodeSinks,
+    tables: &CalleeTables,
     vocabulary: &mut Vec<CodeSite>,
     dynamic: &mut Vec<DynSite>,
 ) {
@@ -116,8 +116,12 @@ pub(super) fn enumerate_dynamic(
         let stage_glob = text.contains("Stage::*");
         let analyzer = path.to_string_lossy().contains("wright-analyzer");
 
-        // Sink callsites: every arg at a code-parameter index.
-        for (name, indices) in sinks {
+        // Sink callsites: every arg at a code-parameter index. The
+        // declaration's `param` counts a leading `self` receiver, so
+        // the callsite shape shifts it: `recv.f(…)` binds arg
+        // `param - 1` (the receiver is out-of-band), while
+        // `T::f(r, …)`/`Self::f`/`f(…)` pass arguments positionally.
+        for (name, decls) in &tables.sinks {
             let mut needles: Vec<(usize, usize)> = text
                 .match_indices(format!("{name}(").as_str())
                 .map(|(a, _)| (a, a + name.len()))
@@ -144,8 +148,24 @@ pub(super) fn enumerate_dynamic(
                 if text[..at].trim_end().ends_with("fn") {
                     continue; // the `fn name(` definition itself
                 }
-                for index in indices {
-                    let Some(span) = call_args(masked, open).get(*index).copied() else {
+                let args = call_args(masked, open);
+                // `.` before the name is a method call — the receiver
+                // is the callee's arg0, out of the arg list. `::` and
+                // bare spellings pass the receiver positionally.
+                let method = at > 0 && masked[at - 1] == b'.';
+                for decl in decls {
+                    let index = if method {
+                        if !decl.has_self || args.len() + 1 != decl.arity {
+                            continue;
+                        }
+                        decl.param.wrapping_sub(1)
+                    } else {
+                        if args.len() != decl.arity {
+                            continue;
+                        }
+                        decl.param
+                    };
+                    let Some(span) = args.get(index).copied() else {
                         continue;
                     };
                     if !plausibly_string(&skeleton(&original[span.0..span.1])) {
@@ -168,14 +188,29 @@ pub(super) fn enumerate_dynamic(
             if masked.get(at + 1) == Some(&b':') || (at > 0 && masked[at - 1] == b':') {
                 continue;
             }
-            let mut nstart = at;
-            while nstart > 0
-                && (masked[nstart - 1].is_ascii_alphanumeric() || masked[nstart - 1] == b'_')
-            {
-                nstart -= 1;
-            }
-            let name = &text[nstart..at];
-            if !is_code_field(name, analyzer) {
+            // The key is a bare ident or a masked `"lit"` — serde JSON
+            // keys quote camelCase `*Code` names (`"refusalCode":`).
+            let name = if at > 0 && masked[at - 1] == b'"' {
+                // `"  "` masked literal — recover the key from the
+                // original text.
+                let mut k = at - 1;
+                while k > 0 && masked[k - 1] != b'"' {
+                    k -= 1;
+                }
+                if k == 0 {
+                    continue;
+                }
+                original[k..at - 1].to_string()
+            } else {
+                let mut nstart = at;
+                while nstart > 0
+                    && (masked[nstart - 1].is_ascii_alphanumeric() || masked[nstart - 1] == b'_')
+                {
+                    nstart -= 1;
+                }
+                text[nstart..at].to_string()
+            };
+            if !is_code_field(&name, analyzer) && !code_tail_field(&name) {
                 continue;
             }
             let mut depth = 0i32;
@@ -395,77 +430,25 @@ pub(super) fn enumerate_dynamic(
             }
         }
 
-        // `(expr, Stage::…)` tuples: the expression before `, Stage::`.
+        // `(expr, …, Stage::…)` tuples: a `, Stage::` comma marks the
+        // tuple — the code position is its FIRST element, however many
+        // payload elements sit between it and the marker.
         for (at, _) in text.match_indices(',') {
             if !stage_marker_at(masked, at, stage_glob) {
                 continue;
             }
-            let mut end = at;
-            while end > 0 && (text.as_bytes()[end - 1] as char).is_ascii_whitespace() {
-                end -= 1;
-            }
-            if end == 0 {
+            let Some(open) = enclosing_open(masked, at) else {
+                continue;
+            };
+            if masked[open] != b'(' {
                 continue;
             }
-            let mut start = end;
-            loop {
-                let prev = start.checked_sub(1).map(|i| masked[i]);
-                match prev {
-                    Some(b')') | Some(b']') | Some(b'}') => {
-                        let mut depth = 0i32;
-                        let mut j = start;
-                        while j > 0 {
-                            j -= 1;
-                            match masked[j] {
-                                b')' | b']' | b'}' => depth += 1,
-                                b'(' | b'[' | b'{' => {
-                                    depth -= 1;
-                                    if depth == 0 {
-                                        break;
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                        start = j;
-                    }
-                    Some(b'"') => {
-                        let mut j = start - 1;
-                        while j > 0 && masked[j - 1] != b'"' {
-                            j -= 1;
-                        }
-                        if j == 0 {
-                            break;
-                        }
-                        start = j - 1;
-                    }
-                    Some(c)
-                        if c.is_ascii_alphanumeric()
-                            || c == b'_'
-                            || c == b'!'
-                            || c == b':'
-                            || c == b'.' =>
-                    {
-                        let mut j = start;
-                        while j > 0
-                            && (masked[j - 1].is_ascii_alphanumeric()
-                                || masked[j - 1] == b'_'
-                                || masked[j - 1] == b'!'
-                                || masked[j - 1] == b':'
-                                || masked[j - 1] == b'.')
-                        {
-                            j -= 1;
-                        }
-                        start = j;
-                    }
-                    _ => break,
-                }
-                if start == 0 {
-                    break;
-                }
-            }
+            let Some((start, end)) = call_args(masked, open).first().copied() else {
+                continue;
+            };
             let expr = original[start..end].trim();
-            if expr.starts_with("Stage::")
+            if expr.is_empty()
+                || expr.starts_with("Stage::")
                 || expr.contains("::Stage::")
                 || (stage_glob
                     && !expr.is_empty()

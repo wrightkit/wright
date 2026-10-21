@@ -7,11 +7,12 @@ use super::brackets::{
     depth0_words, enclosing_open, is_struct_lit_brace, next_nonws, prev_nonws, stmt_head,
     word_before,
 };
-use super::classify::{FileCtx, Outcome, Scope};
+use super::call::call_arg;
+use super::classify::{FileCtx, Outcome, Scope, evaluate};
 use super::expand::{BlockRole, Callee, block_role, callee_before, is_operand_end};
-use super::positions::{code_binding_name, is_code_field, mutates_string};
-use super::sinks::AMBIGUOUS_SINKS;
-use super::source::{as_str, call_args, enclosing_fn_span, match_bracket, stage_marker_at};
+use super::positions::{code_binding_name, code_tail_field, is_code_field};
+use super::source::{as_str, call_args, enclosing_fn_span, match_bracket};
+use super::uses::{concat_span, element_is_stage};
 
 /// The slot of the expanded expression `s..e` — the verdict that
 /// decides the literal it came from.
@@ -30,7 +31,10 @@ pub(super) fn slot_of(ctx: &FileCtx, s: usize, e: usize, crossed: bool) -> Outco
             b':' if masked.get(a + 1) != Some(&b':') && (a == 0 || masked[a - 1] != b':') => {
                 return Outcome::Other("key");
             }
-            b'+' | b'-' | b'*' | b'/' | b'%' | b'^' | b'&' | b'|' | b'<' | b'>' | b'!' | b'=' => {
+            // `"a" + "b"`/`lit + x` — the literal is a piece of the
+            // `+` chain's produced string; the chain's slot decides.
+            b'+' if masked.get(a + 1) != Some(&b'=') => return concat_piece(ctx, s, e),
+            b'-' | b'*' | b'/' | b'%' | b'^' | b'&' | b'|' | b'<' | b'>' | b'!' | b'=' => {
                 return Outcome::Other("operand");
             }
             b'.' => return Outcome::Other("receiver"),
@@ -43,7 +47,7 @@ pub(super) fn slot_of(ctx: &FileCtx, s: usize, e: usize, crossed: bool) -> Outco
     match masked[p] {
         b':' if (p == 0 || masked[p - 1] != b':') && masked.get(p + 1) != Some(&b':') => {
             let name = name_before_colon(ctx, p);
-            if is_code_field(&name, ctx.analyzer) {
+            if is_code_field(&name, ctx.analyzer) || code_tail_field(&name) {
                 Outcome::Vocab("code-field")
             } else {
                 Outcome::Other("field")
@@ -77,8 +81,11 @@ pub(super) fn slot_of(ctx: &FileCtx, s: usize, e: usize, crossed: bool) -> Outco
         b',' | b'(' | b'[' => arg_or_element(ctx, s, e),
         b'{' | b';' | b'}' => statement_slot(ctx, s, e, crossed),
         b'|' => Outcome::Other("operand"),
-        b'+' | b'-' | b'*' | b'/' | b'%' | b'^' | b'&' | b'!' | b'<' | b'>' | b'?' | b'~'
-        | b'#' => Outcome::Other("operand"),
+        // `x + "lit"` — the literal is a piece of the `+` chain.
+        b'+' => concat_piece(ctx, s, e),
+        b'-' | b'*' | b'/' | b'%' | b'^' | b'&' | b'!' | b'<' | b'>' | b'?' | b'~' | b'#' => {
+            Outcome::Other("operand")
+        }
         b'"' | b'\'' | b')' | b']' | b'.' => Outcome::Unresolved("adjacent-token"),
         _ => {
             let (ws, we) = word_before(masked, p + 1);
@@ -184,6 +191,7 @@ fn for_iterable(ctx: &FileCtx, at: usize) -> Outcome {
     Outcome::Deferred {
         names,
         scope: Scope::Range(body_open, body_close),
+        piece: false,
     }
 }
 
@@ -207,8 +215,11 @@ fn lhs_of_assign(ctx: &FileCtx, eq: usize, compound: bool) -> Outcome {
     {
         let rest = head[kat + kw.len()..].trim_start();
         let rest = rest.trim_start_matches("mut ").trim_start_matches("ref ");
-        // `let (a, b)`/`let T { .. }`/`let Some(x)`/`let _` destructure
-        // — a literal on the RHS is not bound whole to one name.
+        // `let (a, b)`/`let [a]`/`let T { .. }`/`let _` destructure —
+        // the whole-RHS literal cannot be a destructured value. `let
+        // W(x)`/`if let Some(code)`/`let Ok(code) … else` ctor
+        // patterns DO bind: the literal expanded here sat inside
+        // `W(…)`, so a single pattern leaf names its channel.
         if rest.starts_with(['(', '[', '{']) {
             return Outcome::Other("destructure-binding");
         }
@@ -217,31 +228,33 @@ fn lhs_of_assign(ctx: &FileCtx, eq: usize, compound: bool) -> Outcome {
             .unwrap_or(rest.len());
         let name = &rest[..name_len];
         let after = rest[name_len..].trim_start();
-        if name_len == 0 || name == "_" || after.starts_with(['(', '{', '<', '!']) {
+        if name_len == 0 || name == "_" || after.starts_with(['{', '<', '!']) {
             return Outcome::Other("destructure-binding");
         }
-        if code_binding_name(name, ctx.analyzer) {
-            if compound || name.split('_').any(|p| p == "PREFIX" || p == "SUFFIX") {
-                return Outcome::Fragment("code-binding-fragment");
+        if after.starts_with('(') || after.starts_with("::") {
+            // The pattern's `(` is the first `(` after the `let`
+            // keyword — `W(leaf, …)`/`m::W(leaf, …)` binds the RHS
+            // `W(…)`'s args per-index; the whole-RHS literal (expanded
+            // out of a transparent `Some`/`Ok`/`Err`) binds only a
+            // single leaf.
+            let pat_at = hs + kat + kw.len();
+            let Some(paren) = (pat_at..eq).find(|&i| masked[i] == b'(') else {
+                return Outcome::Other("destructure-binding");
+            };
+            let names = pattern_leaves(masked, paren);
+            let mut bare = names.iter().flatten();
+            match (bare.next(), names.iter().filter(|n| n.is_some()).count()) {
+                (Some(only), 1) => return bind_name(ctx, only, compound, kw == "let", eq),
+                _ => return Outcome::Other("destructure-binding"),
             }
-            return Outcome::Vocab("code-binding");
         }
-        let scope = if kw == "let" {
-            enclosing_fn_span(masked, eq)
-                .map(|(_, b, be)| Scope::Range(b, be))
-                .unwrap_or(Scope::AllFiles)
-        } else {
-            Scope::AllFiles
-        };
-        return Outcome::Deferred {
-            names: vec![name.to_string()],
-            scope,
-        };
+        return bind_name(ctx, name, compound, kw == "let", eq);
     }
     let lhs = head.trim();
     let field = lhs.rsplit([' ', '\t']).next().unwrap_or("").trim();
     let field_leaf = field.rsplit('.').next().unwrap_or(field);
     if is_code_field(field_leaf, ctx.analyzer)
+        || code_tail_field(field_leaf)
         || (field.ends_with("_code") && !field.ends_with("by_code") && !field.contains('('))
         || field == "code"
         || (ctx.analyzer && field == "id")
@@ -256,7 +269,7 @@ fn lhs_of_assign(ctx: &FileCtx, eq: usize, compound: bool) -> Outcome {
         // `v["code"] =` — the subscript key decides.
         let open = bracketed.rfind('[').unwrap_or(0);
         let key = bracketed[open + 1..].trim().trim_matches('"');
-        if is_code_field(key, ctx.analyzer) {
+        if is_code_field(key, ctx.analyzer) || code_tail_field(key) {
             return Outcome::Vocab("code-subscript-write");
         }
         return Outcome::Other("subscript-write");
@@ -291,87 +304,75 @@ fn return_tail(ctx: &FileCtx, at: usize) -> Outcome {
         Some((name, _, _)) => Outcome::Deferred {
             names: vec![name],
             scope: Scope::AllFiles,
+            piece: false,
         },
         None => Outcome::Unresolved("return-outside-fn"),
     }
 }
 
-/// The literal sits at a `,`/`(`/`[` boundary — an argument or a
-/// collection element.
-fn arg_or_element(ctx: &FileCtx, s: usize, e: usize) -> Outcome {
-    let masked = ctx.masked;
-    let Some(open) = enclosing_open(masked, s) else {
-        return Outcome::Unresolved("no-bracket");
-    };
-    match masked[open] {
-        b'(' => match callee_before(masked, open) {
-            Callee::Call(name, callee_start) => call_arg(ctx, &name, callee_start, open, s),
-            Callee::Expr => Outcome::Other("expr-callee-arg"),
-            Callee::Group => {
-                // `(x, Stage::Y)` — the tuple's first element is a code.
-                if let Some(a) = next_nonws(masked, e)
-                    && masked[a] == b','
-                    && stage_marker_at(masked, a, ctx.stage_glob)
-                {
-                    return Outcome::Vocab("stage-tuple");
-                }
-                // `let (a, b) = (x, y)` — the RHS element binds the
-                // pattern name at its own index: a code-ish name is a
-                // code channel, any other name defers under it so a
-                // later `deny(code)` resolves the literal.
-                if let Some(names) = tuple_pattern_names(masked, open) {
-                    let args = call_args(masked, open);
-                    let index = args.iter().position(|&(a, b)| s >= a && s <= b);
-                    match index.and_then(|i| names.get(i).and_then(|n| n.clone())) {
-                        Some(name) if code_binding_name(&name, ctx.analyzer) => {
-                            return Outcome::Vocab("tuple-code-binding");
-                        }
-                        Some(name) => {
-                            return Outcome::Deferred {
-                                names: vec![name],
-                                scope: enclosing_fn_span(masked, open)
-                                    .map(|(_, b, be)| Scope::Range(b, be))
-                                    .unwrap_or(Scope::AllFiles),
-                            };
-                        }
-                        None => {}
-                    }
-                }
-                Outcome::Other("group-element")
-            }
-        },
-        b'[' => {
-            // `[` is a subscript key when it follows an expression.
-            match prev_nonws(masked, open) {
-                Some(p) if is_operand_end(masked[p]) => Outcome::Other("subscript-key"),
-                _ => match for_head(masked, open) {
-                    Some((names, body_open, body_close)) => {
-                        if names.iter().any(|n| code_binding_name(n, ctx.analyzer)) {
-                            Outcome::Vocab("for-code")
-                        } else {
-                            Outcome::Deferred {
-                                names,
-                                scope: Scope::Range(body_open, body_close),
-                            }
-                        }
-                    }
-                    None => Outcome::Other("array-element"),
-                },
-            }
+/// A name bound by `let`/`const`/`static`/pattern — the binding's own
+/// verdict: a code-channel name is `Vocab` (a `PREFIX`/`SUFFIX` name or
+/// a `compound` `op=` write makes it a piece), any other name defers
+/// under it for use-resolution.
+fn bind_name(ctx: &FileCtx, name: &str, compound: bool, local: bool, at: usize) -> Outcome {
+    if code_binding_name(name, ctx.analyzer) {
+        if compound || name.split('_').any(|p| p == "PREFIX" || p == "SUFFIX") {
+            return Outcome::Fragment("code-binding-fragment");
         }
-        b'{' => statement_slot(ctx, s, e, false),
-        _ => Outcome::Unresolved("stray-bracket"),
+        return Outcome::Vocab("code-binding");
+    }
+    let scope = if local {
+        enclosing_fn_span(ctx.masked, at)
+            .map(|(_, b, be)| Scope::Range(b, be))
+            .unwrap_or(Scope::AllFiles)
+    } else {
+        Scope::AllFiles
+    };
+    Outcome::Deferred {
+        names: vec![name.to_string()],
+        scope,
+        piece: false,
     }
 }
 
-/// `let (a, b) = (…)` — when `open` is the RHS tuple's `(`, the LHS
-/// pattern's element names in order. `None` entries are `_`, nested
-/// patterns, and typed elements — a literal never sits against one
-/// directly. `None` (the whole return) means the `(` is not a `let`
-/// destructure's RHS at all.
-fn tuple_pattern_names(masked: &[u8], open: usize) -> Option<Vec<Option<String>>> {
-    // The RHS `(` follows the `=` of a `let`/`if let`/`while let`
-    // binding — `==`, `=>`, `<=`, `>=`, `!=` are operators, not one.
+/// The bindable leaf names of a `(`/`[` pattern at `open` — bare
+/// identifiers only; `_`, nested patterns, and typed elements are
+/// `None` (no single name binds that element).
+fn pattern_leaves(masked: &[u8], open: usize) -> Vec<Option<String>> {
+    call_args(masked, open)
+        .iter()
+        .map(|&(a, b)| {
+            let el = as_str(masked, a..b)
+                .trim()
+                .trim_start_matches("ref ")
+                .trim_start_matches("mut ")
+                .trim_start_matches('&')
+                .trim_start_matches("mut ")
+                .trim();
+            (!el.is_empty()
+                && el != "_"
+                && el.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
+            .then(|| el.to_string())
+        })
+        .collect()
+}
+
+/// The `let`/`if let`/`while let` pattern the `=`-RHS at `open`
+/// destructures into — `None` when `open` does not open a let-binding
+/// RHS expression.
+enum LetPattern {
+    /// `let (a, b) = (…)` — the RHS tuple element binds the pattern
+    /// name at its own index.
+    Tuple(Vec<Option<String>>),
+    /// `let [a, b] = […]` — the RHS array element binds per-index.
+    Array(Vec<Option<String>>),
+    /// `let W(a, …) = W(…)` — the RHS ctor call's arg binds the leaf
+    /// at the same index; the stored string is the ctor path's leaf.
+    Ctor(String, Vec<Option<String>>),
+}
+
+fn let_pattern(masked: &[u8], open: usize) -> Option<LetPattern> {
+    // `= <rhs>` — a binding `=`, not `==`/`=>`/`<=`/`!=`.
     let eq = prev_nonws(masked, open)?;
     if masked[eq] != b'='
         || masked.get(eq + 1) == Some(&b'=')
@@ -384,252 +385,231 @@ fn tuple_pattern_names(masked: &[u8], open: usize) -> Option<Vec<Option<String>>
     }
     let (hs, he) = stmt_head(masked, eq);
     let head = as_str(masked, hs..he);
-    // The last depth-0 `let` heads this binding. Its pattern must start
-    // with `(` — `let x`, `let x: (T, T)` are not tuple destructures.
+    // The last depth-0 `let` heads this binding — `if let`/`while let`
+    // included.
     let &(kat, _) = depth0_words(head)
         .iter()
         .rev()
         .find(|&(_, w)| *w == "let")?;
-    let after_let = &head[kat + "let".len()..];
-    let trimmed = after_let
-        .trim_start()
-        .trim_start_matches("ref ")
-        .trim_start_matches("mut ");
-    if !trimmed.starts_with('(') {
+    let mut j = hs + kat + "let".len();
+    while j < eq && masked[j].is_ascii_whitespace() {
+        j += 1;
+    }
+    for _ in 0..2 {
+        for kw in ["ref ", "mut "] {
+            if masked[j..].starts_with(kw.as_bytes()) {
+                j += kw.len();
+                while j < eq && masked[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+            }
+        }
+    }
+    match *masked.get(j)? {
+        b'(' => Some(LetPattern::Tuple(pattern_leaves(masked, j))),
+        b'[' => Some(LetPattern::Array(pattern_leaves(masked, j))),
+        b'{' => None,
+        c if c.is_ascii_alphanumeric() || c == b'_' => {
+            let id_start = j;
+            while j < eq
+                && (masked[j].is_ascii_alphanumeric() || masked[j] == b'_' || masked[j] == b':')
+            {
+                j += 1;
+            }
+            while j < eq && masked[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if masked.get(j) == Some(&b'(') {
+                let ctor = as_str(masked, id_start..j)
+                    .trim_end()
+                    .rsplit("::")
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+                return Some(LetPattern::Ctor(ctor, pattern_leaves(masked, j)));
+            }
+            // A bare-ident or struct pattern — not a bracketed RHS
+            // destructure.
+            None
+        }
+        _ => None,
+    }
+}
+
+/// The verdict for a pattern-bound element: a code-channel name is
+/// `Vocab`, a plain name defers under it, and `_`/nested/typed pattern
+/// elements bind nothing the census can follow.
+fn bind_pattern_leaf(ctx: &FileCtx, name: Option<&String>, at: usize) -> Outcome {
+    match name {
+        Some(n) if code_binding_name(n, ctx.analyzer) => Outcome::Vocab("pattern-code-binding"),
+        Some(n) => Outcome::Deferred {
+            names: vec![n.clone()],
+            scope: enclosing_fn_span(ctx.masked, at)
+                .map(|(_, b, be)| Scope::Range(b, be))
+                .unwrap_or(Scope::AllFiles),
+            piece: false,
+        },
+        None => Outcome::Other("pattern-element"),
+    }
+}
+
+/// The literal sits at a `,`/`(`/`[` boundary — an argument or a
+/// collection element.
+fn arg_or_element(ctx: &FileCtx, s: usize, e: usize) -> Outcome {
+    let masked = ctx.masked;
+    let Some(open) = enclosing_open(masked, s) else {
+        return Outcome::Unresolved("no-bracket");
+    };
+    let index_of = |open: usize| {
+        call_args(masked, open)
+            .iter()
+            .position(|&(a, b)| s >= a && s <= b)
+    };
+    match masked[open] {
+        b'(' => match callee_before(masked, open) {
+            Callee::Call(name, callee_start) => {
+                // `let W(code) = W(lit)` — a ctor pattern's RHS call
+                // binds arg `i` to the pattern leaf at index `i`.
+                if let Some(LetPattern::Ctor(ctor, names)) = let_pattern(masked, open)
+                    && ctor
+                        == name
+                            .trim_end_matches(':')
+                            .rsplit([':', '.'])
+                            .next()
+                            .unwrap_or("")
+                {
+                    return bind_pattern_leaf(
+                        ctx,
+                        index_of(open)
+                            .and_then(|i| names.get(i))
+                            .and_then(Option::as_ref),
+                        open,
+                    );
+                }
+                call_arg(ctx, &name, callee_start, open, s)
+            }
+            Callee::Expr => Outcome::Other("expr-callee-arg"),
+            Callee::Group => {
+                let args = call_args(masked, open);
+                let index = index_of(open);
+                // `(code, …, Stage::X)` — the stage marker can sit in
+                // any later element; element 0 is the code, other
+                // elements ride along as data.
+                if let Some(i) = index
+                    && args.iter().enumerate().any(|(j, &(a, b))| {
+                        j != i && element_is_stage(masked, a, b, ctx.stage_glob)
+                    })
+                {
+                    return if i == 0 {
+                        Outcome::Vocab("stage-tuple")
+                    } else {
+                        Outcome::Other("stage-tuple-field")
+                    };
+                }
+                // `let (a, b) = (x, y)` — the RHS element binds the
+                // pattern name at its own index: a code-ish name is a
+                // code channel, any other name defers under it so a
+                // later `deny(code)` resolves the literal.
+                if let Some(LetPattern::Tuple(names)) = let_pattern(masked, open)
+                    && let Some(i) = index
+                {
+                    return bind_pattern_leaf(ctx, names.get(i).and_then(Option::as_ref), open);
+                }
+                Outcome::Other("group-element")
+            }
+        },
+        b'[' => {
+            // `[` is a subscript key when it follows an expression.
+            match prev_nonws(masked, open) {
+                Some(p) if is_operand_end(masked[p]) => Outcome::Other("subscript-key"),
+                _ => {
+                    // `let [code] = ["x"]` — per-index pattern binding.
+                    if let Some(LetPattern::Array(names)) = let_pattern(masked, open) {
+                        return bind_pattern_leaf(
+                            ctx,
+                            index_of(open)
+                                .and_then(|i| names.get(i))
+                                .and_then(Option::as_ref),
+                            open,
+                        );
+                    }
+                    // `[a, b].join(sep)`/`[a, b].concat()` — the
+                    // elements are pieces of the produced string; the
+                    // produced expression's own slot decides them.
+                    if let Some(produced_end) = produced_join_end(masked, open) {
+                        return piece_eval(ctx, open, produced_end);
+                    }
+                    match for_head(masked, open) {
+                        Some((names, body_open, body_close)) => {
+                            if names.iter().any(|n| code_binding_name(n, ctx.analyzer)) {
+                                Outcome::Vocab("for-code")
+                            } else {
+                                Outcome::Deferred {
+                                    names,
+                                    scope: Scope::Range(body_open, body_close),
+                                    piece: false,
+                                }
+                            }
+                        }
+                        None => Outcome::Other("array-element"),
+                    }
+                }
+            }
+        }
+        b'{' => statement_slot(ctx, s, e, false),
+        _ => Outcome::Unresolved("stray-bracket"),
+    }
+}
+
+/// The literal is a *piece* of a produced string (`+` operand, a
+/// `.join()`/`.concat()` element) — the produced expression `s..e`
+/// decides; a code position makes the literal a `Fragment`, and a
+/// bound name defers carrying the piece flag.
+fn piece_eval(ctx: &FileCtx, s: usize, e: usize) -> Outcome {
+    match evaluate(ctx, s, e) {
+        Outcome::Vocab(_) | Outcome::Fragment(_) => Outcome::Fragment("code-piece"),
+        Outcome::Deferred { names, scope, .. } => Outcome::Deferred {
+            names,
+            scope,
+            piece: true,
+        },
+        other => other,
+    }
+}
+
+/// `s..e` is an operand of a binary `+` — the whole `+` chain produces
+/// a string; evaluate the chain's slot as a piece context.
+fn concat_piece(ctx: &FileCtx, s: usize, e: usize) -> Outcome {
+    let (cs, ce) = concat_span(ctx.masked, s, e);
+    piece_eval(ctx, cs, ce)
+}
+
+/// If the `]` closing the `[` at `open` is followed by `.join(…)` or
+/// `.concat()`, the produced expression's end — `call_end` inclusive
+/// of further transparent call chains is not walked; the immediate
+/// `join`/`concat` call end is the produced span the piece evaluator
+/// expands outward from.
+fn produced_join_end(masked: &[u8], open: usize) -> Option<usize> {
+    let close = match_bracket(masked, open)?;
+    let mut i = next_nonws(masked, close + 1)?;
+    if masked[i] != b'.' {
         return None;
     }
-    let pat_open = hs + kat + "let".len() + (after_let.len() - trimmed.len());
-    Some(
-        call_args(masked, pat_open)
-            .iter()
-            .map(|&(a, b)| {
-                let el = as_str(masked, a..b)
-                    .trim()
-                    .trim_start_matches("ref ")
-                    .trim_start_matches("mut ")
-                    .trim_start_matches('&')
-                    .trim_start_matches("mut ")
-                    .trim();
-                // A bare identifier binds the element under its name.
-                (!el.is_empty()
-                    && el != "_"
-                    && el.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
-                .then(|| el.to_string())
-            })
-            .collect(),
-    )
-}
-
-/// `call(args)` — the callee decides the argument's role.
-fn call_arg(ctx: &FileCtx, callee: &str, callee_start: usize, open: usize, s: usize) -> Outcome {
-    let masked = ctx.masked;
-    let args = call_args(masked, open);
-    let index = args
-        .iter()
-        .position(|&(a, b)| s >= a && s <= b)
-        .unwrap_or(args.len());
-    let leaf = callee.rsplit([':', '.']).next().unwrap_or(callee);
-    if callee.ends_with('!') {
-        let name = leaf.trim_end_matches('!');
-        return match name {
-            // `concat!` args are pieces of the produced string — the
-            // expander absorbs them into the call's span, so reaching
-            // here means the walk missed one: fail loudly.
-            "concat" => Outcome::Unresolved("concat-arg"),
-            // Macros whose produced value can never be a diagnostic
-            // code: formatting/printing/panicking templates, the
-            // assert family, data constructors (`vec!`, `json!`,
-            // `matches!`, …), `env!`/`include_*!` (their produced
-            // strings are external data), and the pinned third-party
-            // helpers (`hotpath::measure_block!`). An unlisted macro's
-            // argument is unclassifiable — it must be audited, not
-            // defaulted.
-            _ if KNOWN_DATA_MACROS.contains(&name) => Outcome::Other("macro-arg"),
-            _ => Outcome::Unresolved("unknown-macro-arg"),
-        };
+    i += 1;
+    let mstart = i;
+    while i < masked.len() && (masked[i].is_ascii_alphanumeric() || masked[i] == b'_') {
+        i += 1;
     }
-    // `.` method calls give the receiver — the span before the `.`
-    // before the leaf; `::` paths and bare names have none.
-    let receiver_span = callee
-        .rfind('.')
-        .filter(|dot| !callee[..*dot].ends_with(':'))
-        .map(|dot| (callee_start, callee_start + dot));
-    // Writes that take the code channel as a target:
-    // `mem::replace(&mut d.code, "x")`, `ptr::write(&mut d.code, "x")` —
-    // any arg after a code-channel arg0 is a code position.
-    if index >= 1
-        && [
-            "replace",
-            "write",
-            "write_unaligned",
-            "take",
-            "swap",
-            "read",
-            "write_bytes",
-            "drop_in_place",
-            "copy",
-            "copy_nonoverlapping",
-            "clone_from",
-        ]
-        .contains(&leaf)
-        && args
-            .first()
-            .is_some_and(|&(a, b)| arg_is_code_channel(ctx, a, b))
-    {
-        return Outcome::Vocab("code-write-arg");
+    if !matches!(as_str(masked, mstart..i), "join" | "concat") {
+        return None;
     }
-    // `insert("code", v)` — the literal value behind a code-named key.
-    if matches!(leaf, "insert" | "insert_str" | "get_or_insert")
-        && index >= 1
-        && args.first().is_some_and(|&(a, b)| {
-            lit_content(ctx, a, b).is_some_and(|k| is_code_field(&k, ctx.analyzer))
-        })
-    {
-        return Outcome::Vocab("code-key-value");
+    while i < masked.len() && masked[i].is_ascii_whitespace() {
+        i += 1;
     }
-    if matches!(leaf, "or_insert" | "or_insert_with" | "get_or_insert_with")
-        && receiver_span.is_some_and(|(rs, re)| receiver_has_code_entry(ctx, rs, re))
-    {
-        return Outcome::Vocab("code-entry-value");
+    if masked.get(i) != Some(&b'(') {
+        return None;
     }
-    // `code.push_str("x")`-family: the arg is a code fragment.
-    if mutates_string(leaf)
-        && receiver_span.is_some_and(|(rs, re)| {
-            let r = as_str(ctx.masked, rs..re).trim();
-            r == "code"
-                || r.ends_with(".code")
-                || r.ends_with("_code")
-                || (ctx.analyzer && (r == "id" || r.ends_with(".id")))
-        })
-    {
-        return Outcome::Fragment("code-append");
-    }
-    // A qualified callsite whose leaf collides with a std method —
-    // `x.contains(…)`, `v.insert(…)` — is ambiguous: the receiver could
-    // be the registered sink's owner or a `String`/`Vec`. A literal
-    // cannot prove which, so it stays non-code (the dynamic report
-    // still lists code-channel-shaped *arguments* at these callsites).
-    // Bare calls are unambiguous — they resolve to the defined `fn`.
-    if callee.contains(['.', ':']) && AMBIGUOUS_SINKS.contains(&leaf) {
-        return Outcome::Other("ambiguous-callee");
-    }
-    if let Some(indices) = ctx.sinks.get(leaf) {
-        if indices.contains(&index) {
-            return Outcome::Vocab("sink-arg");
-        }
-        return Outcome::Other("sink-other-arg");
-    }
-    if AMBIGUOUS_SINKS.contains(&leaf) {
-        return Outcome::Other("ambiguous-callee");
-    }
-    // The argument of a callee the census can attribute is positively
-    // data: `recv.f(…)`/`path::f(…)` defer to the receiver's type or
-    // the owning module, and a `fn`/closure/type defined in the scanned
-    // sources had its parameter list audited — no `code` channel
-    // registered. A *bare* callee that resolves to nothing is
-    // unanalyzable — `unknown_fn(c)` proves nothing about `c`, so the
-    // use cannot clear a deferred literal.
-    if callee.contains(['.', ':']) || ctx.defined.contains(leaf) {
-        return Outcome::Other("call-arg");
-    }
-    Outcome::Unresolved("unknown-callee")
-}
-
-/// Macro callees whose arguments can never produce a diagnostic code —
-/// `call_arg` whitelists them as `Other`; any other `!`-callee's
-/// argument is unclassifiable (`Unresolved`), and `concat!` is
-/// transparent to the expander so its args never reach this table.
-const KNOWN_DATA_MACROS: &[&str] = &[
-    "assert",
-    "assert_eq",
-    "assert_matches",
-    "assert_ne",
-    "cfg",
-    "column",
-    "compile_error",
-    "concat_idents",
-    "dbg",
-    "debug",
-    "debug_assert",
-    "debug_assert_eq",
-    "debug_assert_ne",
-    "env",
-    "eprint",
-    "eprintln",
-    "error",
-    "file",
-    "format",
-    "format_args",
-    "format_args_nl",
-    "include",
-    "include_bytes",
-    "include_str",
-    "info",
-    "json",
-    "json_internal",
-    "line",
-    "log",
-    "matches",
-    "measure_block",
-    "module_path",
-    "option_env",
-    "panic",
-    "print",
-    "println",
-    "stringify",
-    "thread_local",
-    "todo",
-    "trace",
-    "unimplemented",
-    "unreachable",
-    "vec",
-    "warn",
-    "write",
-    "writeln",
-];
-
-/// The cooked text of `masked[a..b]` when it is exactly one literal.
-fn lit_content(ctx: &FileCtx, a: usize, b: usize) -> Option<String> {
-    let text = ctx.original[a..b].trim();
-    let text = text.strip_prefix('r').unwrap_or(text);
-    let inner = text.strip_prefix('"')?.strip_suffix('"')?;
-    Some(inner.to_string())
-}
-
-/// Whether the arg at `a..b` names a code channel — `&mut d.code`,
-/// `code`, `d.provider_code`, analyzer `d.id`.
-fn arg_is_code_channel(ctx: &FileCtx, a: usize, b: usize) -> bool {
-    let text = as_str(ctx.masked, a..b).trim().to_string();
-    let text = text
-        .trim_start_matches('&')
-        .trim_start_matches("mut ")
-        .trim_start_matches('*')
-        .trim();
-    text == "code"
-        || text.ends_with(".code")
-        || text.ends_with("_code")
-        || (ctx.analyzer && (text == "id" || text.ends_with(".id")))
-        || {
-            let last = text.rsplit('.').next().unwrap_or(text);
-            is_code_field(last, ctx.analyzer)
-        }
-}
-
-/// Whether the receiver span `rs..re` holds an `entry("code")`-family
-/// call — read the original text since the mask blanks the literal.
-fn receiver_has_code_entry(ctx: &FileCtx, rs: usize, re: usize) -> bool {
-    let text = &ctx.original[rs..re];
-    let Some(at) = text.find("entry(") else {
-        return false;
-    };
-    let keys: &[&str] = if ctx.analyzer {
-        &["code", "provider_code", "refusal_code", "id"]
-    } else {
-        &["code", "provider_code", "refusal_code"]
-    };
-    let arg = text[at + 6..].trim_start();
-    keys.iter()
-        .any(|k| arg.starts_with(&format!("\"{k}\"")) || arg.starts_with(&format!("r\"{k}\"")))
+    Some(match_bracket(masked, i).map(|c| c + 1).unwrap_or(i + 1))
 }
 
 /// `s..e` at a statement boundary — a mid-block statement or a block

@@ -53,17 +53,20 @@
 //! defaulted.
 
 mod brackets;
+mod call;
 mod classify;
 mod driver_codes;
 mod dynamic;
 mod engine_kinds;
 mod expand;
 mod positions;
+mod probes;
 mod sinks;
 mod slot;
 mod source;
+mod uses;
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use workshop_rs::catalog::{Catalog, Locale};
@@ -288,139 +291,6 @@ fn fixed_codes_obey_the_declared_grammar() {
                 file.to_string_lossy().contains(path_part) && found.as_str() == code
             }),
             "the census missed `{code}` at a `{path_part}` site"
-        );
-    }
-}
-
-/// Position-rule probes on a synthetic source: each construct the
-/// round-8 review called out classifies the way the fix requires —
-/// receiver-shifted sink args, `concat!` folding, per-index tuple
-/// destructures, `fn`-return deferral (a `code`-position callsite
-/// proves the return literal; a never-called `fn` resolves non-code),
-/// unknown bare callees and unknown macros staying unresolved, an
-/// orphan literal staying unresolved, and an ordinary non-code binding
-/// resolving non-code through a defined callee.
-#[test]
-fn census_position_probes() {
-    const PROBE: &str = r##"
-struct Recv;
-impl Recv {
-    fn deny(&self, code: &str) {
-        let _ = code;
-    }
-    fn multi(&self, msg: &str, code: &str) {
-        let _ = (msg, code);
-    }
-}
-fn deny_once(code: &str) {
-    let _ = code;
-}
-fn consume(text: &str) {
-    let _ = text;
-}
-fn make_tag() -> String {
-    "probe-tag".to_string()
-}
-fn never_called() -> String {
-    "probe-unused".to_string()
-}
-fn drive(recv: &Recv) {
-    recv.deny("probe-sink-arg");
-    recv.multi("probe-first", "probe-second");
-    let code = concat!("probe-concat-", "tail");
-    deny_once(&code);
-    println!("{}", concat!("probe-print-", "joined"));
-    let (code, note) = ("probe-tuple-code", "probe-tuple-note");
-    deny_once(&code);
-    consume(note);
-    recv.deny(&make_tag());
-    let msg = "probe-msg";
-    println!("{}", msg);
-    let c = "probe-unknown";
-    unknown_fn(c);
-    mystery!("probe-macro");
-    "probe-orphan";
-}
-"##;
-    let (masked, lits) = source::mask_rust_full(PROBE);
-    let path = PathBuf::from("probe.rs");
-    let files: BTreeMap<PathBuf, (String, Vec<u8>)> =
-        [(path.clone(), (PROBE.to_string(), masked.clone()))].into();
-    let (sinks, defined) = sinks::collect_code_sinks(&files);
-    let scan = classify::ScanCtx {
-        files: &files,
-        sinks: &sinks,
-        defined: &defined,
-    };
-    let ctx = classify::FileCtx {
-        original: PROBE,
-        masked: &masked,
-        analyzer: false,
-        stage_glob: false,
-        sinks: &sinks,
-        defined: &defined,
-    };
-    let mut got: BTreeMap<&str, &str> = BTreeMap::new();
-    for lit in &lits {
-        let content = &PROBE[lit.content.0..lit.content.1];
-        let label = match classify::classify(&ctx, lit) {
-            classify::Outcome::Vocab(_) => "vocab",
-            classify::Outcome::Fragment(_) => "fragment",
-            classify::Outcome::Other(_) => "other",
-            classify::Outcome::Unresolved(_) => "unresolved",
-            classify::Outcome::Deferred { names, scope } => {
-                match classify::resolve_deferred(
-                    &names,
-                    &path,
-                    &scope,
-                    &scan,
-                    &mut HashSet::new(),
-                    0,
-                ) {
-                    classify::Flow::Vocab => "deferred-vocab",
-                    classify::Flow::Other => "deferred-other",
-                    classify::Flow::Unknown(_) => "deferred-unresolved",
-                }
-            }
-        };
-        got.insert(content, label);
-    }
-    for (content, expected) in [
-        // `fn deny(&self, code)` registers `code` at callsite index 0.
-        ("probe-sink-arg", "vocab"),
-        // `fn multi(&self, msg, code)` — only the second arg codes.
-        ("probe-first", "other"),
-        ("probe-second", "vocab"),
-        // `concat!` args fold into the produced string — the `code`
-        // binding's RHS is a code position.
-        ("probe-concat-", "vocab"),
-        ("tail", "vocab"),
-        // …and inside a whitelisted macro they stay data.
-        ("probe-print-", "other"),
-        ("joined", "other"),
-        // Per-index tuple destructure: `code` codes, `note` defers and
-        // resolves non-code through `consume`.
-        ("probe-tuple-code", "vocab"),
-        ("probe-tuple-note", "deferred-other"),
-        // A non-code-named `fn`'s return literal defers under the fn
-        // name: `recv.deny(&make_tag())` proves it, `never_called`
-        // resolves non-code.
-        ("probe-tag", "deferred-vocab"),
-        ("probe-unused", "deferred-other"),
-        // A deferred name used only by an unresolvable callee stays
-        // loud, an unknown macro's arg is unresolved, and an orphan
-        // statement literal has no evidence at all.
-        ("probe-unknown", "deferred-unresolved"),
-        ("probe-macro", "unresolved"),
-        ("probe-orphan", "unresolved"),
-        // The ordinary deferred non-code binding keeps resolving.
-        ("probe-msg", "deferred-other"),
-    ] {
-        assert_eq!(
-            got.get(content).copied(),
-            Some(expected),
-            "probe literal {content:?} classified {:?}, expected {expected:?}",
-            got.get(content)
         );
     }
 }

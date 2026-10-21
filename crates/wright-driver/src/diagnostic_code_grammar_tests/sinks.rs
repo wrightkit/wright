@@ -1,8 +1,10 @@
 //! Sink collection for `super::driver_codes::driver_code_census`: which
 //! `fn`/closure names take a string-typed `code` (or analyzer `id`)
-//! parameter and at which callsite argument indices, plus the direct
-//! `use`/`let` aliases that forward to those names and the set of every
-//! `fn`/closure/`struct`/`enum` name defined in the scanned sources.
+//! parameter and at which *parameter* index, plus the direct
+//! `use`/`let` aliases that forward to those names, the set of every
+//! `fn`/closure/`struct`/`enum`/`trait`/`mod`/`type` name defined in
+//! the scanned sources, each `fn`'s return-type leaf, and every
+//! `const`/`static`'s declared-type leaf.
 //!
 //! Two facts the census relies on:
 //!
@@ -11,34 +13,73 @@
 //!   `String`, `impl Into<String>`, `impl AsRef<str>`, or a bare generic
 //!   `T` bound — in the generics list or the `where` clause — that
 //!   mentions a string trait);
-//! - the registered indices are *callsite* indices: a leading `self`
-//!   receiver binds no callsite argument, so `fn deny(&self, code:
-//!   &str)` registers `code` at index 0 and `recv.deny("x")` classifies
-//!   its first argument as the code position. A fn with two code-named
-//!   parameters registers both, not just the first.
+//! - sink declarations carry *parameter* indices together with the
+//!   receiver shape: a `&self` method declares `param` counting the
+//!   receiver, so `recv.deny("x")` matches `args.len() + 1 == arity`
+//!   and classifies arg `param - 1`, while `Recv::deny(r, "x")` and
+//!   `Self::deny(self, "x")` pass arguments positionally
+//!   (`args.len() == arity`). A fn with two code-named parameters
+//!   registers both, and a name defined twice keeps a declaration per
+//!   `impl`/module.
 //!
 //! The defined-name set backs the unknown-callee rule in `slot.rs`: an
 //! argument of a bare callee the census cannot resolve to any `fn`,
 //! closure, or type is unclassifiable and must fail, while the argument
 //! of a defined fn is positively data — its parameters were audited.
+//! `rets` and `consts` feed receiver-type inference in `uses.rs`: a
+//! qualified ambiguous callsite (`x.contains("lit")`) resolves by
+//! proving the receiver type, and `let`/`const` annotations are the
+//! local evidence that does it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use super::source::{as_str, call_args, match_bracket};
+use super::uses::{impl_owner, ty_leaf};
 
-/// `fn` names whose parameter list carries a string-typed `code`
-/// parameter, with the set of that parameter's *callsite* indices —
-/// a `self` receiver occupies no callsite slot, so its successors'
-/// indices shift down by one. Any callsite's argument at one of those
-/// indices is a code position.
-pub(super) type CodeSinks = BTreeMap<String, BTreeSet<usize>>;
+/// One registered `code`-channel declaration — a `fn` or closure whose
+/// parameter list carries a string-typed `code`/`.._code`/analyzer-`id`
+/// parameter. Indices are *parameter* indices counting a leading `self`
+/// receiver; callsites apply them by shape — `recv.f(…)` binds the
+/// receiver, `T::f(recv, …)`/`f(…)` pass arguments positionally.
+#[derive(Clone)]
+pub(super) struct SinkDecl {
+    /// The parameter index carrying the code channel, `self` included.
+    pub param: usize,
+    /// The declaration's parameter count, `self` included.
+    pub arity: usize,
+    /// Whether a `self` receiver occupies parameter 0.
+    pub has_self: bool,
+    /// The `impl` owner type — `contains` on `RuleRegistry` — used to
+    /// prove a qualified ambiguous callsite's receiver. `None` for
+    /// closures and module-level fns.
+    pub owner: Option<String>,
+}
 
-/// Every `fn` name, `let`-bound closure variable, and
-/// `struct`/`enum`/`union` type name defined in the scanned sources —
-/// the callees the census can attribute. A bare callsite callee absent
-/// here is unanalyzable and fails closed.
+/// `fn` names with one declaration per registered `code` parameter —
+/// a name defined twice (`error` on `Diagnostic` and on the canonical
+/// service) keeps every declaration.
+pub(super) type CodeSinks = BTreeMap<String, Vec<SinkDecl>>;
+
+/// Every `fn` name, `let`-bound closure variable, `struct`/`enum`/
+/// `union`/`trait`/`type`/`mod` name defined in the scanned sources —
+/// the callees and receiver types the census can attribute. A bare
+/// callsite callee absent here is unanalyzable and fails closed; a
+/// receiver type absent here stays unproven.
 pub(super) type DefinedCallees = BTreeSet<String>;
+
+/// The callee/owner/name tables the census collects before scanning —
+/// sink declarations, defined names, `fn` return-type leaves for
+/// receiver inference (`let x = make()`), and `const`/`static` type
+/// leaves (`x::CODE` path-leaf bindings and `KINDS.contains` receivers).
+pub(super) struct CalleeTables {
+    pub sinks: CodeSinks,
+    pub defined: DefinedCallees,
+    /// `fn name` → leaf type name of its `-> Type`.
+    pub rets: BTreeMap<String, String>,
+    /// `const`/`static` name → leaf type name of its `: Type`.
+    pub consts: BTreeMap<String, String>,
+}
 
 /// Sink names that collide with std collection/string methods. Their
 /// callsites are ambiguous (`Vec::contains` vs `LintRegistry::contains`)
@@ -205,27 +246,30 @@ fn is_code_param(pname: &str, ptype: &str, bounds: &[&str], analyzer: bool) -> b
         || (bare_ident && bound_is_string(bounds, ptype))
 }
 
-/// Collect `fn` names whose parameter list carries a string-typed `code`
-/// parameter (`code: &str`, `code: String`, `code: impl Into<String>`,
-/// a generic `code: T` whose bound mentions `Into`/`AsRef`/`str`),
-/// recording every such parameter's *callsite* index — a leading `self`
-/// receiver consumes a parameter index but no callsite argument, so
-/// every later parameter shifts down by one. In wright-analyzer a
-/// string-typed `id:` parameter is a rule-code channel too.
+/// Collect the callee tables: `fn`/closure names whose parameter list
+/// carries a string-typed `code` parameter (`code: &str`,
+/// `code: String`, `code: impl Into<String>`, a generic `code: T`
+/// whose bound mentions `Into`/`AsRef`/`str`) — one [`SinkDecl`] per
+/// code parameter, recording its *parameter* index (the receiver is a
+/// parameter but consumes no callsite argument), the arity, whether a
+/// `self` receiver leads, and the `impl` owner type. In wright-analyzer
+/// a string-typed `id:` parameter is a rule-code channel too.
 /// `let name = |code: &str, …|` closure bindings register under their
 /// variable so `cb("lit")` callsites classify. Built from the masked
 /// sources so `#[cfg(test)]` helpers never register.
 ///
-/// The second return value is [`DefinedCallees`]: every `fn` name and
-/// closure-binding name seen, plus `struct`/`enum`/`union` type names —
-/// whether or not a code parameter exists. `call_arg` uses it to tell
-/// an audited non-code callee (`Other`) from an unresolvable one
-/// (`Unresolved`).
-pub(super) fn collect_code_sinks(
-    files: &BTreeMap<PathBuf, (String, Vec<u8>)>,
-) -> (CodeSinks, DefinedCallees) {
-    let mut sinks = BTreeMap::new();
-    let mut defined = BTreeSet::new();
+/// The rest of [`CalleeTables`]: every `fn` name, closure-binding name,
+/// `struct`/`enum`/`union`/`trait`/`type`/`mod` name (`call_arg` tells
+/// an audited non-code callee — `Other` — from an unresolvable one —
+/// `Unresolved`), each `fn`'s `-> Type` leaf, and each `const`/`static`'s
+/// `: Type` leaf for `uses.rs` receiver inference.
+pub(super) fn collect_code_sinks(files: &BTreeMap<PathBuf, (String, Vec<u8>)>) -> CalleeTables {
+    let mut tables = CalleeTables {
+        sinks: BTreeMap::new(),
+        defined: BTreeSet::new(),
+        rets: BTreeMap::new(),
+        consts: BTreeMap::new(),
+    };
     for (path, (original, masked)) in files {
         let analyzer = path.to_string_lossy().contains("wright-analyzer");
         let text = as_str(masked, 0..masked.len()).to_string();
@@ -238,7 +282,7 @@ pub(super) fn collect_code_sinks(
                 continue;
             };
             let name = original[name_start..name_end].to_string();
-            defined.insert(name.clone());
+            tables.defined.insert(name.clone());
             // Capture the generics list `<'a, T: Bound>` and the `where`
             // clause after `)` — a bare-ident param type (`code: T`) is
             // a string channel only when its own bound says so, and the
@@ -289,6 +333,15 @@ pub(super) fn collect_code_sinks(
                 wend += 1;
             }
             let tail = &text[params_close + 1..wend];
+            // `-> Type` — the return-type leaf feeds `uses.rs`
+            // receiver inference (`let x = f()`).
+            if let Some(arrow) = tail.find("->") {
+                let ret = tail[arrow + 2..].split("where").next().unwrap_or("").trim();
+                let leaf = ty_leaf(ret);
+                if !leaf.is_empty() {
+                    tables.rets.entry(name.clone()).or_insert(leaf);
+                }
+            }
             let where_text = tail
                 .match_indices("where")
                 .find(|(at, _)| {
@@ -302,10 +355,12 @@ pub(super) fn collect_code_sinks(
             let mut bounds: Vec<&str> = split_top_level(&text[name_end..generics_end]);
             bounds.extend(split_top_level(where_text));
             // The receiver (`self`/`&self`/`&mut self`/`self: T`) is a
-            // parameter but takes no callsite argument — every later
-            // parameter's callsite index is one less than its parameter
-            // index, so `recv.f("x")` still hits `f`'s `code` channel.
-            let receiver = params
+            // parameter but takes no callsite argument — callsites
+            // apply a declaration by shape: `recv.f(…)` supplies the
+            // receiver (`args + 1 == arity`, arg `i` ↔ param `i + 1`),
+            // while `T::f(recv, …)` and bare `f(…)` pass arguments
+            // positionally (`args == arity`, arg `i` ↔ param `i`).
+            let has_self = params
                 .first()
                 .map(|&(ps, pe)| {
                     let mut p = as_str(masked, ps..pe).trim();
@@ -322,17 +377,24 @@ pub(super) fn collect_code_sinks(
                         || p.strip_prefix("self")
                             .is_some_and(|r| r.trim_start().starts_with(':'))
                 })
-                .unwrap_or(false) as usize;
+                .unwrap_or(false);
+            let owner = has_self.then(|| impl_owner(masked, at)).flatten();
             for (index, (ps, pe)) in params.iter().enumerate() {
                 let param = as_str(masked, *ps..*pe).trim().to_string();
                 let Some((pname, ptype)) = param.split_once(':') else {
                     continue;
                 };
                 if is_code_param(pname, ptype, &bounds, analyzer) {
-                    sinks
+                    tables
+                        .sinks
                         .entry(name.clone())
-                        .or_insert_with(BTreeSet::new)
-                        .insert(index - receiver);
+                        .or_default()
+                        .push(SinkDecl {
+                            param: index,
+                            arity: params.len(),
+                            has_self,
+                            owner: owner.clone(),
+                        });
                 }
             }
         }
@@ -381,7 +443,7 @@ pub(super) fn collect_code_sinks(
                 continue;
             }
             // The binding is a closure — a defined callee name.
-            defined.insert(var.clone());
+            tables.defined.insert(var.clone());
             let Some(pipe_end) = masked[j + 1..]
                 .iter()
                 .position(|b| *b == b'|')
@@ -390,35 +452,79 @@ pub(super) fn collect_code_sinks(
                 continue;
             };
             let params_text = as_str(masked, j + 1..pipe_end);
+            let arity = params_text.split(',').count();
             for (index, param) in params_text.split(',').enumerate() {
                 let param = param.trim().trim_start_matches("mut ").trim();
-                match param.split_once(':') {
-                    Some((pname, ptype)) => {
-                        if is_code_param(pname, ptype, &[], analyzer) {
-                            sinks
-                                .entry(var.clone())
-                                .or_insert_with(BTreeSet::new)
-                                .insert(index);
-                        }
-                    }
+                let code_named = match param.split_once(':') {
+                    Some((pname, ptype)) => is_code_param(pname, ptype, &[], analyzer),
                     // `|code| …` — untyped params register on name.
                     None => {
-                        let code_name = param == "code"
-                            || param.ends_with("_code")
-                            || (analyzer && param == "id");
-                        if code_name {
-                            sinks
-                                .entry(var.clone())
-                                .or_insert_with(BTreeSet::new)
-                                .insert(index);
-                        }
+                        param == "code" || param.ends_with("_code") || (analyzer && param == "id")
                     }
+                };
+                if code_named {
+                    tables.sinks.entry(var.clone()).or_default().push(SinkDecl {
+                        param: index,
+                        arity,
+                        has_self: false,
+                        owner: None,
+                    });
                 }
             }
         }
-        // `struct Name`/`enum Name`/`union Name` — tuple-struct and
-        // variant constructors are resolvable callees too.
-        for kw in ["struct ", "enum ", "union "] {
+        // `const NAME: Ty`/`static NAME: Ty` — the declared type's leaf
+        // names the binding's type for `uses.rs` receiver inference and
+        // the `x::NAME` path-leaf rule.
+        for kw in ["const ", "static "] {
+            for (at, _) in text.match_indices(kw) {
+                if at > 0 && (masked[at - 1].is_ascii_alphanumeric() || masked[at - 1] == b'_') {
+                    continue;
+                }
+                let rest = &text[at + kw.len()..];
+                let name_len = rest
+                    .find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ' '))
+                    .unwrap_or(0);
+                let name = original[at + kw.len()..at + kw.len() + name_len]
+                    .trim()
+                    .trim_start_matches("mut ")
+                    .trim();
+                if name.is_empty() {
+                    continue;
+                }
+                let mut j = at + kw.len() + name_len;
+                while j < masked.len()
+                    && masked[j] != b':'
+                    && masked[j] != b'='
+                    && masked[j] != b';'
+                    && masked[j] != b'{'
+                {
+                    j += 1;
+                }
+                if masked.get(j) != Some(&b':') || masked.get(j + 1) == Some(&b':') {
+                    continue;
+                }
+                let ty_start = j + 1;
+                let mut ty_end = ty_start;
+                let mut depth = 0i32;
+                while ty_end < masked.len() {
+                    match masked[ty_end] {
+                        b'<' | b'(' | b'[' => depth += 1,
+                        b'>' | b')' | b']' => depth -= 1,
+                        b'=' | b';' | b'{' if depth <= 0 => break,
+                        _ => {}
+                    }
+                    ty_end += 1;
+                }
+                let leaf = ty_leaf(as_str(masked, ty_start..ty_end).trim());
+                if !leaf.is_empty() {
+                    tables.consts.insert(name.to_string(), leaf);
+                }
+            }
+        }
+        // `struct Name`/`enum Name`/`union Name`/`trait Name`/
+        // `type Name`/`mod Name` — type, module, and constructor names
+        // are resolvable callees and receiver types.
+        for kw in ["struct ", "enum ", "union ", "trait ", "type ", "mod "] {
             for (at, _) in text.match_indices(kw) {
                 if at > 0 && (masked[at - 1].is_ascii_alphanumeric() || masked[at - 1] == b'_') {
                     continue;
@@ -432,12 +538,12 @@ pub(super) fn collect_code_sinks(
                     j += 1;
                 }
                 if j > nstart {
-                    defined.insert(original[nstart..j].to_string());
+                    tables.defined.insert(original[nstart..j].to_string());
                 }
             }
         }
     }
-    (sinks, defined)
+    tables
 }
 
 /// The leaf identifier of a `use`/`let`-bound path — `a::b::f` and
@@ -491,9 +597,9 @@ pub(super) fn collect_aliases(files: &BTreeMap<PathBuf, (String, Vec<u8>)>, sink
                 }
                 let alias = &stmt[a..a_end];
                 if !alias.is_empty()
-                    && let Some(indices) = sinks.get(leaf).cloned()
+                    && let Some(decls) = sinks.get(leaf).cloned()
                 {
-                    sinks.entry(alias.to_string()).or_insert(indices);
+                    sinks.entry(alias.to_string()).or_insert(decls);
                 }
             }
         }
@@ -535,8 +641,8 @@ pub(super) fn collect_aliases(files: &BTreeMap<PathBuf, (String, Vec<u8>)>, sink
                     && rhs
                         .chars()
                         .all(|c| c.is_alphanumeric() || c == '_' || c == ':' || c == ' ');
-                if is_path && let Some(indices) = sinks.get(path_leaf(rhs)).cloned() {
-                    sinks.entry(name).or_insert(indices);
+                if is_path && let Some(decls) = sinks.get(path_leaf(rhs)).cloned() {
+                    sinks.entry(name).or_insert(decls);
                 }
             }
         }

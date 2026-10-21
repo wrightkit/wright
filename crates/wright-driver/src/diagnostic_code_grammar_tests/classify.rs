@@ -44,10 +44,12 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use super::brackets::{in_attribute, in_pattern, in_use_item, next_nonws};
+use super::call::arg_is_code_channel;
 use super::expand::expand_transparent;
-use super::sinks::{CodeSinks, DefinedCallees};
+use super::sinks::CalleeTables;
 use super::slot::slot_of;
-use super::source::{Lit, as_str};
+use super::source::{Lit, as_str, call_args, match_bracket};
+use super::uses::template_holes;
 
 /// Per-file classification context.
 pub(super) struct FileCtx<'a> {
@@ -55,11 +57,10 @@ pub(super) struct FileCtx<'a> {
     pub masked: &'a [u8],
     pub analyzer: bool,
     pub stage_glob: bool,
-    pub sinks: &'a CodeSinks,
-    /// `fn`, closure, and type names declared anywhere in the scanned
-    /// sources — a bare callsite argument is positively non-code when
-    /// its callee is one of these (its parameters were audited).
-    pub defined: &'a DefinedCallees,
+    /// The collected callee/owner/name tables — sink declarations,
+    /// defined `fn`/closure/type names, `fn` return-type leaves, and
+    /// `const`/`static` type leaves.
+    pub tables: &'a CalleeTables,
 }
 
 /// How far a name bound to a literal can flow.
@@ -82,7 +83,14 @@ pub(super) enum Outcome {
     /// Positively not a diagnostic-code position.
     Other(&'static str),
     /// Bound to a name — resolve by proving where the name is used.
-    Deferred { names: Vec<String>, scope: Scope },
+    /// `piece` marks the bound value as part of a produced string
+    /// (`"a" + b`, a `format!` template, `x.join(sep)` elements): a
+    /// resolved code use makes the literal a `Fragment`, not `Vocab`.
+    Deferred {
+        names: Vec<String>,
+        scope: Scope,
+        piece: bool,
+    },
     /// No evidence either way — the census must fail.
     Unresolved(&'static str),
 }
@@ -112,7 +120,7 @@ pub(super) fn classify(ctx: &FileCtx, lit: &Lit) -> Outcome {
 /// Expand `s..e` through transparent structure and evaluate the slot
 /// the produced value lands in — shared by literal classification and
 /// deferred identifier-use resolution.
-fn evaluate(ctx: &FileCtx, s: usize, e: usize) -> Outcome {
+pub(super) fn evaluate(ctx: &FileCtx, s: usize, e: usize) -> Outcome {
     let (es, ee, crossed) = expand_transparent(ctx.masked, s, e);
     slot_of(ctx, es, ee, crossed)
 }
@@ -121,6 +129,10 @@ fn evaluate(ctx: &FileCtx, s: usize, e: usize) -> Outcome {
 pub(super) enum Flow {
     /// A use reached a code position — the literal is vocabulary.
     Vocab,
+    /// A use reached a code position as a *piece* of a produced code
+    /// — a `format!` hole value, a `+` operand, a write template — the
+    /// literal is a fragment.
+    Piece,
     /// Every use found is positively non-code — including none at all;
     /// a bound-but-never-used value goes nowhere.
     Other,
@@ -132,8 +144,7 @@ pub(super) enum Flow {
 /// The whole-scan context deferred resolution searches.
 pub(super) struct ScanCtx<'a> {
     pub files: &'a BTreeMap<PathBuf, (String, Vec<u8>)>,
-    pub sinks: &'a CodeSinks,
-    pub defined: &'a DefinedCallees,
+    pub tables: &'a CalleeTables,
 }
 
 /// Whether the literal bound to `names` at `decl_file` flows to a code
@@ -160,6 +171,7 @@ pub(super) fn resolve_deferred(
         return Flow::Unknown("resolve-depth");
     }
     let mut unknown = None;
+    let mut piece = false;
     for name in names {
         let key = format!("{}::{name}", decl_file.display());
         if !visiting.insert(key.clone()) {
@@ -171,8 +183,7 @@ pub(super) fn resolve_deferred(
                 masked,
                 analyzer: path.to_string_lossy().contains("wright-analyzer"),
                 stage_glob: original.contains("use crate::diag::Stage::*"),
-                sinks: scan.sinks,
-                defined: scan.defined,
+                tables: scan.tables,
             };
             // The scope's byte range; AllFiles searches every file whole.
             let (ls, le) = match scope {
@@ -185,22 +196,28 @@ pub(super) fn resolve_deferred(
                 let pos = ls + at;
                 let end = pos + name.len();
                 // Identifier boundaries — `$x` macro vars, `'x`
-                // lifetimes, `x::y` path leaves, `x!` macro names, and
-                // `x.name` member pieces are not the bound name. A name
-                // after `.` is a field/method of the receiver's type —
-                // `name.as_str()` calls `String::as_str`, not a fn this
-                // census defined — so it can never be a use of the
-                // binding and is skipped outright (consumption-side
-                // member reads are covered by the slot rules' `receiver`
-                // verdict on the receiver itself).
+                // lifetimes, and `x.name` member pieces are not the
+                // bound name. A name after `.` is a field/method of the
+                // receiver's type — `name.as_str()` calls
+                // `String::as_str`, not a fn this census defined — so
+                // it can never be a use of the binding and is skipped
+                // outright. `::name` path leaves are uses only under
+                // `Scope::AllFiles` (a `const`/`static` can be named
+                // `m::NAME` anywhere); a `:`-preceded name otherwise
+                // reads `field: name` — a real use whose slot the
+                // `:`-arm decides.
+                let path_leaf = pos >= 2 && masked[pos - 1] == b':' && masked[pos - 2] == b':';
                 let before_ok = pos == 0 || {
                     let b = masked[pos - 1];
-                    !(b.is_ascii_alphanumeric()
-                        || b == b'_'
-                        || b == b':'
-                        || b == b'$'
-                        || b == b'\''
-                        || b == b'.')
+                    if path_leaf {
+                        matches!(scope, Scope::AllFiles)
+                    } else {
+                        !(b.is_ascii_alphanumeric()
+                            || b == b'_'
+                            || b == b'$'
+                            || b == b'\''
+                            || b == b'.')
+                    }
                 };
                 let after_ok = masked.get(end).is_none_or(|b| {
                     !(b.is_ascii_alphanumeric() || *b == b'_' || *b == b':' || *b == b'!')
@@ -225,27 +242,196 @@ pub(super) fn resolve_deferred(
                 {
                     continue;
                 }
-                match evaluate(&file_ctx, pos, end) {
-                    Outcome::Vocab(_) | Outcome::Fragment(_) => {
+                // A path-leaf use — `probe_take(m::CODE)` — evaluates
+                // the whole path's slot, so walk back over `::`heads.
+                // A `Type::name` head names that type's associated
+                // item — `serde_json::Value::as_str` is a different
+                // `as_str` than any local binding's — so only
+                // module-path heads (`crate`/`self`/`super`/`Self` or
+                // lowercase segments) can be a use of the bound name.
+                let (us, ue) = if path_leaf {
+                    let mut hs = pos - 2;
+                    while hs > 0 && masked[hs - 1].is_ascii_whitespace() {
+                        hs -= 1;
+                    }
+                    let he = hs;
+                    while hs > 0
+                        && (masked[hs - 1].is_ascii_alphanumeric() || masked[hs - 1] == b'_')
+                    {
+                        hs -= 1;
+                    }
+                    let head = as_str(masked, hs..he);
+                    if head != "Self" && head.bytes().next().is_some_and(|b| b.is_ascii_uppercase())
+                    {
+                        continue;
+                    }
+                    let mut ps = hs;
+                    loop {
+                        let mut j = ps;
+                        while j > 0 && masked[j - 1].is_ascii_whitespace() {
+                            j -= 1;
+                        }
+                        if j >= 2 && masked[j - 1] == b':' && masked[j - 2] == b':' {
+                            j -= 2;
+                            while j > 0 && masked[j - 1].is_ascii_whitespace() {
+                                j -= 1;
+                            }
+                            while j > 0
+                                && (masked[j - 1].is_ascii_alphanumeric() || masked[j - 1] == b'_')
+                            {
+                                j -= 1;
+                            }
+                            if j == ps {
+                                break;
+                            }
+                            ps = j;
+                        } else {
+                            break;
+                        }
+                    }
+                    (ps, end)
+                } else {
+                    (pos, end)
+                };
+                match evaluate(&file_ctx, us, ue) {
+                    Outcome::Vocab(_) => {
                         visiting.remove(&key);
                         return Flow::Vocab;
                     }
-                    Outcome::Deferred { names: next, scope } => {
-                        match resolve_deferred(&next, path, &scope, scan, visiting, depth + 1) {
-                            Flow::Vocab => {
-                                visiting.remove(&key);
-                                return Flow::Vocab;
-                            }
-                            Flow::Unknown(reason) => unknown = unknown.or(Some(reason)),
-                            Flow::Other => {}
+                    Outcome::Fragment(_) => piece = true,
+                    Outcome::Deferred {
+                        names: next, scope, ..
+                    } => match resolve_deferred(&next, path, &scope, scan, visiting, depth + 1) {
+                        Flow::Vocab => {
+                            visiting.remove(&key);
+                            return Flow::Vocab;
                         }
-                    }
+                        Flow::Piece => piece = true,
+                        Flow::Unknown(reason) => unknown = unknown.or(Some(reason)),
+                        Flow::Other => {}
+                    },
                     Outcome::Other(_) => {}
                     Outcome::Unresolved(reason) => unknown = unknown.or(Some(reason)),
+                }
+            }
+            // `format!`-family holes — `{name}` inside a template uses
+            // `name` even though the mask erased the literal. The
+            // produced string's slot decides the use; a mixed template
+            // contributes `name` as a piece of the produced code.
+            for (needle, tpl_idx, write_family) in [
+                ("format!(", 0, false),
+                ("format_args!(", 0, false),
+                ("format_args_nl!(", 0, false),
+                ("write!(", 1, true),
+                ("writeln!(", 1, true),
+            ] {
+                for (fat, _) in text.match_indices(needle) {
+                    if fat > 0
+                        && (masked[ls + fat - 1].is_ascii_alphanumeric()
+                            || masked[ls + fat - 1] == b'_'
+                            || masked[ls + fat - 1] == b'.')
+                    {
+                        continue;
+                    }
+                    let open = ls + fat + needle.len() - 1;
+                    let Some(close) = match_bracket(masked, open) else {
+                        continue;
+                    };
+                    let args = call_args(masked, open);
+                    let Some(&(ts, te)) = args.get(tpl_idx) else {
+                        continue;
+                    };
+                    let Some(cooked) = super::uses::template_text(original, ts, te) else {
+                        continue;
+                    };
+                    let (holes, covers) = template_holes(&cooked);
+                    let hole_use = holes.iter().any(|h| h == name);
+                    // `format!("{t}", t = tag3)` — the named argument
+                    // feeds hole `t`; its value is the hole's use.
+                    let kwarg_use = args[tpl_idx + 1..].iter().any(|&(a, b)| {
+                        as_str(masked, a..b).split_once('=').is_some_and(|(k, v)| {
+                            let k = k.trim();
+                            !k.is_empty()
+                                && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                                && v.trim() == name
+                                && holes.iter().any(|h| h == k)
+                        })
+                    });
+                    if !hole_use && !kwarg_use {
+                        continue;
+                    }
+                    // The hole's value *is* the produced string when the
+                    // template is exactly one hole — `{name}` whole, or
+                    // `{t}` fed by `t = name`.
+                    let pure = covers && holes.len() == 1;
+                    let flow = if write_family {
+                        // `write!(w, "tpl {name}")` — the hole value
+                        // lands in `w`; a code-channel writer makes
+                        // `name` a code piece.
+                        if args
+                            .first()
+                            .is_some_and(|&(a, b)| arg_is_code_channel(&file_ctx, a, b))
+                        {
+                            Flow::Piece
+                        } else {
+                            continue;
+                        }
+                    } else {
+                        match evaluate(&file_ctx, ls + fat, close + 1) {
+                            Outcome::Vocab(_) => {
+                                if pure {
+                                    Flow::Vocab
+                                } else {
+                                    Flow::Piece
+                                }
+                            }
+                            Outcome::Fragment(_) => Flow::Piece,
+                            Outcome::Deferred {
+                                names: next,
+                                scope: inner,
+                                ..
+                            } => match resolve_deferred(
+                                &next,
+                                path,
+                                &inner,
+                                scan,
+                                visiting,
+                                depth + 1,
+                            ) {
+                                Flow::Vocab => {
+                                    if pure {
+                                        Flow::Vocab
+                                    } else {
+                                        Flow::Piece
+                                    }
+                                }
+                                Flow::Piece => Flow::Piece,
+                                Flow::Other => Flow::Other,
+                                Flow::Unknown(reason) => Flow::Unknown(reason),
+                            },
+                            Outcome::Other(_) => continue,
+                            Outcome::Unresolved(reason) => Flow::Unknown(reason),
+                        }
+                    };
+                    match flow {
+                        Flow::Vocab => {
+                            visiting.remove(&key);
+                            return Flow::Vocab;
+                        }
+                        Flow::Piece => piece = true,
+                        Flow::Other => {}
+                        Flow::Unknown(reason) => unknown = unknown.or(Some(reason)),
+                    }
                 }
             }
         }
         visiting.remove(&key);
     }
-    unknown.map(Flow::Unknown).unwrap_or(Flow::Other)
+    if let Some(reason) = unknown {
+        Flow::Unknown(reason)
+    } else if piece {
+        Flow::Piece
+    } else {
+        Flow::Other
+    }
 }

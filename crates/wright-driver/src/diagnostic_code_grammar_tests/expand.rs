@@ -17,8 +17,8 @@
 //! field inits — so it stops the walk and `slot.rs` reads the field.
 
 use super::brackets::{
-    enclosing_open, if_chain_start, is_match_body, is_struct_lit_brace, last_construct_kw,
-    next_nonws, prev_nonws, stmt_head, word_before,
+    enclosing_open, head_tail, if_chain_start, is_match_body, is_struct_lit_brace,
+    last_construct_kw, next_nonws, prev_nonws, stmt_head, word_before,
 };
 use super::source::{as_str, call_args, match_bracket};
 
@@ -156,7 +156,13 @@ pub(super) fn is_operand_end(b: u8) -> bool {
 /// Constructors whose produced value is the argument whole —
 /// `Some(…)`, `Ok(…)`, `String::from(…)` and friends.
 fn transparent_ctor(name: &str) -> bool {
-    let leaf = name.rsplit([':', '.']).next().unwrap_or(name);
+    // `callee_ident` can hand back `Ok:`/`Some:` — a turbofish
+    // `::<T>` between the name and `(` leaves a trailing `:`.
+    let leaf = name
+        .trim_end_matches(':')
+        .rsplit([':', '.'])
+        .next()
+        .unwrap_or(name);
     if matches!(leaf, "Some" | "Ok" | "Err") {
         return true;
     }
@@ -253,7 +259,7 @@ fn transparent_suffix_end(masked: &[u8], e: usize) -> Option<usize> {
 /// The start of the primary expression ending at `pos` — walks back
 /// over `ident`, `::`/`.` paths, call/index brackets, literals, `?`/`!`
 /// suffixes, and turbofish `::<…>` — the receiver of a method call.
-fn expr_start_before(masked: &[u8], pos: usize) -> usize {
+pub(super) fn expr_start_before(masked: &[u8], pos: usize) -> usize {
     let mut i = pos;
     loop {
         while i > 0 && masked[i - 1].is_ascii_whitespace() {
@@ -376,8 +382,11 @@ fn block_role_inner(head: &str) -> BlockRole {
     // The last construct keyword at top-level bracket depth decides:
     // `kind: if c {` and `let x = if a {} else` heads read `if`/`else`
     // the same as statement-level arms, while a `match`/`fn`/`else if`
-    // inside an earlier item's balanced body stays invisible.
-    match last_construct_kw(head) {
+    // inside an earlier item's balanced body stays invisible. Only the
+    // head's tail counts — a complete earlier statement (`if c {}`
+    // before `let x = {`) has already finished, so its `if` cannot
+    // head this block.
+    match last_construct_kw(head_tail(head)) {
         Some(("if" | "else", _)) => BlockRole::IfArm,
         Some(("fn", _)) => BlockRole::FnBody,
         Some(_) => BlockRole::Dead,

@@ -99,11 +99,11 @@ pub(super) fn driver_code_census() -> Census {
         );
         file_lits.insert(path.clone(), lits);
     }
-    let (mut sinks, defined) = collect_code_sinks(&masked_files);
-    collect_aliases(&masked_files, &mut sinks);
+    let mut tables = collect_code_sinks(&masked_files);
+    collect_aliases(&masked_files, &mut tables.sinks);
 
     let mut census = Census::default();
-    let mut deferred: Vec<(Lit, PathBuf, Vec<String>, Scope)> = Vec::new();
+    let mut deferred: Vec<(Lit, PathBuf, Vec<String>, Scope, bool)> = Vec::new();
     for (path, (original, masked)) in &masked_files {
         let text = super::source::as_str(masked, 0..masked.len()).to_string();
         let ctx = FileCtx {
@@ -111,8 +111,7 @@ pub(super) fn driver_code_census() -> Census {
             masked,
             analyzer: path.to_string_lossy().contains("wright-analyzer"),
             stage_glob: text.contains("Stage::*") || original.contains("use crate::diag::Stage::*"),
-            sinks: &sinks,
-            defined: &defined,
+            tables: &tables,
         };
         for lit in &file_lits[path] {
             // A literal whose span was blanked sits in `#[cfg(test)]`
@@ -145,8 +144,12 @@ pub(super) fn driver_code_census() -> Census {
                     census.other += 1;
                     *census.other_reasons.entry(reason).or_insert(0) += 1;
                 }
-                Outcome::Deferred { names, scope } => {
-                    deferred.push((*lit, path.clone(), names, scope));
+                Outcome::Deferred {
+                    names,
+                    scope,
+                    piece,
+                } => {
+                    deferred.push((*lit, path.clone(), names, scope, piece));
                 }
                 Outcome::Unresolved(reason) => census.unresolved.push(LitSite {
                     file: path.clone(),
@@ -158,24 +161,35 @@ pub(super) fn driver_code_census() -> Census {
         }
     }
     // Deferred names resolve by use: any use at a code position makes
-    // the bound literal vocabulary, and a use the classifier cannot
-    // read stays loud instead of silently counting as non-code.
+    // the bound literal vocabulary — or a fragment when the bound
+    // value only ever arrives as a piece of a produced string — and a
+    // use the classifier cannot read stays loud instead of silently
+    // counting as non-code.
     let scan = ScanCtx {
         files: &masked_files,
-        sinks: &sinks,
-        defined: &defined,
+        tables: &tables,
     };
-    for (lit, path, names, scope) in deferred {
+    for (lit, path, names, scope, piece) in deferred {
         let (original, _) = &masked_files[&path];
         match resolve_deferred(&names, &path, &scope, &scan, &mut HashSet::new(), 0) {
-            Flow::Vocab => {
-                census.deferred_vocab += 1;
-                census.vocabulary.push(CodeSite {
-                    file: path,
-                    line: line_of(original, lit.span.0),
-                    code: original[lit.content.0..lit.content.1].to_string(),
-                    scan: "deferred-use",
-                });
+            Flow::Vocab | Flow::Piece => {
+                let code = original[lit.content.0..lit.content.1].to_string();
+                if piece {
+                    census.fragments.push(CodeSite {
+                        file: path,
+                        line: line_of(original, lit.span.0),
+                        code,
+                        scan: "deferred-piece",
+                    });
+                } else {
+                    census.deferred_vocab += 1;
+                    census.vocabulary.push(CodeSite {
+                        file: path,
+                        line: line_of(original, lit.span.0),
+                        code,
+                        scan: "deferred-use",
+                    });
+                }
             }
             Flow::Other => census.deferred_other += 1,
             Flow::Unknown(reason) => census.unresolved.push(LitSite {
@@ -188,7 +202,7 @@ pub(super) fn driver_code_census() -> Census {
     }
     enumerate_dynamic(
         &masked_files,
-        &sinks,
+        &tables,
         &mut census.vocabulary,
         &mut census.dynamic,
     );

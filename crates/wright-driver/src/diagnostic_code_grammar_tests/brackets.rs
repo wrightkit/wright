@@ -134,6 +134,29 @@ pub(super) const CONSTRUCT_KWS: &[&str] = &[
     "trait_alias",
 ];
 
+/// The head suffix that heads this bracket — the text after the last
+/// top-level `}`. A complete `if c { … }`/`match { … }` earlier in the
+/// head is a finished statement (`if c { } let x = {`), so only the
+/// tail decides what the bracket being asked about is.
+pub(super) fn head_tail(head: &str) -> &str {
+    let mut depth = 0i32;
+    let mut tail = 0;
+    for (i, &b) in head.as_bytes().iter().enumerate() {
+        match b {
+            b'{' | b'(' | b'[' => depth += 1,
+            b')' | b']' => depth -= 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    tail = i + 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    &head[tail..]
+}
+
 /// The (offset, word) pairs sitting at top-level bracket depth in
 /// `head`: `()[]{}` contents are skipped, so words inside earlier
 /// items' balanced bodies never leak into a construct verdict —
@@ -236,7 +259,7 @@ fn in_match_pattern_segment(masked: &[u8], match_open: usize, pos: usize) -> boo
 pub(super) fn is_match_body(masked: &[u8], open: usize) -> bool {
     let (hs, he) = stmt_head(masked, open);
     let head = as_str(masked, hs..he);
-    last_construct_kw(head).is_some_and(|(w, _)| w == "match")
+    last_construct_kw(head_tail(head)).is_some_and(|(w, _)| w == "match")
 }
 
 /// Whether `pos` sits in pattern position — a `let`/`if let`/`while
@@ -317,7 +340,7 @@ pub(super) fn in_use_item(masked: &[u8], pos: usize) -> bool {
 /// expansion must not absorb a struct literal's braces.
 pub(super) fn is_struct_lit_brace(masked: &[u8], open: usize) -> bool {
     let (hs, he) = stmt_head(masked, open);
-    let head = as_str(masked, hs..he).trim_end();
+    let head = head_tail(as_str(masked, hs..he)).trim_end();
     if head.is_empty() || head.ends_with("=>") || head.contains("->") {
         return false;
     }

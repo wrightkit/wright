@@ -344,7 +344,8 @@ pub(super) fn match_bracket(mask: &[u8], open: usize) -> Option<usize> {
 }
 
 /// The (start, end) byte ranges of the top-level arguments of the call
-/// whose `(` sits at `open`.
+/// whose `(` sits at `open`. A whitespace-only tail — `f(a,\n)` or the
+/// `()` empty list — is not an argument.
 pub(super) fn call_args(mask: &[u8], open: usize) -> Vec<(usize, usize)> {
     let mut args = Vec::new();
     let mut depth = 0i32;
@@ -354,7 +355,9 @@ pub(super) fn call_args(mask: &[u8], open: usize) -> Vec<(usize, usize)> {
             b'(' | b'[' | b'{' => depth += 1,
             b')' | b']' | b'}' => {
                 if depth == 0 {
-                    args.push((arg_start, i));
+                    if mask[arg_start..i].iter().any(|b| !b.is_ascii_whitespace()) {
+                        args.push((arg_start, i));
+                    }
                     return args;
                 }
                 depth -= 1;

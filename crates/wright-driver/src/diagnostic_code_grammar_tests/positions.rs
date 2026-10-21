@@ -62,9 +62,74 @@ fn peel_once(expr: &str) -> Option<&str> {
     None
 }
 
+/// Top-level `+` operands of `expr` — string-concatenation pieces.
+/// `Some(vec)` only when a real binary `+` exists outside quotes and
+/// brackets; `+=` targets and bracketed/quoted `+` never split.
+fn concat_parts(expr: &str) -> Option<Vec<&str>> {
+    let bytes = expr.as_bytes();
+    let mut parts = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0;
+    let mut in_str = false;
+    let mut escaped = false;
+    for (i, &b) in bytes.iter().enumerate() {
+        if in_str {
+            if escaped {
+                escaped = false;
+            } else if b == b'\\' {
+                escaped = true;
+            } else if b == b'"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_str = true,
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth -= 1,
+            b'+' if depth == 0
+                && bytes.get(i + 1) != Some(&b'=')
+                && bytes.get(i + 1) != Some(&b'+') =>
+            {
+                parts.push(&expr[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    parts.push(&expr[start..]);
+    Some(parts)
+}
+
+/// The `[a, b]` receiver elements of a `.join(…)`/`.concat()` tail —
+/// `e[..dot]` must be a bracketed list.
+fn join_elements(e: &str) -> Option<Vec<&str>> {
+    let t = e.trim();
+    let inner = t.strip_prefix('[')?.strip_suffix(']')?;
+    Some(inner.split(',').map(str::trim).collect())
+}
+
+/// Join literal `parts` with `sep` — every piece must itself reduce to
+/// a single literal, else the expression is dynamic (`Some(None)`).
+fn join_literals(parts: &[&str], sep: &str) -> Option<Option<String>> {
+    let mut lits = Vec::with_capacity(parts.len());
+    for part in parts {
+        match single_literal(part) {
+            Some(Some(lit)) => lits.push(lit),
+            _ => return Some(None),
+        }
+    }
+    Some(Some(lits.join(sep)))
+}
+
 /// If `expr` is syntactically a single string literal — after peeling
-/// wrappers, a `format!`/`concat!` of brace-free literals, or a plain
-/// literal — its cooked content. `Some(None)` is "not a single literal".
+/// wrappers, a `format!`/`concat!` of brace-free literals, a `+`
+/// concat chain or `[…].join(sep)`/`[…].concat()` of literals, or a
+/// plain literal — its cooked content. `Some(None)` is "not a single
+/// literal".
 pub(super) fn single_literal(expr: &str) -> Option<Option<String>> {
     let mut e = expr.trim();
     for _ in 0..10 {
@@ -72,6 +137,27 @@ pub(super) fn single_literal(expr: &str) -> Option<Option<String>> {
             Some(inner) => e = inner,
             None => break,
         }
+    }
+    // `"a" + "b"` — a `+` chain of literals emits their join.
+    if let Some(parts) = concat_parts(e) {
+        return join_literals(&parts, "");
+    }
+    // `[a, b].join(sep)`/`[a, b].concat()` — elements and separator
+    // must all reduce.
+    if let Some(join) = e.strip_suffix(')').and_then(|s| s.rsplit_once(".join(")) {
+        let Some(elements) = join_elements(join.0) else {
+            return Some(None);
+        };
+        return match single_literal(join.1) {
+            Some(Some(sep)) => join_literals(&elements, &sep),
+            _ => Some(None),
+        };
+    }
+    if let Some(recv) = e.strip_suffix(".concat()") {
+        let Some(elements) = join_elements(recv) else {
+            return Some(None);
+        };
+        return join_literals(&elements, "");
     }
     // `format!("lit")` with no holes emits exactly the literal; a
     // `format!` whose template carries `{`/`}` holes is dynamic.
@@ -149,6 +235,22 @@ pub(super) fn is_code_field(name: &str, analyzer: bool) -> bool {
         return true;
     }
     analyzer && name == "id"
+}
+
+/// Whether `name` is a camelCase `*Code` field — `refusalCode`,
+/// `outCode` — a JSON/serde key that carries an *owner-typed* code
+/// spelling (the LPP `refusalCode` is `provider-refusal-`'s tail).
+/// Literal values at one are code pieces: charset-checked, not
+/// grammar-checked. `byCode`/`*ByCode` stay entity channels.
+pub(super) fn code_tail_field(name: &str) -> bool {
+    name.ends_with("Code")
+        && name.len() > "Code".len()
+        && !name.ends_with("ByCode")
+        && name != "byCode"
+        && name[..name.len() - 4]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_lowercase())
 }
 
 /// Whether `name` declares a code channel as a binding. `code` is the
