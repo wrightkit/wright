@@ -109,9 +109,8 @@ fn resolved_input() -> ResolvedInput {
 /// Every fixed code literal in a production code position matches the
 /// declared grammar. Non-literal positions are not classified: they are
 /// reported as dynamic positions whose produced values the
-/// `debug_assert!` code-token checks inside the production sinks
-/// (`Diagnostic::error`, `refusal`, `provider_failure_code`, the LSP
-/// error writer) validate on any exercised path.
+/// `debug_assert!` code-token checks inside the universal chokes
+/// (`Diagnostic::error`, `refusal`) validate on any exercised path.
 #[test]
 fn fixed_codes_obey_the_declared_grammar() {
     let (codes, dynamic) = driver_codes::driver_code_census();

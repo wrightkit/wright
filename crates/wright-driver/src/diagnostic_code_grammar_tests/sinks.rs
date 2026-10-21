@@ -201,6 +201,11 @@ pub(super) fn collect_code_sinks(files: &BTreeMap<PathBuf, (String, Vec<u8>)>) -
                 };
                 let pname = pname.trim().trim_start_matches("mut ").trim();
                 let ptype = ptype.trim();
+                // `code`/`.._code` (analyzer adds `id`) params name a
+                // code channel; `write_error`'s `refusal_code` and the
+                // like ride along.
+                let code_param =
+                    pname == "code" || pname.ends_with("_code") || (analyzer && pname == "id");
                 let bare_ident = !ptype.is_empty()
                     && ptype.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
                 // `code: T` where `T`'s own bound (`<T: Into<String>>` /
@@ -216,6 +221,8 @@ pub(super) fn collect_code_sinks(files: &BTreeMap<PathBuf, (String, Vec<u8>)>) -
                                 || bound.contains("AsRef")
                                 || bound.contains("Borrow")
                                 || bound.contains("String")
+                                || bound.contains("Display")
+                                || bound.contains("ToString")
                                 || bound.contains("str"))
                     });
                 let string_typed = ptype.contains("str")
@@ -224,8 +231,10 @@ pub(super) fn collect_code_sinks(files: &BTreeMap<PathBuf, (String, Vec<u8>)>) -
                     || ptype.contains("AsRef")
                     || ptype.contains("Borrow")
                     || ptype.contains("Cow")
+                    || ptype.contains("Display")
+                    || ptype.contains("ToString")
                     || generic_string;
-                if (pname == "code" || (analyzer && pname == "id")) && string_typed {
+                if code_param && string_typed {
                     sinks.entry(name.clone()).or_insert(index);
                 }
                 index += 1;
@@ -284,14 +293,28 @@ pub(super) fn collect_code_sinks(files: &BTreeMap<PathBuf, (String, Vec<u8>)>) -
             };
             let params_text = as_str(masked, j + 1..pipe_end);
             for (index, param) in params_text.split(',').enumerate() {
-                if let Some((pname, ptype)) = param.split_once(':') {
-                    let pname = pname.trim().trim_start_matches("mut ").trim();
-                    let ptype = ptype.trim();
-                    let string_typed =
-                        ptype.contains("str") || ptype.contains("String") || ptype.contains("Into");
-                    if (pname == "code" || (analyzer && pname == "id")) && string_typed {
+                let param = param.trim().trim_start_matches("mut ").trim();
+                let code_name =
+                    param == "code" || param.ends_with("_code") || (analyzer && param == "id");
+                match param.split_once(':') {
+                    Some((pname, ptype)) => {
+                        let pname = pname.trim();
+                        let ptype = ptype.trim();
+                        let string_typed = ptype.contains("str")
+                            || ptype.contains("String")
+                            || ptype.contains("Into");
+                        let named = pname == "code"
+                            || pname.ends_with("_code")
+                            || (analyzer && pname == "id");
+                        if named && string_typed {
+                            sinks.entry(var.clone()).or_insert(index);
+                        }
+                    }
+                    // `|code| …` — untyped params register on name.
+                    None if code_name => {
                         sinks.entry(var.clone()).or_insert(index);
                     }
+                    None => {}
                 }
             }
         }

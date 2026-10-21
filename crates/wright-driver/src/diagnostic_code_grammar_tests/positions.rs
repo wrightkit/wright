@@ -5,11 +5,15 @@
 //! shape is *reported* as a dynamic position, never classified.
 //!
 //! Dynamic positions are not silent: `debug_assert!` code-token checks
-//! inside the production sinks (`Diagnostic::error`, `refusal`,
-//! `provider_failure_code`, the LSP error writer) validate every code
-//! they produce on any exercised path, regardless of how the value was
-//! computed, and the engine-kind tests drive the `kind`-built shapes
-//! through their producers.
+//! inside the two universal production chokes (`Diagnostic::error` and
+//! `refusal`) validate every code produced on an exercised path,
+//! regardless of how the value was computed, and the engine-kind tests
+//! drive the `kind`-built shapes through their producers. The remaining
+//! write-side channels (field writes bypassing the chokes, callsite
+//! arguments under aliased or let-bound indirection, `const`/`static`
+//! spellings, `use X as Y` re-exports) are reported on the dynamic list
+//! rather than claimed as covered — the census is a source enumeration,
+//! not a proof of absence.
 
 use std::path::PathBuf;
 
@@ -42,6 +46,7 @@ fn peel_once(expr: &str) -> Option<&str> {
     for (pre, suf) in [
         ("Some(", ")"),
         ("Ok(", ")"),
+        ("Err(", ")"),
         ("String::from(", ")"),
         ("str::to_string(", ")"),
         ("Box::new(", ")"),
@@ -61,10 +66,18 @@ fn peel_once(expr: &str) -> Option<&str> {
         ".as_str()",
         ".as_mut_str()",
         ".trim()",
+        ".unwrap()",
+        ".ok()",
     ] {
         if let Some(inner) = t.strip_suffix(suf) {
             return Some(inner.trim());
         }
+    }
+    // `.expect(msg)` — the payload is the code, the arg a panic message.
+    if let Some(inner) = t.strip_suffix(')').and_then(|s| s.rsplit_once(".expect(")) {
+        let (_, base) = inner;
+        let _ = inner;
+        return Some(base.trim());
     }
     None
 }
@@ -107,6 +120,21 @@ fn single_literal(expr: &str) -> Option<Option<String>> {
         }
         return Some(Some(out));
     }
+    // Raw strings: `r"…"` and `r#"…"#` carry no escapes.
+    if let Some(rest) = e.strip_prefix('r') {
+        let (hashes, rest) = rest.split_once('"')?;
+        if !hashes.chars().all(|c| c == '#') || hashes.len() > 3 {
+            return Some(None);
+        }
+        let close = format!("\"{}", "#".repeat(hashes.len()));
+        let inner = rest.strip_suffix(close.as_str())?;
+        return Some(Some(inner.to_string()));
+    }
+    // A char literal — its content becomes part of the code via
+    // `push`/`insert`; treat it as a code fragment to check.
+    if let Some(inner) = e.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')) {
+        return Some(Some(inner.to_string()));
+    }
     let inner = e.strip_prefix('"')?.strip_suffix('"')?;
     // An escaped or interior quote means the span is not one literal.
     if inner.contains('\\') || inner.contains('"') {
@@ -141,30 +169,64 @@ pub(super) fn arg_names_code_channel(shape: &str) -> bool {
 
 /// Whether the `:`-scan hit at `at` sits in a destructure/pattern head —
 /// `let { code: c }`, `for (k, v)`, `if let X { code: c } =`, a match-arm
-/// pattern — rather than an expression position. Approximated by the
-/// statement head: text from the last top-level `;`/`{`/`}`.
+/// pattern — rather than an expression position. The enclosing `{`/`(`'s
+/// own head decides: a `let`/`for`/arm-pattern head means the braces are
+/// a pattern, a `=` or call head means an expression.
 pub(super) fn in_pattern_position(masked: &[u8], at: usize) -> bool {
-    let mut stmt = at;
+    // Find the nearest enclosing `{` (struct pattern) or `(` (tuple
+    // pattern) and read the head before it.
     let mut depth = 0i32;
+    let mut j = at;
+    while j > 0 {
+        match masked[j - 1] {
+            b')' | b']' | b'}' => depth += 1,
+            b'(' | b'[' | b'{' => {
+                if depth == 0 {
+                    break;
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+        j -= 1;
+    }
+    if j == 0 {
+        return false;
+    }
+    let bracket = j - 1;
+    // The head: text from the enclosing bracket's statement start to it.
+    let mut stmt = bracket;
+    let mut d = 0i32;
     while stmt > 0 {
         match masked[stmt - 1] {
-            b'(' | b'[' => depth += 1,
-            b')' | b']' => {
-                if depth > 0 {
-                    depth -= 1;
+            b'(' | b'[' | b'{' => {
+                if d > 0 {
+                    d -= 1;
+                } else {
+                    break;
                 }
             }
-            b';' | b'{' | b'}' if depth == 0 => break,
+            b')' | b']' | b'}' => d += 1,
+            b';' | b',' if d == 0 => break,
             _ => {}
         }
         stmt -= 1;
     }
-    let head = masked[stmt..at]
+    let head = masked[stmt..bracket]
         .iter()
         .map(|&b| b as char)
         .collect::<String>();
-    let head = head.trim_start();
-    head.starts_with("let ") || head.starts_with("for ") || head.contains("=>")
+    let head = head.trim();
+    head.starts_with("let ")
+        || head.starts_with("let\t")
+        || head.starts_with("for ")
+        || head.starts_with("if let ")
+        || head.starts_with("while let ")
+        || head.contains(" if let ")
+        || head.contains(" while let ")
+        || head.ends_with("=>")
+        || head.starts_with("matches!")
+        || head.contains(" matches!")
 }
 
 /// A `name:`/`.._code:`/`id:` field name decides whether a `:`-scan hit is
@@ -272,6 +334,50 @@ fn literal_leaves(masked: &[u8], s0: usize, e0: usize) -> Vec<(usize, usize)> {
         for ae in combinator_fallback_args(masked, s, e) {
             stack.push(ae);
         }
+        // `Option::unwrap_or(o, "x")`/`Result::ok_or(e, "x")`/
+        // `bool::then(c, || "x")` — qualified combinators: the last arg
+        // is a produced value.
+        for qual in ["Option::", "Result::", "bool::"] {
+            let mut i = s;
+            while let Some(pos) = masked[i..e]
+                .windows(qual.len())
+                .position(|w| w == qual.as_bytes())
+                .map(|p| i + p)
+            {
+                let mut h = pos + qual.len();
+                while h < e && (masked[h].is_ascii_alphanumeric() || masked[h] == b'_') {
+                    h += 1;
+                }
+                if masked.get(h) == Some(&b'(')
+                    && let Some(close) = match_bracket(masked, h)
+                {
+                    let method = masked[pos + qual.len()..h]
+                        .iter()
+                        .map(|&b| b as char)
+                        .collect::<String>();
+                    if matches!(
+                        method.as_str(),
+                        "unwrap_or"
+                            | "unwrap_or_else"
+                            | "or"
+                            | "or_else"
+                            | "then_some"
+                            | "then"
+                            | "ok_or"
+                            | "ok_or_else"
+                            | "map_or"
+                            | "map"
+                            | "and_then"
+                    ) && let Some(&(a, b)) = super::source::call_args(masked, h).last()
+                    {
+                        stack.push((a, b.min(close)));
+                    }
+                    i = close + 1;
+                    continue;
+                }
+                i = pos + qual.len();
+            }
+        }
         // `if c { a } else { b }` and `match x { p => a, _ => b }` —
         // every arm's body is a produced value.
         if masked[s..e].starts_with(b"if ") || masked[s..e].starts_with(b"if\t") {
@@ -304,7 +410,7 @@ fn literal_leaves(masked: &[u8], s0: usize, e0: usize) -> Vec<(usize, usize)> {
                 h += 1;
             }
             if masked[h.saturating_sub(1)] == b'!'
-                && masked.get(h) == Some(&b'[')
+                && matches!(masked.get(h), Some(b'[' | b'(' | b'{'))
                 && let Some(close) = match_bracket(masked, h)
             {
                 for (a, b) in super::source::call_args(masked, h) {

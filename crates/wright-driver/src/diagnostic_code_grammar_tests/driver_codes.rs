@@ -3,21 +3,19 @@
 //! an explicit report of the dynamic (non-literal) positions.
 //!
 //! A code position is anywhere a value can reach a diagnostic `code`:
-//! `Diagnostic::error`/`warning`/`refusal(` calls and any in-crate fn or
-//! closure whose `code` parameter is string-typed (analyzer adds `id`);
-//! `code:`/`.._code:` field values; `"code"` JSON keys and key-value
-//! call/subscript/tuple forms; `.code` writes (`=`, `+=`, mutating
-//! methods, `mem::`/`ptr::`/`write!` targets); bare `code`/`id` binding
-//! mutations; `(expr, Stage::…)` tuples; `=>`/`return`/tail expressions
-//! inside string-returning `fn <name>code(` bodies; `for <code-ish>`
-//! iterables.
+//! `Diagnostic::error`/`warning`/`refusal(` calls and in-crate fns or
+//! closures with a string-typed `code` parameter (analyzer adds `id`);
+//! `code:`/`.._code:` fields; `"code"` keys in call/subscript/tuple
+//! forms; `.code` writes; bare `code`/`id` mutations; `(expr, Stage::…)`
+//! tuples; `=>`/`return`/tail expressions in string-returning `fn
+//! <name>code(` bodies; `for <code-ish>` iterables.
 //!
 //! Literals reachable through transparent wrappers (`Some`, fallbacks,
 //! `if`/`match` arms) enter the vocabulary; the residual shape is
 //! reported dynamic, never classified — produced values are checked at
-//! runtime by the `debug_assert!` code-token assertions inside
-//! `Diagnostic::error`, `refusal`, `provider_failure_code`, and the LSP
-//! error writer, and by the engine-kind tests for `kind`-built shapes.
+//! runtime by the `debug_assert!` code-token assertions inside the two
+//! universal chokes (`Diagnostic::error` and `refusal`), and by the
+//! engine-kind tests for `kind`-built shapes.
 //!
 //! `wright-cli`, `wright-analyzer`, `wright-language`, and `wright-lsp`
 //! are scanned alongside `wright-driver`.
@@ -95,14 +93,33 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
         // spellings stay in.
         sites.scan = "sinks";
         for (name, index) in &sinks {
-            for (at, _) in text.match_indices(format!("{name}(").as_str()) {
+            // `name(` plain and `name::<T>(` turbofish callsites.
+            let mut needles: Vec<(usize, usize)> = text
+                .match_indices(format!("{name}(").as_str())
+                .map(|(a, _)| (a, a + name.len()))
+                .collect();
+            for (a, _) in text.match_indices(format!("{name}::<").as_str()) {
+                let mut j = a + name.len() + 2;
+                let mut depth = 1i32;
+                while j < masked.len() && depth > 0 {
+                    match masked[j] {
+                        b'<' => depth += 1,
+                        b'>' => depth -= 1,
+                        _ => {}
+                    }
+                    j += 1;
+                }
+                if masked.get(j) == Some(&b'(') {
+                    needles.push((a, j));
+                }
+            }
+            for (at, open) in needles {
                 if at > 0 && (masked[at - 1].is_ascii_alphanumeric() || masked[at - 1] == b'_') {
                     continue;
                 }
                 if text[..at].trim_end().ends_with("fn") {
                     continue; // the `fn name(` definition itself
                 }
-                let open = at + name.len();
                 let Some(span) = call_args(masked, open).get(*index).copied() else {
                     continue;
                 };
@@ -253,7 +270,7 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
             // `"code"` literal followed by `,` keys the values after it
             // inside the enclosing `(…)`/`[…]`/`{…}`.
             if masked.get(after) == Some(&b',')
-                && let Some((_, open)) = enclosing_call(masked, at)
+                && let Some(open) = enclosing_bracket(masked, at)
                 && let Some(close) = match_bracket(masked, open)
             {
                 let mut depth = 0i32;
@@ -277,7 +294,7 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
             // method's argument.
             if masked.get(after) == Some(&b')')
                 && let Some((callee, _)) = enclosing_call(masked, at)
-                && (callee.ends_with("::entry") || callee == "entry")
+                && (callee.ends_with(".entry") || callee.ends_with("::entry") || callee == "entry")
             {
                 let mut i = after + 1;
                 while i < masked.len()
@@ -302,12 +319,18 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
         // `.id`): `=`, `+=`, mutating methods, and `mem::`/`ptr::`/`write!`
         // calls that take the field as a target.
         sites.scan = "fieldwrite";
-        for field in [".code", ".provider_code", ".refusal_code", ".id"] {
-            if field == ".id" && !analyzer {
+        for (at, _) in text.match_indices('.') {
+            let fname_end = at
+                + 1
+                + text[at + 1..]
+                    .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+                    .unwrap_or(0);
+            let fname = &text[at + 1..fname_end];
+            if !is_code_field(fname, analyzer) {
                 continue;
             }
-            for (at, _) in text.match_indices(field) {
-                let mut i = at + field.len();
+            {
+                let mut i = at + 1 + fname.len();
                 while i < text.len() && masked[i].is_ascii_whitespace() {
                     i += 1;
                 }
@@ -343,7 +366,6 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
                         }
                     }
                     Some(b',') | Some(b')') => {
-                        sites.scan = Box::leak(format!("fieldwrite@{at}").into_boxed_str());
                         // `mem::replace(&mut d.code, v)`,
                         // `ptr::write(&mut d.code, v)`,
                         // `write!(d.code, "…")` — other args are code
@@ -365,17 +387,21 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
                         // Only field-mutating calls make the sibling
                         // args code positions; `.code` inside any other
                         // call is a read.
-                        let mutation_like = callee.ends_with("::replace")
-                            || callee.ends_with("::write")
-                            || callee.ends_with("::write_unaligned")
-                            || callee.ends_with("::copy")
-                            || callee.ends_with("::copy_nonoverlapping")
-                            || callee.ends_with("::take")
-                            || callee.ends_with("::swap")
-                            || callee.ends_with("::read")
-                            || callee.ends_with("::write_bytes")
-                            || callee.ends_with("::drop_in_place")
-                            || callee.ends_with("::clone_from");
+                        let bare = callee.rsplit([':', '.']).next().unwrap_or("");
+                        let mutation_like = [
+                            "replace",
+                            "write",
+                            "write_unaligned",
+                            "copy",
+                            "copy_nonoverlapping",
+                            "take",
+                            "swap",
+                            "read",
+                            "write_bytes",
+                            "drop_in_place",
+                            "clone_from",
+                        ]
+                        .contains(&bare);
                         if mutation_like {
                             for arg in args {
                                 if arg.0 <= at && at < arg.1 {
@@ -556,7 +582,7 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
             else {
                 continue;
             };
-            if !text[name_start..name_start + name_len].ends_with("code") {
+            if !text[name_start..name_start + name_len].contains("code") {
                 continue;
             }
             let Some(body) = text[name_start + name_len..]
@@ -694,12 +720,15 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
             let Some(in_at) = head.find(" in ") else {
                 continue;
             };
-            let pat = head[..in_at].trim();
+            let pat = head[..in_at]
+                .trim_start_matches(['m', 'u', 't', ' ', 'r', 'e', 'f', '&'])
+                .trim_matches(['(', ')'])
+                .trim();
             if !(pat == "code"
                 || pat == "id"
-                || pat.ends_with("_code")
-                || pat.contains("code,")
-                || pat.contains(", code"))
+                || pat.contains("code")
+                || pat.contains("id,")
+                || pat.contains(", id"))
             {
                 continue;
             }
@@ -748,4 +777,24 @@ fn looks_like_type(value: &str) -> bool {
             .contains(&first))
         && !value.contains('(')
         && !value.contains('=')
+}
+
+/// The enclosing bracket of `at`, whatever its kind — `(`, `[`, or `{`.
+fn enclosing_bracket(masked: &[u8], at: usize) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut j = at;
+    while j > 0 {
+        j -= 1;
+        match masked[j] {
+            b')' | b']' | b'}' => depth += 1,
+            b'(' | b'[' | b'{' => {
+                if depth == 0 {
+                    return Some(j);
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    None
 }
