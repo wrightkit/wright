@@ -493,8 +493,8 @@ describe('the session locale (#883)', () => {
     requests = []
 
     // A project that names no origin.locale falls back to en-US — the
-    // locale is never guessed from file text. The selector still shows it
-    // even when the catalog list does not spell it (`en-us` vs `en-US`).
+    // locale is never guessed from file text. The selector adopts the
+    // catalog's spelling (`en-us`) so it offers exactly one option.
     api.handler = localeHandler(
       summaries,
       { origin: { kind: 'workshop' }, sourceFiles: ['demo.ws'] },
@@ -504,7 +504,7 @@ describe('the session locale (#883)', () => {
     mountApp()
     await settle()
 
-    expect(host.querySelector<HTMLSelectElement>('select.locale')!.value).toBe('en-US')
+    expect(host.querySelector<HTMLSelectElement>('select.locale')!.value).toBe('en-us')
     const fallback = requests.filter((request) => request.op === 'lookup')
     expect(fallback.length).toBeGreaterThan(0)
     expect([...new Set(fallback.map((request) => request.locale))]).toEqual(['en-US'])

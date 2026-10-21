@@ -88,7 +88,9 @@
   // when the catalog does not spell it, so `value` always matches an
   // option (the service spells locales `zh-cn`/`en-us`).
   const localeOptions = $derived(
-    targetLocales.includes(sessionLocale) ? targetLocales : [sessionLocale, ...targetLocales],
+    targetLocales.some((locale) => locale.toLowerCase() === sessionLocale.toLowerCase())
+      ? targetLocales
+      : [sessionLocale, ...targetLocales],
   )
   // Open state is per rule, keyed by the listing id: any number of rules
   // stay open at once and a rule filtered out keeps its open state (#880).
@@ -202,6 +204,13 @@
       const response = await call({ op: 'targetMetadata' })
       if ('result' in response) {
         targetLocales = (response.result as TargetMetadataResult).locales ?? []
+        // Adopt the catalog's spelling for the session locale so the
+        // selector has exactly one matching option; the service resolves
+        // locales case-insensitively so nothing re-warms.
+        const catalogSpelling = targetLocales.find(
+          (locale) => locale.toLowerCase() === sessionLocale.toLowerCase(),
+        )
+        if (catalogSpelling) sessionLocale = catalogSpelling
       }
     } catch {
       // The selector keeps the session locale as its only option.
