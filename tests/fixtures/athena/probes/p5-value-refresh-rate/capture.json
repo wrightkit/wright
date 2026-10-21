@@ -1,0 +1,51 @@
+{
+  "probe": "p5-value-refresh-rate",
+  "client": {
+    "version": "2.25.0.0 - 154461.1",
+    "date": "2026-10-19",
+    "locale": "zh-CN"
+  },
+  "runs": 3,
+  "probe_sha256": "b449d0a341280da1d12ac232d3be3fded31d77eb143afa7496d34d3491a33ea3",
+  "hypothesis": "Position Of refreshes about 12.5 times per second (about 38 distinct values in 188 samples); Update Every Frame gives about 62.5 (about 188 distinct values)",
+  "observed": [
+    {
+      "run": 1,
+      "samples": 188,
+      "sample_interval_ms": 16,
+      "pos_distinct_values": 188,
+      "everyframe_distinct_values": 188,
+      "lines_where_pos_differs_from_everyframe": 0,
+      "start_line": "P5 start spawned=真 pos=(-104.74, -3.29, -55.28)",
+      "first_sample": "pos=(-104.74, -3.50, -55.33)",
+      "last_sample": "pos=(-95.15, -2.50, -43.37)",
+      "final_i": 188
+    },
+    {
+      "run": 2,
+      "samples": 188,
+      "sample_interval_ms": 16,
+      "pos_distinct_values": 188,
+      "everyframe_distinct_values": 188,
+      "lines_where_pos_differs_from_everyframe": 0,
+      "start_line": "P5 start spawned=真 pos=(-105.85, -3.29, -53.28)",
+      "first_sample": "pos=(-105.85, -3.50, -53.33)",
+      "last_sample": "pos=(-93.12, -2.50, -44.30)",
+      "final_i": 188
+    },
+    {
+      "run": 3,
+      "samples": 188,
+      "sample_interval_ms": 16,
+      "pos_distinct_values": 188,
+      "everyframe_distinct_values": 188,
+      "lines_where_pos_differs_from_everyframe": 0,
+      "start_line": "P5 start spawned=真 pos=(-105.85, -3.29, -53.28)",
+      "first_sample": "pos=(-105.85, -3.50, -53.33)",
+      "last_sample": "pos=(-93.05, -2.50, -44.16)",
+      "final_i": 188
+    }
+  ],
+  "result": "mismatch",
+  "notes": "Final: three independent restarts have complete saved captures, each with a valid spawned=true nonzero start, 188 samples and final i=188. Both columns have 188 distinct values and are identical on every sample. This action-read access pattern does not support the 12.5 Hz Position Of hypothesis. This does not test Update Every Frame inside continuously re-evaluated elements such as HUD text or effects. Client version was read from the options menu. An earlier unsaved observation (188 distinct values in both columns) is not counted; an earlier unspawned zero-position run was invalid. Captures were copied through the Inspector into TextEdit, then exported as plain text without changing their content."
+}

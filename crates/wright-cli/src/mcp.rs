@@ -217,10 +217,11 @@ mod tests {
             "wright_provider_validate_edit",
             "wright_edit_statements",
             "wright_lookup",
+            "wright_simulate",
         ] {
             assert!(names.iter().any(|n| n == name), "missing {name}");
         }
-        assert_eq!(names.len(), 20);
+        assert_eq!(names.len(), 21);
         assert!(names.iter().all(|name| name.starts_with("wright_")));
     }
 

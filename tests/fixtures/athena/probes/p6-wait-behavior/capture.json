@@ -1,0 +1,129 @@
+{
+  "probe": "p6-wait-behavior",
+  "client": {
+    "version": "2.25.0.0 - 154461.1",
+    "date": "2026-10-19",
+    "locale": "zh-CN"
+  },
+  "runs": 3,
+  "probe_sha256": "4f5ed507cbbc23672386325e2b42b20de799fbcd858ce9fa072f96718dc6bc23",
+  "hypothesis": "Compare Ignore Condition, Abort When False and Restart When True across two true intervals; expected values in docs/procedure.zh-CN.md",
+  "observed": [
+    {
+      "run": 1,
+      "flag_transitions": [
+        {
+          "value": true,
+          "t_ms": 0.0
+        },
+        {
+          "value": false,
+          "t_ms": 208.0
+        },
+        {
+          "value": true,
+          "t_ms": 416.0
+        },
+        {
+          "value": false,
+          "t_ms": 624.0
+        }
+      ],
+      "ignore_end_ms": [
+        1008.0
+      ],
+      "abort_end_ms": [],
+      "restart_end_ms": [
+        1424.0
+      ],
+      "done_ms": 2624.0,
+      "counts": {
+        "nIgnore": 1,
+        "nAbort": 2,
+        "nRestart": 2,
+        "endIgnore": 1,
+        "endRestart": 1,
+        "endAbort": 0
+      },
+      "t0_ms": 3023.0
+    },
+    {
+      "run": 2,
+      "flag_transitions": [
+        {
+          "value": true,
+          "t_ms": 0.0
+        },
+        {
+          "value": false,
+          "t_ms": 208.0
+        },
+        {
+          "value": true,
+          "t_ms": 416.0
+        },
+        {
+          "value": false,
+          "t_ms": 624.0
+        }
+      ],
+      "ignore_end_ms": [
+        1008.0
+      ],
+      "abort_end_ms": [],
+      "restart_end_ms": [
+        1424.0
+      ],
+      "done_ms": 2624.0,
+      "counts": {
+        "nIgnore": 1,
+        "nAbort": 2,
+        "nRestart": 2,
+        "endIgnore": 1,
+        "endRestart": 1,
+        "endAbort": 0
+      },
+      "t0_ms": 3023.0
+    },
+    {
+      "run": 3,
+      "flag_transitions": [
+        {
+          "value": true,
+          "t_ms": 0.0
+        },
+        {
+          "value": false,
+          "t_ms": 208.0
+        },
+        {
+          "value": true,
+          "t_ms": 416.0
+        },
+        {
+          "value": false,
+          "t_ms": 624.0
+        }
+      ],
+      "ignore_end_ms": [
+        1008.0
+      ],
+      "abort_end_ms": [],
+      "restart_end_ms": [
+        1424.0
+      ],
+      "done_ms": 2624.0,
+      "counts": {
+        "nIgnore": 1,
+        "nAbort": 2,
+        "nRestart": 2,
+        "endIgnore": 1,
+        "endRestart": 1,
+        "endAbort": 0
+      },
+      "t0_ms": 3023.0
+    }
+  ],
+  "result": "match",
+  "notes": "Final: three independent starts/restarts agree, each with a complete seven-line log ending in P6 done and the Inspector variable export. endAbort=0 was visually checked in the Inspector on each run; the native copy-variables export omits zero-valued variables, so endAbort is absent from the verbatim exported variable blocks. No Abort end log occurred. Recording/live was enabled and Slow Motion was not used. Client version was read from the options menu. The period shortcut opened the Inspector successfully for P6. Captures were copied through the Inspector into TextEdit and exported as plain text without changing their content."
+}

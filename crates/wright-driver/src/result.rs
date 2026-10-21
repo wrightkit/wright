@@ -193,6 +193,17 @@ pub struct InspectResult {
     pub next: Vec<String>,
 }
 
+/// The `simulate` result payload (ADR-0033): the `athena` trace, serialized
+/// unchanged — `outcome`, `logs`, `globals`, `players`, `hud`,
+/// `missingInputs`, and `expectations` are `athena`'s contract
+/// (`athena`'s `docs/simulator-interface.md`), versioned there, so Wright
+/// carries the typed value rather than re-describing its members.
+#[derive(Debug, Clone, Serialize)]
+pub struct SimulateResult {
+    /// The `athena` trace, unchanged.
+    pub trace: athena_sim::Trace,
+}
+
 /// `rules` result (ADR-0024): the `rules` agent operation's payload verbatim
 /// — with `content`, a selection-wrapped list whose entries carry the
 /// owner's canonical rule content.

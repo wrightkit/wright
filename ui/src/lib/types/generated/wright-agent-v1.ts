@@ -149,6 +149,7 @@ export type AgentResult =
   | EditStatementsResult
   | LookupResult
   | ListEntriesResult
+  | SimulateResult
 export type CompileResult = WorkflowEnvelope & {
   command?: 'compile'
   result?: CompilePayload
@@ -183,6 +184,11 @@ export type ReferencesResult = UsageResult & {
 }
 export type ReferencesListResult = Reference[] | ReferencesSelectionResult
 export type CallGraphResult = CallGraphEdge[] | CallGraphSelectionResult | CappedListResult
+export type SimulateResult = WorkflowEnvelope & {
+  command?: 'simulate'
+  result?: SimulatePayload
+  [k: string]: unknown
+}
 export type ToolRequest =
   | CapabilitiesRequest
   | CompileRequest
@@ -207,6 +213,7 @@ export type ToolRequest =
   | EditStatementsRequest
   | LookupRequest
   | ListEntriesRequest
+  | SimulateRequest
 export type ToolResponse =
   | {
       result: AgentResult
@@ -245,6 +252,7 @@ export interface WrightAgentContractV1 {
     | EditStatementsRequest
     | LookupRequest
     | ListEntriesRequest
+    | SimulateRequest
   /**
    * A wright-agent/v1 result envelope.
    */
@@ -570,6 +578,27 @@ export interface ListEntriesRequest {
    */
   cursor?: string | null
 }
+export interface SimulateRequest {
+  op: 'simulate'
+  /**
+   * The freshness precondition (ADR-0033): the `inputIdentity` of the program to simulate — the value `project` reports, or the identity of the supplied `sources` text. A mismatch refuses `edit-stale-source` and runs nothing.
+   */
+  inputIdentity: string
+  /**
+   * Optional current text of the loaded input, keyed by its source spelling — the meaning it has for `editStatements`: when supplied the program is loaded from that text and `inputIdentity` is checked against it; omitted or null uses the served program.
+   */
+  sources?: Sources | null
+  /**
+   * Simulated seconds for a scenario-free run — `athena`'s `Options.seconds`. Required when `scenario` is omitted; refused when `scenario` is supplied, since a scenario owns the simulated time.
+   */
+  seconds?: number | null
+  /**
+   * An `athena` scenario value (ADR-0033): players, injected events, expected observations, and the simulated `seconds`. Passed through uninterpreted; `athena` validates it — a malformed scenario refuses and inputs it omits are reported in the trace, never defaulted. Mutually exclusive with `seconds`.
+   */
+  scenario?: {
+    [k: string]: unknown
+  } | null
+}
 /**
  * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
  * via the `definition` "CapabilitiesResult".
@@ -591,6 +620,10 @@ export interface Capabilities {
   }
   languages: string[]
   profiles: string[]
+  /**
+   * The `athena` release `simulate` links against (ADR-0033) — the owner of the trace format it returns.
+   */
+  athena_version: string
   [k: string]: unknown
 }
 export interface WorkflowEnvelope {
@@ -1225,6 +1258,38 @@ export interface ListEntriesResult {
     message: string
     [k: string]: unknown
   }
+  [k: string]: unknown
+}
+export interface SimulatePayload {
+  trace: AthenaTrace
+  [k: string]: unknown
+}
+/**
+ * The unchanged `athena` trace (ADR-0033). `athena` owns this contract — see `athena`'s simulator-interface document — and evolves it under its own versioning; Wright does not reinterpret or reorder it. `outcome` says how the run ended; `logs`, `globals`, `players`, and `hud` describe the state when the run ended and must be read only after checking `outcome.status`. `missingInputs` lists the live inputs a scenario did not supply; `expectations` reports one result per scenario expectation.
+ *
+ * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
+ * via the `definition` "AthenaTrace".
+ */
+export interface AthenaTrace {
+  /**
+   * How the run ended: `{"status":"complete"}` for the whole requested time, `{"status":"not_modeled","construct":…,"tick":…}` when the run stopped at a construct the simulator does not model, or `{"status":"missing_input"}` when it stopped at a live input the scenario did not supply. `not_modeled` and `missing_input` are trace content, not failures; `tick` is absent when the stop preceded the first tick.
+   */
+  outcome: {
+    status: 'complete' | 'not_modeled' | 'missing_input'
+    construct?: string
+    tick?: number | null
+    [k: string]: unknown
+  }
+  logs: unknown[]
+  globals: {
+    [k: string]: unknown
+  }
+  players: {
+    [k: string]: unknown
+  }
+  hud: unknown[]
+  missingInputs: unknown[]
+  expectations: unknown[]
   [k: string]: unknown
 }
 export interface ToolErrorInfo {

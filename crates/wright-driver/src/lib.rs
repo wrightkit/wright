@@ -41,7 +41,7 @@ pub use progress::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit}
 pub use result::{
     AnalyzeResult, CheckResult, CompileResult, CompiledOutput, ConvertResult, ConvertTarget,
     Envelope, EssentialResult, InspectResult, LintPackageResult, LintPackageRow, LintResult,
-    RESULT_CONTRACT,
+    RESULT_CONTRACT, SimulateResult,
 };
 pub use select::{FindingSelection, SelectionOutcome};
 pub use session::{CompilerSession, Loaded, Provenance, WORKSHOP_CLIENT_ELEMENT_LIMIT};

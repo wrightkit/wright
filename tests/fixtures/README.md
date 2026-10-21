@@ -20,3 +20,8 @@ specific product tests:
 The source-language owners maintain their own syntax, semantic, reference, and
 compatibility test suites. Changes to those contracts belong in `opy-rs` or
 `deltin-rs`, not in this directory.
+
+`athena/` holds the `simulate` (ADR-0033) inputs: `athena`'s probe programs,
+their recorded client captures, the scenario examples, and the
+`practice-range` Workshop build — see [athena/README.md](athena/README.md)
+for provenance and the refresh rule.

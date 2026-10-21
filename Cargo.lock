@@ -120,6 +120,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d92bec98840b8f03a5ff5413de5293bfcd8bf96467cf5452609f939ec6f5de16"
 
 [[package]]
+name = "athena-sim"
+version = "0.2.0"
+source = "git+https://github.com/wrightkit/athena.git?tag=v0.2.0#f01b30df13bda5215ba6852936942918cffeb1c2"
+dependencies = [
+ "serde",
+ "serde_json",
+ "workshop-rs",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2576,6 +2586,7 @@ dependencies = [
 name = "wright-driver"
 version = "0.29.0"
 dependencies = [
+ "athena-sim",
  "flate2",
  "hotpath",
  "percent-encoding",

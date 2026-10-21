@@ -1,0 +1,45 @@
+{
+  "probe": "p3-same-tick-rule-order",
+  "client": {
+    "version": "2.25.0.0 - 154461.1",
+    "date": "2026-10-19",
+    "locale": "zh-CN"
+  },
+  "runs": 3,
+  "probe_sha256": "43b747117552d118d8178235a072cb8315e84b79179d907a548df51c773fe8d9",
+  "hypothesis": "rules whose conditions become true on the same tick run in file order; the second batch logs D1, D3, D2",
+  "observed": [
+    {
+      "batch": 1,
+      "rule": "A",
+      "t_ms": 0
+    },
+    {
+      "batch": 1,
+      "rule": "B",
+      "t_ms": 0
+    },
+    {
+      "batch": 1,
+      "rule": "C",
+      "t_ms": 0
+    },
+    {
+      "batch": 2,
+      "rule": "D1",
+      "t_ms": 1008
+    },
+    {
+      "batch": 2,
+      "rule": "D3",
+      "t_ms": 1024
+    },
+    {
+      "batch": 2,
+      "rule": "D2",
+      "t_ms": 1040
+    }
+  ],
+  "result": "match",
+  "notes": "Three saved captures agree for the recorded probe hash; final under the capture convention. Client version 2.25.0.0 - 154461.1 visually verified in the options menu during runs 2 and 3 session. Run 1 version is unknown. Only covers the driver before the receiving rules. The D batch verifies Wait durations, not rule order. Final variables: go=true, go2=true, t0=3.023."
+}

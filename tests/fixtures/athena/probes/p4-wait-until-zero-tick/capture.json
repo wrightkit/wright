@@ -1,0 +1,31 @@
+{
+  "probe": "p4-wait-until-zero-tick",
+  "client": {
+    "version": "2.25.0.0 - 154461.1",
+    "date": "2026-10-19",
+    "locale": "zh-CN"
+  },
+  "runs": 3,
+  "probe_sha256": "94679b92f7c9b58782441b7e354f4278b3c1e935e6fcc97308b786ee34fc8235",
+  "hypothesis": "Wait Until(True, 0) takes 0 ticks; Wait(0) takes 1 tick; Wait Until(False, 0.03) times out at 0.032; Wait Until(False, 0.1) times out at 0.112",
+  "observed": [
+    {
+      "case": "P4a Wait Until(True, 0)",
+      "elapsed_ms": 0
+    },
+    {
+      "case": "P4b Wait(0)",
+      "elapsed_ms": 16.0
+    },
+    {
+      "case": "P4c Wait Until(False, 0.03)",
+      "elapsed_ms": 32.0
+    },
+    {
+      "case": "P4d Wait Until(False, 0.1)",
+      "elapsed_ms": 112.0
+    }
+  ],
+  "result": "match",
+  "notes": "Three agreeing valid captures; final match. Final t0=3.071 in all captures. Client version visually verified in options during the repeat session; the original run version was not recorded."
+}

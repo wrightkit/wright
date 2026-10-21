@@ -1,0 +1,28 @@
+variables
+{
+	global:
+		0: i
+}
+
+rule("P5 Position Of refresh rate: forced forward throttle for 3 s")
+{
+	event
+	{
+		Ongoing - Global;
+	}
+
+	actions
+	{
+		Wait(3, Ignore Condition);
+		Wait Until(Has Spawned(Host Player) && Is Alive(Host Player), 600);
+		Log To Inspector(Custom String("P5 start spawned={0} pos={1}", Has Spawned(Host Player), Position Of(Host Player), Null));
+		Start Forcing Throttle(Host Player, 1, 1, 0, 0, 0, 0);
+		Global.i = 0;
+		While(Global.i < 188);
+			Wait(0.016, Ignore Condition);
+			Log To Inspector(Custom String("P5 i={0} pos={1} everyframe={2}", Global.i, Position Of(Host Player), Update Every Frame(Position Of(Host Player))));
+			Global.i += 1;
+		End;
+		Stop Forcing Throttle(Host Player);
+	}
+}

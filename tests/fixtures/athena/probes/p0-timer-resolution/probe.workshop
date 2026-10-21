@@ -1,0 +1,26 @@
+variables
+{
+	global:
+		0: i
+		1: t0
+}
+
+rule("P0 timer resolution: 8 x Wait(0.016), log Total Time Elapsed")
+{
+	event
+	{
+		Ongoing - Global;
+	}
+
+	actions
+	{
+		Wait(3, Ignore Condition);
+		Global.i = 0;
+		Global.t0 = Total Time Elapsed;
+		While(Global.i < 8);
+			Wait(0.016, Ignore Condition);
+			Log To Inspector(Custom String("P0 i={0} t_ms={1}", Global.i, (Total Time Elapsed - Global.t0) * 1000));
+			Global.i += 1;
+		End;
+	}
+}

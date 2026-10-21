@@ -27,7 +27,8 @@
         { "$ref": "#/$defs/ProviderValidateEditRequest" },
         { "$ref": "#/$defs/EditStatementsRequest" },
         { "$ref": "#/$defs/LookupRequest" },
-        { "$ref": "#/$defs/ListEntriesRequest" }
+        { "$ref": "#/$defs/ListEntriesRequest" },
+        { "$ref": "#/$defs/SimulateRequest" }
       ]
     },
     "ToolResponse": {
@@ -81,7 +82,8 @@
         { "$ref": "#/$defs/ProviderValidateEditResult" },
         { "$ref": "#/$defs/EditStatementsResult" },
         { "$ref": "#/$defs/LookupResult" },
-        { "$ref": "#/$defs/ListEntriesResult" }
+        { "$ref": "#/$defs/ListEntriesResult" },
+        { "$ref": "#/$defs/SimulateResult" }
       ]
     },
     "WorkflowEnvelope": {
@@ -811,6 +813,51 @@
       },
       "additionalProperties": true
     },
+    "SimulateResult": {
+      "allOf": [
+        { "$ref": "#/$defs/WorkflowEnvelope" },
+        {
+          "type": "object",
+          "properties": {
+            "command": { "const": "simulate" },
+            "result": { "$ref": "#/$defs/SimulatePayload" }
+          }
+        }
+      ]
+    },
+    "SimulatePayload": {
+      "type": "object",
+      "required": ["trace"],
+      "properties": {
+        "trace": { "$ref": "#/$defs/AthenaTrace" }
+      },
+      "additionalProperties": true
+    },
+    "AthenaTrace": {
+      "type": "object",
+      "description": "The unchanged `athena` trace (ADR-0033). `athena` owns this contract — see `athena`'s simulator-interface document — and evolves it under its own versioning; Wright does not reinterpret or reorder it. `outcome` says how the run ended; `logs`, `globals`, `players`, and `hud` describe the state when the run ended and must be read only after checking `outcome.status`. `missingInputs` lists the live inputs a scenario did not supply; `expectations` reports one result per scenario expectation.",
+      "required": ["outcome", "logs", "globals", "players", "hud", "missingInputs", "expectations"],
+      "properties": {
+        "outcome": {
+          "type": "object",
+          "description": "How the run ended: `{\"status\":\"complete\"}` for the whole requested time, `{\"status\":\"not_modeled\",\"construct\":…,\"tick\":…}` when the run stopped at a construct the simulator does not model, or `{\"status\":\"missing_input\"}` when it stopped at a live input the scenario did not supply. `not_modeled` and `missing_input` are trace content, not failures; `tick` is absent when the stop preceded the first tick.",
+          "required": ["status"],
+          "properties": {
+            "status": { "enum": ["complete", "not_modeled", "missing_input"] },
+            "construct": { "type": "string" },
+            "tick": { "type": ["integer", "null"], "minimum": 0 }
+          },
+          "additionalProperties": true
+        },
+        "logs": { "type": "array" },
+        "globals": { "type": "object" },
+        "players": { "type": "object" },
+        "hud": { "type": "array" },
+        "missingInputs": { "type": "array" },
+        "expectations": { "type": "array" }
+      },
+      "additionalProperties": true
+    },
     "CompilePayload": {
       "type": "object",
       "properties": {
@@ -907,7 +954,7 @@
     },
     "Capabilities": {
       "type": "object",
-      "required": ["name", "version", "contract", "agent_contract", "operations", "result_schemas", "languages", "profiles"],
+      "required": ["name", "version", "contract", "agent_contract", "operations", "result_schemas", "languages", "profiles", "athena_version"],
       "properties": {
         "name": { "type": "string" },
         "version": { "type": "string" },
@@ -924,7 +971,8 @@
           "additionalProperties": { "type": "string" }
         },
         "languages": { "type": "array", "items": { "type": "string" } },
-        "profiles": { "type": "array", "items": { "type": "string" } }
+        "profiles": { "type": "array", "items": { "type": "string" } },
+        "athena_version": { "type": "string", "description": "The `athena` release `simulate` links against (ADR-0033) — the owner of the trace format it returns." }
       },
       "additionalProperties": true
     },
@@ -1414,6 +1462,31 @@
         "cursor": { "type": ["string", "null"], "description": "The previous page's `nextCursor`; omitted for the first page." }
       },
       "required": ["op", "language", "kind"],
+      "additionalProperties": false
+    },
+    "SimulateRequest": {
+      "type": "object",
+      "properties": {
+        "op": { "const": "simulate" },
+        "inputIdentity": {
+          "type": "string",
+          "description": "The freshness precondition (ADR-0033): the `inputIdentity` of the program to simulate — the value `project` reports, or the identity of the supplied `sources` text. A mismatch refuses `edit-stale-source` and runs nothing."
+        },
+        "sources": {
+          "anyOf": [{ "$ref": "#/$defs/Sources" }, { "type": "null" }],
+          "description": "Optional current text of the loaded input, keyed by its source spelling — the meaning it has for `editStatements`: when supplied the program is loaded from that text and `inputIdentity` is checked against it; omitted or null uses the served program."
+        },
+        "seconds": {
+          "type": ["number", "null"],
+          "exclusiveMinimum": 0,
+          "description": "Simulated seconds for a scenario-free run — `athena`'s `Options.seconds`. Required when `scenario` is omitted; refused when `scenario` is supplied, since a scenario owns the simulated time."
+        },
+        "scenario": {
+          "type": ["object", "null"],
+          "description": "An `athena` scenario value (ADR-0033): players, injected events, expected observations, and the simulated `seconds`. Passed through uninterpreted; `athena` validates it — a malformed scenario refuses and inputs it omits are reported in the trace, never defaulted. Mutually exclusive with `seconds`."
+        }
+      },
+      "required": ["op", "inputIdentity"],
       "additionalProperties": false
     }
   },

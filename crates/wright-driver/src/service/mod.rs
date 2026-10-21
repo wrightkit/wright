@@ -12,7 +12,6 @@
 
 use std::sync::Arc;
 
-use serde::Serialize;
 use serde_json::json;
 
 use crate::diag::Diagnostic;
@@ -20,7 +19,7 @@ use crate::input;
 use crate::result::{AnalyzeResult, CheckResult, CompileResult, Envelope, InspectResult};
 use crate::session::Provenance;
 use crate::source_provider::document_sources;
-use crate::{CompilerSession, Loaded, RESULT_CONTRACT};
+use crate::{CompilerSession, Loaded};
 use wright_analyzer::canonical::{
     BLOCK_KINDS, ReferenceKind, SemanticIndex, SemanticService, SymbolKind,
 };
@@ -30,8 +29,10 @@ pub use wright_analyzer::service::ErrorInfo as ToolErrorInfo;
 pub use wright_analyzer::service::Response as ToolResponse;
 use wright_analyzer::service::{Request, Response};
 
+mod capabilities;
 mod cost;
 mod edit_statements;
+mod simulate;
 
 /// The tool-service name and version.
 pub const SERVICE_NAME: &str = "wright-tool-service";
@@ -41,53 +42,11 @@ pub const AGENT_CONTRACT: &str = "wright-agent/v1";
 /// Rules returned by a `content` request that sets no `max` (ADR-0024).
 const DEFAULT_CONTENT_RULES: usize = 20;
 
-/// Every operation `capabilities.operations` advertises, in contract order —
-/// the catalog client tool definitions are emitted from (#535).
-pub const OPERATIONS: &[&str] = &[
-    "capabilities",
-    "project",
-    "rules",
-    "symbols",
-    "references",
-    "usage",
-    "cfg",
-    "findings",
-    "persistentObjects",
-    "lint",
-    "lintRules",
-    "callGraph",
-    "costEstimate",
-    "targetMetadata",
-    "compile",
-    "check",
-    "analyze",
-    "inspect",
-    "validateEditTransaction",
-    "providerValidateEdit",
-    "editStatements",
-    "lookup",
-    "listEntries",
-];
+pub use capabilities::{Capabilities, OPERATIONS};
 
 pub use crate::request::{
     Address, StatementEditChange, StatementEditRequest, StatementList, ToolRequest,
 };
-
-/// The capability/version contract of the service.
-#[derive(Debug, Clone, Serialize)]
-pub struct Capabilities {
-    pub name: String,
-    pub version: String,
-    pub contract: String,
-    pub agent_contract: String,
-    pub operations: Vec<String>,
-    /// The committed-schema `$defs` entry describing each advertised
-    /// operation's result (#532): `"<op>": "#/$defs/<Op>Result"`, so a
-    /// caller learns an operation's result shape without a second document.
-    pub result_schemas: std::collections::BTreeMap<String, String>,
-    pub languages: Vec<String>,
-    pub profiles: Vec<String>,
-}
 
 struct Snapshot {
     loaded: Loaded,
@@ -185,37 +144,6 @@ impl<'a> ToolService<'a> {
         self.session.semantic_build_count()
     }
 
-    /// The capability/version contract.
-    pub fn capabilities(&self) -> Capabilities {
-        let operations: Vec<String> = OPERATIONS.iter().map(|op| op.to_string()).collect();
-        // The committed schema names every operation's result definition
-        // `<Op>Result` — `capabilities` surfaces the map so a caller learns
-        // result shapes without a second document (#532).
-        let result_schemas = operations
-            .iter()
-            .map(|op| {
-                let mut pascal = op.clone();
-                if let Some(first) = pascal.get_mut(0..1) {
-                    first.make_ascii_uppercase();
-                }
-                (op.clone(), format!("#/$defs/{pascal}Result"))
-            })
-            .collect();
-        Capabilities {
-            name: SERVICE_NAME.to_string(),
-            version: SERVICE_VERSION.to_string(),
-            contract: RESULT_CONTRACT.to_string(),
-            agent_contract: AGENT_CONTRACT.to_string(),
-            operations,
-            result_schemas,
-            languages: vec!["opy".to_string(), "workshop".to_string()],
-            profiles: vec![
-                crate::Profile::Off.as_str().to_string(),
-                crate::Profile::Compat.as_str().to_string(),
-            ],
-        }
-    }
-
     /// Handle one tool request, returning a structured owned response.
     ///
     /// A request that reads the loaded program requires a valid current
@@ -299,6 +227,11 @@ impl<'a> ToolService<'a> {
                 {
                     return response;
                 }
+                // ADR-0033: `simulate` has no input-kind gate — `athena`
+                // runs the loaded program's canonical emission, so a
+                // provider-loaded source-language project simulates its
+                // compiled Workshop artifact like every other
+                // program-reading operation.
                 if let Err(error) = self.refresh() {
                     return ToolResponse::Error { error };
                 }
@@ -725,6 +658,12 @@ impl<'a> ToolService<'a> {
                 edits,
                 ..
             } => self.edit_statements(input_identity, sources, edits),
+            ToolRequest::Simulate {
+                input_identity,
+                sources,
+                seconds,
+                scenario,
+            } => self.simulate(input_identity, sources, *seconds, scenario),
             ToolRequest::Lookup {
                 language,
                 query,
@@ -1377,5 +1316,6 @@ fn request_label(request: &ToolRequest) -> &'static str {
         ToolRequest::EditStatements { .. } => "req::editStatements",
         ToolRequest::Lookup { .. } => "req::lookup",
         ToolRequest::ListEntries { .. } => "req::listEntries",
+        ToolRequest::Simulate { .. } => "req::simulate",
     }
 }
