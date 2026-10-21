@@ -102,7 +102,7 @@ fn rule_file_name(path: &Path) -> Option<&std::ffi::OsStr> {
 }
 
 /// `*.yaml|yml` files directly inside `rules_dir`, in lexical order — the
-/// same file set the `--rule <dir>` loader consumes.
+/// same file set the `--rule-file <dir>` loader consumes.
 fn rule_files(rules_dir: &Path) -> Result<Vec<PathBuf>, LintPackageError> {
     let mut files = std::fs::read_dir(rules_dir)
         .map_err(|e| {

@@ -31,7 +31,7 @@ pub(crate) fn parse_profile(value: &str) -> Result<wright_driver::Profile, Strin
     wright_driver::Profile::parse(value).ok_or_else(|| "expected one of: off, compat".to_string())
 }
 
-/// Explicit lint-policy configuration (`--lint-config`, `--rule`,
+/// Explicit lint-policy configuration (`--lint-config`, `--rule-file`,
 /// `--disable-rule`, `--rule-severity`) shared by `lint` and `serve`
 /// (#594): both surfaces apply the same file, local rule paths, and CLI
 /// overrides to the session's effective policy — the file first, then the
@@ -44,8 +44,8 @@ pub(crate) struct LintPolicyArgs {
     #[arg(long = "lint-config", value_name = "PATH")]
     pub(crate) lint_config: Option<std::path::PathBuf>,
     /// Load a local YAML rule file or directory (repeatable).
-    #[arg(long = "rule", value_name = "PATH")]
-    pub(crate) rule: Vec<std::path::PathBuf>,
+    #[arg(long = "rule-file", value_name = "PATH")]
+    pub(crate) rule_file: Vec<std::path::PathBuf>,
     /// Disable a lint rule (repeatable).
     #[arg(long = "disable-rule", value_name = "ID")]
     pub(crate) disable_rule: Vec<String>,
@@ -57,14 +57,14 @@ pub(crate) struct LintPolicyArgs {
 impl LintPolicyArgs {
     /// Apply the configured policy to `config`, returning the first usage
     /// error. Precedence matches `wright lint`: the YAML file establishes
-    /// the base, `--rule` extends the registry's load set, then
+    /// the base, `--rule-file` extends the registry's load set, then
     /// `--disable-rule` and `--rule-severity` override the file's entries.
     pub(crate) fn apply_to(&self, config: &mut SessionConfig) -> Result<(), String> {
         if let Some(path) = &self.lint_config {
             config.lint = wright_driver::config::LintConfig::from_yaml_path(path)
                 .map_err(|error| format!("cannot read lint config {}: {error}", path.display()))?;
         }
-        config.lint_rule_paths = self.rule.clone();
+        config.lint_rule_paths = self.rule_file.clone();
         for rule in &self.disable_rule {
             config.lint.disable(rule);
         }
@@ -143,7 +143,7 @@ pub(crate) fn run(args: ServeArgs) -> ExitCode {
     let mut session = match wright_driver::CompilerSession::new(config) {
         Ok(session) => session,
         Err(diagnostic) => {
-            // A rejected configuration (an unreadable `--rule` path, an
+            // A rejected configuration (an unreadable `--rule-file` path, an
             // unknown `--disable-rule` selection) is a startup usage error,
             // like the same failure on `wright lint` (#594).
             eprintln!("wright: {}", diagnostic.message);

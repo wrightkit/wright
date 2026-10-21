@@ -241,7 +241,6 @@ fn run_workflow(command: Command) -> ExitCode {
                 move |session| {
                     session
                         .rules(
-                            query.name,
                             query.rule,
                             query.file,
                             query
@@ -563,7 +562,7 @@ fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
     let request = wright_driver::service::ToolRequest::Lookup {
         language: args.language.as_str().to_string(),
         query: args.query.clone(),
-        kind: args.kind.map(|kind| kind.as_str().to_string()),
+        kind: args.only.map(|kind| kind.as_str().to_string()),
         within: args.within.clone(),
         locale: args.locale.clone(),
         limit: args.limit,

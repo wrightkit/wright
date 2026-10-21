@@ -7,10 +7,6 @@
 export type RulesRequest = {
   op: 'rules'
   /**
-   * Selection (#531): only the rule with this declared name.
-   */
-  name?: string
-  /**
    * Selection (ADR-0024): exactly this rule, addressed by id or declared name.
    */
   rule?: number | string

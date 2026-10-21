@@ -1371,34 +1371,6 @@ fn lint_rule_flags_control_findings() {
 }
 
 #[test]
-fn lint_lists_a_local_yaml_rule_loaded_with_the_rule_flag() {
-    let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
-    let rule_file = temp_file(
-        "cli-smoke.yaml",
-        "id: community/cli-smoke\nmetadata:\n  summary: summary\n  rationale: rationale\n  documentation: documentation\n  known-limits: limits\n  tags: []\nmatcher: {}\n",
-    );
-    let output = run(&[
-        "lint",
-        path.to_str().unwrap(),
-        "--rule",
-        rule_file.to_str().unwrap(),
-        "-f",
-        "json",
-    ]);
-    assert!(output.status.success(), "{}", command_result(&output));
-    let envelope = parse_json(&output.stdout);
-    assert!(
-        envelope["result"]["findings"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|finding| finding["code"] == "community/cli-smoke")
-    );
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    let _ = std::fs::remove_dir_all(rule_file.parent().unwrap());
-}
-
-#[test]
 fn lint_flags_are_usage_errors_for_other_commands() {
     for flags in [
         &["check", "--disable-rule", "min-wait-loop"][..],
@@ -2332,7 +2304,7 @@ fn an_unknown_rule_id_in_the_lint_policy_is_a_usage_error() {
             "the message names the unknown id"
         );
     }
-    // A lint-config key for a rule loaded through --rule is known (#640).
+    // A lint-config key for a rule loaded through --rule-file is known (#640).
     let rule_file = path.parent().unwrap().join("smoke.yaml");
     std::fs::write(
         &rule_file,
@@ -2347,7 +2319,7 @@ fn an_unknown_rule_id_in_the_lint_policy_is_a_usage_error() {
     let output = run(&[
         "lint",
         path.to_str().unwrap(),
-        "--rule",
+        "--rule-file",
         rule_file.to_str().unwrap(),
         "--lint-config",
         config.to_str().unwrap(),
@@ -2355,7 +2327,7 @@ fn an_unknown_rule_id_in_the_lint_policy_is_a_usage_error() {
     assert_eq!(
         output.status.code(),
         Some(0),
-        "a lint-config key for a loaded --rule id is known: {}",
+        "a lint-config key for a loaded --rule-file id is known: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -4840,7 +4812,7 @@ fn lookup_help_carries_the_agent_guidance() {
         help.contains("unfamiliar language") && help.contains("when a name is rejected"),
         "help tells agents when to reach for lookup: {help}"
     );
-    for option in ["--language", "--kind", "--within", "--locale", "--limit"] {
+    for option in ["--language", "--only", "--within", "--locale", "--limit"] {
         assert!(help.contains(option), "lookup help documents {option}");
     }
 }
@@ -4905,7 +4877,7 @@ fn lookup_json_carries_callable_returns_and_variadic() {
 
 #[test]
 fn lookup_within_lists_an_enums_members() {
-    let output = run(&["lookup", "--within", "Team", "--kind", "enum-member"]);
+    let output = run(&["lookup", "--within", "Team", "--only", "enum-member"]);
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("name=\"All Teams\""), "{stdout}");

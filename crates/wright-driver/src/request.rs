@@ -85,12 +85,18 @@ pub enum ToolRequest {
     },
     /// The loaded canonical program summary (origin, files, counts, findings).
     Project,
-    /// Every rule, optionally narrowed by an inline selection (`name`,
-    /// `rule`, `file`, `max`; #531). `content` adds each selected rule's
-    /// canonical content (ADR-0024).
+    /// Every rule, optionally narrowed by an inline selection (`rule`,
+    /// `file`, `max`; #531). `content` adds each selected rule's canonical
+    /// content (ADR-0024).
     Rules {
+        /// The removed `name` selection (ADR-0035): a request still
+        /// carrying it is refused `malformed-request` rather than silently
+        /// ignored. The value deserializes untouched so the refusal comes
+        /// from the service — identical on every transport, including the
+        /// CLI's in-process request — instead of depending on transport
+        /// deserialization.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        name: Option<String>,
+        name: Option<serde_json::Value>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rule: Option<Address>,
         /// The program generation a numeric `rule` was issued under (#595):

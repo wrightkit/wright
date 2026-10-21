@@ -46,7 +46,7 @@ error (exit 2), never a silently remapped default:
   combination is a startup usage error, and a request whose input resolves
   to OPY or OSTW is refused the same way (ADR-0028, #725);
 * `--locale <LOCALE>`: Workshop client locale override;
-* `--lint-config <PATH>`, `--rule <PATH>`, `--disable-rule <ID>`,
+* `--lint-config <PATH>`, `--rule-file <PATH>`, `--disable-rule <ID>`,
   `--rule-severity <ID>:<SEVERITY>`: explicit lint policy. The session applies
   the same file, local rule paths, and overrides `wright lint` accepts to every
   lint-consuming operation it serves (#594).
@@ -59,8 +59,10 @@ effective policy the equivalent `wright lint` invocation prints.
 Stdio returns one `ToolResponse` per request. A successful response has a
 `result` member; an application-level refusal has an `error` member containing
 `code` and `message`. The schema defines supported request fields; current
-deserialization ignores unknown fields for forward compatibility. Clients
-should send only fields defined by the negotiated schema.
+deserialization ignores unknown fields for forward compatibility — except
+removed vocabulary, which refuses instead: a `rules` request still carrying
+the removed `name` field is a `malformed-request` error on every transport
+(ADR-0035). Clients should send only fields defined by the negotiated schema.
 
 Use `wright serve --transport jsonrpc [INPUT]` for JSON-RPC 2.0. The canonical
 agent method is `request`, with a `ToolRequest` in `params`:
@@ -396,7 +398,7 @@ independent of spelling and locale.
 A `content` request without `max` returns at most 20 rules, always in the
 selection-wrapped shape; `rule` selects exactly one. A selected rule's content
 is never truncated. The CLI form is `wright inspect rules --content`
-(`--rule`, `--only`, `--file`, `--max`). OverPy spellings for the canonical ids
+(`--rule`, `--file`, `--max`). OverPy spellings for the canonical ids
 (`names`) are not served yet: they wait on a provider capability.
 
 ### Semantic query selection (#531)
@@ -405,12 +407,13 @@ is never truncated. The CLI form is `wright inspect rules --content`
 selection fields with the same semantics as finding selection: filters narrow
 first, `max` bounds after, and a `selection` member reports `{"total":
 <set before selection>, "withheld": <dropped by max>}`. An unknown filter
-value, such as a kind outside the listed domain or a `name`/`rule`/`caller`/`callee`
+value, such as a kind outside the listed domain or a `rule`/`caller`/`callee`
 that matches nothing in the loaded program, is a structured
 `invalid-selection` error, never a silent empty result.
 
-* `rules`: `name` (a declared rule name), `rule` (exactly one rule, by index
-  or declared name), `file`, `max`.
+* `rules`: `rule` (exactly one rule, by index or declared name), `file`,
+  `max`. The removed `name` field is a `malformed-request` error, never
+  silently ignored (ADR-0035).
 * `symbols`: `file`, `max`, plus the pre-existing `kind` (`globalVariable`,
   `playerVariable`, `subroutine`, `rule`). `kind` predates this selection
   contract: a request carrying only `kind` keeps the previous filtered bare

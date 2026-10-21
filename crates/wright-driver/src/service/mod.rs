@@ -214,6 +214,16 @@ impl<'a> ToolService<'a> {
     }
 
     pub(crate) fn handle_full(&mut self, request: &ToolRequest) -> ToolResponse {
+        // ADR-0035: the `rules` `name` selection is removed vocabulary —
+        // its presence is a request-shape error, refused like a schema
+        // violation (`malformed-request`) before any project state is
+        // consulted, never silently ignored.
+        if let ToolRequest::Rules { name: Some(_), .. } = request {
+            return crate::lookup::refusal(
+                "malformed-request",
+                "`rules` no longer takes `name`; address one rule with `rule` or list them all",
+            );
+        }
         match request {
             ToolRequest::Check { .. } | ToolRequest::Compile { .. } => self.refresh_workflow(),
             _ if Self::reads_program(request) => {
@@ -563,7 +573,6 @@ impl<'a> ToolService<'a> {
             }
             ToolRequest::Project => self.ok(self.project()),
             ToolRequest::Rules {
-                name,
                 rule,
                 file,
                 max,
@@ -571,7 +580,6 @@ impl<'a> ToolService<'a> {
                 all,
                 ..
             } => self.rules(
-                name,
                 rule.as_ref(),
                 file,
                 &max.or_else(|| (*all && *content).then_some(usize::MAX)),
@@ -924,29 +932,17 @@ impl<'a> ToolService<'a> {
 
     /// `rules`: every rule with resolved span paths, like `symbols` — a
     /// `file` id without its path is unusable to a caller. The selection
-    /// fields are `name` (a declared rule name), `rule` (one rule address),
-    /// `file`, and `max` (#531). With `content`, each selected rule carries
-    /// its canonical content, `max` defaults to [`DEFAULT_CONTENT_RULES`],
-    /// and the selection shape is always returned (ADR-0024).
+    /// fields are `rule` (one rule address), `file`, and `max` (#531).
+    /// With `content`, each selected rule carries its canonical content,
+    /// `max` defaults to [`DEFAULT_CONTENT_RULES`], and the selection
+    /// shape is always returned (ADR-0024).
     fn rules(
         &self,
-        name: &Option<String>,
         rule: Option<&Address>,
         file: &Option<String>,
         max: &Option<usize>,
         content: bool,
     ) -> ToolResponse {
-        if let Some(name) = name
-            && !self
-                .snapshot()
-                .loaded
-                .program
-                .rules
-                .iter()
-                .any(|rule| rule.name == *name)
-        {
-            return invalid_selection(format!("unknown rule '{name}'"));
-        }
         let rule_id = match rule {
             Some(address) => match self.rule_address(address) {
                 Ok(id) if (id as usize) < self.snapshot().loaded.program.rules.len() => {
@@ -965,19 +961,14 @@ impl<'a> ToolService<'a> {
         } else {
             *max
         };
-        let selected =
-            content || name.is_some() || rule_id.is_some() || file.is_some() || max.is_some();
+        let selected = content || rule_id.is_some() || file.is_some() || max.is_some();
         let response = self.semantic_query_with_resolved_span_paths(Request::ListRules);
         let response = match response {
             ToolResponse::Ok { result } => self.select_result(
                 "rules",
                 result,
                 file.as_deref(),
-                |item| {
-                    name.as_deref()
-                        .is_none_or(|name| item["name"].as_str() == Some(name))
-                        && rule_id.is_none_or(|id| item["id"].as_u64() == Some(id))
-                },
+                |item| rule_id.is_none_or(|id| item["id"].as_u64() == Some(id)),
                 max,
                 selected,
             ),

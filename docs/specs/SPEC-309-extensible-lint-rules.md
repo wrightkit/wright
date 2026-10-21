@@ -118,7 +118,7 @@ limits. Evidence classification and a declarative rule's default finding
 severity are assigned by Wright from the canonical matcher contract; external
 metadata cannot override them.
 Unknown configuration keys are rejected. CLI flags apply to the same
-configuration object: `wright lint --lint-config project.yaml --rule rules/
+configuration object: `wright lint --lint-config project.yaml --rule-file rules/
 --disable-rule ID --rule-severity ID:warn`.
 
 ## Query and finding output
