@@ -5,9 +5,10 @@
 
 use std::path::{Path, PathBuf};
 
+use super::format::check_format_literal;
 use super::source::{
     arm_pattern_binds, as_str, call_args, closure_param_binds, enclosing_fn, enclosing_fn_body,
-    line_of, match_arms_stage_ok, match_bracket, rhs_span, skeleton,
+    line_of, match_arms_stage_ok, match_bracket, rhs_span, skeleton, stage_marker,
 };
 
 /// One literal found in a code position, with its site for diagnostics.
@@ -59,10 +60,13 @@ pub(super) fn classify_arm_value(sites: &mut Sites<'_>, arm_at: usize, start: us
 }
 
 /// One top-level field segment of a struct literal. A segment that trims
-/// to exactly a code name is a shorthand binding to resolve.
+/// to exactly a code name is a shorthand binding to resolve. In
+/// wright-analyzer `id` is also a rule-code channel (`RuleInfo { id }`);
+/// elsewhere `id` names an entity id and is not shorthand-scanned.
 pub(super) fn check_shorthand_field(sites: &mut Sites<'_>, start: usize, end: usize, at: usize) {
     let field = as_str(sites.masked, start..end).trim();
-    if sites.code_names.contains(&field) {
+    let analyzer_id = field == "id" && sites.file.to_string_lossy().contains("wright-analyzer");
+    if sites.code_names.contains(&field) || analyzer_id {
         resolve_code_binding(sites, at, field);
     }
 }
@@ -100,7 +104,12 @@ fn census_fallback_literals(sites: &mut Sites<'_>, start: usize, end: usize) {
     for marker in ["unwrap_or(", "||", "or(", "or_else("] {
         for (off, _) in expr.match_indices(marker) {
             let lit_at = start + off + marker.len();
-            let rest = expr[off + marker.len()..].trim_start();
+            // Peel `Some(` wrappers — `or(Some("lit"))` and
+            // `|| Some("lit")` carry the literal one level down.
+            let mut rest = expr[off + marker.len()..].trim_start();
+            while let Some(inner) = rest.strip_prefix("Some(") {
+                rest = inner.trim_start();
+            }
             // `|| format!("…")` — the closure body is a format literal.
             if let Some(fmt) = rest.strip_prefix("format!") {
                 let fmt_start = lit_at + (expr[off + marker.len()..].len() - rest.len());
@@ -203,6 +212,13 @@ pub(super) fn classify_rhs(sites: &mut Sites<'_>, start: usize, end: usize) {
         if !peeled {
             break;
         }
+        if normalized
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            resolve_code_binding(sites, start, &normalized);
+            return;
+        }
     }
     sites.unclassified.push(format!(
         "{}:{}: {}",
@@ -218,7 +234,7 @@ pub(super) fn classify_rhs(sites: &mut Sites<'_>, start: usize, end: usize) {
 /// constant/passthrough read. A producer nested inside a wrapper that
 /// changes its output (e.g. inside `format!` args) never matches —
 /// `format!` goes through `check_format_literal` instead.
-fn producer(normalized: &str, code_fns: &std::collections::BTreeSet<String>) -> bool {
+pub(super) fn producer(normalized: &str, code_fns: &std::collections::BTreeSet<String>) -> bool {
     if normalized == "UNKNOWN_WITHIN" || normalized == "finding[\"code\"]" {
         return true;
     }
@@ -246,7 +262,7 @@ fn producer(normalized: &str, code_fns: &std::collections::BTreeSet<String>) -> 
 /// Passthrough reads of already-enumerated or owner/provider-spelled
 /// codes. Bare `code`/`id` never reach here — `classify_rhs` resolves
 /// their bindings first.
-fn passthrough(shape: &str) -> bool {
+pub(super) fn passthrough(shape: &str) -> bool {
     shape.ends_with(".code")
         || shape.ends_with(".code()")
         || shape.ends_with(".refusal_code()")
@@ -257,56 +273,20 @@ fn passthrough(shape: &str) -> bool {
         || shape == "finding[\"\"]" // skeleton of `finding["code"]`
 }
 
-/// A `format!(…)` in a code position: its format literal must consist
-/// only of grammar-valid characters around `{…}` holes — a space,
-/// uppercase letter, or stray punctuation in the literal produces a
-/// malformed code no producer whitelist may hide.
-fn check_format_literal(sites: &mut Sites<'_>, start: usize, end: usize) {
-    let expr = &sites.original[start..end];
-    let Some(open) = expr.find('(') else {
-        return;
-    };
-    let args = expr[open + 1..].trim_start();
-    let Some(rest) = args.strip_prefix('"') else {
-        sites.unclassified.push(format!(
-            "{}:{}: `format!` code position without a literal format string",
-            sites.file.display(),
-            line_of(sites.original, start)
-        ));
-        return;
-    };
-    let mut i = 0;
-    let bytes = rest.as_bytes();
-    let mut bad = false;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'"' => break,
-            b'\\' => i += 2, // keep escapes simple — `\n` is not a code char anyway
-            b'{' => {
-                // Skip the format hole `{…}`.
-                i += 1;
-                while i < bytes.len() && bytes[i] != b'}' {
-                    i += 1;
-                }
-                i += 1;
-            }
-            b => {
-                if !(b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-') {
-                    bad = true;
-                    break;
-                }
-                i += 1;
-            }
-        }
-    }
-    if bad {
-        sites.unclassified.push(format!(
-            "{}:{}: `format!` literal produces a grammar-invalid code: {}",
-            sites.file.display(),
-            line_of(sites.original, start),
-            expr.trim()
-        ));
-    }
+/// Whether a skeleton is clearly a non-string entity id — `SymbolId`,
+/// index/len arithmetic, `as usize`-style casts, or a number — as
+/// opposed to a rule code. `id` is overloaded in wright-analyzer; these
+/// shapes are never diagnostic codes.
+pub(super) fn is_entity_id(shape: &str) -> bool {
+    shape.starts_with("SymbolId::")
+        || shape.contains("::from_index")
+        || shape.ends_with(".index()")
+        || shape.ends_with(".len()")
+        || shape.contains("asusize")
+        || shape.contains("asu32")
+        || shape.contains("asu64")
+        || shape.contains("asi64")
+        || (!shape.is_empty() && shape.chars().all(|c| c.is_ascii_digit()))
 }
 
 /// Resolve what a bare `code`/`id` value (shorthand field, ctor argument,
@@ -317,7 +297,7 @@ fn check_format_literal(sites: &mut Sites<'_>, start: usize, end: usize) {
 /// whose producer is covered at the caller, a match-arm pattern binding
 /// defers to the `, Stage::`/arm scans, and anything else is
 /// unclassified.
-fn resolve_code_binding(sites: &mut Sites<'_>, at: usize, name: &str) {
+pub(super) fn resolve_code_binding(sites: &mut Sites<'_>, at: usize, name: &str) {
     let unclassified_at = |sites: &mut Sites<'_>, why: &str| {
         sites.unclassified.push(format!(
             "{}:{}: `{name}` value {why}",
@@ -357,12 +337,15 @@ fn resolve_code_binding(sites: &mut Sites<'_>, at: usize, name: &str) {
         let Some(eq) = eq else {
             continue;
         };
-        // Find where the pattern binds the name (word boundary).
+        // Find where the pattern binds the name (word boundary). `name:`
+        // inside a `{…}` destructure is the FIELD name (`{ code: c }`
+        // binds `c`), not a binding of `name`.
         let Some(name_at) = pattern.match_indices(name).map(|(i, _)| i).find(|&i| {
             let before = pattern[..i].chars().last();
             let after = pattern[i + name.len()..].chars().next();
             !before.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
                 && !after.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+                && !pattern[i + name.len()..].trim_start().starts_with(':')
         }) else {
             continue;
         };
@@ -373,10 +356,17 @@ fn resolve_code_binding(sites: &mut Sites<'_>, at: usize, name: &str) {
         // carry a Stage marker.
         let shallow = !pattern[..name_at].trim_end().contains(['{', '(']);
         let (rstart, rend) = rhs_span(sites.masked, eq, body_end);
+        let skel = skeleton(&sites.original[rstart..rend]);
+        // `id` is overloaded in the analyzer: entity ids (`SymbolId`,
+        // indexes, numeric casts) are not diagnostic codes.
+        if name == "id" && is_entity_id(&skel) {
+            continue;
+        }
         if shallow {
             // A `name`-to-`name` binding traces to an earlier binding this
-            // scan already classifies.
-            if skeleton(&sites.original[rstart..rend]) != name {
+            // scan already classifies. A numeric RHS is a safe segment
+            // for non-`code` names (`format!("x-{}", n)`).
+            if skel != name && !(name != "code" && skel.chars().all(|c| c.is_ascii_digit())) {
                 classify_rhs(sites, rstart, rend);
             }
         } else {
@@ -387,21 +377,37 @@ fn resolve_code_binding(sites: &mut Sites<'_>, at: usize, name: &str) {
             // - a `Some(`/enum/tuple constructor RHS produces the value
             //   right here — classify it so `Some("bad code")` is
             //   censused;
-            // - anything else (param, call, field read) was produced at
-            //   its own `code:`/`id:`/shorthand write site.
+            // - a `.code`/`.id`-family field read defers to that field's
+            //   scanned write site; for `id`, a bare ident/field read
+            //   (`RuleDefinition { id } = def`) likewise defers to the
+            //   struct's `id:` site;
+            // - anything else — a call, method, or opaque ident — can not
+            //   be traced to a scanned write site: fail closed.
             let rhs_text = &text[eq + 1..rend];
             if rhs_text.contains("match") {
                 if !match_arms_stage_ok(rhs_text) {
                     unclassified_at(sites, "bound by a match arm the Stage:: scan misses");
                 }
-            } else if !rhs_text.contains(", Stage::") {
-                let skel = skeleton(&sites.original[rstart..rend]);
+            } else if !stage_marker(rhs_text.as_bytes()) {
                 if skel.starts_with("Some(")
                     || skel.starts_with("Ok(")
                     || skel.starts_with("Err(")
                     || skel.starts_with('(')
+                    || skel.starts_with('"')
                 {
                     classify_rhs(sites, rstart, rend);
+                } else if skel.ends_with(".code")
+                    || skel.ends_with(".id")
+                    || skel.ends_with(".provider_code")
+                    || skel.ends_with(".refusal_code")
+                    || (name == "id" && ident_or_field(&skel))
+                {
+                    // Produced at that field's own scanned write site.
+                } else {
+                    unclassified_at(
+                        sites,
+                        "is destructured from a value the census can not trace",
+                    );
                 }
             }
         }
@@ -468,13 +474,15 @@ fn resolve_code_binding(sites: &mut Sites<'_>, at: usize, name: &str) {
                         && masked_get(sites.masked, i + 1) != Some(b'>') =>
                 {
                     let (rstart, rend) = rhs_span(sites.masked, i, body_end);
-                    if plausibly_string(&skeleton(&sites.original[rstart..rend])) {
+                    let skel = skeleton(&sites.original[rstart..rend]);
+                    if plausibly_string(&skel) && !(name == "id" && is_entity_id(&skel)) {
                         classify_rhs(sites, rstart, rend);
                     }
                 }
                 Some(b'+') if masked_get(sites.masked, i + 1) == Some(b'=') => {
                     let (rstart, rend) = rhs_span(sites.masked, i + 1, body_end);
-                    if plausibly_string(&skeleton(&sites.original[rstart..rend])) {
+                    let skel = skeleton(&sites.original[rstart..rend]);
+                    if plausibly_string(&skel) && !(name == "id" && is_entity_id(&skel)) {
                         classify_rhs(sites, rstart, rend);
                     }
                 }
@@ -510,12 +518,24 @@ fn resolve_code_binding(sites: &mut Sites<'_>, at: usize, name: &str) {
 pub(super) fn plausibly_string(shape: &str) -> bool {
     !shape.starts_with("vec!")
         && !shape.starts_with("json!")
+        && !shape.starts_with('\'')
         && !shape.starts_with('[')
         && !shape.starts_with('{')
         && !shape
             .chars()
             .next()
             .is_some_and(|c| c.is_ascii_digit() || (c == '-' && shape.len() > 1))
+}
+
+/// Whether a skeleton is a bare ident or a field/index read (`x`,
+/// `x.y`, `self.x`, `x[..]`, `&x`) — a value produced at its own write
+/// site, not an opaque call.
+fn ident_or_field(skel: &str) -> bool {
+    !skel.contains('(')
+        && !skel.is_empty()
+        && skel.chars().all(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | ':' | '[' | ']' | '"' | '&' | '*')
+        })
 }
 
 fn masked_get(masked: &[u8], i: usize) -> Option<u8> {

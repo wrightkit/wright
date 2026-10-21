@@ -30,6 +30,7 @@
 mod classify;
 mod driver_codes;
 mod engine_kinds;
+mod format;
 mod source;
 
 use std::collections::BTreeSet;
@@ -146,7 +147,11 @@ fn fixed_codes_obey_the_declared_grammar() {
     // - `min-wait-loop` enters only through the analyzer `id:` registry
     //   literal scan;
     // - `malformed-request` enters only through the `"code":` envelope-key
-    //   scan in `serve.rs`.
+    //   scan in `serve.rs`;
+    // - `unsupported-construct` sits in a rustfmt multi-line tuple
+    //   (`"…",\n    Stage::Frontend`) — it enters only when the tuple
+    //   needle tolerates the newline and the match-arm check terminates
+    //   at arm boundaries.
     for (path_part, code) in [
         ("lint/package.rs", "lint-package-not-found"),
         ("lint/package.rs", "lint-package-remote"),
@@ -159,6 +164,7 @@ fn fixed_codes_obey_the_declared_grammar() {
         ("registry.rs", "min-wait-loop"),
         ("serve.rs", "malformed-request"),
         ("wright-language", "rename-refused"),
+        ("session.rs", "unsupported-construct"),
     ] {
         assert!(
             unique.iter().any(|(file, _, found)| {

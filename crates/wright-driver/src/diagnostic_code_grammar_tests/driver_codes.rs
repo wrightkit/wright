@@ -45,11 +45,11 @@ use std::path::{Path, PathBuf};
 
 use super::classify::{
     CodeSite, Sites, check_shorthand_field, classify_arm_value, classify_rhs, classify_tuple_code,
-    plausibly_string, push_literal,
+    is_entity_id, plausibly_string, push_literal,
 };
 use super::source::{
-    as_str, blank_cfg_test_items, call_args, crate_src, line_of, mask_rust, match_bracket,
-    read_rs_tree, rhs_span, skeleton,
+    as_str, blank_cfg_test_items, call_args, crate_src, in_pattern_position, line_of, mask_rust,
+    match_bracket, read_rs_tree, rhs_span, skeleton,
 };
 
 /// `fn` names whose parameter list carries a string-typed `code`
@@ -180,9 +180,10 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
                     vend -= 1;
                 }
                 // Type positions (`code: String` declarations, `code: &str`
-                // params) are not code values.
+                // params) and destructure patterns (`let Diagnostic {
+                // code: c }`, match arms) are not code values.
                 let value = text[vstart..vend].trim();
-                if value.is_empty() || looks_like_type(value) {
+                if value.is_empty() || looks_like_type(value) || in_pattern_position(masked, at) {
                     continue;
                 }
                 classify_rhs(&mut sites, vstart, vend);
@@ -190,14 +191,16 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
         }
 
         // Analyzer rule-code vocabulary: `id: "lint-…"` literals in the
-        // registry are the codes `.id`/`.id()` passthroughs surface. Only
-        // literal values are censused — `Symbol.id`/`RuleDefinition.id`
-        // and JSON-RPC ids are entity ids, not diagnostic codes.
+        // registry are the codes `.id`/`.id()` passthroughs surface.
+        // `id` is overloaded — entity ids (`SymbolId::from_index`,
+        // `.index()`, numeric JSON-RPC ids) are not diagnostic codes and
+        // stay out; every other non-literal value must classify.
         if analyzer {
             for (at, _) in text.match_indices("id:") {
                 if at > 0
                     && (text.as_bytes()[at - 1].is_ascii_alphanumeric()
                         || text.as_bytes()[at - 1] == b'_')
+                    || in_pattern_position(masked, at)
                 {
                     continue;
                 }
@@ -227,7 +230,14 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
                 while vend > vstart && (text.as_bytes()[vend - 1] as char).is_ascii_whitespace() {
                     vend -= 1;
                 }
-                push_literal(sites.codes, original, path, (vstart, vend));
+                if push_literal(sites.codes, original, path, (vstart, vend)) {
+                    continue;
+                }
+                let shape = skeleton(&original[vstart..vend]);
+                if looks_like_type(&shape) || is_entity_id(&shape) {
+                    continue;
+                }
+                classify_rhs(&mut sites, vstart, vend);
             }
         }
 
@@ -280,39 +290,61 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
             }
         }
 
-        // `.code` writes: `=`, `+=`, and mutating methods whose operand is
-        // a code value.
-        for (at, _) in text.match_indices(".code") {
-            let mut i = at + ".code".len();
-            while i < text.len() && masked[i].is_ascii_whitespace() {
-                i += 1;
-            }
-            match masked.get(i) {
-                Some(b'=') | Some(b'+') => {
-                    if masked.get(i + 1) == Some(&b'=') || masked.get(i + 1) == Some(&b'>') {
-                        continue;
-                    }
-                    let (vstart, vend) = rhs_span(masked, i, masked.len());
-                    classify_rhs(&mut sites, vstart, vend);
+        // `.code`/`.provider_code`/`.refusal_code` writes: `=`, `+=`, and
+        // mutating methods whose operand is a code value — the write side
+        // of the read passthrough whitelist.
+        for field in [".code", ".provider_code", ".refusal_code"] {
+            for (at, _) in text.match_indices(field) {
+                let mut i = at + field.len();
+                while i < text.len() && masked[i].is_ascii_whitespace() {
+                    i += 1;
                 }
-                Some(b'.') => {
-                    let after_dot = i + 1;
-                    for method in ["push_str(", "push(", "insert(", "extend(", "replace_range("] {
-                        if masked[after_dot..].starts_with(method.as_bytes()) {
-                            let open = after_dot + method.len() - 1;
-                            for arg in call_args(masked, open) {
-                                classify_rhs(&mut sites, arg.0, arg.1);
+                match masked.get(i) {
+                    Some(b'=')
+                        if masked.get(i + 1) != Some(&b'=') && masked.get(i + 1) != Some(&b'>') =>
+                    {
+                        let (vstart, vend) = rhs_span(masked, i, masked.len());
+                        classify_rhs(&mut sites, vstart, vend);
+                    }
+                    Some(b'+') if masked.get(i + 1) == Some(&b'=') => {
+                        let (vstart, vend) = rhs_span(masked, i + 1, masked.len());
+                        classify_rhs(&mut sites, vstart, vend);
+                    }
+                    Some(b'.') => {
+                        let after_dot = i + 1;
+                        for method in ["push_str(", "push(", "insert(", "extend(", "replace_range("]
+                        {
+                            if masked[after_dot..].starts_with(method.as_bytes()) {
+                                let open = after_dot + method.len() - 1;
+                                for arg in call_args(masked, open) {
+                                    // `insert(pos, s)`/`replace_range(range,
+                                    // s)` index operands are not strings.
+                                    if plausibly_string(&skeleton(&original[arg.0..arg.1])) {
+                                        classify_rhs(&mut sites, arg.0, arg.1);
+                                    }
+                                }
                             }
                         }
                     }
+                    _ => {}
                 }
-                _ => {}
             }
         }
 
-        // `(expr, Stage::…)` tuple arms: the expression directly before
-        // `, Stage::` is the code position.
-        for (at, _) in text.match_indices(", Stage::") {
+        // `(expr, Stage::…)` tuple arms: the expression before `,` + ws +
+        // `Stage::` is the code position — whitespace-tolerant so rustfmt
+        // multi-line tuples (`"…",\n    Stage::Frontend`) are covered.
+        for (at, _) in text.match_indices(',') {
+            let mut stage_at = at + 1;
+            while stage_at < masked.len() && masked[stage_at].is_ascii_whitespace() {
+                stage_at += 1;
+            }
+            if !masked
+                .get(stage_at..)
+                .is_some_and(|s| s.starts_with(b"Stage::"))
+            {
+                continue;
+            }
             let mut end = at;
             while end > 0 && (text.as_bytes()[end - 1] as char).is_ascii_whitespace() {
                 end -= 1;
