@@ -29,7 +29,9 @@ program.
   variables; variables absent from an export must be zero-like).
 - `p4`–`p6` probes: layer-3 constructs `athena` `v0.2.0` does not model —
   the `not_modeled` coverage (`action waitUntil`, a player world read, the
-  `ABORT_WHEN_FALSE` wait behavior). No captures are vendored for them:
+  `ABORT_WHEN_FALSE` wait behavior). The tests exercise `p4` and `p5`;
+  `p6` is vendored for record completeness and not exercised (upstream
+  `#[ignore]`s it too). No captures are vendored for them:
   the runs never complete.
 - `practice-range.ow` + `scenarios/practice-range.json`: the real project's
   scenario run — one injected final blow takes `score` to `2` and `streak`
