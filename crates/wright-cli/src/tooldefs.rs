@@ -44,8 +44,8 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         request_def: "ProjectRequest",
         drop_fields: &[],
         mcp: true,
-        description: "The loaded canonical program summary: origin, files, and counts of variables, subroutines, rules, symbols, and findings. Its `snapshot` scopes the numeric ids the program reports.",
-        result: "the loaded program's origin, files, counts, and issuing snapshot",
+        description: "The loaded canonical program summary: origin, `sourceFiles` (the loaded source paths, entry file first), file count, and counts of variables, subroutines, rules, symbols, and findings. Its `snapshot` scopes the numeric ids the program reports.",
+        result: "the loaded program's origin, source files, counts, and issuing snapshot",
     },
     ToolSpec {
         op: "rules",

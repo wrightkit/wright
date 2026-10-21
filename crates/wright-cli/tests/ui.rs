@@ -175,6 +175,25 @@ fn endpoint_bodies_match_the_stdio_transport() {
     }
 }
 
+/// `project` lists the loaded sources through `sourceFiles`, entry file
+/// first — the page title shows its base name (#879).
+#[cfg(feature = "ui")]
+#[test]
+fn project_lists_source_files_entry_first() {
+    let session = UiSession::start(&corpus_workshop("synthetic/control-flow"));
+    let (status, body) = session.api(r#"{"op":"project"}"#);
+    assert_eq!(status, 200);
+    let result: serde_json::Value = serde_json::from_str(&body).expect("project body is JSON");
+    let files = result["result"]["sourceFiles"]
+        .as_array()
+        .expect("project reports sourceFiles");
+    assert_eq!(files.len(), 1);
+    assert!(
+        files[0].as_str().unwrap().ends_with("control-flow.ws"),
+        "the entry source names the input file: {files:?}"
+    );
+}
+
 /// Every refusal below is answered before the request can reach
 /// `ToolService`: a missing or wrong token, a foreign `Host`, or a foreign
 /// `Origin` (ADR-0032 decision 4).

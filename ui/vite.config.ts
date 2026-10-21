@@ -6,9 +6,9 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [svelte()],
   // Vitest resolves imports through the SSR pipeline, whose defaults pick
-  // the server build of `svelte` (`mount` is client-only). Gated on VITEST
-  // so the production bundle's resolver stays at its defaults.
-  resolve: {
-    conditions: process.env.VITEST ? ['browser'] : [],
-  },
+  // the server build of `svelte` (`mount` is client-only). The `resolve` key
+  // itself is gated on VITEST so the production bundle's resolver stays at
+  // its defaults: `conditions` fully replaces the defaults, and `[]` dropped
+  // `browser`, bundling the server build.
+  resolve: process.env.VITEST ? { conditions: ['browser'] } : {},
 })

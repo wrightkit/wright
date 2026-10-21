@@ -178,7 +178,7 @@
     <header class="event">
       <span class="tok value">{eventName(content.event)}</span>
       {#each filterNames(content.event) as filter (filter)}
-        <span class="filter">{filter}</span>
+        <span class="event-filter">{filter}</span>
       {/each}
       {#if content.disabled}
         <span class="disabled-badge">disabled</span>

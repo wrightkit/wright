@@ -1245,14 +1245,10 @@ impl<'a> ToolService<'a> {
         );
         json!({
             "origin": { "kind": loaded.origin.kind, "locale": loaded.origin.locale },
-            "inputIdentity": loaded.input.identity,
-            "files": loaded.source_files.len().max(1),
-            "globalVariables": loaded.program.global_variables.len(),
-            "playerVariables": loaded.program.player_variables.len(),
-            "subroutines": loaded.program.subroutines.len(),
-            "rules": loaded.program.rules.len(),
-            "symbols": index.symbols().count(),
-            "findings": findings.len(),
+            "inputIdentity": loaded.input.identity, "files": loaded.source_files.len().max(1),
+            "sourceFiles": loaded.source_files.as_slice(), "globalVariables": loaded.program.global_variables.len(),
+            "playerVariables": loaded.program.player_variables.len(), "subroutines": loaded.program.subroutines.len(),
+            "rules": loaded.program.rules.len(), "symbols": index.symbols().count(), "findings": findings.len(),
         })
     }
 

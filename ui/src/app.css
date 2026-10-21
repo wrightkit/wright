@@ -1,85 +1,175 @@
-/* Read-only Workshop rule view (#804): a dark, editor-like surface. The
-   eight token classes carry the issue's palette. */
+/* `wright ui` page shell (#879): the design spec's backdrop, tokens, title,
+   and toolbar (docs/ui/design.md § Tokens, § Main screen items 1–2). Rule
+   bars, the rule body, and dialog contents keep their interim styles;
+   #880–#882 restyle them. */
+
 :root {
-  color-scheme: dark;
-  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --bg: #1b1d21;
-  --panel: #22252b;
-  --panel-2: #282c33;
-  --line: #363b44;
-  --text: #d8dce3;
-  --muted: #8a919d;
-  --accent: #d9a62e;
+  color-scheme: light;
+  font-family: -apple-system, "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  font-size: 15px;
+
+  /* docs/ui/design.md § Tokens */
+  --bar: rgb(44 48 68 / 0.72);
+  --bar-hover: rgb(44 48 68 / 0.86);
+  --dlg: #262c40;
+  --dlg-foot: #171b26;
+  --card: #1d2131;
+  --lbl: #3a4566;
+  --lbl-focus: #9c9fa8;
+  --ctl: #2c5383;
+  --ctl-hi: #3a6db0;
+  --num: #343d58;
+  --opt-hi: #4a8fcb;
+  --text: #f2f4f8;
+  --muted: #b9bfce;
+  --dim: #8a91a6;
+  --orange: #cf6a26;
+  --gold: #d9a03f;
+  --blue: #3d9be9;
+  --warn: #f0b04a;
+  --error: #ff7a70;
+  /* The table's "white control" row: `#f4f5f8` on `#111`. */
+  --white: #f4f5f8;
+  --on-white: #111;
 }
 
 body {
   margin: 0;
-  background: var(--bg);
   color: var(--text);
+  /* Backdrop: a light blue-grey diagonal gradient under a fixed pattern of
+     faint large triangles drawn as inline SVG. No web fonts are loaded. */
+  background-color: #6f80aa;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='480' height='480' viewBox='0 0 480 480'%3E%3Cg fill='none' stroke='rgba(255,255,255,0.08)' stroke-width='2'%3E%3Cpath d='M40 400 L170 130 L300 400 Z'/%3E%3Cpath d='M300 60 L430 330 L170 330 Z'/%3E%3Cpath d='M60 40 L140 180 L-20 180 Z'/%3E%3C/g%3E%3C/svg%3E"),
+    linear-gradient(135deg, #c3c9e6 0%, #98a6cc 50%, #6f80aa 100%);
+  /* `fixed` (and the `repeat` default) apply to both layers. */
+  background-attachment: fixed;
 }
 
-#app {
-  height: 100vh;
+button,
+input,
+select {
+  font: inherit;
 }
 
-.layout {
-  display: grid;
-  grid-template-rows: auto 1fr;
-  grid-template-columns: 16rem 1fr;
-  grid-template-areas:
-    'top top'
-    'list view';
-  height: 100vh;
+/* One column: title, toolbar, then the rule list at full width. */
+.page {
+  padding: 1.5rem clamp(1rem, 4vw, 3rem) 4rem;
 }
 
-.top {
-  grid-area: top;
+.title-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.title-row h1 {
+  margin: 0;
+  font-size: 2.2rem;
+  font-weight: 700;
+  font-style: italic;
+  line-height: 1.1;
+}
+
+.file-name {
+  font-style: italic;
+  color: var(--muted);
+}
+
+/* The toolbar is one row over a 2 px light rule line. */
+.toolbar {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.6rem 1rem;
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 2px solid color-mix(in srgb, var(--text) 55%, transparent);
 }
 
-.top h1 {
-  font-size: 1rem;
+.toolbar .end {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.rule-count {
   font-weight: 600;
-  margin: 0;
-  color: var(--accent);
+  white-space: nowrap;
 }
 
-.top .filter {
-  flex: 1;
-  max-width: 22rem;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  color: var(--text);
-  padding: 0.3rem 0.6rem;
-}
-
-.top button,
-.dialog button {
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  color: var(--text);
-  padding: 0.3rem 0.8rem;
+/* Square icon buttons: 40 px, #f4f5f8 on #111, 3 px radius, inline SVG icon
+   drawn for WrightKit, `title` tooltip. */
+.sq {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 3px;
+  background: var(--white);
+  color: var(--on-white);
   cursor: pointer;
+  flex: none;
 }
 
-.top button:hover,
-.dialog button:hover {
-  border-color: var(--accent);
+/* The spec's count badge (§ Main screen 2) sits on the button's corner. */
+.sq-badge {
+  position: absolute;
+  top: -0.4rem;
+  right: -0.4rem;
+  min-width: 1.15rem;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  background: var(--orange);
+  color: var(--white);
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.15rem;
+  text-align: center;
 }
 
+.sq:hover:not(:disabled) {
+  filter: brightness(0.93);
+}
+
+.sq:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.sep {
+  width: 1px;
+  height: 1.4rem;
+  background: color-mix(in srgb, var(--text) 40%, transparent);
+}
+
+.filter {
+  width: 16rem;
+  max-width: 100%;
+  border: 0;
+  border-radius: 3px;
+  padding: 0.45rem 0.7rem;
+  background: var(--white);
+  color: var(--on-white);
+}
+
+.filter::placeholder {
+  color: var(--dim);
+}
+
+/* The rule list and the rule body keep their read-only content; #880/#881
+   restyle them. The list is a plain column — the page scrolls as a whole. */
 .rule-list {
-  grid-area: list;
-  overflow-y: auto;
-  background: var(--panel);
-  border-right: 1px solid var(--line);
-  padding: 0.5rem 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem 0;
 }
 
 .rule-item {
@@ -91,29 +181,27 @@ body {
   background: none;
   color: var(--text);
   text-align: left;
-  padding: 0.45rem 1rem;
+  padding: 0.45rem 0.75rem;
   cursor: pointer;
-  font: inherit;
+  border-radius: 3px;
 }
 
 .rule-item:hover {
-  background: var(--panel-2);
+  background: var(--bar);
 }
 
 .rule-item.selected {
-  background: var(--panel-2);
-  box-shadow: inset 3px 0 0 var(--accent);
+  background: var(--bar);
+  box-shadow: inset 3px 0 0 var(--gold);
 }
 
 .rule-item.disabled .rule-name {
-  color: var(--muted);
+  color: var(--dim);
   text-decoration: line-through;
 }
 
 .view {
-  grid-area: view;
-  overflow-y: auto;
-  padding: 1rem 1.5rem;
+  padding: 0.5rem 0 2rem;
 }
 
 .rule-title {
@@ -126,12 +214,11 @@ body {
   align-items: baseline;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 4px;
+  background: var(--bar);
+  border-radius: 3px;
 }
 
-.event .filter {
+.event .event-filter {
   color: var(--muted);
   font-size: 0.85rem;
 }
@@ -156,10 +243,8 @@ body {
   padding: 0.22rem 0.5rem 0.22rem calc(0.5rem + var(--depth, 0) * 1.6rem);
   border-radius: 3px;
   white-space: pre-wrap;
-}
-
-.statement:nth-child(odd) {
-  background: rgb(255 255 255 / 0.025);
+  background: var(--bar);
+  margin-bottom: 0.15rem;
 }
 
 .statement.disabled {
@@ -167,10 +252,10 @@ body {
 }
 
 .disabled-badge {
-  font-family: system-ui, sans-serif;
+  font-family: -apple-system, "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
   font-size: 0.7rem;
-  color: var(--muted);
-  border: 1px solid var(--line);
+  color: var(--dim);
+  border: 1px solid var(--dim);
   border-radius: 3px;
   padding: 0 0.35rem;
   margin-left: 0.5rem;
@@ -193,8 +278,7 @@ body {
   color: var(--muted);
 }
 
-/* Syntax classes (#804): action, value, enum, number, string, variable,
-   operator, literal. */
+/* Syntax classes (#804); the spec's class colours land with #881. */
 .tok {
   white-space: pre-wrap;
 }
@@ -248,9 +332,10 @@ details.debug pre {
 }
 
 .dialog {
-  background: var(--panel);
+  color-scheme: dark;
+  background: var(--dlg);
   color: var(--text);
-  border: 1px solid var(--line);
+  border: 1px solid rgb(255 255 255 / 0.15);
   border-radius: 6px;
   padding: 1rem 1.25rem;
   min-width: 24rem;
@@ -266,6 +351,19 @@ details.debug pre {
 .dialog h2 {
   margin-top: 0;
   font-size: 1rem;
+}
+
+.dialog button {
+  background: var(--card);
+  border: 1px solid rgb(255 255 255 / 0.18);
+  border-radius: 3px;
+  color: var(--text);
+  padding: 0.3rem 0.8rem;
+  cursor: pointer;
+}
+
+.dialog button:hover {
+  border-color: var(--gold);
 }
 
 .symbol-kind {
@@ -293,7 +391,7 @@ details.debug pre {
   grid-template-columns: auto auto 1fr;
   gap: 0.5rem;
   padding: 0.3rem 0;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid rgb(255 255 255 / 0.12);
   font-size: 0.85rem;
 }
 
@@ -303,15 +401,15 @@ details.debug pre {
 }
 
 .finding.severity-error .sev {
-  color: #cc6666;
+  color: var(--error);
 }
 
 .finding.severity-warning .sev {
-  color: #de935f;
+  color: var(--warn);
 }
 
 .finding.severity-info .sev {
-  color: #81a2be;
+  color: var(--muted);
 }
 
 .finding .loc {
@@ -350,16 +448,16 @@ details.debug pre {
 }
 
 .statement.selected {
-  box-shadow: inset 0 0 0 1px var(--accent);
+  box-shadow: inset 0 0 0 1px var(--gold);
 }
 
 .statement.pending-change {
-  box-shadow: inset 3px 0 0 var(--accent);
-  background: rgb(217 166 46 / 0.07);
+  box-shadow: inset 3px 0 0 var(--gold);
+  background: color-mix(in srgb, var(--gold) 7%, transparent);
 }
 
 .statement.pending-delete {
-  box-shadow: inset 3px 0 0 #cc6666;
+  box-shadow: inset 3px 0 0 var(--error);
   text-decoration: line-through;
 }
 
@@ -374,13 +472,13 @@ details.debug pre {
 }
 
 .pending-tag.change {
-  color: var(--accent);
-  border: 1px solid var(--accent);
+  color: var(--gold);
+  border: 1px solid var(--gold);
 }
 
 .pending-tag.delete {
-  color: #cc6666;
-  border: 1px solid #cc6666;
+  color: var(--error);
+  border: 1px solid var(--error);
 }
 
 .sel-bar {
@@ -389,8 +487,8 @@ details.debug pre {
   gap: 0.5rem;
   margin: 0.35rem 0 0.6rem;
   padding: 0.35rem 0.6rem;
-  background: var(--panel);
-  border: 1px solid var(--line);
+  background: var(--card);
+  border: 1px solid rgb(255 255 255 / 0.15);
   border-radius: 4px;
   font-size: 0.85rem;
 }
@@ -402,8 +500,8 @@ details.debug pre {
 
 .sel-bar button,
 .editor-foot button {
-  background: var(--panel-2);
-  border: 1px solid var(--line);
+  background: var(--dlg);
+  border: 1px solid rgb(255 255 255 / 0.15);
   border-radius: 4px;
   color: var(--text);
   padding: 0.25rem 0.8rem;
@@ -412,14 +510,14 @@ details.debug pre {
 
 .sel-bar button:hover,
 .editor-foot button:hover {
-  border-color: var(--accent);
+  border-color: var(--gold);
 }
 
 .sel-bar button:disabled,
 .editor-foot button:disabled {
   opacity: 0.5;
   cursor: default;
-  border-color: var(--line);
+  border-color: rgb(255 255 255 / 0.15);
 }
 
 .editor-title {
@@ -438,8 +536,8 @@ details.debug pre {
 
 .editor-statement {
   padding: 0.5rem 0.75rem;
-  background: var(--bg);
-  border: 1px solid var(--line);
+  background: var(--card);
+  border: 1px solid rgb(255 255 255 / 0.15);
   border-radius: 4px;
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   font-size: 0.88rem;
@@ -451,12 +549,12 @@ details.debug pre {
   gap: 0.6rem;
   margin-top: 1rem;
   padding-top: 0.8rem;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid rgb(255 255 255 / 0.15);
 }
 
 .editor-foot .ok {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--gold);
+  color: var(--gold);
   font-weight: 600;
 }
 

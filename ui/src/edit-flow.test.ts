@@ -101,10 +101,11 @@ const click = (el: Element) => {
   flushSync()
 }
 
+// The shell's pending-changes view button is the icon button labelled
+// "Pending changes"; its spec count badge shows the staged-edit count.
 const pendingButton = () =>
-  [...host.querySelectorAll<HTMLButtonElement>('.top button')].find((button) =>
-    button.textContent.startsWith('Pending'),
-  )!
+  host.querySelector<HTMLButtonElement>('.toolbar button[aria-label="Pending changes"]')!
+const pendingBadge = () => pendingButton().querySelector('.sq-badge')?.textContent ?? null
 
 const rows = () => [...host.querySelectorAll<HTMLLIElement>('.statement')]
 const checkbox = (row: Element) => row.querySelector<HTMLInputElement>('.sel')!
@@ -159,7 +160,7 @@ describe('the editing layer', () => {
     click(checkbox(rows()[1]))
     expect(host.querySelector('.sel-bar')?.textContent).toContain('2 selected')
     click(buttonByText(host.querySelector('.sel-bar')!, 'Disable'))
-    expect(pendingButton().textContent).toBe('Pending (2)')
+    expect(pendingBadge()).toBe('2')
     expect(rows()[0].classList.contains('pending-change')).toBe(true)
 
     // The pending dialog lists the changes; Submit sends the request and
@@ -191,7 +192,7 @@ describe('the editing layer', () => {
     expect(applied).toEqual(transaction)
     // The page re-reads the program after a write; the pending map cleared.
     expect(rulesCalls).toBe(2)
-    expect(pendingButton().textContent).toBe('Pending')
+    expect(pendingBadge()).toBeNull()
   })
 
   it('reports a stale identity and never posts the transaction', async () => {
@@ -247,7 +248,7 @@ describe('the editing layer', () => {
     )
     // A stale refusal drops the staging: the marks addressed a program the
     // page no longer displays, and it re-reads.
-    expect(pendingButton().textContent).toBe('Pending')
+    expect(pendingBadge()).toBeNull()
     expect(rows()[0].classList.contains('pending-delete')).toBe(false)
   })
 
@@ -296,7 +297,7 @@ describe('the editing layer', () => {
     expect(host.querySelector('[data-testid="pending-refusal"]')?.textContent).toContain(
       'edit-stale-source',
     )
-    expect(pendingButton().textContent).toBe('Pending')
+    expect(pendingBadge()).toBeNull()
   })
 
   it('opens the statement editor on a row click and stages the toggle', async () => {
@@ -329,7 +330,7 @@ describe('the editing layer', () => {
     await settle()
 
     expect(editor.open).toBe(false)
-    expect(pendingButton().textContent).toBe('Pending (1)')
+    expect(pendingBadge()).toBe('1')
     expect(rows()[0].classList.contains('pending-change')).toBe(true)
   })
 })
