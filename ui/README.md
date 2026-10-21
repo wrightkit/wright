@@ -11,6 +11,8 @@ carrying `Authorization: Bearer <token>` with the token from the session
 URL fragment. `vite dev`/`preview` serve the bundle but have no `/api`
 backend, so they render the loading state only.
 
+The look and interaction follow [`docs/ui/design.md`](../docs/ui/design.md).
+
 ## Build and test
 
 Node `^22.12 || ^24 || >=26` and npm:

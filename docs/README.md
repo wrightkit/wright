@@ -47,6 +47,8 @@ Issue contract.
   corpus and committed baseline.
 - [Language services & LSP](language-services.md): editor-neutral language
   services and LSP framing.
+- [`wright ui` design](ui/design.md): the look and interaction of the
+  structured editor UI.
 - [Integration verification](compatibility.md): owner boundaries and
   Wright-owned tests.
 - [Licensing/provenance boundary](licensing.md): third-party reference and
