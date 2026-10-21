@@ -7,6 +7,7 @@
    */
   import { closeDialog, showModal } from './dialog'
   import Expr from './Expr.svelte'
+  import type { ChromeStrings } from './chrome'
   import type { Names } from './names'
   import { STATEMENT_KINDS } from './nodes'
   import type { StatementNode } from './edit'
@@ -17,6 +18,7 @@
     target,
     names,
     disabled,
+    t,
     onsave,
     onclose,
   }: {
@@ -24,6 +26,8 @@
     names: Names
     /** The statement's effective disabled state, pending edits included. */
     disabled: boolean
+    /** The session locale's chrome strings. */
+    t: ChromeStrings
     onsave: (disabled: boolean) => void
     onclose: () => void
   } = $props()
@@ -52,7 +56,7 @@
       const action = target.node as SpannedAction
       return names.peek(action.call, STATEMENT_KINDS)?.name ?? action.call
     }
-    return 'Condition'
+    return t.conditionTitle
   })
 
   const exprNode = $derived(
@@ -69,7 +73,7 @@
     <h2 class="editor-title">{title}</h2>
     <label class="editor-disable">
       <input type="checkbox" bind:checked={checked} data-testid="editor-disable" />
-      Disabled
+      {t.disabled}
     </label>
     <div class="editor-statement">
       {#if exprNode !== undefined}
@@ -82,7 +86,7 @@
     </div>
     <div class="editor-foot">
       <button type="button" class="cancel" onclick={() => dialogEl && closeDialog(dialogEl)}
-        >Cancel</button
+        >{t.cancel}</button
       >
       <button
         type="button"
@@ -90,7 +94,7 @@
         onclick={() => {
           onsave(checked)
           if (dialogEl) closeDialog(dialogEl)
-        }}>OK</button
+        }}>{t.ok}</button
       >
     </div>
   {/if}

@@ -17,6 +17,7 @@
    */
   import { SvelteSet } from 'svelte/reactivity'
   import Expr from './Expr.svelte'
+  import type { ChromeStrings } from './chrome'
   import type { Names } from './names'
   import {
     keyFor,
@@ -40,6 +41,7 @@
     names,
     debug,
     pending,
+    t,
     onedit,
   }: {
     summary: RuleSummary
@@ -47,6 +49,8 @@
     names: Names
     debug: boolean
     pending: ReadonlyMap<string, PendingChange>
+    /** The session locale's chrome strings. */
+    t: ChromeStrings
     onedit: {
       open: (list: StatementList, index: number) => void
       batch: (list: StatementList, indices: number[], action: BatchAction) => void
@@ -147,21 +151,24 @@
   }
 
   /** The singular noun an aria label names for a row of `list`. */
-  const noun = (list: StatementList) => (list === 'conditions' ? 'condition' : 'action')
+  const noun = (list: StatementList) =>
+    list === 'conditions' ? t.conditionNoun : t.actionNoun
 
   /**
    * The event rows, in the in-game order: Event always, then Team, Player,
-   * and Subroutine only when the event carries them. Values are `lookup`
-   * names in the session locale (warmed with the rest of the rule), with
-   * the raw identity as the failed-lookup fallback.
+   * and Subroutine only when the event carries them. Labels are chrome in
+   * the session locale; values are `lookup` names in the session locale
+   * (warmed with the rest of the rule), with the raw identity as the
+   * failed-lookup fallback.
    */
-  function eventRows(event: Event): { label: string; value: string }[] {
+  function eventRows(event: Event): { key: string; label: string; value: string }[] {
     const rows = [
-      { label: 'Event', value: names.peek(event.id, ['event'])?.name ?? event.id },
+      { key: 'event', label: t.event, value: names.peek(event.id, ['event'])?.name ?? event.id },
     ]
     if (event.team) {
       rows.push({
-        label: 'Team',
+        key: 'team',
+        label: t.team,
         value:
           names.peek(`EventTeam.${event.team}`, ['enumMember'])?.name ??
           `EventTeam.${event.team}`,
@@ -171,10 +178,10 @@
       const key = isEventPlayerMember(event.player)
         ? `EventPlayer.${event.player}`
         : `Hero.${event.player}`
-      rows.push({ label: 'Player', value: names.peek(key, ['enumMember'])?.name ?? key })
+      rows.push({ key: 'player', label: t.player, value: names.peek(key, ['enumMember'])?.name ?? key })
     }
     if (event.subroutine) {
-      rows.push({ label: 'Subroutine', value: event.subroutine })
+      rows.push({ key: 'subroutine', label: t.subroutine, value: event.subroutine })
     }
     return rows
   }
@@ -209,7 +216,7 @@
     <input
       type="checkbox"
       class="sel"
-      aria-label="select {noun(list)} {index + 1}"
+      aria-label={t.selectRow(noun(list), index + 1)}
       checked={set.has(index)}
       onclick={(event) => {
         event.stopPropagation()
@@ -230,17 +237,17 @@
 
 <section class="rule-view">
   {#if ruleState.phase === 'loading' || (ruleState.phase === 'ready' && !namesReady)}
-    <p class="muted">Loading rule…</p>
+    <p class="muted">{t.loadingRule}</p>
   {:else if ruleState.phase === 'refused'}
     <div class="refusal">
-      <strong>The service could not express this rule's content.</strong>
+      <strong>{t.contentRefused}</strong>
       <code>{ruleState.refusal.code}</code>
       <p>{ruleState.refusal.message}</p>
     </div>
   {:else}
     {@const content = ruleState.content}
     <div class="event-rows">
-      {#each eventRows(content.event) as row (row.label)}
+      {#each eventRows(content.event) as row (row.key)}
         <div class="event-row">
           <span class="event-label">{row.label}</span>
           <span class="event-value"
@@ -282,13 +289,13 @@
           <input
             type="checkbox"
             class="sel-all"
-            aria-label="select all conditions"
+            aria-label={t.selectAll(t.conditionNoun)}
             checked={condSel.size === condVisible.length && condVisible.length > 0}
             indeterminate={condSel.size > 0 && condSel.size < condVisible.length}
             onchange={(event) =>
               selectAll('conditions', condVisible, event.currentTarget.checked)}
           />
-          Conditions <span class="col-count">({content.conditions.length})</span>
+          {t.conditions} <span class="col-count">({content.conditions.length})</span>
         </h3>
         <ol class="statements" class:has-selection={condSel.size > 0}>
           {#each content.conditions as condition, i (i)}
@@ -303,22 +310,22 @@
             )}
           {/each}
           {#if content.conditions.length === 0}
-            <li class="none">none</li>
+            <li class="none">{t.none}</li>
           {/if}
         </ol>
         {#if condSel.size > 0}
           <div class="sel-bar" data-list="conditions">
-            <span class="sel-count">{condSel.size} selected</span>
+            <span class="sel-count">{t.selectedCount(condSel.size)}</span>
             <button type="button" onclick={() => onedit.batch('conditions', [...condSel], 'disable')}
-              >Disable</button
+              >{t.disable}</button
             >
             <button type="button" onclick={() => onedit.batch('conditions', [...condSel], 'enable')}
-              >Enable</button
+              >{t.enable}</button
             >
             <button type="button" onclick={() => onedit.batch('conditions', [...condSel], 'delete')}
-              >Delete</button
+              >{t.delete}</button
             >
-            <button type="button" onclick={() => selection.conditions.clear()}>Clear</button>
+            <button type="button" onclick={() => selection.conditions.clear()}>{t.clear}</button>
           </div>
         {/if}
       </div>
@@ -336,12 +343,12 @@
           <input
             type="checkbox"
             class="sel-all"
-            aria-label="select all actions"
+            aria-label={t.selectAll(t.actionNoun)}
             checked={actSel.size === actVisible.length && actVisible.length > 0}
             indeterminate={actSel.size > 0 && actSel.size < actVisible.length}
             onchange={(event) => selectAll('actions', actVisible, event.currentTarget.checked)}
           />
-          Actions <span class="col-count">({actVisible.length})</span>
+          {t.actions} <span class="col-count">({actVisible.length})</span>
         </h3>
         <ol class="statements" class:has-selection={actSel.size > 0}>
           {#each content.actions as action, i (i)}
@@ -359,22 +366,22 @@
             {/if}
           {/each}
           {#if actVisible.length === 0}
-            <li class="none">none</li>
+            <li class="none">{t.none}</li>
           {/if}
         </ol>
         {#if actSel.size > 0}
           <div class="sel-bar" data-list="actions">
-            <span class="sel-count">{actSel.size} selected</span>
+            <span class="sel-count">{t.selectedCount(actSel.size)}</span>
             <button type="button" onclick={() => onedit.batch('actions', [...actSel], 'disable')}
-              >Disable</button
+              >{t.disable}</button
             >
             <button type="button" onclick={() => onedit.batch('actions', [...actSel], 'enable')}
-              >Enable</button
+              >{t.enable}</button
             >
             <button type="button" onclick={() => onedit.batch('actions', [...actSel], 'delete')}
-              >Delete</button
+              >{t.delete}</button
             >
-            <button type="button" onclick={() => selection.actions.clear()}>Clear</button>
+            <button type="button" onclick={() => selection.actions.clear()}>{t.clear}</button>
           </div>
         {/if}
       </div>
