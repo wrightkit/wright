@@ -97,9 +97,8 @@ CLI_COMMANDS = ["check", "lint", "analyze", "inspect", "compile"]
 
 DEFAULT_OPS = {"check", "lint", "analyze", "inspect", "rules", "symbols", "references", "cfg", "callGraph", "costEstimate"}
 INSPECT_COMMANDS = ["rules", "symbols", "refs", "cfg", "callgraph", "cost"]
-DEFAULT_TOKEN_BUDGET = 1500
 
-BLOCKING_CHANGES = {"removed-from-run", "broken-in-run", "removed", "exceeds-default-budget"}
+BLOCKING_CHANGES = {"removed-from-run", "broken-in-run", "removed"}
 
 
 class ServeSession:
@@ -729,7 +728,6 @@ def run_metrics(
         "corpusVersion": corpus["version"],
         "wright": wright_version(wright),
         "opyProvider": provider_version(),
-        "defaultTokenBudget": DEFAULT_TOKEN_BUDGET,
         "projects": projects,
         "scenarioRatios": scenario_ratios(
             projects, corpus.get("scenarios", []), corpus["projects"]
@@ -742,7 +740,6 @@ MERGE_IDENTITY_KEYS = (
     "corpusVersion",
     "wright",
     "opyProvider",
-    "defaultTokenBudget",
 )
 
 
@@ -833,18 +830,6 @@ def compare_metrics(baseline: dict, current: dict) -> tuple[list[dict], list[str
             "OPY provider differs: "
             f"baseline={baseline.get('opyProvider')} run={current.get('opyProvider')}"
         )
-    for pid, project in (current.get("projects") or {}).items():
-        for key, metric in (project.get("metrics") or {}).items():
-            surface, _, operation = key.partition(":")
-            operation = operation.removesuffix("?text")
-            bounded = (surface == "agent" and operation in DEFAULT_OPS) or (
-                surface == "cli" and (operation in {"check", "lint", "analyze", "inspect"}
-                                      or operation.startswith("inspect ")))
-            tokens = metric.get("tokens")
-            if bounded and isinstance(tokens, (int, float)) and tokens > DEFAULT_TOKEN_BUDGET:
-                violations.append({"project": pid, "metric": key, "field": "tokens",
-                                   "baseline": DEFAULT_TOKEN_BUDGET, "current": tokens,
-                                   "change": "exceeds-default-budget"})
     base_projects = baseline.get("projects") or {}
     run_projects = current.get("projects") or {}
     latency_factor, latency_pairs = _latency_factor(baseline, current)

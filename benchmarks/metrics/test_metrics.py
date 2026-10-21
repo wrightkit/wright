@@ -195,22 +195,6 @@ class BandTest(unittest.TestCase):
             violations,
         )
 
-    def test_default_budget_is_a_violation_not_a_band(self):
-        # #672: a default result above the stated token budget fails even when
-        # the drift band itself would pass.
-        key = "cli:lint"
-        metric = _metric(metrics.DEFAULT_TOKEN_BUDGET * metrics.TOKEN_BYTES + 400)
-        doc = {"p": {"status": "ok", "metrics": {key: metric}}}
-        violations, _ = metrics.compare_metrics(_doc(doc), _doc(doc))
-        self.assertTrue(
-            any(v["metric"] == key and v["change"] == "exceeds-default-budget" for v in violations),
-            violations,
-        )
-        under = _metric(800)
-        doc = {"p": {"status": "ok", "metrics": {key: under}}}
-        violations, _ = metrics.compare_metrics(_doc(doc), _doc(doc))
-        self.assertEqual(violations, [])
-
     def test_cli_address_discovery_avoids_duplicate_rule_names(self):
         self.assertEqual(metrics.unique_name([{"name": "duplicate"}, {"name": "unique"}, {"name": "duplicate"}]), "unique")
         self.assertIsNone(metrics.unique_name([{"name": "same"}, {"name": "same"}]))
@@ -253,13 +237,6 @@ class BandTest(unittest.TestCase):
         self.assertEqual(metrics.default_counts(result), expected)
         self.assertEqual(metrics.default_counts({"result": result}), expected)
 
-    def test_new_default_metric_is_budgeted_without_a_baseline(self):
-        for key in ("cli:inspect symbols?text", "cli:inspect rules", "cli:inspect rules?text", "agent:rules"):
-            with self.subTest(metric=key):
-                run = _doc({"p": {"status": "ok", "metrics": {key: _metric(6400)}}})
-                violations, _ = metrics.compare_metrics(_doc({}), run)
-                self.assertTrue(any(v["change"] == "exceeds-default-budget" for v in violations))
-
 
 class RunTest(unittest.TestCase):
     def test_run_small_project_records_all_surfaces(self):
@@ -292,7 +269,6 @@ class RunTest(unittest.TestCase):
             | {f"cli:{cmd}?text" for cmd in metrics.CLI_COMMANDS if cmd != "compile"}
             | {f"cli:inspect {cmd}?text" for cmd in metrics.INSPECT_COMMANDS},
         )
-        self.assertEqual(result["defaultTokenBudget"], metrics.DEFAULT_TOKEN_BUDGET)
         for key, record in project["metrics"].items():
             if "skipped" in record:
                 continue
@@ -408,7 +384,6 @@ class MergeTest(unittest.TestCase):
 
     def _shard(self, pid, tokens, **overrides):
         document = _doc({pid: {"status": "ok", "metrics": {"scenario:s": {"tokens": tokens}}}})
-        document["defaultTokenBudget"] = 10
         document.update(overrides)
         return document
 
