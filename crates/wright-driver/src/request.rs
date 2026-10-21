@@ -266,6 +266,41 @@ pub enum ToolRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         project_root: Option<String>,
     },
+    /// Structured statement edits for raw Workshop input (ADR-0029, #855):
+    /// insert, replace, or delete a rule's `conditions`/`actions` entries
+    /// carrying `workshop-rs/rule-content-v1` statement documents. The
+    /// service resolves every address against the program before any edit,
+    /// delegates content conversion and source-edit generation to
+    /// `workshop-rs`, assembles the owner edits into an `EditTransaction`,
+    /// and validates it through `validateEditTransaction`. Nothing is
+    /// written and the loaded program is never mutated.
+    #[serde(rename = "editStatements")]
+    EditStatements {
+        /// The freshness precondition (ADR-0029): must equal the
+        /// `inputIdentity` of the program the addresses were read from —
+        /// the value `project` reports, or the identity of the supplied
+        /// `sources` text. A mismatch refuses `edit-stale-source`.
+        #[serde(rename = "inputIdentity")]
+        input_identity: String,
+        /// The caller's current text for the loaded input source, with the
+        /// same optional semantics as `validateEditTransaction` (#472):
+        /// when supplied the program the addresses name is loaded from
+        /// that text, which is also the precondition text the assembled
+        /// edits verify against; when absent the disk-loaded program
+        /// serves.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sources: Option<std::collections::BTreeMap<String, String>>,
+        /// The program generation a numeric `rule` address was issued
+        /// under (#595): required when any edit carries one, refused
+        /// `stale-id` when absent or mismatched, and ignored when every
+        /// `rule` is a declared name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot: Option<u64>,
+        /// The statement edits, every one addressed against the program
+        /// before any edit in this request applies. Two edits at the same
+        /// statement address refuse `edit-duplicate-address`.
+        edits: Vec<StatementEditRequest>,
+    },
     /// Resolve a free-text name guess — a display name, a near spelling, or
     /// a guess — to the owner's accepted vocabulary (ADR-0021, #529):
     /// spellings, enum domains and members, settings keys, and
@@ -321,4 +356,71 @@ pub enum ToolRequest {
         #[serde(default)]
         cursor: Option<String>,
     },
+}
+
+/// The rule statement list a statement edit addresses (ADR-0029) — the
+/// same two lists `rule-content-v1` exports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StatementList {
+    /// The rule's `conditions` section (`rule.conditions`).
+    Conditions,
+    /// The rule's `actions` section (`rule.actions`).
+    Actions,
+}
+
+impl StatementList {
+    /// The section spelling, for diagnostics.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Conditions => "conditions",
+            Self::Actions => "actions",
+        }
+    }
+}
+
+/// One statement-level edit against a rule's `conditions` or `actions`
+/// list (ADR-0029). `rule` + `list` + `index` is the statement address: a
+/// position in the program before any edit in the request applies, the
+/// same flat action index space `rules`, `cfg`, `references`, and
+/// findings share.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatementEditRequest {
+    /// The rule holding the list: its numeric index in the program
+    /// (scoped to the request's `snapshot` generation, #595) or its
+    /// declared name.
+    pub rule: Address,
+    /// The statement list inside the rule.
+    pub list: StatementList,
+    /// For `insert`, the index the new statements are placed before
+    /// (`index == list length` appends); for `replace`/`delete`, the
+    /// index of the statement to change.
+    pub index: usize,
+    /// The change to make at the address.
+    #[serde(flatten)]
+    pub change: StatementEditChange,
+}
+
+/// The change a statement edit makes (ADR-0029). Payload nodes are
+/// `workshop-rs/rule-content-v1` statement documents — `{"value": …}`
+/// for a condition, `{"call": id, "args": […]}` for an action; either may
+/// carry `"disabled": true`, and `span`/`spans` keys are output-only and
+/// refused by the owner.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "change", rename_all = "camelCase")]
+pub enum StatementEditChange {
+    /// Insert the `rule-content-v1` statements, in order, before `index`.
+    Insert {
+        /// The non-empty list of statement documents. Statements that
+        /// belong at one position — an `if`, its body, and its `end` —
+        /// go in one `insert`.
+        statements: Vec<serde_json::Value>,
+    },
+    /// Replace the statement at `index`, keeping its leading comments.
+    Replace {
+        /// The replacement statement document.
+        statement: serde_json::Value,
+    },
+    /// Delete the statement at `index` with its attached comments.
+    Delete,
 }

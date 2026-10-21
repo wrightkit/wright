@@ -100,6 +100,31 @@ export type CfgRequest = {
    */
   all?: boolean
 }
+export type StatementEdit = {
+  /**
+   * The rule holding the statement list: its index in the program or its declared name. A numeric index must carry the `snapshot` generation that issued it; a name ignores `snapshot`.
+   */
+  rule: number | string
+  /**
+   * The statement list inside the rule — the same two lists `rule-content-v1` exports.
+   */
+  list: 'conditions' | 'actions'
+  /**
+   * For `insert`, the index the new statements are placed before (`index == list length` appends); for `replace`/`delete`, the index of the statement to change — the flat index space `rules` reports.
+   */
+  index: number
+  /**
+   * The change to make at the address.
+   */
+  change: 'insert' | 'replace' | 'delete'
+  /**
+   * Required on `insert`: the `rule-content-v1` statement documents to insert, in order — statements that belong at one position (an `if`, its body, its `end`) go in one insert.
+   *
+   * @minItems 1
+   */
+  statements?: [RuleContentStatement, ...RuleContentStatement[]]
+  statement?: RuleContentStatement1
+}
 export type AgentResult =
   | Capabilities
   | CompileResult
@@ -121,6 +146,7 @@ export type AgentResult =
   | TargetMetadataResult
   | EditValidationPayload
   | ProviderMutationPayload
+  | EditStatementsResult
   | LookupResult
   | ListEntriesResult
 export type CompileResult = WorkflowEnvelope & {
@@ -178,6 +204,7 @@ export type ToolRequest =
   | TargetMetadataRequest
   | ValidateEditTransactionRequest
   | ProviderValidateEditRequest
+  | EditStatementsRequest
   | LookupRequest
   | ListEntriesRequest
 export type ToolResponse =
@@ -215,6 +242,7 @@ export interface WrightAgentContractV1 {
     | TargetMetadataRequest
     | ValidateEditTransactionRequest
     | ProviderValidateEditRequest
+    | EditStatementsRequest
     | LookupRequest
     | ListEntriesRequest
   /**
@@ -465,6 +493,42 @@ export interface Document {
    * The document's full current text.
    */
   text: string
+}
+export interface EditStatementsRequest {
+  op: 'editStatements'
+  /**
+   * The freshness precondition (ADR-0029): the `inputIdentity` of the program the statement addresses were read from — the value `project` reports, or the identity of the supplied `sources` text. A mismatch refuses `edit-stale-source`.
+   */
+  inputIdentity: string
+  /**
+   * Optional current text of the loaded input source, keyed by its source spelling: when supplied the program the addresses name is loaded from that text, which is also the precondition each assembled edit's `source_identity` verifies against; omitted or null uses the disk-loaded program.
+   */
+  sources?: Sources | null
+  /**
+   * Required when any `edits[].rule` is a numeric index: the generation that issued it. Declared rule names ignore it.
+   */
+  snapshot?: number
+  /**
+   * The statement edits. Every `rule`+`list`+`index` address names a position in the program before any edit in this request applies; two edits at the same address refuse `edit-duplicate-address`.
+   *
+   * @minItems 1
+   */
+  edits: [StatementEdit, ...StatementEdit[]]
+}
+/**
+ * A `workshop-rs/rule-content-v1` statement document — the same node shape `rules` returns in `conditions`/`actions`: `{"value": <value node>}` for a condition, `{"call": "<id>", "args": [...]}` for an action; `disabled` may accompany either. `span`/`spans` keys are output-only and refused.
+ *
+ * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
+ * via the `definition` "RuleContentStatement".
+ */
+export interface RuleContentStatement {
+  [k: string]: unknown
+}
+/**
+ * A `workshop-rs/rule-content-v1` statement document — the same node shape `rules` returns in `conditions`/`actions`: `{"value": <value node>}` for a condition, `{"call": "<id>", "args": [...]}` for an action; `disabled` may accompany either. `span`/`spans` keys are output-only and refused.
+ */
+export interface RuleContentStatement1 {
+  [k: string]: unknown
 }
 export interface LookupRequest {
   op: 'lookup'
@@ -1082,6 +1146,28 @@ export interface ProviderMutationPayload {
   provider_code?: string
   provider_message?: string
   [k: string]: unknown
+}
+export interface EditStatementsResult {
+  ok: boolean
+  exit: number
+  diagnostics: Diagnostic[]
+  transaction?: EditTransaction1
+  /**
+   * Each edited source after the transaction — present when the transaction validates, like `validateEditTransaction`.
+   */
+  preview?: SourcePreview[]
+  [k: string]: unknown
+}
+/**
+ * The transaction the service assembled from the statement edits — present when the edits could be planned, so the caller can apply or replay it through its own write path.
+ */
+export interface EditTransaction1 {
+  /**
+   * The transaction's edits, applied atomically; edits in one source must not overlap, and two zero-width edits at the same position refuse `edit-zero-width-conflict`.
+   *
+   * @minItems 1
+   */
+  edits: [SourceEdit, ...SourceEdit[]]
 }
 export interface LookupResult {
   language: string

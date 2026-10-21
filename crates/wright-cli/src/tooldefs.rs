@@ -192,6 +192,14 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         result: "the provider-validated transaction or a structured refusal",
     },
     ToolSpec {
+        op: "editStatements",
+        request_def: "EditStatementsRequest",
+        drop_fields: &["sources"],
+        mcp: true,
+        description: "Insert, replace, or delete a raw Workshop rule's `conditions`/`actions` statements with `rule-content-v1` statement nodes — the same shape `rules` returns — instead of composing Workshop source by hand. Every `rule`+`list`+`index` address names a position in the program before any edit; `inputIdentity` must be the current `project` identity and a numeric `rule` needs the `snapshot` generation that issued it. Returns the assembled source-edit transaction and its validation preview; nothing is written.",
+        result: "the assembled transaction, the validation status and diagnostics, and its preview when valid",
+    },
+    ToolSpec {
         op: "lookup",
         request_def: "LookupRequest",
         drop_fields: &[],

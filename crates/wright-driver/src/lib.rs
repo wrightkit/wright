@@ -20,6 +20,7 @@ pub mod select;
 pub mod service;
 pub mod session;
 pub mod source_provider;
+pub(crate) mod statement_edit;
 pub mod workshop_compat;
 
 pub use config::{

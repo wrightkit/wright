@@ -6,8 +6,9 @@
 //! filesystem update with `--write`.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
-use super::{CompilerSession, Provenance};
+use super::{CompilerSession, Loaded, Provenance};
 use crate::config::InputSpec;
 use crate::diag::{Diagnostic, Stage};
 use crate::edit::{EditTransaction, EditValidation};
@@ -39,6 +40,33 @@ impl CompilerSession {
             };
         }
         crate::edit::validate_transaction(&self.config, self.catalog, sources, transaction)
+    }
+
+    /// Load the canonical program for caller-supplied Workshop text
+    /// (ADR-0029): `editStatements` addresses the program its `sources`
+    /// describe, so the text runs the same load path a disk resolution
+    /// would — locale detection, parse, validation, canonical-id check,
+    /// and the configured transform profile — and the derived `Loaded`
+    /// keeps the `ResolvedInput`'s own display spelling and identity.
+    /// Nothing is cached or adopted; the served snapshot is untouched.
+    pub(crate) fn load_workshop_text(
+        &mut self,
+        resolved: &crate::input::ResolvedInput,
+    ) -> Result<Loaded, Diagnostic> {
+        let (mut program, locale) = self.load_workshop(resolved)?;
+        super::apply_profile(&mut program, self.config.profile)?;
+        let mut resolved = resolved.clone();
+        resolved.origin.locale = Some(locale);
+        let source_files = Arc::new(vec![resolved.display.clone()]);
+        Ok(Loaded {
+            program: Arc::new(program),
+            origin: resolved.origin.clone(),
+            input: resolved,
+            provenance: Provenance::Source,
+            source_files,
+            completeness_issues: None,
+            load_diagnostics: Arc::new(Vec::new()),
+        })
     }
 
     /// `wright lint --fix [--write]` (#556): resolve the fixes findings
