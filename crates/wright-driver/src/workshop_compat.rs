@@ -1,7 +1,3 @@
-//! Workshop meaning remains owned by `workshop-rs`; this module only adapts
-//! its canonical parser and equivalence contract to the gate's two text
-//! inputs and preserves comparison evidence for CI reports.
-
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]

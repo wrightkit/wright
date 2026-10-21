@@ -1,9 +1,4 @@
 #!/usr/bin/env bash
-# Phases (#293): `objects` uploads and verifies the immutable release objects
-# (and, for stable, the installer scripts); `pointer` advances the channel's
-# version pointer. `all` (default) runs both — the stable workflow separates
-# them so wright/latest/version advances only after the GitHub Release is
-# public; nightly has no GitHub Release and runs both phases in one job.
 
 set -euo pipefail
 

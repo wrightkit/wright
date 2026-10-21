@@ -1,11 +1,3 @@
-/**
- * The editing layer's pending-change model (ADR-0032 layer 2): staged
- * statement edits live against the program the page last read, submit
- * through `editStatements`, and apply through the host `/apply` route.
- * Nothing here composes Workshop text — statements round-trip as the
- * `rule-content-v1` nodes `rules` returned, minus the output-only
- * `span`/`spans` keys the write path refuses.
- */
 import type {
   EditStatementsRequest,
   RuleContentStatement,
@@ -24,14 +16,11 @@ export type BatchAction = 'disable' | 'enable' | 'delete'
 
 /** One staged statement edit, addressed against the pre-edit program. */
 export interface PendingChange {
-  /** The rule's numeric index — a `rules` listing id, sent with `snapshot`. */
   rule: number
-  /** The rule's declared name, kept only for the dialog's grouping. */
   ruleName: string
   list: StatementList
   index: number
   tag: PendingTag
-  /** The `change` edit's replacement statement — spans stripped, `disabled` set or removed. */
   statement?: RuleContentStatement
 }
 
@@ -83,8 +72,6 @@ export function setDisabled(
   const staged = pending.get(key)
   if (staged?.tag === 'delete') return
   if (effectiveDisabled(pending, rule, list, index, node) === target) return
-  // Toggle `disabled` on the staged change when one exists so a batch
-  // action can't silently revert staged argument edits.
   const statement = staged?.tag === 'change' ? { ...staged.statement } : clean(node)
   if (target) statement.disabled = true
   else delete statement.disabled

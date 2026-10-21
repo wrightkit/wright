@@ -201,9 +201,6 @@ jobs:
           cache-targets: false
           cache-save: ${{ github.ref == 'refs/heads/main' }}
 
-      # `wright ui` embeds the built ui/ assets (ADR-0032 decision 9): a
-      # release build with the `ui` feature refuses an empty ui/dist, so
-      # the page builds before Cargo.
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
@@ -409,7 +406,6 @@ jobs:
         with:
           repository: wrightkit/homebrew-tap
           ref: main
-          # Only this cross-repository tap operation uses secrets.GH_TOKEN.
           token: ${{ secrets.GH_TOKEN }}
           path: tap
 
@@ -526,9 +522,6 @@ jobs:
           ARTIFACTS_DIR: ${{ github.workspace }}/artifacts
         run: ./scripts/publish-r2.sh objects
 
-      # Nightly has no GitHub Release, so its pointer follows R2 verification in
-      # this job. The stable pointer advances in advance-latest, after the
-      # canonical GitHub Release is public (#293).
       - name: Advance nightly version pointer
         if: needs.release-identity.outputs.channel == 'nightly'
         run: ./scripts/publish-r2.sh pointer

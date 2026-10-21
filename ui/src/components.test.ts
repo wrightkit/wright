@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Dialog from './lib/components/Dialog.svelte'
 import Picker from './lib/components/Picker.svelte'
 
-/** Drain pending promise continuations, then flush Svelte's effects and DOM. */
 async function settle(): Promise<void> {
   for (let i = 0; i < 4; i++) {
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -42,8 +41,6 @@ const escape = () => {
   flushSync()
 }
 
-/** A pointerdown outside every layer — nonzero coordinates clear jsdom's
-    zero rect. Bits debounces the outside interaction by 10 ms. */
 const outsidePointer = async () => {
   document.body.dispatchEvent(
     new MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 500, clientY: 500 }),

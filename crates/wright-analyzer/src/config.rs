@@ -1,7 +1,3 @@
-//! Lint run configuration: the YAML contract a project lint file and the
-//! programmatic `SessionConfig` share, plus the `packages:` package pins
-//! (issue #843).
-
 use std::collections::HashMap;
 use std::path::Path;
 

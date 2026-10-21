@@ -1,9 +1,3 @@
-//! A [`Diagnostic`] is the machine-readable unit of compiler feedback: a
-//! stable `code`, the pipeline `stage` that produced it, a `severity`, a
-//! human message, an optional source span, and the input's origin metadata.
-//! CLI human rendering and JSON serialization both derive from this one
-//! model, so automation never needs to scrape terminal text.
-
 use serde::{Deserialize, Serialize};
 /// The severity of a diagnostic.
 pub use wright_analyzer::analysis::Severity;
@@ -131,7 +125,6 @@ pub(crate) fn source_span(span: workshop_rs::source::Span, path: String) -> Sour
     }
 }
 
-/// Convenience constructors for internal diagnostics.
 impl Diagnostic {
     /// An error diagnostic in the given stage.
     ///
@@ -156,13 +149,6 @@ impl Diagnostic {
         }
     }
 
-    /// An error diagnostic whose `code` is carried verbatim from another
-    /// contract — owner or LPP provider vocabulary such as
-    /// `lookup.unknownWithin`, or a `provider-refusal-<refusalCode>`
-    /// composition, or an existing diagnostic code moving between
-    /// envelopes. The wire contract fixes the spelling, so only the
-    /// whitespace-free floor is asserted
-    /// (`wright_analyzer::service::carried_code_ok`).
     pub(crate) fn carried_error(
         code: impl Into<String>,
         stage: Stage,
@@ -197,7 +183,6 @@ impl Diagnostic {
     }
 }
 
-/// Map a `workshop-rs` error to a driver diagnostic.
 pub(crate) fn workshop_diag(
     error: workshop_rs::WorkshopError,
     resolved: &crate::input::ResolvedInput,
@@ -291,15 +276,6 @@ mod tests {
         let _ = Diagnostic::carried_error("bad code", Stage::Frontend, "message");
     }
 
-    /// #871: `workshop_diag` builds `unknown-{kind}` codes from owner `kind`
-    /// phrases (`"enum member"` → `unknown-enum-member`), so every phrase
-    /// must stay grammar-valid after kebab-casing.
-    ///
-    /// `OWNER_KINDS` is the smallest test-side list because workshop-rs does
-    /// not expose one; keep it in sync with the `kind` first arguments at
-    /// `WorkshopError::unknown` / `unknown_at` / `not_detected` call sites in
-    /// workshop-rs (including the `frontend/parser.rs` helpers) and the
-    /// `variable_name` kinds in `rules/emitter.rs`.
     #[test]
     fn workshop_diag_codes_match_the_grammar_for_every_owner_kind() {
         const OWNER_KINDS: &[&str] = &[

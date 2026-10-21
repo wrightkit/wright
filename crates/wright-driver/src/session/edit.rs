@@ -1,10 +1,3 @@
-//! Validated source-edit operations on the session (#434):
-//! `validateEditTransaction` runs on raw Workshop input through
-//! `workshop-rs` reparse; other source languages stay at the provider
-//! boundary. `lint --fix` resolves finding fixes through the same
-//! validated source-edit path — a validated diff by default, an atomic
-//! filesystem update with `--write`.
-
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -42,13 +35,6 @@ impl CompilerSession {
         crate::edit::validate_transaction(&self.config, self.catalog, sources, transaction)
     }
 
-    /// Load the canonical program for caller-supplied Workshop text
-    /// (ADR-0029): `editStatements` addresses the program its `sources`
-    /// describe, so the text runs the same load path a disk resolution
-    /// would — locale detection, parse, validation, canonical-id check,
-    /// and the configured transform profile — and the derived `Loaded`
-    /// keeps the `ResolvedInput`'s own display spelling and identity.
-    /// Nothing is cached or adopted; the served snapshot is untouched.
     pub(crate) fn load_workshop_text(
         &mut self,
         resolved: &crate::input::ResolvedInput,
@@ -185,12 +171,6 @@ impl CompilerSession {
         envelope
     }
 
-    /// The validated disposition of every finding in `findings` that
-    /// carries a `fix` — in findings order. Each fix's transaction is
-    /// deserialized and validated: raw Workshop fixes through
-    /// `validate_transaction` (input identity, ranges, Workshop reparse),
-    /// provider-mapped fixes through the provider pipeline (#583). A fix
-    /// that fails deserializes or validates to a structured refusal.
     fn fix_outcomes(
         &self,
         findings: &serde_json::Value,
@@ -206,11 +186,6 @@ impl CompilerSession {
             .collect()
     }
 
-    /// For a provider-mapped load, the document set and precondition
-    /// sources `providerValidateEdits` runs against — the members' current
-    /// disk text under their `file://` URIs, built once per fix batch.
-    /// `Some(Err)` refuses every fix in the batch with the member-read
-    /// diagnostic; `None` keeps the raw Workshop validation path.
     fn provider_fix_context(&self) -> Option<Result<ProviderFixContext, Diagnostic>> {
         let loaded = self.loaded.as_ref()?;
         (loaded.provenance == Provenance::Mapped).then(|| {
@@ -233,9 +208,6 @@ impl CompilerSession {
         })
     }
 
-    /// Validate one mapped-source fix transaction through the provider
-    /// pipeline: Wright's preconditions, `lpp/validateEdits` per edited
-    /// document, then `lpp/check` over the edited project (#583).
     fn provider_fix_validation(
         &self,
         context: &ProviderFixContext,
@@ -331,8 +303,6 @@ impl CompilerSession {
         let rendered = previews
             .iter()
             .map(|preview| LintFixPreview {
-                // A mapped edit's `file://` URI displays as the same member
-                // path spelling the finding's `span.path` resolves to.
                 source: crate::source_provider::provider_uri_path(&preview.source),
                 original: originals
                     .and_then(|sources| sources.get(&preview.source))
@@ -356,9 +326,6 @@ struct ResolvedFix {
     previews: Vec<crate::edit::SourcePreview>,
 }
 
-/// The provider-side context a mapped fix batch validates against (#583):
-/// the loaded project's document set, its precondition sources keyed by
-/// URI, and the project root the session compiled under.
 struct ProviderFixContext {
     documents: wright_lpp::DocumentSet,
     sources: BTreeMap<String, String>,

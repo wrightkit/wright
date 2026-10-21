@@ -16,11 +16,9 @@
     label?: string
     disabled?: boolean
     badge?: number
-    /** A toggle button reports its state (`aria-pressed`) and reads pressed. */
     pressed?: boolean
     onclick?: () => void
     icon: LucideIcon
-    /** Extra content after the icon — the Diagnostics button's severity badges. */
     children?: Snippet
   } = $props()
 </script>

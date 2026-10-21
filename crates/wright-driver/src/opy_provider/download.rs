@@ -1,7 +1,3 @@
-//! Release-download plumbing for the OPY provider store: the HTTPS
-//! client, bounded fetches, checksum verification, and archive
-//! extraction into a staging directory.
-
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;

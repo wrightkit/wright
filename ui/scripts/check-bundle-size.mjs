@@ -1,7 +1,3 @@
-// Bundle size budget (ADR-0032 decision 10): the built JavaScript and CSS
-// together must stay under 100 KB gzipped. Run after `npm run build`.
-//
-//   node scripts/check-bundle-size.mjs
 
 import { gzipSync } from 'node:zlib'
 import { readdirSync, readFileSync, statSync } from 'node:fs'

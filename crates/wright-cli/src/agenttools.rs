@@ -1,26 +1,13 @@
-//! `wright agent tools`: emits the operations `capabilities` advertises as
-//! client tool definitions for code-executing agents — Anthropic Messages
-//! API tools for programmatic tool calling, or plain JSON Schema for other
-//! harnesses (#535). The operation catalog, descriptions, and schema
-//! projection are shared with the MCP surface through [`crate::tooldefs`],
-//! so the emitted set can never drift from the advertised one.
-
 use serde_json::{Map, Value, json};
 
 use crate::tooldefs::{TOOL_SPECS, ToolSpec, input_schema, schema_defs, tool_name};
 
-/// The `allowed_callers` value that makes a Messages API tool callable from
-/// Anthropic's code execution tool (programmatic tool calling).
 const CODE_EXECUTION_CALLER: &str = "code_execution_20260120";
 
-/// The emitted tool description: the operation description with its result
-/// described in text, as #535 requires.
 fn emitted_description(spec: &ToolSpec) -> String {
     format!("{} Result: {}.", spec.description, spec.result)
 }
 
-/// `--format messages`: every advertised operation as a Messages API client
-/// tool definition, code-execution-callable.
 pub(crate) fn messages_tools() -> Value {
     let defs = schema_defs();
     json!({
@@ -34,9 +21,6 @@ pub(crate) fn messages_tools() -> Value {
     })
 }
 
-/// `--format json-schema`: the same operations as plain JSON Schema for
-/// other harnesses — operation name to a standalone request schema holding
-/// the emitted description.
 pub(crate) fn json_schema_tools() -> Value {
     let defs = schema_defs();
     let mut schemas = Map::new();

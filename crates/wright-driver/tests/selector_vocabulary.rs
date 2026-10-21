@@ -1,7 +1,3 @@
-//! ADR-0035 selector vocabulary: a `rules` request still carrying the
-//! removed `name` field refuses `malformed-request` — in-process, so the
-//! refusal is transport-independent.
-
 use std::path::{Path, PathBuf};
 
 use wright_driver::service::{ToolRequest, ToolResponse, ToolService};
@@ -24,9 +20,6 @@ fn a_rules_request_carrying_name_is_malformed() {
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
 
-    // `name` is removed vocabulary — its presence is a request-shape
-    // error, never silently ignored. `rule` carries the one-rule
-    // selection now.
     let request: ToolRequest = serde_json::from_value(serde_json::json!({
         "op": "rules",
         "name": "player starts"

@@ -1,7 +1,3 @@
-//! The package content half: extract only `rules/*.yaml|yml` from a GitHub
-//! tarball and validate it through the existing SPEC-309 declarative rule
-//! loader. Repository code is never executed and never even unpacked.
-
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
@@ -12,9 +8,6 @@ use super::LintPackageError;
 
 const MAX_RULE_BYTES: u64 = 1024 * 1024;
 
-/// Extract only `rules/*.yaml|yml` entries — files directly inside `rules/`,
-/// non-recursively — into `staging/rules/`. Every other archive member is
-/// ignored.
 pub(super) fn extract_rules(archive: &[u8], staging: &Path) -> Result<(), LintPackageError> {
     let rules = staging.join("rules");
     std::fs::create_dir_all(&rules).map_err(|e| {
@@ -70,9 +63,6 @@ pub(super) fn extract_rules(archive: &[u8], staging: &Path) -> Result<(), LintPa
     Ok(())
 }
 
-/// The file name of a `<top>/rules/<name>.yaml|yml` or `rules/<name>.yaml|yml`
-/// archive member — exactly three (or two) normal path components, the
-/// second (or first) of which is `rules`.
 fn rule_file_name(path: &Path) -> Option<&std::ffi::OsStr> {
     let mut components = path.components();
     let file = match (
@@ -101,8 +91,6 @@ fn rule_file_name(path: &Path) -> Option<&std::ffi::OsStr> {
     .then_some(file)
 }
 
-/// `*.yaml|yml` files directly inside `rules_dir`, in lexical order — the
-/// same file set the `--rule-file <dir>` loader consumes.
 fn rule_files(rules_dir: &Path) -> Result<Vec<PathBuf>, LintPackageError> {
     let mut files = std::fs::read_dir(rules_dir)
         .map_err(|e| {
@@ -131,13 +119,10 @@ fn rule_files(rules_dir: &Path) -> Result<Vec<PathBuf>, LintPackageError> {
     Ok(files)
 }
 
-/// A store entry that is present and still shaped like a package.
 pub(super) fn intact_package(dir: &Path) -> bool {
     dir.is_dir() && rule_files(&dir.join("rules")).is_ok()
 }
 
-/// Validate a stored package directory before reuse: an existing entry must
-/// still be a complete, loadable package.
 pub(super) fn validate_stored(
     dir: &Path,
     first_party: bool,
@@ -151,11 +136,6 @@ pub(super) fn validate_stored(
     validate_package(&dir.join("rules"), first_party)
 }
 
-/// Load every rule file through the existing SPEC-309 loader — the
-/// first-party package under its bare-ID contract, every other package
-/// under the external namespaced contract (issue #843). The first failure
-/// is reported as a `lint-package-invalid` diagnostic naming the file; a
-/// passing package returns its declarative rule IDs in load order.
 pub(super) fn validate_package(
     rules_dir: &Path,
     first_party: bool,

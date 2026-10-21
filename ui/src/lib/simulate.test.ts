@@ -1,9 +1,3 @@
-/**
- * The simulation panel's logic tests (#836): the room→scenario mapping
- * carries only occupied slots as `p1`…`pN`, the run length defaults from
- * `lobby.matchTimeLimit` or 60, and each outcome renders its own state —
- * `not_modeled` and `missing_input` carrying the not-verified wording.
- */
 import { describe, expect, it } from 'vitest'
 import {
   buildScenario,
@@ -106,8 +100,6 @@ describe('variableRows and logRows', () => {
         seen: { type: 'array', value: [{ type: 'number', value: 1 }, { type: 'null' }] },
         who: { type: 'player', value: 'p1' },
       },
-      // Player state carries hero/team/world only at athena v0.2.0 — no
-      // variables are read from it.
       players: { p1: { hero: 'Ana', team: 'team1', world: {} } },
     })
     expect(rows).toEqual([

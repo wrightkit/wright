@@ -2,13 +2,6 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// `wright ui` serves the page built under `ui/dist` (ADR-0032): with the
-/// `ui` feature every file there is embedded into the binary so a release
-/// archive is self-contained. Cargo always runs this script, so the asset
-/// table is empty unless the feature is on — a Rust-only build never needs
-/// Node. A debug build with the feature but no `ui/dist` embeds a stub
-/// page instead of failing; a release build fails, so a packaged binary
-/// can never ship the stub.
 fn main() {
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set")).join("ui_assets.rs");
     let mut source = String::from("pub(crate) static UI_ASSETS: &[(&str, &str, &[u8])] = &[\n");
@@ -40,8 +33,6 @@ fn main() {
     }
     for file in files {
         let serve_path = file.strip_prefix(&dist).expect("under dist").to_path_buf();
-        // Serve paths are URL paths: emit `/`-separated spellings, which
-        // `include_bytes!` also accepts on every build platform.
         let serve_path = serve_path.to_string_lossy().replace('\\', "/");
         source.push_str(&format!(
             "(\"{serve_path}\", \"{}\", include_bytes!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../../ui/dist/{serve_path}\"))),\n",

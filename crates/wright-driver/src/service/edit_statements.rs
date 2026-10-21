@@ -1,7 +1,3 @@
-//! `editStatements` (ADR-0029): the service-side planning and validation
-//! of a structured statement-edit request — the owner-boundary helpers
-//! live in [`crate::statement_edit`].
-
 use wright_analyzer::canonical::SemanticIndex;
 
 use super::{Address, StatementEditRequest, ToolErrorInfo, ToolResponse, ToolService};
@@ -11,11 +7,6 @@ use crate::edit::{EditTransaction, EditValidation};
 use crate::result::exit_code_from;
 
 impl<'a> ToolService<'a> {
-    /// The `editStatements` input-kind gate (ADR-0029), evaluated before
-    /// the snapshot refresh in `handle_full` so a non-Workshop input
-    /// refuses with its provider-boundary diagnostic instead of the
-    /// loader's. The refusal rides the result payload, the same shape
-    /// `validateEditTransaction` reports refusals in.
     pub(crate) fn edit_statements_kind_gate(&mut self) -> Option<ToolResponse> {
         let refuse = |diagnostic: Diagnostic| {
             self.ok(
@@ -30,13 +21,6 @@ impl<'a> ToolService<'a> {
         crate::edit::edit_kind_gate(resolved.kind, "providerValidateEdit").map(refuse)
     }
 
-    /// `editStatements` (ADR-0029): address the request's statement edits
-    /// against the effective program — the caller's `sources` text loaded
-    /// through the session's own Workshop path when supplied, the served
-    /// snapshot otherwise — delegate content conversion and source-edit
-    /// generation to `workshop-rs`, and validate the assembled
-    /// transaction through `validateEditTransaction`. Nothing is written
-    /// and the canonical program is never mutated.
     pub(crate) fn edit_statements(
         &mut self,
         input_identity: &str,
@@ -49,10 +33,6 @@ impl<'a> ToolService<'a> {
         }
     }
 
-    /// Plan an `editStatements` request. Refusals that belong in the
-    /// result payload (the `validateEditTransaction` shape) return `Ok`;
-    /// addressing contract violations — `invalid-selection`,
-    /// `unknown-rule`, `ambiguous-rule` — return the envelope `Err`.
     fn statement_edits(
         &mut self,
         input_identity: &str,
@@ -62,11 +42,6 @@ impl<'a> ToolService<'a> {
         use crate::statement_edit as se;
         let refuse = |diagnostics: Vec<Diagnostic>| Ok(se::refusal(diagnostics));
         let loaded = self.snapshot().loaded.clone();
-        // The program the addresses name is the caller's `sources` text
-        // when the request supplies it, else the served snapshot; the
-        // edit `source` keeps the caller's own key spelling in the first
-        // case and the input's display spelling in the second, the same
-        // binding `validateEditTransaction` performs.
         let derived;
         let (effective, source) = match sources {
             Some(sources) => {
@@ -91,10 +66,6 @@ impl<'a> ToolService<'a> {
             }
             None => (&loaded, loaded.input.display.clone()),
         };
-        // `inputIdentity` is the freshness precondition: the identity of
-        // the program the addresses were read from — `project`'s reported
-        // value for the disk-loaded snapshot, the supplied text's identity
-        // for caller-held sources.
         if input_identity != effective.input.identity {
             return refuse(vec![Diagnostic::error(
                 "edit-stale-source",
@@ -102,10 +73,6 @@ impl<'a> ToolService<'a> {
                 "the request's inputIdentity does not match the program these addresses were read from — re-read `project` (or pass the current `sources` text) and retry",
             )]);
         }
-        // Names resolve against the program the edits address: the served
-        // semantic service for the snapshot, an index built for the
-        // derived one. A numeric index bounds-checks against the same
-        // program — `stale-id` already scoped it to its generation.
         let derived_index = sources
             .is_some()
             .then(|| SemanticIndex::build(effective.program.as_ref()));
@@ -129,9 +96,6 @@ impl<'a> ToolService<'a> {
                     };
                     match resolved {
                         Ok(rule) => rule,
-                        // Candidates resolve against the effective program
-                        // — the caller's `sources` file table, not the
-                        // served snapshot's (#888).
                         Err(mut error) => {
                             crate::service::resolve_candidates(
                                 &mut error.message,
@@ -156,10 +120,6 @@ impl<'a> ToolService<'a> {
             }
             resolved_edits.push((rule, edit));
         }
-        // `workshop-rs` owns content conversion, canonical emission, and
-        // the checked source edit. Each address names a position in the
-        // program before any edit in the request — the edits it produces
-        // are disjoint, so they assemble into one transaction.
         let locale = CompilerSession::locale_for(effective);
         let source_identity = crate::input_identity(&effective.input.text);
         let mut source_edits = Vec::with_capacity(resolved_edits.len());
@@ -227,19 +187,11 @@ impl<'a> ToolService<'a> {
             diagnostics,
             preview: None,
         };
-        // With `sources` absent the validation re-reads the named files
-        // from disk: every edit's `source_identity` — the `inputIdentity`
-        // `editStatements` stamped — is checked against the current bytes
-        // before anything writes, and the edited text is reparsed through
-        // the session's own Workshop path.
         let validation = self.session.validate_edit_transaction(None, transaction);
         if !validation.ok {
             return validation;
         }
         let previews = validation.preview.clone().unwrap_or_default();
-        // `write_previews` keys its expected identities by `edit.source`;
-        // a transaction whose spellings do not cover a previewed source
-        // refuses rather than panicking the host.
         if previews.iter().any(|preview| {
             !transaction
                 .edits
@@ -255,9 +207,6 @@ impl<'a> ToolService<'a> {
         if let Err(diagnostic) = crate::edit::write_previews(&previews, transaction) {
             return refuse(vec![diagnostic]);
         }
-        // The write changed the served input's fingerprint: refresh now
-        // so the next program-reading request serves the edited program,
-        // and surface a load failure here rather than on the next read.
         if let Err(error) = self.refresh() {
             let mut diagnostic =
                 Diagnostic::carried_error(error.code, Stage::Discovery, error.message);

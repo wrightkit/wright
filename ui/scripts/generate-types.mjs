@@ -1,15 +1,3 @@
-// Regenerates the TypeScript contract types from the committed JSON schemas
-// (ADR-0032 decision 8):
-//
-//   - schemas/wright-agent-v1.schema.json        -> src/lib/types/generated/wright-agent-v1.ts
-//   - workshop-rs schemas/rule-content-v1.schema.json -> src/lib/types/generated/rule-content-v1.ts
-//
-// The rule-content schema ships in the published workshop-rs crate; the version
-// pinned in Cargo.lock is downloaded from static.crates.io so the types always
-// match the semantic core Wright actually links.
-//
-//   node scripts/generate-types.mjs          write the generated files
-//   node scripts/generate-types.mjs --check  fail if the committed files are stale
 
 import { gunzipSync } from 'node:zlib'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
@@ -21,7 +9,6 @@ const uiDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repoRoot = resolve(uiDir, '..')
 const check = process.argv.includes('--check')
 
-// -- Inputs ---------------------------------------------------------------
 
 function pinnedWorkshopRsVersion() {
   const lock = readFileSync(join(repoRoot, 'Cargo.lock'), 'utf8')
@@ -44,9 +31,6 @@ async function fetchPublishedSchema(crateName, version, schemaPath) {
   return JSON.parse(entry.toString('utf8'))
 }
 
-// Minimal tar reader for the single file we need out of a .crate archive.
-// Handles ustar entries, ustar prefix fields, and GNU long-name ('L')
-// records; that covers the archives cargo publishes to crates.io.
 function tarEntry(archive, wanted) {
   let offset = 0
   let longName = null
@@ -74,15 +58,9 @@ function tarEntry(archive, wanted) {
   return null
 }
 
-// -- Generation -----------------------------------------------------------
 
 const STYLE = { semi: false, singleQuote: true }
 
-// The agent schema's root is a bare `$ref` to ToolRequest, so a plain compile
-// emits request-side types only. Re-anchor the root on a synthetic
-// {request, response} envelope: the generator then parses the root as an
-// object and `unreachableDefinitions` emits every $defs entry — requests,
-// the result envelope, and all payload types.
 function agentEnvelope(schema) {
   const { $ref, ...rest } = schema
   return {
@@ -103,9 +81,6 @@ function agentEnvelope(schema) {
   }
 }
 
-// The generator inlines a `$defs` entry that is a bare `$ref` instead of
-// naming it, which would silently drop those names (CapabilitiesResult,
-// LintResult, …). Emit them explicitly so every schema name resolves.
 function refAliases(schema) {
   return Object.entries(schema.$defs ?? {})
     .filter(([, def]) => {
@@ -130,9 +105,6 @@ async function generate(schema, rootName, sourceNote) {
     unreachableDefinitions: true,
     style: STYLE,
   })
-  // The compiler stamps "referenced by `X`'s JSON-Schema via the definition
-  // `Y`." above every named type — four lines of noise per export that say
-  // nothing the export name does not. Strip them so the artifact stays small.
   body = body.replaceAll(
     /\/\*\*\n \* This interface was referenced by[^\n]*\n \* via the `definition` "[^"]+"\.\n \*\/\n/g,
     '',

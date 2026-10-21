@@ -1,9 +1,3 @@
-//! The `lint` command's dispatch: `lint package <subcommand>` manages
-//! GitHub lint rule packages over the wright-driver store (#844) — no
-//! project session is involved — while bare `lint` runs the finding
-//! workflow through the shared configured runner like the other workflow
-//! commands.
-
 mod package;
 mod report;
 
@@ -15,8 +9,6 @@ use crate::present::{self, Presentation};
 use crate::{cli, essential_envelope, fail_on, run_configured, selection_from_args};
 use crate::{config_from_common, present::terminal};
 
-/// Run `wright lint`: the `package` subcommand goes to the store commands,
-/// otherwise the lint finding workflow (plain or `--fix`) runs.
 pub(crate) fn run(args: cli::LintArgs) -> ExitCode {
     if let Some(cli::LintSubcommand::Package(package)) = args.command {
         return package::run(&package);

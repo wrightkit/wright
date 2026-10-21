@@ -1,9 +1,3 @@
-//! [`SemanticService`] answers transport-neutral JSON requests about a
-//! Workshop program: program summary, rule/action/value lookup,
-//! symbol/reference inspection, usage, CFG inspection, and static-analysis
-//! findings. The request/response models ([`Request`], [`Response`]) are
-//! plain serde data with no transport or UI dependency.
-
 use serde::{Deserialize, Serialize};
 
 pub use crate::canonical::SemanticService;

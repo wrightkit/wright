@@ -71,8 +71,6 @@ fn requests() -> Vec<Value> {
         json!({"op":"project"}),
         json!({"op":"rules"}),
         json!({"op":"symbols","kind":null}),
-        // #429: symbol/rule addresses accept the declared name as well as the
-        // numeric id; `service_responses` substitutes discovered ids.
         json!({"op":"references","symbol":"name"}),
         json!({"op":"usage","symbol":"name"}),
         json!({"op":"cfg","rule":"name"}),
@@ -110,8 +108,6 @@ fn requests() -> Vec<Value> {
             "sources":{"file:///project.opy":"rule(\"Example\") {}"},
             "project_root":null
         }),
-        // ADR-0029: `service_responses` substitutes the loaded input's
-        // `inputIdentity`; a declared rule name needs no `snapshot`.
         json!({
             "op":"editStatements",
             "inputIdentity":"",
@@ -138,8 +134,6 @@ fn requests() -> Vec<Value> {
             "pageSize":null,
             "cursor":null
         }),
-        // ADR-0033: `inputIdentity` preconditions the program to simulate;
-        // `seconds` runs a scenario-free simulation under `athena`.
         json!({
             "op":"simulate",
             "inputIdentity":"",
@@ -192,8 +186,6 @@ fn service_responses() -> Vec<(String, Value)> {
         .map(|mut request| {
             let operation = request["op"].as_str().unwrap().to_string();
             match operation.as_str() {
-                // #595: a numeric address carries the generation that issued
-                // it — the `snapshot` the id-reporting response returned.
                 "references" | "usage" => {
                     request["symbol"] = json!(symbol);
                     request["snapshot"] = json!(generation);
@@ -202,9 +194,6 @@ fn service_responses() -> Vec<(String, Value)> {
                     request["rule"] = json!(rule);
                     request["snapshot"] = json!(generation);
                 }
-                // ADR-0029/ADR-0033: `inputIdentity` preconditions the
-                // program the statement addresses were read from, or the
-                // program `simulate` runs.
                 "editStatements" | "simulate" => {
                     request["inputIdentity"] = json!(input_identity);
                 }
@@ -298,9 +287,6 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
         serde_json::from_value::<ToolRequest>(request).expect("request deserializes");
     }
 
-    // #429 + #595: both address spellings validate and deserialize; a
-    // numeric address requires its issuing `snapshot` while a declared name
-    // ignores it. Other types are rejected rather than coerced.
     for request in [
         json!({"op":"references","symbol":0,"snapshot":1}),
         json!({"op":"references","symbol":"counter"}),
@@ -322,17 +308,10 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
         json!({"op":"references","symbol":true}),
         json!({"op":"usage","symbol":1.5}),
         json!({"op":"cfg","rule":null}),
-        // #595: a numeric address without its issuing snapshot is invalid —
-        // and even where a request still parses, the service refuses it
-        // `stale-id`.
         json!({"op":"references","symbol":0}),
         json!({"op":"usage","symbol":1}),
         json!({"op":"cfg","rule":0}),
         json!({"op":"rules","rule":0}),
-        // ADR-0035: `name` is removed from `rules` — the schema no longer
-        // accepts it, and the service refuses a request carrying it
-        // `malformed-request` (the deserialization sentinel lets the
-        // refusal come from the service on every transport).
         json!({"op":"rules","name":"intro"}),
     ] {
         assert!(
@@ -341,9 +320,6 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
         );
     }
 
-    // #472: `sources` is optional on the raw edit operations — a request
-    // without it, or with an explicit null, validates and deserializes; the
-    // service then reads the files the request names from disk.
     for request in [
         json!({"op":"validateEditTransaction","transaction":{"edits":[{
             "kind":"edit","source":"a.ws","source_identity":"sha256:x",
@@ -361,9 +337,6 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
         serde_json::from_value::<ToolRequest>(request).expect("request deserializes");
     }
 
-    // #548: `documents`/`sources` are optional on the provider operations —
-    // a request without them, or with explicit nulls, validates and
-    // deserializes; the service then derives the set from the loaded project.
     for request in [
         json!({"op":"providerValidateEdit","language_id":"opy","transaction":{"edits":[{
             "kind":"edit","source":"file:///main.opy","source_identity":"sha256:x",
@@ -395,9 +368,6 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
     assert!(!response_schema.is_valid(&json!({"result":{},"error":{"code":"x","message":"y"}})));
     assert!(!request_schema.is_valid(&json!({"op":"check","unexpected":true})));
 
-    // #532: `capabilities.result_schemas` names the committed-schema definition
-    // describing each advertised operation's result. An advertised operation
-    // without a result schema fails here.
     let result_schemas = current["result_schemas"].as_object().unwrap();
     assert_eq!(
         result_schemas.keys().cloned().collect::<BTreeSet<String>>(),
@@ -431,8 +401,6 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
         );
     }
 
-    // #532: `all` validates and deserializes on analyze/inspect/lint, and a
-    // all result validates against the same operation result schema.
     for request in [
         json!({"op":"analyze","all":true}),
         json!({"op":"inspect","all":true}),
@@ -464,10 +432,6 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
     assert!(!request_schema.is_valid(&json!({"op":"lint","all":"yes"})));
     assert!(request_schema.is_valid(&json!({"op":"check","all":true})));
 
-    // #783: `limit` declares 1..=10 in the request schema. An out-of-range
-    // value fails schema validation, still deserializes (the wire type is
-    // an integer), and the service refuses it `malformed-request` — the
-    // same code a transport assigns a malformed request.
     for request in [
         json!({"op":"lookup","language":"workshop","limit":0}),
         json!({"op":"lookup","language":"workshop","limit":11}),
@@ -499,8 +463,6 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
 
 #[test]
 fn cli_and_agent_selections_return_the_same_set() {
-    // #430: the CLI flags and the agent request fields drive one driver-side
-    // selection, so both surfaces must return the same selected findings.
     let input = workspace_root().join("tests/fixtures/workshop/real-world/overpy-cake.ws");
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(input.clone()),
@@ -548,8 +510,6 @@ fn cli_and_agent_selections_return_the_same_set() {
         json!({"total": 10, "withheld": 7, "byCode": {"repeated-value": 9}})
     );
 
-    // #531: the semantic-query flags select the same set the agent request
-    // fields do, through the same driver-side selection.
     let agent = match service.handle(&ToolRequest::Symbols {
         kind: Some("rule".to_string()),
         file: None,
@@ -583,11 +543,6 @@ fn cli_and_agent_selections_return_the_same_set() {
     assert_eq!(cli["symbols"], agent["symbols"], "same selected set");
     assert_eq!(cli["selection"], agent["selection"], "same truncation");
 
-    // ADR-0024: `inspect rules` serves the same driver model `rules`
-    // serves, including `content` and `rule` — each flag maps to the
-    // request field of the same name. A fixture without ambiguous enums:
-    // `rule-content-v1` cannot express `__ambiguous_enum`, so content
-    // fails whole-call there by design.
     let rules_input =
         workspace_root().join("tests/fixtures/workshop/synthetic/declarations-rules.ws");
     let mut rules_session = CompilerSession::new(SessionConfig {
@@ -644,9 +599,6 @@ fn cli_and_agent_selections_return_the_same_set() {
         assert_eq!(cli, agent, "{request:?} differs between CLI and service");
     }
 
-    // #532: `--all` and the `all` request field produce the same all
-    // payload for the same input — the agent and CLI surfaces share one
-    // driver-side form.
     for (request, args, envelope) in [
         (
             ToolRequest::Lint {
@@ -671,9 +623,6 @@ fn cli_and_agent_selections_return_the_same_set() {
                 if !envelope {
                     result.as_object_mut().unwrap().remove("ok");
                     result.as_object_mut().unwrap().remove("exit");
-                    // #595: the service stamps its serving `snapshot`;
-                    // the one-shot `lint` command has no session
-                    // generation and reports none.
                     result.as_object_mut().unwrap().remove("snapshot");
                 }
                 if envelope {
@@ -735,7 +684,6 @@ fn rule_content_conforms_to_the_owner_schema() {
     let response = validator_for(&response).expect("response schema compiles");
     assert!(response.is_valid(&result), "{result}");
     for rule in result["rules"].as_array().unwrap() {
-        // Wright adds `span` to each statement; the owner's document has none.
         let mut content = rule["content"].clone();
         for key in ["conditions", "actions"] {
             for statement in content[key].as_array_mut().unwrap() {

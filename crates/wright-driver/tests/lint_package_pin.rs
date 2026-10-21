@@ -1,8 +1,3 @@
-//! Offline project pinning tests (issue #843): a `packages` entry in the
-//! lint configuration activates rule packages pinned by full commit SHA.
-//! Every remote answer is served by a recorded-response HTTP server on
-//! localhost; no test touches real network.
-
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -20,8 +15,6 @@ use wright_driver::{
 const SHA_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const SHA_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
-/// A community package rule matching any `While` body with a call action;
-/// `control-flow.ws` carries one such loop.
 const RULE: &str = "\
 id: community/minimum-wait
 metadata:
@@ -36,8 +29,6 @@ matcher:
     - kind: call
 ";
 
-/// A first-party package rule carrying the built-in `min-wait-loop` ID —
-/// legal only for the first-party source (issue #843).
 const FIRST_PARTY_RULE: &str = "\
 id: min-wait-loop
 metadata:
@@ -89,8 +80,6 @@ fn tarball(files: &[(&str, &[u8])]) -> Vec<u8> {
     encoder.finish().unwrap()
 }
 
-/// A repository tarball carrying one rule file; the archive member names
-/// do not matter — the store reads only `rules/*.yaml|yml`.
 fn package_tarball(rule: &str) -> Vec<u8> {
     tarball(&[
         ("pkg-aaaaaaaa/rules/rule.yaml", rule.as_bytes()),
@@ -123,7 +112,6 @@ impl Response {
     }
 }
 
-/// A localhost HTTP server replaying the handler's recorded responses.
 struct TestServer {
     addr: SocketAddr,
     stop: Arc<AtomicBool>,
@@ -143,8 +131,6 @@ impl TestServer {
             loop {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
-                        // Accepted sockets inherit the listener's nonblocking
-                        // flag on some platforms; request reads must block.
                         let _ = stream.set_nonblocking(false);
                         let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
                         let request = read_request(&mut stream);
@@ -243,8 +229,6 @@ impl Drop for TestDir {
     }
 }
 
-/// A store entry shaped like an intact install of `owner/repo` at `sha`:
-/// `<root>/<owner>/<repo>/<sha>/rules/<file>`, the layout the store owns.
 fn seed_store(root: &Path, owner: &str, repo: &str, sha: &str, file: &str, rule: &str) {
     let rules = root.join(owner).join(repo).join(sha).join("rules");
     std::fs::create_dir_all(&rules).unwrap();
@@ -272,7 +256,6 @@ fn session_config(lint: LintConfig, store_dir: &Path, server: &TestServer) -> Se
     }
 }
 
-/// A lint config parsed from the same YAML the `--lint-config` file reads.
 fn pinned_config(yaml: &str) -> LintConfig {
     LintConfig::from_yaml_str(yaml).expect("lint config YAML parses")
 }
@@ -310,8 +293,6 @@ fn pinned_package_rules_lint_the_project_under_project_policy() {
             Response::not_found()
         }
     });
-    // The project's severity/enablement policy applies to package rules;
-    // rule files never set `severity` or `enabled` (issue #843).
     let lint = pinned_config(&format!(
         "packages:\n  - repo: community/rules\n    sha: {SHA_A}\nrules:\n  community/minimum-wait:\n    severity: error\n"
     ));
@@ -340,8 +321,6 @@ fn a_missing_package_is_fetched_by_its_sha_on_activation() {
         "packages:\n  - repo: community/rules\n    sha: {SHA_A}\n"
     ));
     let mut session = CompilerSession::new(session_config(lint, dir.path(), &server)).unwrap();
-    // The missing package was fetched by its SHA — no commits-API
-    // resolution ran because a full SHA needs none.
     assert_eq!(
         server.find("/community/rules/tar.gz/").len(),
         1,
@@ -475,9 +454,6 @@ fn the_first_party_pin_replaces_the_builtin_without_colliding() {
         entry["kind"], "declarative",
         "the package rule replaced the built-in entry: {entry}"
     );
-    // Exactly one `min-wait-loop` finding, produced by the package's
-    // declarative rule — the replaced embedded analysis must not
-    // double-report the same ID.
     let findings = lint_findings(&mut service);
     let hits: Vec<_> = findings
         .iter()
@@ -492,15 +468,10 @@ fn the_first_party_pin_replaces_the_builtin_without_colliding() {
 
 #[test]
 fn the_same_config_yields_the_same_effective_rules_across_different_stores() {
-    // Determinism (issue #843 acceptance): the effective rule set depends
-    // on the project configuration, not on what else a global store holds.
     let config_yaml = format!("packages:\n  - repo: community/rules\n    sha: {SHA_A}\n");
-    // Store A: the pinned package pre-installed beside an unrelated package
-    // the project does not list.
     let dir_a = TestDir::new("store-a");
     seed_store(dir_a.path(), "community", "rules", SHA_A, "rule.yaml", RULE);
     seed_store(dir_a.path(), "other", "more", SHA_B, "x.yaml", OTHER_RULE);
-    // Store B: empty; the pinned package is fetched on activation.
     let dir_b = TestDir::new("store-b");
     let archive = package_tarball(RULE);
     let server = TestServer::serve(move |request| {

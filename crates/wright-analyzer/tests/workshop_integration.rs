@@ -1,8 +1,3 @@
-//! Native Workshop input integration tests (#36): localized Workshop text
-//! drives the existing rule/symbol/reference/usage/CFG/finding queries and
-//! the read-only semantic service, with Workshop-origin metadata and usable
-//! source spans.
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -54,9 +49,6 @@ fn service_for(program: Program) -> SemanticService<'static> {
 }
 
 fn workshop_service_from_text(text: &str) -> SemanticService<'static> {
-    // The catalog supplies the canonical expected enum domains (e.g. Create
-    // HUD Text's Reevaluation argument is HudReeval), resolving bare members
-    // that are ambiguous across the catalog's enum domains (#118).
     let catalog = workshop_rs::catalog::Catalog::builtin_ref().unwrap();
     let program = parser::parse_with_context(text, catalog, &Locale::new("en-US"), catalog)
         .unwrap_or_else(|error| panic!("Workshop source must parse: {error}"));
@@ -246,8 +238,6 @@ rule ("analysis parity") {
         .iter()
         .filter(|finding| finding["code"] == "min-wait-loop")
         .collect();
-    // The `For Player Variable` loop's `Wait(0.016)` reports alongside the
-    // `While`'s — loop-body rules cover every loop kind (#634).
     assert_eq!(minimum_waits.len(), 2);
     assert!(minimum_waits.iter().all(
         |finding| finding["severity"] == "warning" && finding["evidence"] == "static-indicator"
@@ -270,8 +260,6 @@ rule ("analysis parity") {
         .unwrap();
     let repeated_message = repeated["message"].as_str().unwrap();
     assert!(repeated_message.contains("evaluated 2 times"));
-    // The finding names the repeated expression canonically so it is
-    // identifiable from the message alone (#735).
     assert!(repeated_message.contains("`distance(getPosition(eventPlayer), vector(0, 0, 0))`"));
     assert_eq!(repeated["severity"], "warning");
     assert_eq!(repeated["evidence"], "exact");
@@ -606,9 +594,6 @@ rule ("disabled blocks") {
 
 #[test]
 fn disabled_block_body_stays_dead_through_its_own_end() {
-    // #633: a `disabled` block opener claims the region through its own
-    // `End`; it must not close the enclosing `While` early, and the live
-    // `Wait` stays in the loop body.
     let source = r#"
 rule ("outer loop") {
     event {
@@ -673,8 +658,6 @@ rule ("outer loop") {
 
 #[test]
 fn a_disabled_wait_is_not_live_for_loop_checks() {
-    // #633: a `Wait` inside a disabled block does not count — the loop
-    // warns it has no live wait, and dead code fires no `min-wait-loop`.
     let source = r#"
 rule ("disabled wait") {
     event {
@@ -708,9 +691,6 @@ rule ("disabled wait") {
 
 #[test]
 fn disabled_rules_and_statements_contribute_no_persistent_objects() {
-    // #633: persistent-object facts see only live actions — a disabled
-    // rule, a `disabled` object creation, and a `disabled` cleanup call
-    // all contribute nothing.
     let mut program = Program::new();
     let mut off = Rule::new("off", Event::Global).action(Action::call("createHudText", []));
     off.disabled = true;
@@ -743,9 +723,6 @@ fn disabled_rules_and_statements_contribute_no_persistent_objects() {
 
 #[test]
 fn a_subroutine_named_like_a_builtin_neither_edges_nor_counter_writes() {
-    // #634: builtin calls resolve by catalog id, never by matching a
-    // declared subroutine's name — `Big Message` produces no `calls` edge
-    // to a subroutine named `bigMessage` and no phantom counter write.
     let source = r#"
 variables {
     global:
@@ -796,8 +773,6 @@ rule ("counter loop") {
 
 #[test]
 fn start_rule_resolves_as_a_subroutine_call() {
-    // #634: `Start Rule(sub)` is a real call — a CFG `calls` edge and a
-    // possible counter write, exactly like `Call Subroutine(sub)`.
     let source = r#"
 variables {
     global:
@@ -848,8 +823,6 @@ rule ("start rule loop") {
 
 #[test]
 fn for_player_variable_bodies_see_the_same_loop_findings() {
-    // #634: loop-body rules cover `For Player Variable` exactly like
-    // `For Global Variable` on identical bodies.
     let source = r#"
 variables {
     global:
@@ -967,11 +940,6 @@ fn disabled_conditions_are_excluded_from_ongoing_gate_counts() {
     );
 }
 
-// #713: `nested-binder-lambda` reports a binder call (`filteredArray`,
-// `sortedArray`, `mappedArray`, `isTrueForAll`, `isTrueForAny`) inside
-// another binder's per-element argument — the structural signature
-// measured on the client-rejected Bastion builds. The flat idioms in the
-// accepted builds produce no findings.
 const NESTED_BINDERS: &str = r#"
 variables {
     global:
@@ -1261,8 +1229,6 @@ rule ("argument spans") {
     );
     for (reference, (line, column)) in reads.iter().zip(expected) {
         assert_eq!(reference["span"]["start"]["line"], line);
-        // The reported span is the variable identifier, which follows the
-        // `Global.` qualifier in the authored text.
         assert_eq!(reference["span"]["start"]["col"], column + "Global.".len());
         assert_eq!(span_text(source, &reference["span"]), "source");
     }
@@ -1270,10 +1236,6 @@ rule ("argument spans") {
 
 #[test]
 fn workshop_references_slice_to_the_identifier() {
-    // #433: every declaration, write, and read span reported for a raw
-    // Workshop symbol slices exactly to the authored identifier — including
-    // reads nested inside other values (`Add(First Of(Global.cakePos), …)`)
-    // and `For` targets.
     let source = fixture_text("real-world/overpy-cake");
     let service = workshop_service_from_text(&source);
     for name in ["cakePos", "i2", "candlePos"] {
@@ -1283,8 +1245,6 @@ fn workshop_references_slice_to_the_identifier() {
             serde_json::json!({"op": "findReferences", "symbol": symbol}),
         );
         let references = references.as_array().unwrap();
-        // `Modify Global Variable(name, …)` reports both the write and the
-        // implicit old-value read at the same identifier span.
         let implicit_modify_reads = source
             .match_indices(&format!("Modify Global Variable({name}"))
             .count();
@@ -1311,8 +1271,6 @@ fn workshop_references_slice_to_the_identifier() {
 
 #[test]
 fn workshop_symbols_report_their_declaration_identifier() {
-    // #433: `symbols` returns the recorded declaration-name span, not a
-    // null or a search-derived guess.
     let source = fixture_text("real-world/overpy-cake");
     let service = workshop_service_from_text(&source);
     let symbols = query(&service, serde_json::json!({"op": "listSymbols"}));
@@ -1333,8 +1291,6 @@ fn workshop_symbols_report_their_declaration_identifier() {
 
 #[test]
 fn workshop_reference_spans_ignore_same_name_strings_and_comments() {
-    // #433: a variable name spelled inside a string literal or comment in
-    // the same action is not reported as the reference location.
     let source = r#"
 variables {
     global:
@@ -1459,8 +1415,6 @@ rule ("player reads") {
 
 #[test]
 fn workshop_references_without_provenance_are_unmapped() {
-    // #433: a reference without recorded provenance reports an unmapped
-    // span; it never falls back to an enclosing action or value span.
     let mut program = Program::new();
     program.global_variable(Variable::new("unmapped"));
     program.rule(
@@ -1530,7 +1484,6 @@ fn name_resolution_finds_unique_symbols_and_rules() {
     assert_eq!(score.name, "score");
     assert_eq!(score.id.index(), 0);
     assert_eq!(service.resolve_rule("player starts").unwrap(), 1);
-    // ADR-0035: a bare symbol address never resolves a rule.
     assert_eq!(
         service.resolve_symbol("player starts").unwrap_err().code,
         "unknown-symbol"
@@ -1550,7 +1503,6 @@ fn name_resolution_rejects_unknown_and_ambiguous_names() {
     assert_eq!(error.code, "unknown-rule");
     assert!(service.resolve_symbol("solo").is_ok());
 
-    // ADR-0035: a rule never competes with a variable for a bare symbol name.
     assert_eq!(service.resolve_symbol("dup").unwrap().name, "dup");
     let error = service.resolve_rule("dup").unwrap_err();
     assert_eq!(error.code, "ambiguous-rule");

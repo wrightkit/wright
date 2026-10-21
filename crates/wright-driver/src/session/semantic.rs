@@ -22,17 +22,6 @@ fn service_response(service: &SemanticService<'_>, request: &Request) -> serde_j
     }
 }
 
-/// Build the `analyze` report from existing semantic query surfaces plus the
-/// canonical Workshop element count (#445).
-///
-/// Keeping this composition here makes the product boundary explicit: the
-/// report layers Workshop cost/size, structural complexity, and
-/// performance/stability risk indicators over symbol usage and CFG
-/// measurements. The element count is the `workshop-rs`-owned canonical
-/// computation; the risk layer reuses registry findings narrowed to rules
-/// that declare a `performance` or `stability` tag, so correctness findings
-/// stay out of the risk frame. Lint rules remain owned by `LintRegistry` and
-/// are only exposed in full by `lint`/`findings` queries.
 #[hotpath::measure]
 fn semantic_facts(
     service: &SemanticService<'_>,
@@ -101,8 +90,6 @@ fn semantic_facts(
                             "waitBlocks": wait_blocks,
                         },
                     });
-                    // Report rules keep canonical source/WIR order, so the
-                    // element node at `index` belongs to this rule.
                     if let Ok(report) = &element_count
                         && let Some(node) = report.rules.get(index)
                     {
@@ -137,16 +124,10 @@ fn semantic_facts(
         "rules": rules,
         "cost": cost,
         "risks": risks,
-        // Persistent Workshop object facts join the semantic report rather
-        // than living behind a query-only operation (#429).
         "persistentObjects": service_response(service, &Request::GetPersistentObjects),
     })
 }
 
-/// Workshop cost/size facts (#445): the canonical element count where the
-/// program supports it, plus structural counts that are always computable.
-/// The element count is an exact structural measurement — program size —
-/// never a claim about runtime cost.
 fn cost_facts(
     program: &workshop_rs::Program,
     element_count: &Result<
@@ -171,9 +152,6 @@ fn cost_facts(
         }
     }
     let counts = serde_json::json!({
-        // `rules` is the declared program inventory `analyze`/`inspect cost`
-        // report — disabled rules included (#788); `conditions`/`actions`/
-        // `waits` stay live statement counts (#633).
         "rules": program.rules.len(),
         "conditions": conditions,
         "actions": actions,
@@ -192,11 +170,6 @@ fn cost_facts(
     cost
 }
 
-/// Performance/stability risk indicators (#445): registry findings narrowed
-/// to rules that declare a `performance` or `stability` tag. Each finding
-/// keeps its evidence class so consumers can distinguish exact facts,
-/// static indicators, and heuristics; nothing here claims measured runtime
-/// behavior.
 fn risk_facts(service: &SemanticService<'_>) -> serde_json::Value {
     let lint_rules = service_response(service, &Request::LintRules);
     let risk_rule_ids: BTreeSet<&str> = lint_rules
@@ -243,11 +216,6 @@ fn program_summary(service: &SemanticService<'_>, loaded: &Loaded) -> serde_json
     program
 }
 
-/// `check`'s program summary (#792): the same members `analyze`'s `program`
-/// reports — origin, file count, and declaration counts — computed from
-/// `loaded` alone. `Request::Program`'s only other member is the lint
-/// `findings` count, which `analyze` strips and which would force a
-/// semantic-service build `check` otherwise never performs.
 pub(crate) fn check_program_summary(loaded: &Loaded) -> serde_json::Value {
     serde_json::json!({
         "origin": super::loaded_origin(loaded),
@@ -259,9 +227,6 @@ pub(crate) fn check_program_summary(loaded: &Loaded) -> serde_json::Value {
     })
 }
 
-/// `inspect`: the structural/semantic program model. Every member's spans
-/// resolve to `path` like `analyze`/`lint` findings do — a bare
-/// `{file: <index>}` is unusable outside the session (#635).
 #[hotpath::measure]
 fn inspect_result(service: &SemanticService<'_>, loaded: &Loaded) -> InspectResult {
     let mut rules = service_response(service, &Request::ListRules);
@@ -279,14 +244,6 @@ fn inspect_result(service: &SemanticService<'_>, loaded: &Loaded) -> InspectResu
     }
 }
 
-/// The `analyze` report over one semantic service: the `program` summary
-/// without the lint-finding count, then the fact layers with every span
-/// resolved against the loaded input like `lint` does — mapped or
-/// source-parsed locations become authored paths, while unmapped provider
-/// output resolves to `<provider-artifact>` instead of a fabricated
-/// location (#445). `facts.risks` is finding-shaped, so the session's
-/// finding selection narrows it exactly like `lint` findings and the
-/// outcome rides in `result.selection` (#635).
 #[allow(unsafe_code)] // hotpath 0.28 emits `#[unsafe(export_name)]` statics
 fn analyze_result(
     service: &SemanticService<'_>,
@@ -324,12 +281,6 @@ fn tool_result(response: ToolResponse) -> Result<serde_json::Value, ToolErrorInf
     }
 }
 
-/// Add the resolved `path` to every semantic `span` in a JSON result.
-///
-/// File 0 is the main input and resolves root-relative to the include root
-/// (`--root`, defaulting to the input's directory); other files resolve from
-/// the retained frontend file registry. `<file N>` is the fallback when no
-/// registry entry resolves, and stdin inputs fall back to `<stdin>`.
 pub(crate) fn resolve_span_paths(value: &mut serde_json::Value, loaded: &Loaded) {
     match value {
         serde_json::Value::Object(object) => {
@@ -432,12 +383,6 @@ impl CompilerSession {
         )
     }
 
-    /// `analyze` over an already-loaded snapshot and its held semantic
-    /// service — the ToolService reuse path (#513): the report renders
-    /// through the service built once per loaded program rather than
-    /// rebuilding the index per request. `selection` narrows
-    /// `facts.risks`; the request-level selection on the agent surface and
-    /// the session's configured selection on the CLI both feed it (#635).
     pub(crate) fn analyze_loaded(
         &mut self,
         loaded: Loaded,
@@ -614,10 +559,6 @@ impl CompilerSession {
         let mut envelope = self.service_query("cost", move |service| {
             let (mut result, outcome) =
                 service.cost_estimate_result(&selection, rule.as_deref())?;
-            // `--max-total` and the named-baseline usage error are service
-            // errors (exit 1) raised before the verdict; the comparison is
-            // returned in-process and lifted onto the envelope below — it
-            // never joins the JSON payload (ADR-0027 decision 3).
             let comparison = service.apply_cost_run(&result)?;
             if let Some(comparison) = comparison {
                 result["__comparison"] = comparison.to_json();
@@ -638,11 +579,6 @@ impl CompilerSession {
         envelope
     }
 
-    /// Run one query operation through the session's [`ToolService`] — the
-    /// same dispatch the agent surface uses, so CLI payloads equal the
-    /// operation payloads by construction, including shared name resolution
-    /// (#429). A structured service error becomes an analysis-stage
-    /// diagnostic; a failed envelope carries a `null` result.
     fn service_query<T>(
         &mut self,
         command: &str,
@@ -666,9 +602,6 @@ impl CompilerSession {
                 match run(&mut service) {
                     Ok(result) => result,
                     Err(mut error) => {
-                        // Candidates resolve against this loaded program's
-                        // file table; the listing-operation clause waits
-                        // for the surface's own spelling (#888).
                         crate::service::resolve_candidates(
                             &mut error.message,
                             &mut error.fields,
@@ -717,10 +650,6 @@ impl CompilerSession {
             |session, loaded| {
                 session.attach_workshop_completeness(&loaded);
                 let shared = session.shared_semantic(&loaded);
-                // An explicitly configured lint run shares the snapshot's
-                // index and only reruns the registry under the effective
-                // configuration (#513); the default configuration is the
-                // shared service itself.
                 let configured;
                 let service = if session.config.lint.rules.is_empty() {
                     &*shared

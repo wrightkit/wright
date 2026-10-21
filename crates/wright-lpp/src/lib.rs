@@ -1,28 +1,3 @@
-//! This crate is the Wright-owned client/runtime side of the Language
-//! Provider Protocol. The wire contract itself — message shapes, methods,
-//! error kinds, and conformance fixtures — is owned by the
-//! `language-provider-protocol` repository (spec/lpp-v1.md); this crate
-//! consumes that contract and never redefines it.
-//!
-//! # Language neutrality
-//!
-//! Nothing in this crate branches on a particular source language. Providers
-//! are discovered by opaque language id strings through
-//! [`registry::ProviderRegistry`]; a language id such as `x-demo-lang` is
-//! just a key. When no provider is configured for a language id, or when a
-//! required capability was not negotiated, the client refuses explicitly
-//! with a structured [`error::ProviderError`] — there is no silent fallback
-//! to in-process compiler semantics.
-//!
-//! # Failure classes
-//!
-//! Every provider interaction fails deterministically into one of the
-//! structured [`error::ProviderError`] variants: spawn failure, process
-//! exit, request timeout, malformed response, protocol version mismatch,
-//! JSON-RPC errors, typed LPP errors (including `capabilityUnavailable`
-//! refusals), and client-side session-phase violations. Each variant carries
-//! a stable machine `code()`.
-
 #![allow(clippy::result_large_err)]
 
 pub mod client;

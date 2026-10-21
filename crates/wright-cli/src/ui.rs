@@ -1,17 +1,3 @@
-//! `wright ui` — the local Workshop project view (ADR-0032).
-//!
-//! The command binds a loopback HTTP server on an ephemeral port, prints a
-//! URL carrying a per-session token in its fragment, opens the default
-//! browser, and serves until interrupted. `POST /api` passes
-//! `wright-agent/v1` bodies to `ToolService` and returns its responses
-//! unchanged; `POST /apply` writes the transaction an `editStatements`
-//! result carried, after re-validating it against the files on disk —
-//! the host owns the write, the page never touches files (decision 5).
-//! The UI implements no Workshop semantics of its own.
-//!
-//! Without the `ui` Cargo feature no UI assets are embedded and the command
-//! reports the no-UI build instead of serving.
-
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -79,19 +65,11 @@ mod server {
 
     include!(concat!(env!("OUT_DIR"), "/ui_assets.rs"));
 
-    /// Bodies are `wright-agent/v1` unchanged.
     const API_PATH: &str = "/api";
-    /// The host write path (ADR-0032 decision 5); bodies are the
-    /// `EditTransaction` an `editStatements` result returned.
     const APPLY_PATH: &str = "/apply";
-    /// Requests are a few hundred bytes of JSON; the cap keeps a local
-    /// client from streaming unbounded memory into the process.
     const MAX_BODY: u64 = 1024 * 1024;
 
     impl UiArgs {
-        /// The session configuration `serve` would build for the same
-        /// flags. `-` is refused rather than mapped to stdin: nothing may
-        /// block on the terminal before the browser is even open.
         fn session_config(&self) -> Result<SessionConfig, String> {
             if self
                 .input
@@ -111,8 +89,6 @@ mod server {
                 input: InputSpec::Path(self.input.clone().unwrap_or_else(|| ".".into())),
                 ..SessionConfig::default()
             };
-            // Same constraint as `serve` (ADR-0028): profiles apply to
-            // Workshop input only.
             if self.profile != wright_driver::Profile::Off
                 && matches!(self.kind, SourceKind::Opy | SourceKind::Ostw)
             {
@@ -134,8 +110,6 @@ mod server {
                 return ExitCode::from(exit::USAGE);
             }
         };
-        // The view speaks raw Workshop only; detect the input's kind before
-        // anything binds so an unsupported input never gets a server.
         let resolved = match wright_driver::input::resolve(&config) {
             Ok(resolved) => resolved,
             Err(diagnostic) => {
@@ -222,7 +196,6 @@ mod server {
         ExitCode::SUCCESS
     }
 
-    /// A 128-bit token is unguessable over loopback within a session.
     fn session_token() -> Option<String> {
         let mut bytes = [0u8; 16];
         getrandom::fill(&mut bytes).ok()?;
@@ -233,11 +206,6 @@ mod server {
         Some(token)
     }
 
-    /// DNS rebinding and cross-site protection (ADR-0032): every request —
-    /// asset or endpoint — must name the bound loopback authority in `Host`
-    /// and, when a browser `Origin` is present, the server's own origin.
-    /// The endpoint additionally requires the session token. The server
-    /// never emits `Access-Control-*` headers.
     fn route(
         service: &mut ToolService<'_>,
         request: &mut tiny_http::Request,
@@ -266,8 +234,6 @@ mod server {
             );
         }
         let path = request.url().split(['?', '#']).next().unwrap_or("/");
-        // An absolute-form request-target (`POST http://host/api`, legal
-        // for proxies) names the path after its authority.
         let path = path
             .strip_prefix("http://")
             .or_else(|| path.strip_prefix("https://"))
@@ -282,9 +248,6 @@ mod server {
         }
     }
 
-    /// The preamble every endpoint shares: the session token must match,
-    /// then the body is read under the cap and must be UTF-8. `Err` is the
-    /// already-built refusal response.
     fn read_request_body(
         request: &mut tiny_http::Request,
         token: &str,
@@ -320,9 +283,6 @@ mod server {
         })
     }
 
-    /// `POST /api`: the request body is a `wright-agent/v1` request; the
-    /// response body is whatever `serve` would have written for it — the
-    /// transport adds no envelope of its own (ADR-0032 decision 3).
     fn api(
         service: &mut ToolService<'_>,
         request: &mut tiny_http::Request,
@@ -332,9 +292,6 @@ mod server {
             Ok(body) => body,
             Err(response) => return response,
         };
-        // `serve` writes the dispatch result as one newline-terminated
-        // line; the endpoint returns the same bytes, terminator included,
-        // so both transports answer byte-identically (ADR-0032).
         respond(
             200,
             "application/json",
@@ -342,13 +299,6 @@ mod server {
         )
     }
 
-    /// `POST /apply`: the request body is the `EditTransaction` an
-    /// `editStatements` result carried. The host re-validates it against
-    /// the files on disk — the freshness recheck — writes it through the
-    /// same atomic path `lint --fix --write` uses, and refreshes the
-    /// session so the next read serves the edited program (ADR-0032
-    /// decision 5). A stale or invalid transaction answers the
-    /// `validateEditTransaction` refusal shape and writes nothing.
     fn apply(
         service: &mut ToolService<'_>,
         request: &mut tiny_http::Request,
@@ -410,9 +360,6 @@ mod server {
             )
     }
 
-    /// Open the session URL in the system browser with the platform's
-    /// stock opener; a failure is a hint, not a session error — the URL is
-    /// already on stdout.
     fn open_browser(url: &str) {
         #[cfg(target_os = "macos")]
         let spawned = std::process::Command::new("open").arg(url).spawn();

@@ -1,6 +1,3 @@
-//! Line/column unit conversions for source-edit positioning: UTF-16
-//! code units, Rust char offsets, and byte offsets.
-
 pub(super) fn position_byte(lines: &[&str], line: u32, col: u32) -> usize {
     lines[..line as usize - 1]
         .iter()

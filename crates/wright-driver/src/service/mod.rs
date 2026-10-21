@@ -1,15 +1,3 @@
-//! [`ToolService`] exposes Wright's compile/check/analyze/query workflows and
-//! agent-oriented semantic queries over stable public contracts, reusing the
-//! driver session. It is transport-neutral: the `serve` transport adapters
-//! (#60) and the embedding API are thin mappings over the same operations,
-//! so behavior is testable in-process without a transport.
-//!
-//! Capability/version negotiation is provided by [`Capabilities`]; cost and
-//! resource inspection ([`ToolRequest::CostEstimate`]) consumes the
-//! Wright-owned generated-resource semantics established by the `wright-bench`
-//! harness (emitted bytes, canonical program counts, action/rule counts) and
-//! distinguishes exact counts from static findings.
-
 use std::sync::Arc;
 
 use serde_json::json;
@@ -43,7 +31,6 @@ pub const SERVICE_NAME: &str = "wright-tool-service";
 pub const SERVICE_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const AGENT_CONTRACT: &str = "wright-agent/v1";
 
-/// Rules returned by a `content` request that sets no `max` (ADR-0024).
 const DEFAULT_CONTENT_RULES: usize = 20;
 
 pub use capabilities::{Capabilities, OPERATIONS};
@@ -62,35 +49,15 @@ struct Snapshot {
     loaded: Loaded,
     semantic: Arc<SemanticService<'static>>,
     lint_semantic: Option<SemanticService<'static>>,
-    /// The disk state `loaded` was read from, recomputed before every
-    /// program-reading request so a long-lived session observes edits, file
-    /// additions, and removals (#471).
     fingerprint: input::DiskFingerprint,
 }
 
 /// The session-aware tool service.
 pub struct ToolService<'a> {
     session: &'a mut CompilerSession,
-    /// The current program snapshot, when one exists. The service may exist
-    /// without one (#512): a configured project that cannot load at
-    /// construction is deferred to the first program-reading request rather
-    /// than failing the service, so `None` is the unloaded state — never an
-    /// empty placeholder program.
     snapshot: Option<Snapshot>,
-    /// The served program's generation (#595): `adopt` increments it, so
-    /// every adopted snapshot — the deferred initial load, a
-    /// content-changing reload, a recovery after a failed load — is a
-    /// distinct generation. Responses that issue numeric `symbol`/`rule`
-    /// addresses report it as `snapshot`, and a request carrying a numeric
-    /// address must send that value back or be refused `stale-id`.
     generation: u64,
-    /// How many times an observed disk change reloaded the program — the
-    /// observable hook for "unchanged inputs are not reloaded" (#471).
     reloads: usize,
-    /// `true` while the service sits in the invalidated state after a
-    /// failed refresh (#512): the next successful load is a reload — an
-    /// observed change brought the project back — rather than the deferred
-    /// initial load.
     invalidated: bool,
 }
 
@@ -154,27 +121,7 @@ impl<'a> ToolService<'a> {
         self.session.semantic_build_count()
     }
 
-    /// Handle one tool request, returning a structured owned response.
-    ///
-    /// A program-reading request requires a current snapshot (#471, #512):
-    /// the deferred initial load runs here, a changed input fingerprint
-    /// reloads, and either failure is the structured refusal — the stale
-    /// snapshot is never served silently. `capabilities`/`targetMetadata`
-    /// consult neither; a `provider*` request omitting its document set
-    /// derives it from the loaded project (#548), triggering the same load.
-    ///
-    /// `check` and `compile` are workflows, not snapshot queries (#591):
-    /// they run the session's operation-aware load instead of requiring a
-    /// canonical snapshot, so a compile-capable provider's `check` compiles
-    /// for canonical validation and supplies the snapshot later queries
-    /// read (#617); a provider that declines its compile keeps the
-    /// check-only path.
-    ///
-    /// `handle` lives in [`refusal`] — it composes refusal fields (#888).
     pub(crate) fn handle_full(&mut self, request: &ToolRequest) -> ToolResponse {
-        // ADR-0035: `rules` `name` is removed vocabulary — a request-shape
-        // error refused like a schema violation (`malformed-request`)
-        // before any project state is consulted, never silently ignored.
         if let ToolRequest::Rules { name: Some(_), .. } = request {
             return refusal::refusal(
                 "malformed-request",
@@ -184,20 +131,11 @@ impl<'a> ToolService<'a> {
         match request {
             ToolRequest::Check { .. } | ToolRequest::Compile { .. } => self.refresh_workflow(),
             _ if Self::reads_program(request) => {
-                // ADR-0029: `editStatements` answers on the resolved input
-                // kind — an OPY/OSTW input fails `refresh` before the
-                // provider-boundary refusal could run, so the raw-Workshop
-                // gate evaluates first.
                 if let ToolRequest::EditStatements { .. } = request
                     && let Some(response) = self.edit_statements_kind_gate()
                 {
                     return response;
                 }
-                // ADR-0033: `simulate` has no input-kind gate — `athena`
-                // runs the loaded program's canonical emission, so a
-                // provider-loaded source-language project simulates its
-                // compiled Workshop artifact like every other
-                // program-reading operation.
                 if let Err(error) = self.refresh() {
                     return ToolResponse::Error { error };
                 }
@@ -212,13 +150,6 @@ impl<'a> ToolService<'a> {
         self.stamp_snapshot(request, response)
     }
 
-    /// Whether the request requires a canonical snapshot to answer (#471,
-    /// #591). `check`/`compile` do not: they run their own operation-aware
-    /// load, so a provider without canonical compile capability still
-    /// answers `check`. A provider operation carrying its own document set
-    /// consults no snapshot either; one that omits it derives the set from
-    /// the loaded project (#548) and so requires it like every other
-    /// program-reading operation.
     fn reads_program(request: &ToolRequest) -> bool {
         !matches!(
             request,
@@ -235,21 +166,8 @@ impl<'a> ToolService<'a> {
         )
     }
 
-    /// Ensure a valid current snapshot backs a program-reading request
-    /// (#471, #512). With no snapshot the request performs the deferred
-    /// initial load; with one, a changed disk fingerprint reloads it. A
-    /// failed attempt surfaces the loader's structured diagnostic and
-    /// invalidates the served snapshot — the previous program is never
-    /// served, even if the input is restored to identical bytes — so the
-    /// next request retries the same resolution and a repaired project is
-    /// adopted without restarting the service.
     fn refresh(&mut self) -> Result<(), ToolErrorInfo> {
         let Some(snapshot) = &self.snapshot else {
-            // The deferred initial load, or recovery after an invalidated
-            // snapshot (#512). Recovery counts as a reload — an observed
-            // disk change brought the project back — and `adopt` gives it a
-            // fresh generation, so ids issued by the dropped program stay
-            // refused (#595).
             let loaded = self.session.load().map_err(Self::loader_error)?;
             self.adopt(loaded);
             if self.invalidated {
@@ -274,11 +192,6 @@ impl<'a> ToolService<'a> {
         Ok(())
     }
 
-    /// Drop the served snapshot after a failed refresh (#512). The next
-    /// program-reading request must load again — restoring the input's exact
-    /// previous bytes must not fingerprint-match the pre-failure snapshot
-    /// back to life — and ids it issued keep their old generation, so they
-    /// refuse `stale-id` against the recovered program (#595).
     fn invalidate(&mut self) {
         self.clear_snapshot();
         self.invalidated = true;
@@ -288,13 +201,6 @@ impl<'a> ToolService<'a> {
         self.snapshot = None;
     }
 
-    /// The freshness gate for `check`/`compile` (#591): like [`Self::refresh`]
-    /// an observed disk change invalidates the served snapshot, but the
-    /// workflow itself performs the operation-aware load — the session never
-    /// demands a canonical compile just to run `check`, and the load's
-    /// outcome rides in the workflow envelope rather than a `ToolResponse`
-    /// refusal. No snapshot held means there is nothing to invalidate: the
-    /// workflow resolves the input itself.
     fn refresh_workflow(&mut self) {
         let Some(snapshot) = &self.snapshot else {
             return;
@@ -308,13 +214,6 @@ impl<'a> ToolService<'a> {
         self.reloads += 1;
     }
 
-    /// Adopt the canonical snapshot a `check`/`compile` workflow established
-    /// when the service holds none (#591): a successful `compile` makes its
-    /// program the snapshot later queries serve — the same guarantee as a
-    /// session that had already compiled before service construction. A
-    /// check-only provider's `check` caches no program (`cached_loaded` is
-    /// `None`), so snapshot queries keep refusing `load()`'s explicit
-    /// unsupported state rather than inheriting a placeholder program.
     fn adopt_session_snapshot(&mut self) {
         if self.snapshot.is_none()
             && let Some(loaded) = self.session.cached_loaded()
@@ -329,10 +228,6 @@ impl<'a> ToolService<'a> {
         error
     }
 
-    /// Adopt a successfully loaded program: every adoption is a new
-    /// generation (#595), so numeric addresses a previous generation issued
-    /// refuse `stale-id` — including the byte-identical recovery case, which
-    /// is still a new program even though `inputIdentity` is unchanged.
     fn adopt(&mut self, loaded: Loaded) {
         let semantic = self.session.shared_semantic(&loaded);
         let lint_semantic = (!self.session.config.lint.rules.is_empty())
@@ -358,13 +253,6 @@ impl<'a> ToolService<'a> {
         (snapshot.loaded.clone(), Arc::clone(&snapshot.semantic))
     }
 
-    /// The document set a provider mutation runs against (#548): the
-    /// caller's set when supplied, otherwise the loaded project's members —
-    /// each member read from disk at `version` 0 and keyed by `file://` URI,
-    /// so the provider sees the same project the session serves. The
-    /// omitted-set path only runs after the refresh gate, so `snapshot` is
-    /// guaranteed; a member that is not a readable disk file is a structured
-    /// refusal, never a silently partial set.
     fn provider_documents(
         &self,
         language_id: &str,
@@ -374,9 +262,6 @@ impl<'a> ToolService<'a> {
             return Ok(documents.clone());
         }
         let loaded = &self.snapshot().loaded;
-        // Mapped members are provider-file-table spellings relative to the
-        // project root the provider was given; unmapped members are the
-        // input's own display spellings, relative to the invocation cwd.
         let base = if loaded.provenance == Provenance::Mapped {
             &loaded.input.root
         } else {
@@ -389,12 +274,6 @@ impl<'a> ToolService<'a> {
         &self.snapshot().semantic
     }
 
-    /// Report the serving generation on every response that issues numeric
-    /// `symbol`/`rule` addresses (#595): `snapshot` joins the result object
-    /// — or wraps a bare-array listing result under its key — so a client
-    /// always reads the generation the ids it holds belong to. It lands on
-    /// the `wright-result/v1` envelope for `analyze`/`inspect` and in the
-    /// payload for the query operations.
     fn stamp_snapshot(&self, request: &ToolRequest, mut response: ToolResponse) -> ToolResponse {
         let ToolResponse::Ok { result } = &mut response else {
             return response;
@@ -691,14 +570,6 @@ impl<'a> ToolService<'a> {
         ToolResponse::Ok { result }
     }
 
-    /// `findings`: every static-analysis finding with resolved span paths.
-    ///
-    /// The tool/agent surface resolves `span.path` exactly like the CLI
-    /// `analyze`/`lint` workflows, so one file identity holds per finding
-    /// across every surface (#102). A selection narrows the reported set
-    /// (#430): without selection fields the result stays the bare finding
-    /// array; with them it becomes `{"findings": [...], "selection": {...}}`
-    /// so truncation is always visible.
     fn findings(&self, selection: &crate::select::FindingSelection) -> ToolResponse {
         if let Some(error) = self.selection_error(selection) {
             return error;
@@ -728,9 +599,6 @@ impl<'a> ToolService<'a> {
         self.semantic_query_with_resolved_span_paths(Request::GetPersistentObjects)
     }
 
-    /// Resolve a symbol `Address` to its numeric id (#429). A name resolves
-    /// through the shared semantic index; unmatched and ambiguous names are
-    /// the analyzer's structured `unknown-symbol`/`ambiguous-symbol` errors.
     fn symbol_address(&self, address: &Address) -> Result<u32, ToolErrorInfo> {
         match address {
             Address::Id(id) => Ok(*id),
@@ -741,7 +609,6 @@ impl<'a> ToolService<'a> {
         }
     }
 
-    /// Resolve a rule `Address` to its numeric index (#429).
     fn rule_address(&self, address: &Address) -> Result<u32, ToolErrorInfo> {
         match address {
             Address::Id(id) => Ok(*id),
@@ -771,17 +638,12 @@ impl<'a> ToolService<'a> {
             .unwrap_or(&snapshot.semantic)
     }
 
-    /// A selection naming an unknown rule id is a usage error, never a
-    /// silent empty result (#430).
     fn selection_error(&self, selection: &crate::select::FindingSelection) -> Option<ToolResponse> {
         self.selection_check(selection)
             .err()
             .map(|error| ToolResponse::Error { error })
     }
 
-    /// The selection's validity as a structured error: an unknown `rule` id
-    /// or a `file` naming no source file of the loaded program (ADR-0035)
-    /// would silently select nothing and report a clean result (#430).
     fn selection_check(
         &self,
         selection: &crate::select::FindingSelection,
@@ -805,10 +667,6 @@ impl<'a> ToolService<'a> {
         Ok(())
     }
 
-    /// Bound one list-shaped semantic operation's result (#531): without
-    /// selection fields the previous bare array is returned unchanged;
-    /// with them the result becomes `{<key>: [...], "selection": {...}}`
-    /// reporting the pre-selection `total` and the count `max` withheld.
     fn select_result(
         &self,
         key: &str,
@@ -820,8 +678,6 @@ impl<'a> ToolService<'a> {
     ) -> ToolResponse {
         let loaded = &self.snapshot().loaded;
         let file_bases = crate::select::file_bases(&loaded.input);
-        // ADR-0035: a `file` value matching no source file of the loaded
-        // program is `invalid-selection`, never a silently empty result.
         if let Some(file) = file
             && let Some((message, fields)) =
                 crate::select::file_error(file, &loaded.source_files, &file_bases)
@@ -840,12 +696,6 @@ impl<'a> ToolService<'a> {
         self.ok(json!({ key: kept, "selection": outcome }))
     }
 
-    /// `rules`: every rule with resolved span paths, like `symbols` — a
-    /// `file` id without its path is unusable to a caller. The selection
-    /// fields are `rule` (one rule address), `file`, and `max` (#531).
-    /// With `content`, each selected rule carries its canonical content,
-    /// `max` defaults to [`DEFAULT_CONTENT_RULES`], and the selection
-    /// shape is always returned (ADR-0024).
     fn rules(
         &self,
         rule: Option<&Address>,
@@ -853,9 +703,6 @@ impl<'a> ToolService<'a> {
         max: &Option<usize>,
         content: bool,
     ) -> ToolResponse {
-        // `rules` `rule` names the operation's subject (ADR-0035): a name
-        // address keeps its `unknown-rule`/`ambiguous-rule` refusal; only
-        // an out-of-range numeric index is a selection error.
         let rule_id = match rule {
             Some(address) => match self.rule_address(address) {
                 Ok(id) if (id as usize) < self.snapshot().loaded.program.rules.len() => {
@@ -895,8 +742,6 @@ impl<'a> ToolService<'a> {
         let ToolResponse::Ok { mut result } = response else {
             return response;
         };
-        // OverPy spellings for the canonical ids need a provider capability
-        // that no provider advertises yet (ADR-0024 decision 4).
         if self.snapshot().loaded.input.kind == crate::config::SourceKind::Opy {
             result["unavailable"] = json!({"names": "opy-rs"});
         }
@@ -914,11 +759,6 @@ impl<'a> ToolService<'a> {
         ToolResponse::Ok { result }
     }
 
-    /// `symbols`: every symbol with resolved span paths. `kind` predates
-    /// #531 — a request carrying only `kind` keeps the previous bare-array
-    /// shape, still filtered; the `file`/`max` selection fields wrap the
-    /// result in `{"symbols": [...], "selection": {...}}` with the
-    /// pre-selection total.
     fn symbols(&self, kind: Option<&str>, file: Option<&str>, max: Option<usize>) -> ToolResponse {
         if let Some(kind) = kind
             && !SymbolKind::ALL.iter().any(|known| known.as_str() == kind)
@@ -946,9 +786,6 @@ impl<'a> ToolService<'a> {
         }
     }
 
-    /// `references`: every reference to one symbol. The selection fields
-    /// are `kind` (a reference kind), `rule` (a rule address narrowing to
-    /// references inside that rule), `file`, and `max` (#531).
     fn references(
         &self,
         symbol: &Address,
@@ -1007,11 +844,6 @@ impl<'a> ToolService<'a> {
         }
     }
 
-    /// `cfg`: one rule's control-flow graph. The selection fields are
-    /// `kind` (a block kind) and `max` (#531): they filter and bound
-    /// `blocks` — which keep their original `id`s, so `successors` still
-    /// address the full graph — and add a `selection` member with the
-    /// pre-selection total.
     fn cfg(&self, rule: u32, kind: Option<&str>, max: Option<usize>) -> ToolResponse {
         if let Some(kind) = kind
             && !BLOCK_KINDS.contains(&kind)
@@ -1044,13 +876,6 @@ impl<'a> ToolService<'a> {
         }
     }
 
-    /// `lint`: per-rule id and effective severity, effective configuration,
-    /// and findings over the loaded program through the same semantic-service
-    /// path as the CLI `lint` workflow (no duplicated rule execution, #98).
-    /// Full rule metadata is served once by `lintRules` rather than inlined
-    /// into every `lint` response (#431). A `selection` member records the
-    /// true total and withheld count when the request selected a subset
-    /// (#430). Wire presentation omits configuration and caps findings.
     fn lint(&self, selection: &crate::select::FindingSelection) -> ToolResponse {
         if let Some(error) = self.selection_error(selection) {
             return error;
@@ -1106,7 +931,6 @@ impl<'a> ToolService<'a> {
             "sourceFiles": loaded.source_files.as_slice(), "globalVariables": loaded.program.global_variables.len(),
             "playerVariables": loaded.program.player_variables.len(), "subroutines": loaded.program.subroutines.len(),
             "rules": loaded.program.rules.len(), "symbols": index.symbols().count(), "findings": findings.len(),
-            // The simulation panel's read-only lobby settings (#836).
             "settings": loaded.program.settings.as_ref().map(settings::settings_json),
         })
     }

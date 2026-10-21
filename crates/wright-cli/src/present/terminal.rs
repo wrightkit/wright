@@ -1,22 +1,3 @@
-//! The terminal report (ADR-0030 decision 4): one filled element — the
-//! verdict tag — leads, then the headline, then named sections, items, and
-//! secondary notes; the rail frame is retired.
-//!
-//! The tag word maps to the exit code: `PASS`/`WARN` for clean results,
-//! `FAIL` for the `--fail-on` gate, `USAGE` for exit 2, `UNSUPPORTED` for
-//! exit 3, and `ERROR` for other failures. Query commands carry no judging
-//! word: their tag is the command's own name (`SYMBOLS`, `COST`, `LOOKUP`,
-//! …). Colour is semantic and drawn from the eight ANSI hues only —
-//! green pass, yellow warn, red error class, cyan neutral — and the word
-//! alone carries the status, so reports stay legible without colour.
-//!
-//! Layout width is capped at 100 columns; below 90 the report switches to
-//! its compact layout, where children of a section item align at the
-//! item's column instead of indenting deeper. Counts are plain plurals —
-//! never `(s)` — a section states uniform evidence once in its heading,
-//! and a failed computation reports unavailable with its reason, never a
-//! fabricated value.
-
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::Duration;
@@ -37,9 +18,6 @@ use super::{
     unmapped_positions, unmapped_positions_note,
 };
 
-/// The envelope's tag word (ADR-0030 decision 4): `summary_status` covers
-/// `PASS`/`WARN`/`FAIL`/`ERROR`; the exit code disambiguates `USAGE` and
-/// `UNSUPPORTED`, and a query command shows its own name.
 fn tag_word<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) -> String {
     if envelope.gated {
         return "FAIL".to_string();
@@ -58,15 +36,10 @@ fn tag_word<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) ->
     summary_status(envelope).to_string()
 }
 
-/// Commands that report facts rather than judge a program: their tag is
-/// their name, drawn in the neutral hue.
 fn is_query(command: &str) -> bool {
     crate::cli::is_query_command(command)
 }
 
-/// The tag cell — ` WORD ` filled with the semantic hue under colour:
-/// green pass, yellow warn, red error class, cyan neutral (query names and
-/// unsupported). The word carries the status; colour only supports it.
 pub(crate) fn tag(word: &str, color: bool) -> String {
     let text = format!(" {word} ");
     if !color {
@@ -81,8 +54,6 @@ pub(crate) fn tag(word: &str, color: bool) -> String {
     format!("\x1b[{bg};{fg}m{text}\x1b[0m")
 }
 
-/// The verdict line's command text: a query command's own-name tag stands
-/// alone; a status word names the command after it.
 fn verdict_line<T: serde::Serialize + ResultPresentation>(
     envelope: &Envelope<T>,
     color: bool,
@@ -95,9 +66,6 @@ fn verdict_line<T: serde::Serialize + ResultPresentation>(
     }
 }
 
-/// A non-envelope error (`update`, `lookup`, usage errors): the tag and
-/// subject lead, the message hangs under it; other surfaces keep the
-/// `wright:` error line.
 pub(crate) fn report_error(pres: Presentation, word: &str, subject: &str, message: &str) {
     if pres.is_terminal() {
         eprintln!("{} {subject}", tag(word, pres.color));
@@ -107,17 +75,12 @@ pub(crate) fn report_error(pres: Presentation, word: &str, subject: &str, messag
     }
 }
 
-/// The closing status for a command that streams its own lines (`update` —
-/// an operation, not a report): the tag ends the output instead of leading
-/// it. Other renderers print nothing.
 pub(crate) fn report_close(pres: Presentation, subject: &str, word: &str) {
     if pres.is_terminal() {
         println!("{} {subject}", tag(word, pres.color));
     }
 }
 
-/// The tag word for a bare exit code (update's folded targets): the same
-/// exit-code mapping `tag_word` applies.
 pub(crate) fn exit_word(code: u8) -> &'static str {
     match code {
         wright_driver::result::exit::USAGE => "USAGE",
@@ -127,7 +90,6 @@ pub(crate) fn exit_word(code: u8) -> &'static str {
     }
 }
 
-/// `{n} {singular}` or `{n} {plural}` — counts never carry `(s)` suffixes.
 pub(crate) fn plural(n: usize, singular: &str, plural: &str) -> String {
     if n == 1 {
         format!("{n} {singular}")
@@ -136,8 +98,6 @@ pub(crate) fn plural(n: usize, singular: &str, plural: &str) -> String {
     }
 }
 
-/// The child's indent at a hierarchy depth: two columns per level, except
-/// in the compact layout where every child aligns at its parent's column.
 fn pad(ctx: &RenderContext<'_>, depth: usize) -> String {
     if depth == 0 {
         return String::new();
@@ -157,8 +117,6 @@ pub(crate) fn note(ctx: &RenderContext<'_>, depth: usize, text: &str) {
     println!("{}{}", pad(ctx, depth), dim(text, ctx.presentation.color));
 }
 
-/// A named section at the report's top level, one blank line before it.
-/// Headings are bold under colour — a text style, not a filled element.
 pub(crate) fn heading(ctx: &RenderContext<'_>, text: &str) {
     if ctx.presentation.color {
         println!("\n\x1b[1m{text}\x1b[0m");
@@ -167,7 +125,6 @@ pub(crate) fn heading(ctx: &RenderContext<'_>, text: &str) {
     }
 }
 
-/// The diagnostic stream: stderr ordinarily, stdout for a failed result (#891).
 fn dprint(text: &str, to_stdout: bool) {
     if to_stdout {
         println!("{text}");
@@ -187,22 +144,13 @@ fn dnote(ctx: &RenderContext<'_>, depth: usize, text: &str, to_stdout: bool) {
     );
 }
 
-/// The terminal renderer's per-result contract: the artifact stream, the
-/// headline following the verdict line, and the body sections. Every
-/// workflow result type implements it — a new result type cannot reach the
-/// terminal without a considered layout.
 pub(crate) trait TerminalReport {
-    /// The source artifact itself (`convert`, `compile -o -`), printed
-    /// instead of a report — `None` for ordinary reports.
     fn artifact(&self) -> Option<&str> {
         None
     }
-    /// The counts, sizes, or key facts on the line under the verdict.
     fn headline(&self) -> Option<String> {
         None
     }
-    /// The report's sections; diagnostics, the footer, and `Next` live at
-    /// the envelope level.
     fn body(&self, ctx: &RenderContext<'_>);
 }
 
@@ -219,7 +167,6 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation + TerminalReport>(
         source_base,
         subject,
     };
-    // An artifact stream keeps stdout pure; tag and diagnostics ride stderr.
     if let Some(artifact) = envelope.result.artifact() {
         if !envelope.ok || !envelope.diagnostics.is_empty() {
             eprintln!("{}", verdict_line(envelope, pres.color));
@@ -232,10 +179,8 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation + TerminalReport>(
     if let Some(text) = headline(envelope) {
         println!("{}{}", pad(&ctx, 1), dim(&text, pres.color));
     }
-    // A failed analysis result's diagnostics join the report on stdout (#891).
     let to_stdout = diagnostics_on_stdout(envelope);
     diagnostics(&ctx, envelope, to_stdout);
-    // A gated result is a raised verdict: its result body still renders.
     if envelope.ok || envelope.gated {
         envelope.result.body(&ctx);
         comparison(&ctx, envelope.comparison.as_ref());
@@ -247,8 +192,6 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation + TerminalReport>(
     }
 }
 
-/// The headline under the verdict: diagnostics counts for `check` and for
-/// failed commands, otherwise the result's own facts.
 fn headline<T: serde::Serialize + ResultPresentation + TerminalReport>(
     envelope: &Envelope<T>,
 ) -> Option<String> {
@@ -266,8 +209,6 @@ fn headline<T: serde::Serialize + ResultPresentation + TerminalReport>(
     }
 }
 
-/// Diagnostic counts by severity — errors first. Under a selection the
-/// breakdown is unknown, so the true total reports instead.
 fn diagnostic_summary<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) -> String {
     if let Some(selection) = &envelope.selection {
         return plural(selection.total, "diagnostic", "diagnostics");
@@ -279,7 +220,6 @@ fn diagnostic_summary<T: serde::Serialize + ResultPresentation>(envelope: &Envel
     severity_counts(counts, "diagnostic")
 }
 
-/// `counts` as error/warning/info parts, or `0 {plural}` when empty.
 fn severity_counts(counts: [usize; 3], noun: &str) -> String {
     let mut parts = Vec::new();
     if counts[0] > 0 {
@@ -298,7 +238,6 @@ fn severity_counts(counts: [usize; 3], noun: &str) -> String {
     }
 }
 
-/// The `check` footer's execution metadata: files, plus interactive elapsed.
 fn check_footer<T: serde::Serialize + ResultPresentation>(
     ctx: &RenderContext<'_>,
     envelope: &Envelope<T>,
@@ -322,7 +261,6 @@ fn check_footer<T: serde::Serialize + ResultPresentation>(
     }
 }
 
-/// The lint footer's metadata: affected files, skipped rule evaluations.
 fn lint_footer(ctx: &RenderContext<'_>, findings: &[Value], skipped: usize) {
     let files: BTreeSet<&str> = findings
         .iter()
@@ -350,7 +288,6 @@ fn lint_footer(ctx: &RenderContext<'_>, findings: &[Value], skipped: usize) {
     }
 }
 
-/// Envelope diagnostics, errors first and bounded at twenty items.
 fn diagnostics<T: serde::Serialize + ResultPresentation>(
     ctx: &RenderContext<'_>,
     envelope: &Envelope<T>,
@@ -370,8 +307,6 @@ fn diagnostics<T: serde::Serialize + ResultPresentation>(
             dprint("", to_stdout);
         }
         diagnostic_item(ctx, diagnostic, to_stdout);
-        // ADR-0021 decision 6: `check`/`compile` text points at `wright
-        // lookup` after a rejected-name diagnostic (#692).
         if matches!(envelope.command.as_str(), "check" | "compile")
             && diagnostic
                 .code
@@ -417,8 +352,6 @@ fn diagnostics<T: serde::Serialize + ResultPresentation>(
     }
 }
 
-/// One diagnostic: the problem line at the report's level, then its
-/// location, source frame, and secondary metadata as children.
 fn diagnostic_item(
     ctx: &RenderContext<'_>,
     diagnostic: &wright_driver::Diagnostic,
@@ -476,12 +409,10 @@ fn diagnostic_item(
     dnote(ctx, 1, &format!("= {}", notes.join(" · ")), to_stdout);
 }
 
-/// `N elements` — the recurring count phrase across analyze/cost bodies.
 fn elements(n: usize) -> String {
     plural(n, "element", "elements")
 }
 
-/// One finding item's head line: severity word, code, then message.
 fn finding_head(ctx: &RenderContext<'_>, finding: &Value, occurrences: usize) -> String {
     let severity = finding_severity_label(finding, ctx.presentation.color);
     let code = finding["code"].as_str().unwrap_or("finding");
@@ -493,8 +424,6 @@ fn finding_head(ctx: &RenderContext<'_>, finding: &Value, occurrences: usize) ->
     }
 }
 
-/// A `-->` location line plus, for a lone finding, the one-line source
-/// frame when the path resolves to a readable file.
 fn finding_location_line(ctx: &RenderContext<'_>, span: &Value, depth: usize, frame: bool) {
     let Some((display, readable)) = finding_location(span, ctx.source_base) else {
         return;
@@ -512,8 +441,6 @@ fn finding_location_line(ctx: &RenderContext<'_>, span: &Value, depth: usize, fr
     }
 }
 
-/// The evidence classes a findings list draws on: uniform when every item
-/// names the same class (or none), so the section heading states it once.
 fn uniform_evidence(findings: &[Value]) -> Option<String> {
     let mut classes = findings
         .iter()
@@ -526,8 +453,6 @@ fn uniform_evidence(findings: &[Value]) -> Option<String> {
     }
 }
 
-/// A section of findings: severity-sorted, collapsed repeats, uniform
-/// evidence named once in the heading, per-item evidence only when mixed.
 fn finding_section(
     ctx: &RenderContext<'_>,
     title: &str,
@@ -544,7 +469,6 @@ fn finding_section(
         return;
     }
     let mixed = uniform_evidence(findings).is_none();
-    // Findings sharing a rule id and message collapse into one entry (#430).
     let mut index = 0;
     while index < findings.len() {
         let first = &findings[index];
@@ -566,8 +490,6 @@ fn finding_section(
                 finding_location_line(ctx, span, 2, false);
             }
         }
-        // Secondary notes trail dimmed: evidence when mixed, plus
-        // boundedness and positions with no readable source file.
         let mut notes = Vec::new();
         if mixed {
             notes.push(format!(
@@ -603,8 +525,6 @@ fn finding_section(
     }
 }
 
-/// `key: showing N of M (code: n, ...); --all to see every item` per bounded
-/// list — pre-cap per-code counts (#791) name what `--all` restores.
 fn truncation_notes(ctx: &RenderContext<'_>, value: &Value) {
     let Some(notes) = value["truncation"].as_object() else {
         return;
@@ -630,7 +550,6 @@ fn truncation_notes(ctx: &RenderContext<'_>, value: &Value) {
     }
 }
 
-/// `... {n} {noun} withheld (--max)` for explicitly selected results.
 fn withheld_note(ctx: &RenderContext<'_>, value: &Value, noun: &str) {
     if let Some(withheld) = value["selection"]["withheld"]
         .as_u64()
@@ -647,7 +566,6 @@ fn withheld_note(ctx: &RenderContext<'_>, value: &Value, noun: &str) {
     }
 }
 
-/// `Next` — the result's follow-up commands (ADR-0030), one per line.
 pub(crate) fn next(ctx: &RenderContext<'_>, value: &Value) {
     let Some(commands) = value["next"]
         .as_array()
@@ -663,8 +581,6 @@ pub(crate) fn next(ctx: &RenderContext<'_>, value: &Value) {
     }
 }
 
-/// The run-cache comparison (ADR-0027, #723): the delta against the previous
-/// run or named baseline, plus rules whose counts changed.
 fn comparison(ctx: &RenderContext<'_>, comparison: Option<&Value>) {
     let Some(comparison) = comparison.filter(|c| c.is_object()) else {
         return;
@@ -707,8 +623,6 @@ fn comparison(ctx: &RenderContext<'_>, comparison: Option<&Value>) {
     }
 }
 
-/// The program inventory shared by `check` (`result.program`) and the
-/// analyze/inspect overviews.
 fn program_overview(ctx: &RenderContext<'_>, program: &Value, persistent_objects: Option<usize>) {
     heading(ctx, "Program overview");
     let mut parts = vec![
@@ -734,8 +648,6 @@ fn program_overview(ctx: &RenderContext<'_>, program: &Value, persistent_objects
 
 impl TerminalReport for CheckResult {
     fn body(&self, ctx: &RenderContext<'_>) {
-        // `check` reports through envelope diagnostics; the result carries
-        // the program inventory and follow-up commands (#792).
         let value = serde_json::to_value(self).unwrap_or_default();
         if let Some(program) = value.get("program").filter(|program| program.is_object()) {
             program_overview(ctx, program, None);
@@ -768,9 +680,6 @@ impl TerminalReport for ConvertResult {
 }
 
 impl TerminalReport for LintResult {
-    /// Finding counts by severity lead, then the rules evaluated; under a
-    /// selection the verdict reports the true total instead of counting
-    /// the selected remainder.
     fn headline(&self) -> Option<String> {
         let rules = array_len(&self.rules);
         let mut metadata = if let Some(selection) = &self.selection {
@@ -837,9 +746,6 @@ fn withheld(selection: Option<&wright_driver::SelectionOutcome>) -> Option<u64> 
     selection.and_then(|selection| (selection.withheld > 0).then_some(selection.withheld as u64))
 }
 
-/// The `lint --fix [--write]` report (#556): each offered fix's
-/// disposition — its summary, location, validated diff, or the structured
-/// refusal — under the findings it remediates.
 fn lint_fixes(ctx: &RenderContext<'_>, fixes: &[wright_driver::result::LintFixOutcome]) {
     heading(ctx, "Lint fixes");
     if fixes.is_empty() {
@@ -871,8 +777,6 @@ fn lint_fixes(ctx: &RenderContext<'_>, fixes: &[wright_driver::result::LintFixOu
 }
 
 impl TerminalReport for EssentialResult {
-    /// The severity-grouped totals first, then the remaining collection
-    /// counts in a stable order — the same population `counts` reports.
     fn headline(&self) -> Option<String> {
         if let Some(selection) = &self.selection {
             return Some(plural(selection.total, "finding", "findings"));
@@ -912,9 +816,6 @@ impl TerminalReport for EssentialResult {
         }
         Some(parts.join(", "))
     }
-    /// The essential body mirrors the plain surface's shape dispatch:
-    /// `hotspots` marks analyze, `program` marks the inspect overview, and
-    /// anything else is the lint finding list.
     fn body(&self, ctx: &RenderContext<'_>) {
         let value = &self.result;
         if value.get("hotspots").is_some() {
@@ -967,8 +868,6 @@ impl TerminalReport for EssentialResult {
     }
 }
 
-/// The `analyze` report: cost and inventory first, then hotspots,
-/// complexity, risks, and state — lines name exact vs heuristic.
 fn analyze_body(ctx: &RenderContext<'_>, value: &Value) {
     program_overview(
         ctx,
@@ -1169,8 +1068,6 @@ impl TerminalReport for RulesResult {
     fn headline(&self) -> Option<String> {
         Some(plural(query_items(&self.0, "rules").len(), "rule", "rules"))
     }
-    /// One entry per rule: identity and location, then — with `--content` —
-    /// the conditions and actions, each statement one call-tree line.
     fn body(&self, ctx: &RenderContext<'_>) {
         let rules = query_items(&self.0, "rules");
         heading(ctx, "Rules");
@@ -1206,8 +1103,6 @@ impl TerminalReport for SymbolsResult {
             "symbols",
         ))
     }
-    /// One section per symbol kind, in encounter order, so a mixed list
-    /// stays scannable; each entry is identity plus primary location.
     fn body(&self, ctx: &RenderContext<'_>) {
         let symbols = query_items(&self.0, "symbols");
         heading(ctx, "Symbols");
@@ -1257,8 +1152,6 @@ impl TerminalReport for RefsResult {
             plural(count(&self.0, "rules"), "rule", "rules"),
         ))
     }
-    /// The bounded location list: reference kind, location, and the owning
-    /// rule when the payload names it.
     fn body(&self, ctx: &RenderContext<'_>) {
         let references = self.0["references"]
             .as_array()
@@ -1276,8 +1169,6 @@ impl TerminalReport for RefsResult {
             return;
         }
         for reference in references.iter() {
-            // `owningRule` identifies the rule when the driver carries it
-            // (#807); ADR-0035 prefers its canonical `address`.
             let context = match rule_address(&reference["owningRule"]) {
                 Some(name) => format!(" (rule {name})"),
                 _ => match (reference["rule"].as_u64(), reference["action"].as_u64()) {
@@ -1316,8 +1207,6 @@ impl TerminalReport for CfgResult {
             plural(cfg_edge_count(blocks), "edge", "edges"),
         ))
     }
-    /// Rule identity and the high-level shape lead; the block/edge detail
-    /// is bounded because a large rule's graph is a reference dump (#446).
     fn body(&self, ctx: &RenderContext<'_>) {
         let blocks = self.0["blocks"].as_array().map_or(&[][..], Vec::as_slice);
         match ctx.subject {
@@ -1363,7 +1252,6 @@ impl TerminalReport for CfgResult {
             if block["waits"].as_bool().unwrap_or(false) {
                 flags.push("waits");
             }
-            // `calls` is a list of subroutine indices, not a bool.
             if block["calls"]
                 .as_array()
                 .is_some_and(|calls| !calls.is_empty())
@@ -1413,8 +1301,6 @@ impl TerminalReport for CallGraphResult {
     fn headline(&self) -> Option<String> {
         Some(plural(query_items(&self.0, "edges").len(), "edge", "edges"))
     }
-    /// The shape summary leads, then notable fan-in/fan-out, then the
-    /// bounded edge list (#446).
     fn body(&self, ctx: &RenderContext<'_>) {
         let edges = query_items(&self.0, "edges");
         heading(ctx, "Call graph");
@@ -1481,8 +1367,6 @@ impl TerminalReport for CallGraphResult {
 }
 
 impl TerminalReport for CostResult {
-    /// `--rule`: the rule's identity and element count; whole-program:
-    /// emitted size and action totals.
     fn headline(&self) -> Option<String> {
         if let Some(rule) = self.result.get("rule").filter(|rule| rule.is_object()) {
             return Some(format!(
@@ -1492,8 +1376,6 @@ impl TerminalReport for CostResult {
             ));
         }
         let exact = &self.result["exact"];
-        // A failed emission reports `null` plus `emittedBytesUnavailable` —
-        // the headline says unavailable, never a zero (ADR-0030 decision 3).
         let emitted = match exact["emittedBytes"].as_u64() {
             Some(bytes) => plural(bytes as usize, "emitted byte", "emitted bytes"),
             None => "emitted bytes unavailable".to_string(),
@@ -1505,8 +1387,6 @@ impl TerminalReport for CostResult {
             plural(count(exact, "waitActions"), "wait", "waits"),
         ))
     }
-    /// Totals lead; findings sort by severity and collapse repeats, bounded
-    /// like other query lists. `--rule` is the per-rule breakdown (#724).
     fn body(&self, ctx: &RenderContext<'_>) {
         if self.result.get("rule").is_some_and(|rule| rule.is_object()) {
             cost_rule_body(&self.result, ctx);
@@ -1535,9 +1415,6 @@ impl TerminalReport for CostResult {
         line(ctx, 1, &format!("rules: {}", count(exact, "programRules")));
         line(ctx, 1, &format!("waits: {}", count(exact, "waitActions")));
 
-        // The canonical element count against the client budget (#691),
-        // then each rule's share in payload order — absent means
-        // unavailable, never zero (ADR-0030 decision 3).
         let elements_value = &self.result["elementCount"];
         if let Some(total) = elements_value["total"].as_u64() {
             line(
@@ -1603,8 +1480,6 @@ impl TerminalReport for CostResult {
     }
 }
 
-/// The `inspect cost --rule` body (#724): the rule's identity and location,
-/// then statements ranked by recursive count and per-name own-cost shares.
 fn cost_rule_body(result: &Value, ctx: &RenderContext<'_>) {
     let rule = &result["rule"];
     heading(ctx, "Element cost");
@@ -1628,8 +1503,6 @@ fn cost_rule_body(result: &Value, ctx: &RenderContext<'_>) {
         .as_array()
         .map_or(&[][..], Vec::as_slice);
     let by_node = result["byNode"].as_array().map_or(&[][..], Vec::as_slice);
-    // A `truncation` note carries the pre-cap `total`; the line names both
-    // so the withheld count is recoverable without `--all`.
     let shown = |key: &str| {
         result["truncation"][key].as_object().map(|note| {
             (
@@ -1702,10 +1575,6 @@ fn cost_rule_body(result: &Value, ctx: &RenderContext<'_>) {
     }
 }
 
-/// The `lookup` report (a custom envelope-free path): the tag leads, the
-/// entry count follows, and each entry is one indented line — signature
-/// for a callable, else the accepted spelling, then kind, owner identity,
-/// and display name.
 pub(crate) fn lookup(result: &Value, pres: Presentation) {
     if let Some(unavailable) = result.get("unavailable") {
         eprintln!("{} lookup", tag("UNSUPPORTED", pres.color));
@@ -1736,7 +1605,6 @@ pub(crate) fn lookup(result: &Value, pres: Presentation) {
     }
 }
 
-/// The `lookup` service error line under the terminal layout.
 pub(crate) fn lookup_error(pres: Presentation, word: &str, code: &str, message: &str) {
     if pres.is_terminal() {
         eprintln!("{} lookup", tag(word, pres.color));

@@ -1,13 +1,3 @@
-//! [`LanguageProvider`] is the stable seam that ToolService and language
-//! services consume: provider capabilities plus source-oriented operations,
-//! with no process, framing, or JSON-RPC details exposed. Failures surface
-//! as structured [`crate::error::ProviderError`] values; there is no silent
-//! fallback when a required capability was not negotiated.
-//!
-//! [`StdioLanguageProvider`] implements the trait over a spawned provider
-//! process (see [`crate::client::JsonRpcClient`] and
-//! [`crate::process::ChildProcess`]).
-
 use std::io::BufWriter;
 use std::path::Path;
 use std::time::Duration;
@@ -859,9 +849,6 @@ mod tests {
 
     #[test]
     fn initialize_parse_failure_resets_the_session_for_retry() {
-        // `languages` is a required initialize field: omitting it keeps this
-        // a genuine malformed response, unlike an absent capability id,
-        // which is a legal subset advertisement (#638).
         let mut missing = init_result_json();
         missing.as_object_mut().expect("object").remove("languages");
         let (mut provider, fake) = Fake::spawn(vec![
@@ -1134,7 +1121,6 @@ mod tests {
         assert_eq!(request["params"]["limit"], 3);
         fake.assert_only_requests(0);
 
-        // A session negotiated below 1.5 refuses before any wire traffic.
         let (mut older, fake) = Fake::spawn(vec![FakeStep::Respond(ok_response(
             init_result_artifact_negotiation_json(),
         ))]);

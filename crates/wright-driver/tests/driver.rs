@@ -62,10 +62,6 @@ fn workshop_check_reports_catalog_residuals() {
     );
 }
 
-/// A settings member the catalog does not declare is a `raw-setting`
-/// residual; when its name is close to one canonical spelling, the
-/// diagnostic keeps the did-you-mean that the owner's former rejection
-/// carried. A name close to nothing gets no suggestion.
 #[test]
 fn workshop_raw_setting_residual_suggests_the_canonical_spelling() {
     let text = r#"settings
@@ -123,10 +119,6 @@ fn workshop_raw_setting_residual_suggests_the_canonical_spelling() {
     );
 }
 
-/// `sqrt` is a foldable spelling that the canonical catalog does not model, so
-/// it survives parsing as an unknown-value residual; `fold-constants` would
-/// remove it from the transformed program. Completeness diagnostics describe
-/// the authored source regardless of the profile (#442).
 #[test]
 fn workshop_check_reports_residuals_under_transform_profile() {
     let path = workshop_fixture("synthetic/foldable-unknown-value");
@@ -153,10 +145,6 @@ fn workshop_check_reports_residuals_under_transform_profile() {
     }
 }
 
-/// Raw Workshop check and compile must apply the owner's catalog-aware
-/// canonical validation, not only the structural `validate()` pass: calls
-/// that violate declared catalog signatures are rejected with the owner's
-/// error and source span instead of reporting clean success.
 #[test]
 fn workshop_check_and_compile_reject_catalog_signature_violations() {
     let directory = workspace_root()
@@ -221,11 +209,6 @@ fn workshop_check_and_compile_reject_catalog_signature_violations() {
     let _ = std::fs::remove_dir_all(&directory);
 }
 
-/// A catalog-unknown residual must not mask a later canonical violation:
-/// the owner validator is fail-fast, so the residual construct is
-/// neutralized before canonical validation judges the rest of the program.
-/// The violation is rejected in either order, including under a transform
-/// profile that would fold the residual away before emission.
 #[test]
 fn workshop_check_and_compile_reject_violations_beside_residuals() {
     let directory = workspace_root()
@@ -276,9 +259,6 @@ fn workshop_check_and_compile_reject_violations_beside_residuals() {
     let _ = std::fs::remove_dir_all(&directory);
 }
 
-/// #789: owner `kind` phrases carry spaces (`"enum member"`), and a
-/// diagnostic code is a single kebab-case token wherever it is emitted, so
-/// the rejection is `unknown-enum-member`.
 #[test]
 fn workshop_unknown_kind_codes_are_kebab_case_tokens() {
     let mut session = CompilerSession::new(SessionConfig {
@@ -311,9 +291,6 @@ fn workshop_unknown_kind_codes_are_kebab_case_tokens() {
     }
 }
 
-/// Trailing catalog defaults are not required arguments: the owner
-/// validator accepts `Wait(1)` and `Wait(1, Ignore Condition)`, and the
-/// integration must not reject them.
 #[test]
 fn workshop_check_accepts_optional_action_defaults() {
     let directory = workspace_root()
@@ -346,17 +323,12 @@ fn workshop_check_accepts_optional_action_defaults() {
     let _ = std::fs::remove_dir_all(&directory);
 }
 
-/// Catalog-unknown constructs belong to the completeness residual channel:
-/// canonical validation defers them rather than aborting the load, so a
-/// preserved opaque action still reports as a classified residual.
 #[test]
 fn workshop_check_reports_opaque_residuals_beside_canonical_validation() {
     let directory = workspace_root()
         .join("target")
         .join(format!("wright-driver-opaque-{}", std::process::id()));
     std::fs::create_dir_all(&directory).expect("fixture directory creates");
-    // A trailing unmatched structural marker is preserved by the parser as
-    // an opaque raw action instead of rejecting the source.
     let path = directory.join("opaque-residual.ws");
     std::fs::write(
         &path,
@@ -415,18 +387,12 @@ fn workshop_compile_is_deterministic_and_idempotent() {
     );
 }
 
-/// The smallest Bastion-style case (#488): a program whose canonical element
-/// count exceeds the 32768 client limit still emits its artifact, and the
-/// compile envelope reports the violation as a warning — not a compilation
-/// error. `check` stays a source-correctness workflow and does not evaluate
-/// the client import budget.
 #[test]
 fn compile_warns_over_client_element_limit_but_still_emits() {
     let elements = (0..17_000).map(|_| "1").collect::<Vec<_>>().join(", ");
     let source = format!(
         "variables {{\n    global:\n        0: values\n}}\n\nrule (\"fill\") {{\n    event {{\n        Ongoing - Global;\n    }}\n    actions {{\n        Set Global Variable(values, Array({elements}));\n    }}\n}}\n"
     );
-    // The warning's numbers come from the canonical owner, not a guess.
     let catalog = workshop_rs::catalog::Catalog::builtin_ref().expect("catalog");
     let locale = workshop_rs::catalog::Locale::new("en-US");
     let expected_total =
@@ -544,10 +510,6 @@ fn refused_config_change(diagnostics: &[Diagnostic]) -> bool {
         .any(|d| d.code == "session-config-changed")
 }
 
-/// #511: `SessionConfig` is construction-time. A post-construction mutation
-/// refuses the next workflow explicitly instead of serving state derived
-/// from the earlier configuration — including the already-loaded program
-/// cached before the mutation.
 #[test]
 fn session_config_mutation_refuses_workflows() {
     let path = workshop_fixture("synthetic/control-flow");
@@ -578,8 +540,6 @@ fn session_config_mutation_refuses_workflows() {
     assert!(session.check().ok, "check: {:?}", session.diagnostics());
 }
 
-/// #511: the same refusal covers the non-load edit surfaces and service
-/// construction, and the diagnostic names the changed fields.
 #[test]
 fn session_config_mutation_refuses_edits_and_service_construction() {
     let path = workshop_fixture("synthetic/control-flow");
@@ -611,10 +571,6 @@ fn session_config_mutation_refuses_edits_and_service_construction() {
     assert!(error.message.contains("lint"), "{error:?}");
 }
 
-/// #511: the provider seam consumes `config.providers`/`config.opy_provider`
-/// live; a mutated registry refuses through the provider refusal channel
-/// carrying `session-config-changed` instead of spawning from the changed
-/// configuration.
 #[test]
 fn session_config_mutation_refuses_provider_workflows() {
     let path = workshop_fixture("synthetic/control-flow");
@@ -661,10 +617,6 @@ fn session_config_mutation_refuses_provider_workflows() {
     );
 }
 
-/// #555: an open editor buffer enters the session as `InputSpec::Text` —
-/// the buffer text replaces the disk read while `path` still carries the
-/// file identity, so `check` answers for the text exactly as it would for
-/// the same bytes on disk.
 #[test]
 fn workshop_text_input_replaces_the_disk_read() {
     let path = workshop_fixture("synthetic/raw-settings");
@@ -752,8 +704,6 @@ fn workshop_text_input_replaces_the_disk_read() {
     );
 }
 
-/// ADR-0025: an existing output file is replaced only when the caller's
-/// prompt says yes; declining keeps it, and the input is never replaced.
 #[test]
 fn compile_to_asks_before_replacing_and_never_replaces_the_input() {
     use wright_driver::{CompileWrite, OutputDest, Overwrite};

@@ -1,9 +1,3 @@
-//! Byte-deterministic golden tests for the GitHub Actions renderer (#794,
-//! ADR-0030 decisions 8–11): bounded annotations, the verdict-titled log
-//! group over the plain record body, and the Markdown step summary. Inputs
-//! are copied into a temp dir and addressed by a relative name, so `file=`,
-//! `at=`, and the summary title render identically on any machine.
-
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
@@ -94,8 +88,6 @@ const HOT_LOOP: &str = "rule (\"r\") {\n\
      \t}\n\
      }\n";
 
-/// `check` under GHA: the error annotation, the verdict-titled log group
-/// with the plain records inside, and the Markdown step summary.
 #[test]
 fn check_renders_annotation_group_and_summary() {
     let dir = fixture_dir("check", &[("mixed.ws", MIXED_CHECK)]);
@@ -106,8 +98,6 @@ fn check_renders_annotation_group_and_summary() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// `lint` under GHA: warning annotations only — the notice/info level never
-/// draws an annotation card.
 #[test]
 fn lint_renders_warning_annotation_and_summary() {
     let dir = fixture_dir(
@@ -121,8 +111,6 @@ fn lint_renders_warning_annotation_and_summary() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// `analyze` under GHA: the risk annotations and the essential report's
-/// summary section.
 #[test]
 fn analyze_renders_risk_annotations_and_summary() {
     let dir = fixture_dir(
@@ -136,12 +124,8 @@ fn analyze_renders_risk_annotations_and_summary() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// More distinct findings than the platform's per-step limit: exactly ten
-/// `::warning` annotations emit, the rest are disclosed by the closing
-/// notice, and the log group still carries every finding record.
 #[test]
 fn annotations_stay_inside_the_per_step_limit() {
-    // Twelve hot loops at distinct lines — twelve min-wait-loop warnings.
     let mut source = String::new();
     for index in 0..12 {
         source.push_str(&HOT_LOOP.replace("\"r\"", &format!("\"r{index}\"")));
@@ -163,8 +147,6 @@ fn annotations_stay_inside_the_per_step_limit() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// The summary links to the blob when the workflow env names it; without
-/// the env the same location stays a code span.
 #[test]
 fn summary_links_to_the_blob_when_the_env_resolves() {
     let dir = fixture_dir("links", &[("mixed.ws", MIXED_CHECK)]);
@@ -194,7 +176,6 @@ fn summary_links_to_the_blob_when_the_env_resolves() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A produced baseline comparison renders in the step summary (#794).
 #[test]
 fn summary_reports_a_produced_baseline_comparison() {
     let dir = fixture_dir(
@@ -222,8 +203,6 @@ fn summary_reports_a_produced_baseline_comparison() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Without `GITHUB_STEP_SUMMARY` the renderer falls back to a compact
-/// notice — the annotations and group are unaffected.
 #[test]
 fn summary_falls_back_to_a_notice_without_the_env() {
     let dir = fixture_dir("notice", &[("mixed.ws", MIXED_CHECK)]);

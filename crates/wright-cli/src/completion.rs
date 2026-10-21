@@ -378,10 +378,6 @@ fn print_guidance(shell: ShellArg, target_file: &Path) {
     }
 }
 
-/// `fallback` is the `wright completion <SHELL>` positional, which clap
-/// accepts ahead of the `install` subcommand: `wright completion bash
-/// install` must install the bash completion, not the detected shell's
-/// (#641).
 pub(crate) fn run_install(
     args: &CompletionInstallArgs,
     fallback: Option<ShellArg>,
@@ -445,7 +441,7 @@ mod tests {
         assert_eq!(parse_shell_name("fish"), Some(ShellArg::Fish));
         assert_eq!(parse_shell_name("powershell"), Some(ShellArg::PowerShell));
         assert_eq!(parse_shell_name("pwsh"), Some(ShellArg::PowerShell));
-        assert_eq!(parse_shell_name("/bin/bash"), None); // filename extraction done beforehand
+        assert_eq!(parse_shell_name("/bin/bash"), None);
         assert_eq!(parse_shell_name("unknown"), None);
     }
 

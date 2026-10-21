@@ -1,15 +1,8 @@
-//! The CLI's command spelling wherever an error must name a runnable form
-//! (#888): the usage subject, the `inspect <area>` narrowing hint a
-//! surplus positional earns, and the `wright inspect` command the
-//! neutral listing-operation marker renders to.
-
 use clap::CommandFactory;
 
 use crate::CLI_NAME;
 use crate::cli::Cli;
 
-/// The command a usage error names: the first argument that is a real
-/// subcommand, else the CLI name itself.
 pub(crate) fn subject(args: &[std::ffi::OsString]) -> String {
     let names: Vec<String> = Cli::command()
         .get_subcommands()
@@ -23,9 +16,6 @@ pub(crate) fn subject(args: &[std::ffi::OsString]) -> String {
         .to_string()
 }
 
-/// The `inspect <area>` narrowing hint a surplus positional earns: the
-/// parser's `unexpected argument` error names no working form, so the
-/// usage error names the flag that narrows that query.
 pub(crate) fn narrowing(args: &[std::ffi::OsString]) -> Option<&'static str> {
     let mut words = args
         .iter()
@@ -66,9 +56,6 @@ pub(crate) fn narrowing(args: &[std::ffi::OsString]) -> Option<&'static str> {
     })
 }
 
-/// The CLI's `listOp` spelling (#888): the `wright inspect` command that
-/// lists the declared names — `wright serve` renders `the 'rules'
-/// operation` on the same fields.
 fn list_command(operation: &str, unbounded: bool) -> String {
     format!(
         "wright inspect {operation}{}",
@@ -76,10 +63,6 @@ fn list_command(operation: &str, unbounded: bool) -> String {
     )
 }
 
-/// Compose the refusal fields an envelope diagnostic carries — the
-/// CLI's own `wright inspect` command spelling (#888). `message` text
-/// is never scanned or rewritten: the fields alone carry the candidate
-/// locations and the listing operation.
 pub(crate) fn render_inspect_diagnostics<T: serde::Serialize>(
     envelope: &mut wright_driver::Envelope<T>,
 ) {

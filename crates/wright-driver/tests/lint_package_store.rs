@@ -1,9 +1,3 @@
-//! Lint package store lifecycle tests (#844): entry enumeration with
-//! damaged entries and leftovers, removal that preserves user files,
-//! offline installs by full SHA, and search paging. Every remote answer
-//! comes from the shared recorded-response server; nothing touches the
-//! real network.
-
 mod support;
 
 use std::net::TcpListener;
@@ -13,8 +7,6 @@ use wright_driver::LintPackageStore;
 
 use support::*;
 
-/// Write a store entry directly: `<root>/<owner>/<repo>/<sha>/rules/<file>`
-/// — the same layout `install` promotes — plus any extra files.
 fn write_entry(root: &Path, sha: &str, extra: &[(&str, &[u8])]) -> PathBuf {
     let dir = root.join("community/rules").join(sha);
     std::fs::create_dir_all(dir.join("rules")).unwrap();
@@ -30,10 +22,8 @@ fn entries_enumerates_intact_and_damaged_entries_in_order() {
     let dir = TestDir::new("entries");
     write_entry(dir.path(), SHA_A, &[]);
     write_entry(dir.path(), SHA_B, &[]);
-    // A damaged entry — no rule files — is reported with its reason.
     let damaged = dir.path().join("damaged/pkg").join(SHA_A).join("rules");
     std::fs::create_dir_all(&damaged).unwrap();
-    // Non-entry directories are skipped: leftovers, non-SHA names, files.
     std::fs::create_dir_all(dir.path().join(".lint-package-staging")).unwrap();
     std::fs::create_dir_all(dir.path().join("community/rules/latest")).unwrap();
     std::fs::write(dir.path().join("README.md"), b"notes").unwrap();
@@ -61,7 +51,6 @@ fn entries_enumerates_intact_and_damaged_entries_in_order() {
         Some("lint-package-install")
     );
     assert!(damaged.rules.is_empty());
-    // Damaged entries load no rules and still enumerate; no remote calls.
     assert!(server.requests().is_empty());
 }
 
@@ -79,7 +68,6 @@ fn remove_deletes_the_entry_and_prunes_empty_parents() {
         store_entries(dir.path()),
         [format!("community/rules/{SHA_B}")]
     );
-    // Removing the last entry prunes <owner>/<repo> back to the root.
     store.remove(&source(), SHA_B).unwrap();
     assert_eq!(store_entries(dir.path()), Vec::<String>::new());
     assert!(!dir.path().join("community").exists());
@@ -129,7 +117,6 @@ fn search_page(hits: &[(&str, Option<&str>)], total: u64) -> String {
 #[test]
 fn search_pages_the_wrightkit_lint_topic_query() {
     let dir = TestDir::new("search");
-    // 101 results over two pages — the second page carries one item.
     let mut first: Vec<(&str, Option<&str>)> = (0..100)
         .map(|i| {
             (

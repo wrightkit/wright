@@ -1,7 +1,3 @@
-//! `wright serve --transport mcp`: the MCP adapter's tool catalog, request
-//! mapping, refusal codes, and long-lived-session behavior over the same
-//! in-process service the other transports expose.
-
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -23,8 +19,6 @@ fn corpus_workshop(id: &str) -> PathBuf {
 }
 
 fn run_lines(transport: &str, input: &Path, lines: &[&str]) -> Vec<serde_json::Value> {
-    // `compile` writes `<entry stem>.ow` in the working directory, so every
-    // service process gets its own.
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let cwd = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
         "serve-mcp-{}-{}",
@@ -70,8 +64,6 @@ fn mcp_call(id: u64, name: &str, arguments: serde_json::Value) -> String {
     .to_string()
 }
 
-/// The tool result's JSON payload: the single text content block parsed back
-/// into a value.
 fn mcp_payload(response: &serde_json::Value) -> serde_json::Value {
     serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap())
         .expect("tool content is JSON")
@@ -90,7 +82,6 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
             r#"{"jsonrpc":"2.0","id":3,"method":"ping"}"#,
         ],
     );
-    // The notification produced no response.
     assert_eq!(responses.len(), 3);
     assert_eq!(responses[0]["result"]["protocolVersion"], "2025-11-25");
     assert_eq!(
@@ -153,8 +144,6 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
             "{} not advertised",
             tool["name"]
         );
-        // Schemas derive from the request definitions: no `op`, and the edit
-        // tools omit `sources`.
         assert!(tool["inputSchema"]["properties"].get("op").is_none());
         assert!(tool["description"].is_string());
     }
@@ -168,8 +157,6 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
             .is_none(),
         "wright_validate_edit_transaction omits sources"
     );
-    // #548: the provider tool omits `documents`/`sources` — the service
-    // derives them from the session's loaded project.
     let provider_tool = tools
         .iter()
         .find(|t| t["name"] == "wright_provider_validate_edit")
@@ -183,8 +170,6 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
                 .is_none(),
         "wright_provider_validate_edit omits documents and sources"
     );
-    // ADR-0029: `editStatements`'s MCP schema omits `sources` like the other
-    // edit tools and keeps `inputIdentity`/`edits` required.
     let edit_statements = tools
         .iter()
         .find(|t| t["name"] == "wright_edit_statements")
@@ -199,9 +184,6 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
         edit_statements["inputSchema"]["required"],
         json!(["inputIdentity", "edits"])
     );
-    // ADR-0033: `wright_simulate`'s schema omits `sources` like the edit
-    // tools and keeps `inputIdentity` required; `seconds`/`scenario` stay
-    // optional alternates.
     let simulate = tools
         .iter()
         .find(|t| t["name"] == "wright_simulate")
@@ -224,7 +206,6 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
                 .get("scenario")
                 .is_some()
     );
-    // #532: the report tools expose `all` in their derived input schemas.
     for name in ["wright_analyze", "wright_inspect", "wright_lint"] {
         let tool = tools.iter().find(|t| t["name"] == name).unwrap();
         assert_eq!(
@@ -232,8 +213,6 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
             "{name} has no all field"
         );
     }
-    // #529: `wright_lookup`'s schema derives from `LookupRequest` — `op` is
-    // dropped, `language` stays required.
     let lookup = tools.iter().find(|t| t["name"] == "wright_lookup").unwrap();
     assert_eq!(lookup["inputSchema"]["required"], json!(["language"]));
     assert!(
@@ -255,15 +234,11 @@ fn mcp_transport_results_match_the_service_contract() {
         ("wright_usage", serde_json::json!({"symbol": "index"})),
         ("wright_call_graph", serde_json::json!({})),
         ("wright_check", serde_json::json!({})),
-        // #532: the report tools carry `all` through to the same service
-        // result the stdio transport reports.
         ("wright_analyze", serde_json::json!({"all": true})),
         ("wright_inspect", serde_json::json!({"all": true})),
         ("wright_lint", serde_json::json!({"severity": "info"})),
         ("wright_lint", serde_json::json!({"all": true})),
         ("wright_cost_estimate", serde_json::json!({})),
-        // #472: the edit tools run without `sources` — the service reads the
-        // on-disk text.
         (
             "wright_validate_edit_transaction",
             serde_json::json!({
@@ -281,8 +256,6 @@ fn mcp_transport_results_match_the_service_contract() {
                 }
             }),
         ),
-        // ADR-0029: `inputIdentity` is the freshness precondition; the edit
-        // tool's MCP schema omits `sources` like the other edit tools.
         (
             "wright_edit_statements",
             serde_json::json!({
@@ -294,14 +267,10 @@ fn mcp_transport_results_match_the_service_contract() {
                 }],
             }),
         ),
-        // #529: vocabulary lookup needs no project state — the payload is
-        // the same result object stdio returns.
         (
             "wright_lookup",
             serde_json::json!({"language": "workshop", "query": "wait"}),
         ),
-        // ADR-0033: the MCP tool maps to `ToolRequest::Simulate` and its
-        // payload is the same wright-result envelope stdio returns.
         (
             "wright_simulate",
             serde_json::json!({
@@ -355,17 +324,11 @@ fn mcp_transport_results_match_the_service_contract() {
 
 #[test]
 fn mcp_transport_preserves_refusal_codes() {
-    // #473: service refusals become `isError` tool results carrying the
-    // original {code, message}; they never become successes, and adapter
-    // protocol errors stay JSON-RPC errors, not tool results.
     let input = corpus_workshop("synthetic/control-flow");
     let dup = {
         let dir = std::env::temp_dir().join(format!("wright-mcp-dup-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("dup.ws");
-        // ADR-0035: a bare `symbol` never matches rules, so the ambiguity
-        // is the global variable against the subroutine — both non-rule
-        // kinds named `dup`.
         std::fs::write(
             &path,
             r#"variables {
@@ -437,7 +400,6 @@ rule ("dup") {
     assert_eq!(refused(&responses[0])["code"], "unknown-symbol");
     assert_eq!(refused(&responses[1])["code"], "unknown-symbol");
     assert_eq!(refused(&responses[2])["code"], "invalid-id");
-    // A numeric address without its issuing `snapshot` refuses `stale-id` (#595).
     assert_eq!(refused(&responses[5])["code"], "stale-id");
     assert_eq!(responses[3]["error"]["code"], -32602);
     assert_eq!(responses[4]["error"]["code"], -32602);
@@ -470,9 +432,6 @@ rule ("dup") {
         }),
     );
     let stale_responses = run_lines("mcp", &stale, &[stale_line.as_str()]);
-    // Edit outcomes ride the result payload (`ok: false` + diagnostics), not
-    // the error envelope — the adapter passes the service result through
-    // unchanged either way.
     let refusal = mcp_payload(&stale_responses[0]);
     assert_eq!(refusal["ok"], false, "{refusal}");
     assert_eq!(
@@ -485,11 +444,6 @@ rule ("dup") {
 
 #[test]
 fn mcp_transport_observes_disk_changes_and_enforces_fresh_ids() {
-    // #473 + #471 + #595: an MCP session is long-lived like `serve` stdio —
-    // a file edit on disk is reflected by the next tools/call, and numeric
-    // ids are scoped to the `snapshot` generation the response reported:
-    // absent or carried over from a dropped generation, a numeric address
-    // refuses `stale-id`.
     use std::io::{BufRead, BufReader};
     let dir = std::env::temp_dir().join(format!("wright-serve-mcp-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -541,8 +495,6 @@ fn mcp_transport_observes_disk_changes_and_enforces_fresh_ids() {
     assert_eq!(names, ["score", "setup"]);
     let snapshot = mcp_payload(&symbols)["snapshot"].as_u64().unwrap();
 
-    // A numeric address without its issuing generation refuses `stale-id`;
-    // echoing the generation resolves.
     let bare = exchange(call("wright_references", serde_json::json!({"symbol": 0})));
     assert_eq!(mcp_payload(&bare)["code"], "stale-id", "{bare}");
     let numeric = exchange(call(
@@ -595,10 +547,6 @@ fn mcp_transport_observes_disk_changes_and_enforces_fresh_ids() {
 
 #[test]
 fn mcp_transport_bootstraps_over_a_broken_project_and_recovers() {
-    // #512: MCP `initialize`/`tools/list` are independent of the session
-    // project — a missing input must not prevent bootstrap or hide the
-    // stable tool set. `tools/call` maps the project-load refusal to the
-    // `isError` tool result, and the same server adopts the repaired input.
     use std::io::{BufRead, BufReader};
     let dir = std::env::temp_dir().join(format!("wright-serve-mcp-512-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -636,9 +584,6 @@ fn mcp_transport_bootstraps_over_a_broken_project_and_recovers() {
         "wright-tool-service"
     );
 
-    // The broken project does not hide tools: the set is the same one the
-    // server advertises once the project loads (compared below), and it
-    // still contains a program-reading tool.
     let list = exchange(serde_json::json!({
         "jsonrpc": "2.0", "id": 2, "method": "tools/list",
     }));
@@ -653,8 +598,6 @@ fn mcp_transport_bootstraps_over_a_broken_project_and_recovers() {
         "{list}"
     );
 
-    // A program-reading tool call is the service's structured refusal as an
-    // `isError` tool result — not a protocol error.
     let refused = exchange(serde_json::json!({
         "jsonrpc": "2.0", "id": 3, "method": "tools/call",
         "params": {"name": "wright_project", "arguments": {}},

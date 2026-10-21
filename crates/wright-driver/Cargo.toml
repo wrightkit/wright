@@ -11,8 +11,6 @@ description = "Wright's reusable compiler/session driver shared by the CLI, tool
 workspace = true
 
 [dependencies]
-# The Workshop scheduler simulator `simulate` delegates to (ADR-0033);
-# pinned to the tagged release that owns the trace contract.
 athena-sim = { git = "https://github.com/wrightkit/athena.git", tag = "v0.2.0" }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

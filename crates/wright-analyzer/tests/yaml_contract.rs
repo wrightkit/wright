@@ -258,8 +258,6 @@ rules:
         LintConfig::from_yaml_str(&serialized).expect("serialized lint config parses");
     assert_eq!(round_tripped, config);
 
-    // The `packages` entry is part of the same deny-unknown-fields
-    // contract — a stray key or a repo ref is not accepted (issue #843).
     assert!(
         LintConfig::from_yaml_str(
             "packages:\n  - repo: community/x\n    sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n    ref: main\n"
@@ -271,9 +269,6 @@ rules:
 
 #[test]
 fn first_party_rule_loading_replaces_the_matching_native_id() {
-    // A first-party package rule may carry a bare built-in ID or the
-    // reserved `wright` namespace; community-style namespaces remain
-    // errors in first-party loading (issue #843).
     let mut registry = LintRegistry::default();
     registry
         .load_first_party_yaml_str(
@@ -301,7 +296,6 @@ matcher:
     assert_eq!(entries.len(), 1, "the ID has one owner: {entries:?}");
     assert_eq!(entries[0].kind, "declarative");
 
-    // The replaced native analysis does not double-report the ID.
     let mut program = Program::new();
     program.rule(
         Rule::new("valid", Event::Global)
@@ -320,7 +314,6 @@ matcher:
     assert_eq!(hits[0].evidence, EvidenceClass::Exact);
     assert!(hits[0].message.contains("matched"));
 
-    // A second declarative rule with the same ID still collides.
     assert!(matches!(
         registry.load_first_party_yaml_str(
             "id: min-wait-loop\nmetadata:\n  summary: s\n  rationale: r\n  documentation: d\n  known-limits: k\n  tags: []\nmatcher: {}\n"
@@ -328,8 +321,6 @@ matcher:
         Err(RuleRegistryError::DuplicateId(id)) if id == "min-wait-loop"
     ));
 
-    // The reserved `wright` namespace is accepted only for first-party
-    // loading; community-style and bare IDs follow the external contract.
     registry
         .load_first_party_yaml_str(
             "id: wright/example\nmetadata:\n  summary: s\n  rationale: r\n  documentation: d\n  known-limits: k\n  tags: []\nmatcher: {}\n",
@@ -349,8 +340,6 @@ matcher:
             )
             .is_err()
     );
-    // Two `packages` entries whose effective rule IDs collide are errors
-    // through the ordinary external path as well.
     registry
         .load_yaml_str(
             "id: community/dup\nmetadata:\n  summary: s\n  rationale: r\n  documentation: d\n  known-limits: k\n  tags: []\nmatcher: {}\n",

@@ -1,20 +1,3 @@
-//! The plain renderer (ADR-0030 decisions 1, 2, 5–7; #793): Wright's
-//! agent-facing text surface as line records.
-//!
-//! Every line is `kind: key=value …`; the verdict line keeps its
-//! `STATUS command` lead. A location is one `path:line:col` token, facts are
-//! fields rather than sentences, a capped list is followed by a `truncated:`
-//! record giving shown, total, and the exact expansion command, and
-//! follow-up commands print as `next:` records. Records carry no
-//! decoration, no `(s)` plural suffixes, and no wall-clock values; a failed
-//! computation reports `unavailable` with its reason.
-//!
-//! Envelope diagnostics keep the text-mode stream contract — `diagnostic:`
-//! records go to stderr while the result records stay on stdout — so a
-//! `diagnostic:` line is never interleaved with the report it belongs to.
-//! A failed analysis result is the exception: verdict, summary, and
-//! diagnostics all go to stdout (#891).
-
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -30,7 +13,6 @@ use crate::present::{
     edge_caller, finding_severity_rank, inline_location, is_real_source_path, query_items,
     render_node, rule_address, rule_name, severity_rank, summary_status, tree_rule,
 };
-/// One buffered output line tagged with its stream.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Stream {
     Out,
@@ -39,13 +21,11 @@ pub(crate) enum Stream {
 
 pub(crate) type Line = (Stream, String);
 
-/// Emit the envelope as plain line records.
 pub(crate) fn render<T: serde::Serialize + ResultPresentation + PlainReport>(
     envelope: &Envelope<T>,
     ctx: &RenderContext<'_>,
 ) {
     if envelope.result.is_artifact_stream() {
-        // An artifact stream is the payload itself; diagnostics stay records.
         let mut err: Vec<Line> = Vec::new();
         diagnostic_records(envelope, ctx, &mut err);
         emit(&mut err);
@@ -61,8 +41,6 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation + PlainReport>(
     }
 }
 
-/// The plain report as ordered `(stdout, stderr)` record strings — the
-/// GitHub Actions log group renders the same lines (#794).
 pub(crate) fn render_lines<T: serde::Serialize + ResultPresentation + PlainReport>(
     envelope: &Envelope<T>,
     ctx: &RenderContext<'_>,
@@ -70,13 +48,8 @@ pub(crate) fn render_lines<T: serde::Serialize + ResultPresentation + PlainRepor
     let mut out: Vec<Line> = Vec::new();
     let mut err: Vec<Line> = Vec::new();
     out.push((Stream::Out, verdict_line(envelope, ctx)));
-    // A failed analysis result's diagnostics join the report on stdout (#891).
     let failed_to_stdout = diagnostics_on_stdout(envelope);
-    // A gated result is a raised verdict: its real result body still
-    // renders — the findings are why it failed (ADR-0030 decision 13).
     if !envelope.ok && !envelope.gated {
-        // A failed command reports severity counts, not the default
-        // result's headline — a default payload would masquerade (#446).
         if envelope.diagnostics.is_empty() {
             (if failed_to_stdout { &mut out } else { &mut err }).push((
                 Stream::Err,
@@ -91,7 +64,6 @@ pub(crate) fn render_lines<T: serde::Serialize + ResultPresentation + PlainRepor
                 counts[severity_rank(diagnostic.severity) as usize] += 1;
             }
             let mut fields = severity_fields(counts[0], counts[1], counts[2]);
-            // The affected-file count is envelope data, not result data.
             let affected: BTreeSet<String> = envelope
                 .diagnostics
                 .iter()
@@ -116,17 +88,12 @@ pub(crate) fn render_lines<T: serde::Serialize + ResultPresentation + PlainRepor
     for next in next_commands(envelope) {
         out.push((Stream::Out, format!("next: {next}")));
     }
-    // The verdict and report lead; the diagnostic records annotate them.
     (
         out.into_iter().map(|(_, line)| line).collect(),
         err.into_iter().map(|(_, line)| line).collect(),
     )
 }
 
-/// The verdict word shares the renderers' tag set (ADR-0030 decision 4):
-/// FAIL the raised gate verdict, ERROR a genuine failure, USAGE exit 2,
-/// UNSUPPORTED exit 3. A clean query command (`rules`, `symbols`, `refs`,
-/// `cfg`, `callgraph`, `cost`, `inspect`, `lookup`) shows its own name.
 fn verdict_word<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) -> String {
     if envelope.exit != 0 || !envelope.ok {
         if envelope.gated {
@@ -146,8 +113,6 @@ fn verdict_word<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>
     }
 }
 
-/// `<WORD> <command>` plus the input context fields (`root=`, and `kind=`/
-/// `locale=` when the result carries a program origin).
 fn verdict_line<T: serde::Serialize + ResultPresentation + PlainReport>(
     envelope: &Envelope<T>,
     ctx: &RenderContext<'_>,
@@ -164,8 +129,6 @@ fn verdict_line<T: serde::Serialize + ResultPresentation + PlainReport>(
     line
 }
 
-/// The include root spelled for an agent: `.` when it is the working
-/// directory, else the display path (deterministic under a fixed cwd).
 pub(crate) fn display_root(root: &Path) -> String {
     if let Ok(cwd) = std::env::current_dir()
         && root == cwd
@@ -175,9 +138,6 @@ pub(crate) fn display_root(root: &Path) -> String {
     display_location_path(&root.display().to_string())
 }
 
-/// `diagnostic:` records on stderr, errors first like every other renderer,
-/// capped at the default page unless `--all` lifted it. `truncated:` and
-/// `selected:` records state what the cap or the `--max` selection withheld.
 fn diagnostic_records<T: serde::Serialize>(
     envelope: &Envelope<T>,
     ctx: &RenderContext<'_>,
@@ -221,9 +181,6 @@ fn diagnostic_records<T: serde::Serialize>(
     }
 }
 
-/// One `diagnostic:` record: severity and code lead, then the location,
-/// stage and origin metadata as fields. A pseudo-path stays a verbatim
-/// `at=<stdin>:l:c` token — records never claim a file that does not exist.
 fn diagnostic_record(diagnostic: &Diagnostic) -> String {
     let mut items = vec![
         diagnostic.severity.as_str().to_string(),
@@ -257,7 +214,6 @@ fn diagnostic_record(diagnostic: &Diagnostic) -> String {
     format!("diagnostic: {}", items.join(" "))
 }
 
-/// The wire spelling of a support classification.
 fn status_label(status: Status) -> &'static str {
     match status {
         Status::Supported => "supported",
@@ -266,9 +222,6 @@ fn status_label(status: Status) -> &'static str {
     }
 }
 
-/// Follow-up commands as `next:` records (decision 2): the result's
-/// driver-provided list (#792) when it carries one, else the command's
-/// known follow-ups; the rejected-name lookup hints are additive.
 fn next_commands<T: serde::Serialize>(envelope: &Envelope<T>) -> Vec<String> {
     let mut commands = Vec::new();
     let result = serde_json::to_value(&envelope.result).unwrap_or_default();
@@ -288,10 +241,6 @@ fn next_commands<T: serde::Serialize>(envelope: &Envelope<T>) -> Vec<String> {
             }
         }
         "check" | "compile" => {
-            // ADR-0021 decision 6, in record form: a rejected-name
-            // diagnostic is followed by the lookup that resolves it.
-            // `unknown-language` is `WorkshopError::NotDetected` — there is
-            // nothing `wright lookup` could resolve for it.
             let mut seen = BTreeSet::new();
             for diagnostic in &envelope.diagnostics {
                 let rejected_name = diagnostic
@@ -322,8 +271,6 @@ fn next_commands<T: serde::Serialize>(envelope: &Envelope<T>) -> Vec<String> {
     commands
 }
 
-/// The run-cache comparison (ADR-0027, #723) as `comparison:`/`change:`
-/// records — absent entirely when no reference was produced.
 fn comparison_records(comparison: Option<&Value>, out: &mut Vec<Line>) {
     let Some(comparison) = comparison.filter(|c| c.is_object()) else {
         return;
@@ -378,8 +325,6 @@ fn emit(lines: &mut Vec<Line>) {
     }
 }
 
-/// `key=value` with the value quoted only when it needs it: a bare token
-/// carries no whitespace, `"`, `\`, or `=`.
 pub(crate) fn field(key: &str, value: &str) -> String {
     format!("{key}={}", scalar(value))
 }
@@ -409,8 +354,6 @@ fn scalar(value: &str) -> String {
     quoted
 }
 
-/// `truncated: <list>=<shown>/<total> … expand="<command>"` — the record a
-/// capped list is followed by.
 pub(crate) fn truncated_record(lists: &[(&str, usize, usize)], expand: &str) -> String {
     let mut parts: Vec<String> = lists
         .iter()
@@ -422,15 +365,10 @@ pub(crate) fn truncated_record(lists: &[(&str, usize, usize)], expand: &str) -> 
     format!("truncated: {}", parts.join(" "))
 }
 
-/// The default expansion command for a capped list of this command's
-/// output: `--all` lifts the default cap; a `--max` selection is raised by
-/// `selected:`'s own expand field.
 pub(crate) fn expand_all<T: serde::Serialize>(envelope: &Envelope<T>) -> String {
     format!("wright {} --all", cli_command(envelope))
 }
 
-/// The CLI spelling of an envelope command name (`symbols` runs as
-/// `wright inspect symbols`).
 fn cli_command<T: serde::Serialize>(envelope: &Envelope<T>) -> String {
     match envelope.command.as_str() {
         name @ ("rules" | "symbols" | "refs" | "cfg" | "callgraph" | "cost") => {
@@ -441,13 +379,10 @@ fn cli_command<T: serde::Serialize>(envelope: &Envelope<T>) -> String {
     }
 }
 
-/// `at=path:line:col` for a JSON span, or `None` without a path.
 fn at_field(span: &Value) -> Option<String> {
     inline_location(span).map(|location| format!("at={location}"))
 }
 
-/// Severity counts as `errors=E warnings=W notes=N` fields — `notes` is the
-/// record name for info-severity items (the JSON member stays `info`).
 fn severity_fields(error: usize, warning: usize, info: usize) -> Vec<String> {
     vec![
         format!("errors={error}"),
@@ -456,11 +391,6 @@ fn severity_fields(error: usize, warning: usize, info: usize) -> Vec<String> {
     ]
 }
 
-/// One `finding:` record per reported finding — severity and code lead,
-/// the `repeated` member's facts ride as `count=`/`spanKind=`/`expression=`
-/// fields around the `at=` location, every other scalar member becomes a
-/// field verbatim (`evidence`, `boundedness`, and any structured fields the
-/// driver adds), and the message closes the line.
 fn finding_record(finding: &Value) -> String {
     let severity = finding["severity"].as_str().unwrap_or("warning");
     let code = finding["code"].as_str().unwrap_or("finding");
@@ -484,10 +414,6 @@ fn finding_record(finding: &Value) -> String {
             items.push(field("expression", expression));
         }
     }
-    // Structured members become fields verbatim so driver additions ride
-    // the record without a renderer change. Well-known members the record
-    // already carries (severity, code, message, span, location, repeated)
-    // are skipped.
     const CARRIED: &[&str] = &[
         "code", "severity", "message", "span", "location", "fix", "repeated",
     ];
@@ -509,9 +435,6 @@ fn finding_record(finding: &Value) -> String {
     format!("finding: {}", items.join(" "))
 }
 
-/// The `byCode=` field for a `selected:`/`truncated:` record: per-code
-/// counts over the complete coded set, so a cap cannot hide a code's real
-/// count (#791). `None` when the set carries no codes.
 fn by_code_field(counts: &std::collections::BTreeMap<String, usize>) -> Option<String> {
     if counts.is_empty() {
         return None;
@@ -524,9 +447,6 @@ fn by_code_field(counts: &std::collections::BTreeMap<String, usize>) -> Option<S
     Some(format!("byCode={joined}"))
 }
 
-/// `selected:` record for a finding selection applied inside a result
-/// (`--max` withholds; `--severity`/`--rule-id`/`--file` narrow). The
-/// expansion repeats the command with `--max <total>` to lift the withhold.
 fn selected_record(noun: &str, shown: usize, selection: &SelectionOutcome, command: &str) -> Line {
     let mut fields = vec![format!("{noun}={shown}/{}", selection.total)];
     if let Some(by_code) = by_code_field(&selection.by_code) {
@@ -542,15 +462,12 @@ fn selected_record(noun: &str, shown: usize, selection: &SelectionOutcome, comma
     (Stream::Out, format!("selected: {}", fields.join(" ")))
 }
 
-/// `truncated:` records for a payload's `truncation` notes: one per capped
-/// list, named by the payload's own key, each giving the expansion command.
 fn truncation_records(value: &Value, command: &str, out: &mut Vec<Line>) {
     for key in truncation_keys(value) {
         out.push((Stream::Out, truncation_line(value, key, command)));
     }
 }
 
-/// The capped-list keys a payload's `truncation` member declares.
 fn truncation_keys(value: &Value) -> Vec<&str> {
     value["truncation"]
         .as_object()
@@ -558,8 +475,6 @@ fn truncation_keys(value: &Value) -> Vec<&str> {
         .unwrap_or_default()
 }
 
-/// The `truncated:` record for one capped list of `command`'s output. A
-/// coded list's `byCode` counts describe the full set the cap hid (#791).
 fn truncation_line(value: &Value, key: &str, command: &str) -> String {
     let note = &value["truncation"][key];
     let mut parts = vec![format!(
@@ -580,8 +495,6 @@ fn truncation_line(value: &Value, key: &str, command: &str) -> String {
     format!("truncated: {}", parts.join(" "))
 }
 
-/// The `program` inventory as a `program:` record — present only when the
-/// payload carries one.
 fn program_record(program: &Value, persistent_objects: Option<u64>) -> Option<Line> {
     if !program.is_object() {
         return None;
@@ -599,11 +512,6 @@ fn program_record(program: &Value, persistent_objects: Option<u64>) -> Option<Li
     Some((Stream::Out, format!("program: {}", fields.join(" "))))
 }
 
-/// `cost:` record for the canonical element count — `unavailable` with its
-/// reason under the payload's own member name (`elementCountUnavailable`,
-/// `unavailableReason`) when the computation failed, and the client budget
-/// either way (ADR-0030 decision 3: a known limit is reported even when the
-/// count is not).
 fn cost_record(elements: Option<u64>, reason: Option<(&str, &str)>, extra: Vec<String>) -> Line {
     let mut fields = vec![match elements {
         Some(elements) => format!("elements={elements}"),
@@ -620,22 +528,15 @@ fn cost_record(elements: Option<u64>, reason: Option<(&str, &str)>, extra: Vec<S
     (Stream::Out, format!("cost: {}", fields.join(" ")))
 }
 
-/// The per-command `summary:` record plus the result's section records.
-/// `envelope` is in scope because a headline may fold in envelope facts
-/// (the diagnostic counts on `check`).
 pub(crate) trait PlainReport {
-    /// `kind=`/`locale=` fields for the verdict line when the result
-    /// carries a program origin.
     fn origin_fields(&self) -> Vec<(&'static str, String)> {
         Vec::new()
     }
-    /// Append this result's `summary:` and section records.
     fn plain_report(&self, envelope: &Envelope<Self>, ctx: &RenderContext<'_>, out: &mut Vec<Line>)
     where
         Self: serde::Serialize + Sized;
 }
 
-/// `origin` member of a `program` object, as verdict fields.
 fn origin_from_program(program: &Value) -> Vec<(&'static str, String)> {
     let origin = &program["origin"];
     let mut fields = Vec::new();
@@ -662,8 +563,6 @@ impl PlainReport for CheckResult {
         out: &mut Vec<Line>,
     ) {
         let mut fields = match &envelope.selection {
-            // Under a selection the per-severity breakdown of the full set
-            // is unknown; the true total is the headline (#430).
             Some(selection) => vec![format!("diagnostics={}", selection.total)],
             None => {
                 let mut counts = [0usize; 3];
@@ -684,7 +583,6 @@ impl PlainReport for CheckResult {
             fields.push(format!("affected={}", affected.len()));
         }
         out.push((Stream::Out, format!("summary: {}", fields.join(" "))));
-        // `check` carries the same program summary `analyze` reports (#792).
         if let Some(program) = self
             .program
             .as_ref()
@@ -745,7 +643,6 @@ impl PlainReport for ConvertResult {
     }
 }
 
-/// Finding-severity totals over a findings array.
 fn findings_severity_counts(findings: &[Value]) -> [usize; 3] {
     let mut counts = [0usize; 3];
     for finding in findings {
@@ -823,8 +720,6 @@ impl PlainReport for LintResult {
                 "lint",
             ));
         }
-        // `lint` carries the same program summary `analyze` reports (#792):
-        // the `rules=` summary field counts lint rules, not program rules.
         if let Some(program) = program_record(&self.program, None) {
             out.push(program);
         }
@@ -865,8 +760,6 @@ impl PlainReport for LintResult {
     }
 }
 
-/// The essential payload (`analyze`, `lint`, bare `inspect`) renders from
-/// its projected `result` value.
 impl PlainReport for EssentialResult {
     fn origin_fields(&self) -> Vec<(&'static str, String)> {
         origin_from_program(&self.result["program"])
@@ -883,15 +776,12 @@ impl PlainReport for EssentialResult {
         } else if value.get("program").is_some() {
             essential_inspect(self, out);
         } else {
-            // The lint essential payload: counts + findings.
             essential_lint(self, out);
         }
         let _ = envelope;
     }
 }
 
-/// The `lint` essential projection — `findings` entries carry a `location`
-/// string instead of a span object.
 fn essential_lint(result: &EssentialResult, out: &mut Vec<Line>) {
     let counts = &result.result["counts"]["findings"];
     let findings = result.result["findings"]
@@ -909,9 +799,6 @@ fn essential_lint(result: &EssentialResult, out: &mut Vec<Line>) {
             counts["info"].as_u64().unwrap_or(0) as usize,
         ));
     }
-    // `fixes` rides the essential payload under `lint --fix` (#556) — the
-    // essential lint path is the one `lint --fix` does not take, but keep
-    // the projection tolerant of the member.
     let fixes = result.result["fixes"]
         .as_array()
         .map_or(&[][..], Vec::as_slice);
@@ -996,8 +883,6 @@ fn essential_lint(result: &EssentialResult, out: &mut Vec<Line>) {
     }
 }
 
-/// The bare `inspect` overview: inventory, a bounded rule preview, and the
-/// detail commands (emitted by the envelope layer as `next:` records).
 fn essential_inspect(result: &EssentialResult, out: &mut Vec<Line>) {
     let counts = &result.result["counts"];
     out.push((
@@ -1022,8 +907,6 @@ fn essential_inspect(result: &EssentialResult, out: &mut Vec<Line>) {
     truncation_records(&result.result, "inspect", out);
 }
 
-/// The `analyze` report (ADR-0030 decision 2): the headline counts and cost
-/// first, then findings (action), then the ranked reference sections.
 fn essential_analyze(result: &EssentialResult, out: &mut Vec<Line>) {
     let value = &result.result;
     let risk_counts = &value["counts"]["risks"];
@@ -1105,8 +988,6 @@ fn essential_analyze(result: &EssentialResult, out: &mut Vec<Line>) {
         }
         out.push((Stream::Out, format!("hotspot: {}", items.join(" "))));
     }
-    // A capped list is followed by its `truncated:` record — shown, total,
-    // and the exact expansion command.
     if truncation_keys(value).contains(&"hotspots") {
         out.push((Stream::Out, truncation_line(value, "hotspots", "analyze")));
     }
@@ -1290,9 +1171,6 @@ impl PlainReport for RefsResult {
             if let Some(at) = reference.get("span").and_then(at_field) {
                 items.push(at);
             }
-            // `owningRule` (#792) identifies the reference's rule —
-            // ADR-0035 prints its canonical `address`; `name` and the
-            // numeric `rule` id are the fallbacks.
             if let Some(address) = rule_address(&reference["owningRule"]) {
                 items.push(field("rule", address));
             } else if let Some(rule) = reference["rule"].as_u64() {
@@ -1447,7 +1325,6 @@ impl PlainReport for CallGraphResult {
     }
 }
 
-/// Call-graph entries with a count above one, ranked by count then name.
 fn notable<'a>(counts: &std::collections::BTreeMap<&'a str, usize>) -> Vec<(&'a str, usize)> {
     let mut ranked: Vec<(&'a str, usize)> = counts.iter().map(|(name, n)| (*name, *n)).collect();
     ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
@@ -1455,8 +1332,6 @@ fn notable<'a>(counts: &std::collections::BTreeMap<&'a str, usize>) -> Vec<(&'a 
     ranked
 }
 
-/// `selected:` record for a query payload's `selection` member (the
-/// `{items, selection}` wrap a `--max` or filter request produces).
 fn selected_from_payload(value: &Value, noun: &str, shown: usize, out: &mut Vec<Line>) {
     let selection = &value["selection"];
     let total = selection["total"].as_u64();
@@ -1486,8 +1361,6 @@ impl PlainReport for CostResult {
         out: &mut Vec<Line>,
     ) {
         let result = &self.result;
-        // The `--rule` drill-down (#724): identity, costliest statements,
-        // and per-name own-cost shares.
         if let Some(rule) = result.get("rule").filter(|rule| rule.is_object()) {
             let mut fields = vec![
                 field("rule", rule_name(rule)),
@@ -1522,9 +1395,6 @@ impl PlainReport for CostResult {
             return;
         }
         let exact = &result["exact"];
-        // A failed emission reports `null` plus `emittedBytesUnavailable` —
-        // `unavailable` and the reason under the payload's own member name,
-        // never a fabricated zero (ADR-0030 decision 3).
         let mut fields = vec![match exact["emittedBytes"].as_u64() {
             Some(bytes) => format!("emittedBytes={bytes}"),
             None => "emittedBytes=unavailable".to_string(),
@@ -1537,15 +1407,12 @@ impl PlainReport for CostResult {
             format!("rules={}", count(exact, "programRules")),
             format!("waits={}", count(exact, "waitActions")),
         ]);
-        // Skipped rule evaluations are disclosed like `lint`'s (#788).
         let skipped = result["skipped"].as_array().map_or(0, Vec::len);
         if skipped > 0 {
             fields.push(format!("skipped={skipped}"));
         }
         out.push((Stream::Out, format!("summary: {}", fields.join(" "))));
         let elements = &result["elementCount"];
-        // The count is `Some(total)` or absent — unavailable, never zero —
-        // while the known budget still reports (ADR-0030 decision 3).
         if let Some(total) = elements["total"].as_u64() {
             out.push((
                 Stream::Out,
@@ -1666,8 +1533,6 @@ mod tests {
 
     #[test]
     fn a_gated_result_reports_fail_like_every_renderer() {
-        // `--fail-on` raised a WARN result to exit 1: the verdict is FAIL
-        // (the gate's word), not the ERROR a genuine failure reports.
         let mut envelope = envelope("lint", 1, LintResult::default());
         envelope.gated = true;
         assert_eq!(verdict_word(&envelope), "FAIL");
@@ -1687,9 +1552,6 @@ mod tests {
 
     #[test]
     fn finding_record_carries_structured_fields_verbatim() {
-        // The driver's `repeated{expression,count,spanKind}` member (#820)
-        // flattens to fields around the location; other scalar members
-        // sort into the field section before the closing message.
         let record = finding_record(&serde_json::json!({
             "code": "repeated-value",
             "severity": "warning",

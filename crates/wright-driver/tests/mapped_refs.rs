@@ -1,8 +1,3 @@
-//! #892: a provider's map is statement-grain — workshop-rs exposes no
-//! setters for identifier-level slots, so a real provider can never carry
-//! them. References still resolve to the enclosing statement's span, the
-//! same `at=` `inspect cost` reports.
-
 use std::path::{Path, PathBuf};
 
 use wright_driver::source_provider::{
@@ -89,8 +84,6 @@ fn mapped_refs_fall_back_to_the_statement_span() {
     )
     .expect("provider session");
 
-    // Read in a condition plus writes in two actions — every reference
-    // resolves the enclosing statement's authored span.
     let refs = serde_json::to_value(session.refs("score", None, None, None, None).result)
         .expect("refs result");
     let references = refs["references"].as_array().expect("reference list");
@@ -106,7 +99,6 @@ fn mapped_refs_fall_back_to_the_statement_span() {
             "{reference}"
         );
     }
-    // ADR-0035: the two `tick` rules keep distinct canonical addresses.
     let addresses: Vec<_> = references
         .iter()
         .filter_map(|reference| reference["owningRule"]["address"].as_str())
@@ -114,7 +106,6 @@ fn mapped_refs_fall_back_to_the_statement_span() {
     assert!(addresses.contains(&"tick#1"), "{addresses:?}");
     assert!(addresses.contains(&"tick#2"), "{addresses:?}");
 
-    // Call references and the subroutine definition resolve spans too.
     let refs = serde_json::to_value(session.refs("helper", None, None, None, None).result)
         .expect("subroutine refs");
     for reference in refs["references"].as_array().expect("reference list") {

@@ -1,10 +1,3 @@
-/**
- * Pure presentation helpers over `workshop-rs/rule-content-v1` nodes. The
- * page holds no Workshop semantics of its own: names come from `lookup`,
- * and the only structural reading here is what the format documents —
- * reserved call forms and the flat action stream whose nesting is
- * recoverable from `If`/`Else If`/`Else`/`While`/`For` openers and `End`.
- */
 import type { Action, CallNode, Condition, Event, Node } from './types/generated/rule-content-v1'
 
 /**
@@ -24,7 +17,6 @@ export type SyntaxClass =
   | 'literal'
   | 'punctuation'
 
-/** Reserved call ids whose documented forms read as variable accesses. */
 const VARIABLE_CALLS = new Set(['globalVariable', 'playerVariable', 'memberAccess'])
 
 /**
@@ -132,8 +124,6 @@ export function statementText(node: Node, names: PeekNames, kinds: string[]): st
   if ('subroutine' in node) return node.subroutine
   if ('ambiguous' in node) return node.ambiguous
   if (node.call === 'globalVariable') {
-    // The scope label's canonical display name is the lowercase `global`
-    // keyword; the editor shows the capitalized form (`Global.score`).
     const scope = names.peek('global', ['structural'])
     const label = (scope?.name ?? 'Global').replace(/^\p{Ll}/u, (c) => c.toUpperCase())
     return `${label}.${text(node.args[0])}`
@@ -193,8 +183,6 @@ export function blockRange(actions: Action[], index: number): [number, number] |
       if (depth === 0) return [index, i]
     }
   }
-  // A truncated block (no closing `end` left in the stream) reaches the
-  // column's end rather than disabling the entry.
   return [index, actions.length - 1]
 }
 
@@ -255,8 +243,6 @@ function collectNode(node: Node, out: { identity: string; kinds: string[] }[]): 
     out.push({ identity: node.localizedString, kinds: [] })
   } else if ('call' in node) {
     out.push({ identity: node.call, kinds: VALUE_KINDS })
-    // A global variable read renders `Global.name`; `global` is the
-    // structural catalog entry whose localized name is the scope word.
     if (node.call === 'globalVariable') {
       out.push({ identity: 'global', kinds: ['structural'] })
     }

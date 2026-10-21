@@ -14,8 +14,6 @@ const TRIPLE: &str = "x86_64-unknown-linux-gnu";
 const PROVIDER_OLD: &str = "1.0.0";
 const PROVIDER_RELEASE: &str = "1.4.0";
 
-/// A release mock in the R2 distribution shape: the plain-text latest pointer
-/// plus the immutable versioned archive and checksum.
 struct Release {
     files: HashMap<String, Vec<u8>>,
 }
@@ -45,8 +43,6 @@ fn sha256_hex(bytes: &[u8]) -> String {
     })
 }
 
-/// Build a gzipped tar archive with the canonical `wright-<version>-<target>/`
-/// layout containing fake `wright` and `wright-lsp` shell scripts.
 fn build_archive(version: &str) -> Vec<u8> {
     let dir = format!("wright-{version}-{TRIPLE}");
     let mut builder = tar::Builder::new(Vec::new());
@@ -74,8 +70,6 @@ fn build_archive(version: &str) -> Vec<u8> {
     encoder.finish().unwrap()
 }
 
-/// The first-party provider release target for the host running the tests;
-/// `None` when no provider artifacts exist for this platform.
 fn provider_target() -> Option<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") => Some("x86_64-unknown-linux-gnu"),
@@ -98,7 +92,6 @@ fn provider_store(dir: &Path) -> PathBuf {
     dir.join("provider-data").join("providers").join("opy")
 }
 
-/// Record an installed provider in the store without exercising install paths.
 fn seed_provider(dir: &Path, version: &str) {
     let target = provider_target().expect("provider tests need a supported host");
     let store = provider_store(dir);
@@ -117,8 +110,6 @@ fn provider_body(version: &str) -> Vec<u8> {
     format!("#!/bin/sh\necho \"fake opy-provider {version}\"\n").into_bytes()
 }
 
-/// Provider release files for the mock server: the version pointer, the
-/// archive, and its checksum under the canonical `opy-rs` routes.
 fn provider_release(version: &str, files: &mut HashMap<String, Vec<u8>>) {
     let target = provider_target().expect("provider tests need a supported host");
     let binary = provider_binary();
@@ -170,9 +161,6 @@ fn install_dir_under(parent: PathBuf, tag: &str) -> PathBuf {
     dir
 }
 
-/// An install directory under a whole `homebrew` path component, the shape
-/// Homebrew's prefix actually produces (`/opt/homebrew/bin`, a Cellar
-/// path) — provenance detection matches components, not substrings (#641).
 fn homebrew_install_dir(tag: &str) -> PathBuf {
     install_dir_under(std::env::temp_dir().join("homebrew"), tag)
 }
@@ -224,8 +212,6 @@ fn check_reports_an_available_update_without_modifying_files() {
 
 #[test]
 fn check_with_pinned_version_reports_availability_without_network() {
-    // A pinned --check never touches the API or downloads: only the version
-    // comparison runs.
     let dir = install_dir("check-pinned");
     let before = read(&dir.join("wright"));
     let output = run_update(
@@ -267,7 +253,6 @@ fn update_installs_and_replaces_both_binaries() {
         format!("#!/bin/sh\necho \"fake wright-lsp {RELEASE}\"\n")
     );
 
-    // The smoke check ran the installed binaries: they report the version.
     let wright_version = Command::new(dir.join("wright"))
         .arg("--version")
         .output()
@@ -294,8 +279,6 @@ fn update_installs_and_replaces_both_binaries() {
         "staging dirs must be cleaned up: {leftovers:?}"
     );
 
-    // Self-update touches only the R2 distribution contract — the latest
-    // pointer plus the immutable versioned routes — never a release API.
     let name = format!("wright-{RELEASE}-{TRIPLE}.tar.gz");
     assert_eq!(
         server.requests(),
@@ -337,8 +320,6 @@ fn pinned_self_update_uses_only_the_versioned_release_routes() {
 
 #[test]
 fn malformed_latest_version_pointer_is_rejected() {
-    // A release-API JSON body is not a valid version pointer: the R2 contract
-    // serves a bare version and anything else must fail without changes.
     let mut files = HashMap::new();
     files.insert(
         "/latest/version".to_string(),
@@ -360,8 +341,6 @@ fn malformed_latest_version_pointer_is_rejected() {
 
 #[test]
 fn missing_release_archive_fails_before_any_change() {
-    // The latest pointer resolves but no archive is published: the download
-    // failure is an environment error and nothing is replaced.
     let mut files = HashMap::new();
     files.insert(
         "/latest/version".to_string(),
@@ -668,8 +647,6 @@ fn package_managed_wright_skips_self_update_but_updates_providers() {
     if provider_target().is_none() {
         return;
     }
-    // An install path under a `homebrew` component makes provenance
-    // detection classify the executable as Homebrew-managed.
     let dir = homebrew_install_dir("managed");
     seed_provider(&dir, PROVIDER_OLD);
     let mut files = HashMap::new();
@@ -721,8 +698,6 @@ fn explicit_self_update_still_refuses_package_managed_installations() {
 
 #[test]
 fn update_self_check_reports_availability_without_modifying_files() {
-    // `update self --check` resolves the same way as `update --check`
-    // restricted to the self target (#641).
     let server = MockServer::new(release(RELEASE).files);
     let dir = install_dir("self-check");
     let before = read(&dir.join("wright"));
@@ -793,11 +768,8 @@ fn a_failed_provider_update_makes_update_exit_nonzero() {
     if provider_target().is_none() {
         return;
     }
-    // The self target skips (package-managed install) while the installed
-    // provider's update fails: `update` must not discard the failure (#641).
     let dir = homebrew_install_dir("provider-fails");
     seed_provider(&dir, PROVIDER_OLD);
-    // No provider routes at all: the latest-version fetch 404s.
     let server = MockServer::new(HashMap::new());
     let output = run_update(&dir, &["update"], &provider_env(&server));
     assert_ne!(
@@ -815,9 +787,6 @@ fn a_failed_provider_update_makes_update_exit_nonzero() {
 
 #[test]
 fn a_prerelease_pinned_version_installs() {
-    // `install.sh` accepts prerelease suffixes; `--version` uses the same
-    // grammar, and prerelease precedence keeps 9.9.9-beta.1 above the
-    // installed stable (#641).
     let server = MockServer::new(release("9.9.9-beta.1").files);
     let dir = install_dir("self-prerelease");
     let output = run_update(
@@ -840,8 +809,6 @@ fn a_prerelease_pinned_version_installs() {
 
 #[test]
 fn standalone_install_in_a_scooped_directory_still_self_updates() {
-    // A directory named `scooped` is not Scoop: provenance only matches whole
-    // path components, so self-update runs instead of being refused (#641).
     let server = MockServer::new(release(RELEASE).files);
     let dir = install_dir_under(std::env::temp_dir().join("scooped"), "standalone");
     let output = run_update(&dir, &["update"], &server.env());
@@ -892,9 +859,6 @@ fn help_documents_the_update_command() {
 
 #[test]
 fn terminal_update_closes_with_the_verdict_tag() {
-    // `update` streams operation lines, so the terminal tag closes the
-    // output instead of leading it (#795); the operation lines and exit
-    // code are unchanged.
     let dir = install_dir("terminal-close");
     let server = MockServer::new(release(RELEASE).files);
     let output = run_update(
@@ -929,8 +893,6 @@ fn terminal_update_closes_with_the_verdict_tag() {
 
 #[test]
 fn terminal_update_reports_failures_under_the_tag() {
-    // A rejected self-update names the tag word for its exit class and
-    // carries the reason under it (#795).
     let dir = install_dir("terminal-error");
     let output = run_update(
         &dir,
@@ -961,8 +923,6 @@ fn terminal_update_reports_failures_under_the_tag() {
 
 #[test]
 fn terminal_update_reports_unsupported_platforms() {
-    // `update self` on an unknown platform is UNSUPPORTED (exit 3) and reports under
-    // the tag (#795).
     let dir = install_dir("terminal-unsupported");
     let output = run_update(
         &dir,

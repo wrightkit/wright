@@ -149,8 +149,6 @@ describe('findings in place (#921)', () => {
     expect(mark.classList.contains('severity-error')).toBe(true)
     expect(mark.querySelector('.finding-count')?.textContent).toBe('1')
     expect(slot(9)!.querySelector('.finding-mark')).toBeNull()
-    // The mark sits inside the bar's button, so it is a labelled
-    // graphic, not a nested interactive element.
     expect(mark.tagName).toBe('SPAN')
     expect(bar.querySelector('button')).toBeNull()
   })
@@ -187,23 +185,18 @@ describe('findings in place (#921)', () => {
     api.handler = handlerFor(
       [summaryFor(7, 'scored rule', content)],
       [
-        // An action-index finding lands on that action's row.
         finding({ rule: 7, action: 0, severity: 'warning', code: 'act-find' }),
-        // An unindexed finding inside the second condition's span lands on it.
         finding({ rule: 7, span: span(55, 70), severity: 'error', code: 'cond-find' }),
-        // A span inside no condition lands on the rule bar only.
         finding({ rule: 7, span: span(5, 9, 999), severity: 'info', code: 'bar-find' }),
       ],
     )
 
     mountApp()
     await settle()
-    // Open the rule.
     click(slot(7)!.querySelector<HTMLButtonElement>('.bar')!)
     await settle()
 
     const statements = [...slot(7)!.querySelectorAll<HTMLElement>('.statement')]
-    // Two conditions + two rendered actions (the `end` marker stays hidden).
     expect(statements).toHaveLength(4)
 
     const [cond0, cond1, act0, act1] = statements
@@ -215,8 +208,6 @@ describe('findings in place (#921)', () => {
     expect(act0!.querySelector('.finding-mark.severity-warning')).not.toBeNull()
     expect(act1!.querySelector('.finding-mark')).toBeNull()
 
-    // The bar counts its most severe level: one error, one warning, one
-    // info — the error count is 1.
     const barMark = slot(7)!.querySelector('.bar .finding-mark')!
     expect(barMark.querySelector('.finding-count')?.textContent).toBe('1')
 

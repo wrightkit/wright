@@ -1,9 +1,3 @@
-//! LPP is a process boundary: the client spawns the provider as a child
-//! process and communicates over its standard input and output. The
-//! provider's standard error is reserved for human-readable logging and
-//! passed through to the client's own stderr; it never carries protocol
-//! messages.
-
 use std::path::Path;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::time::Duration;

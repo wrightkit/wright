@@ -7,8 +7,6 @@ import type {
   ToolResponse,
 } from './types/generated/wright-agent-v1'
 
-// Compile-time check that the generated contract types match the schemas:
-// assigning a non-conforming object must be a type error (see svelte-check).
 const capabilities: CapabilitiesRequest = { op: 'capabilities' }
 const request: ToolRequest = capabilities
 

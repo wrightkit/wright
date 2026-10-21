@@ -1,21 +1,4 @@
 <script lang="ts">
-  /**
-   * One value node rendered as syntax-coloured text (docs/ui/design.md
-   * § Statement text): the call name then its arguments in parentheses,
-   * comparisons and arithmetic infix. Every token takes its spec table
-   * class (`tok <class>`), so parentheses, commas, member dots, and index
-   * brackets are `punctuation`; every name comes from the warmed `Names`
-   * cache (lookup by identity). Reserved call forms get their documented
-   * structural render — a global variable reads `Global.name` with the
-   * scope word from the `global` structural entry, a player variable
-   * reads `owner.name` — and an unresolvable call id renders verbatim;
-   * the page invents no names.
-   *
-   * When `onarg` is supplied each argument span carries its `Action.args`
-   * path (`data-arg-path`) and a click opens the statement editor at that
-   * slot (docs/ui/editor.md § Form · Open) — the same path the hover
-   * outline names (#924).
-   */
   import Expr from './Expr.svelte'
   import { enumIdentity, kindClass, nodeClass, VALUE_KINDS } from './nodes'
   import type { Names } from './names'
@@ -31,9 +14,7 @@
     node: Node
     names: Names
     kinds?: string[]
-    /** An argument's click handler, passed its `Action.args` path. */
     onarg?: (path: number[], event: MouseEvent) => void
-    /** The rendered node's path inside the statement's `args` tree. */
     path?: number[]
   } = $props()
 
@@ -47,11 +28,6 @@
   <span class="tok punctuation">{text}</span>
 {/snippet}
 
-<!--
-  One argument token: wrapped in a span carrying its `args` path so a
-  click opens the editor on that slot. `stopPropagation` keeps the click
-  from re-opening the row's own handler.
--->
 {#snippet arg(child: Node, childPath: number[])}
   {#if onarg}
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
@@ -89,8 +65,6 @@
   <span class="tok enum">{node.ambiguous}</span>
 {:else if node.call === 'globalVariable'}
   {@const scope = names.peek('global', ['structural'])}
-  <!-- The scope label's canonical display name is the lowercase `global`
-       keyword; the editor shows the capitalized form (`Global.score`). -->
   {@const label = (scope?.name ?? 'Global').replace(/^\p{Ll}/u, (c) => c.toUpperCase())}
   <span class="tok {kindClass(scope?.kind)}">{label}</span>{@render punct('.')}{@render arg(
     node.args[0],

@@ -1,31 +1,13 @@
-//! The operation catalog client surfaces share (#535): one entry per
-//! operation in `capabilities.operations`, in the contract's order. MCP lists
-//! the `mcp` subset (ADR-0020's evidence-gated set); `wright agent tools` emits
-//! the whole catalog as Messages API tool definitions or plain JSON Schema.
-
 use serde_json::{Map, Value, json};
 
-/// The committed agent schema is the single source of request shapes; tool
-/// input schemas are extracted from its `$defs` at startup rather than
-/// written a second time.
 const AGENT_SCHEMA: &str = include_str!("../../../schemas/wright-agent-v1.schema.json");
 
-/// One operation advertised by `capabilities`.
 pub(crate) struct ToolSpec {
-    /// The `ToolRequest` operation name (`op` field, camelCase).
     pub(crate) op: &'static str,
-    /// The JSON Schema `$defs` entry describing this operation's request.
     pub(crate) request_def: &'static str,
-    /// Request fields the MCP tool schema omits (`sources` defaults to disk
-    /// there; programmatic callers may pass it, so `agent tools` keeps it).
     pub(crate) drop_fields: &'static [&'static str],
-    /// Whether the operation belongs to the initial MCP set (ADR-0020).
     pub(crate) mcp: bool,
-    /// The tool description shown to the model.
     pub(crate) description: &'static str,
-    /// What a successful call returns, appended to `description` when client
-    /// tool definitions are emitted (#535 wants the result described in text).
-    /// The `wright-serve` binary shares this catalog without the emit path.
     #[allow(dead_code)]
     pub(crate) result: &'static str,
 }
@@ -225,7 +207,6 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
     },
 ];
 
-/// The schema `$defs` of the committed agent contract.
 pub(crate) fn schema_defs() -> Map<String, Value> {
     serde_json::from_str::<Value>(AGENT_SCHEMA).expect("committed agent schema parses")["$defs"]
         .as_object()
@@ -246,12 +227,10 @@ fn snake_case(name: &str) -> String {
     out
 }
 
-/// The client-facing tool name for an operation.
 pub(crate) fn tool_name(op: &str) -> String {
     format!("wright_{}", snake_case(op))
 }
 
-/// Collect every `#/$defs/<name>` reachable from `value` into `needed`.
 fn collect_refs(value: &Value, defs: &Map<String, Value>, needed: &mut Vec<String>) {
     match value {
         Value::Object(map) => {
@@ -281,10 +260,6 @@ fn collect_refs(value: &Value, defs: &Map<String, Value>, needed: &mut Vec<Strin
     }
 }
 
-/// A self-contained JSON Schema for an operation's request fields: the
-/// `op` member goes away (the tool name carries it) plus whatever the
-/// surface chooses to omit, and reachable `$ref` targets ship inside the
-/// schema's own `$defs`.
 pub(crate) fn input_schema(defs: &Map<String, Value>, spec: &ToolSpec, drop: &[&str]) -> Value {
     let request = &defs[spec.request_def];
     let mut properties = request["properties"].clone();
@@ -364,9 +339,6 @@ pub(crate) mod test_support {
     use serde_json::Value;
     use std::collections::{HashMap, HashSet};
 
-    /// Every `$ref` in an emitted input schema resolves inside its own
-    /// `$defs` and forms no cycle — the Messages API rejects tools whose
-    /// schema has a recursive `$ref` (#535).
     pub(crate) fn assert_no_recursive_refs(schema: &Value, context: &str) {
         let mut edges: HashMap<String, HashSet<String>> = HashMap::new();
         fn walk(value: &Value, from: Option<&str>, edges: &mut HashMap<String, HashSet<String>>) {
