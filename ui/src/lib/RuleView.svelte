@@ -116,7 +116,11 @@
   function onkeydown(event: KeyboardEvent) {
     if (event.defaultPrevented) return
     const el = event.target as HTMLElement | null
-    if (el?.closest('input, textarea, select, dialog, [contenteditable="true"]')) return
+    if (
+      el?.closest('input, textarea, select, dialog, [contenteditable="true"]') &&
+      !el?.closest('input.sel, input.sel-all')
+    )
+      return
     const list = hoverCol
     if (!list) return
     const set = sel(list)

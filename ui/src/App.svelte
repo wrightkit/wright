@@ -262,7 +262,9 @@
     try {
       const response = await call(buildRequest(pending, inputIdentity, snapshot))
       if ('error' in response) {
-        submitRefusal = [response.error as ToolErrorInfo]
+        const err = response.error as ToolErrorInfo
+        submitRefusal = [err]
+        if (err.code === 'stale-id') await refreshAfterStale()
         return
       }
       const result = response.result as EditStatementsResult
