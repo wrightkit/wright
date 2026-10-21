@@ -378,9 +378,9 @@ on stdout — the per-session token rides the URL fragment, which browsers
 never send — and opens it in the default browser. `--no-open` prints the
 URL without opening anything, for tests and headless use.
 
-* The single endpoint, `POST /api`, takes a `wright-agent/v1` request body
-  and returns the `ToolService` response body unchanged — byte-identical
-  to what `wright serve` writes for the same request (ADR-0032 decision 3).
+* `POST /api` takes a `wright-agent/v1` request body and returns the
+  `ToolService` response unchanged (decision 3); `POST /apply` validates
+  and writes the `editStatements` transaction or refuses (decision 5).
 * Every request must name the bound loopback authority in `Host` and, when
   a browser `Origin` is present, the server's own origin; endpoint
   requests additionally carry the session token as
@@ -402,8 +402,8 @@ Workshop semantics are never hardcoded — names are resolved through the
 renders the `rule-content-unavailable` refusal inline while the rest of
 the project stays viewable. `symbols` and `findings` back read-only
 Variables and Diagnostics dialogs, and `?debug` exposes line numbers,
-call ids, and raw node JSON that stay hidden otherwise. There is no edit
-path: `editStatements` and pending changes are later layers (ADR-0032).
+call ids, and raw node JSON that stay hidden otherwise. Statements also
+edit through `editStatements` + `/apply`; a stale identity writes nothing.
 
 ## `wright convert` and the reconstruction surface (#126)
 

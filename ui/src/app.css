@@ -319,3 +319,163 @@ details.debug pre {
   color: var(--muted);
   font-size: 0.75rem;
 }
+
+/* Editing layer (ADR-0032): selection checkboxes, the per-column selection
+   bar, pending marks, the statement editor, and the pending-changes
+   dialog. Colours reuse the view's tokens — gold for selection/changed,
+   the error hue for deletions. */
+
+.rule-view h3 {
+  display: flex;
+  align-items: center;
+}
+
+.rule-view h3 .sel-all {
+  margin: 0 0.45rem 0 0;
+}
+
+.statement {
+  cursor: pointer;
+}
+
+.statement .sel {
+  opacity: 0;
+  margin: 0 0.45rem 0 0;
+  vertical-align: middle;
+}
+
+.statement:hover .sel,
+.statements.has-selection .sel {
+  opacity: 1;
+}
+
+.statement.selected {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.statement.pending-change {
+  box-shadow: inset 3px 0 0 var(--accent);
+  background: rgb(217 166 46 / 0.07);
+}
+
+.statement.pending-delete {
+  box-shadow: inset 3px 0 0 #cc6666;
+  text-decoration: line-through;
+}
+
+.pending-tag {
+  font-family: system-ui, sans-serif;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0 0.35rem;
+  border-radius: 3px;
+  margin-left: 0.5rem;
+}
+
+.pending-tag.change {
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.pending-tag.delete {
+  color: #cc6666;
+  border: 1px solid #cc6666;
+}
+
+.sel-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.35rem 0 0.6rem;
+  padding: 0.35rem 0.6rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.sel-bar .sel-count {
+  color: var(--muted);
+  margin-right: 0.25rem;
+}
+
+.sel-bar button,
+.editor-foot button {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 0.25rem 0.8rem;
+  cursor: pointer;
+}
+
+.sel-bar button:hover,
+.editor-foot button:hover {
+  border-color: var(--accent);
+}
+
+.sel-bar button:disabled,
+.editor-foot button:disabled {
+  opacity: 0.5;
+  cursor: default;
+  border-color: var(--line);
+}
+
+.editor-title {
+  font-style: italic;
+  font-size: 1.05rem;
+  margin: 0 0 0.6rem;
+}
+
+.editor-disable {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.7rem;
+  color: var(--muted);
+}
+
+.editor-statement {
+  padding: 0.5rem 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.88rem;
+}
+
+.editor-foot {
+  display: flex;
+  justify-content: center;
+  gap: 0.6rem;
+  margin-top: 1rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--line);
+}
+
+.editor-foot .ok {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.pending-rule {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0.9rem 0 0.2rem;
+}
+
+.pending-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.pending-list li {
+  padding: 0.15rem 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+}

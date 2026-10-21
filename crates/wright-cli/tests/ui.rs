@@ -322,6 +322,154 @@ fn refuses_stdin_input() {
     assert!(stderr.contains("does not include"), "{stderr}");
 }
 
+#[cfg(feature = "ui")]
+impl UiSession {
+    fn apply(&self, body: &str) -> (u16, String) {
+        self.request(
+            "POST",
+            "/apply",
+            &self.authority,
+            &[("Authorization", &format!("Bearer {}", self.token))],
+            body,
+        )
+    }
+}
+
+/// A writable copy of the control-flow fixture: apply tests edit the
+/// file, so they never run against the committed source.
+#[cfg(feature = "ui")]
+fn editable_input(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("wright-ui-apply-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(name);
+    std::fs::copy(corpus_workshop("synthetic/control-flow"), &path).unwrap();
+    path
+}
+
+/// Stage a `disabled` toggle on rule 0's `Wait` action through
+/// `editStatements` — the same replace a checkbox in the page produces —
+/// and return the transaction the result carries.
+#[cfg(feature = "ui")]
+fn staged_transaction(session: &UiSession) -> serde_json::Value {
+    let (_, project) = session.api(r#"{"op":"project"}"#);
+    let project: serde_json::Value = serde_json::from_str(&project).unwrap();
+    let identity = project["result"]["inputIdentity"].as_str().unwrap();
+    let (_, rules) = session.api(r#"{"op":"rules","all":true,"content":true}"#);
+    let rules: serde_json::Value = serde_json::from_str(&rules).unwrap();
+    let snapshot = &rules["result"]["snapshot"];
+    // `span` is output-only; the caller drops it before reusing the node.
+    let mut node = rules["result"]["rules"][0]["content"]["actions"][1].clone();
+    let object = node.as_object_mut().unwrap();
+    object.remove("span");
+    object.insert("disabled".into(), true.into());
+    let request = serde_json::json!({
+        "op": "editStatements",
+        "inputIdentity": identity,
+        "snapshot": snapshot,
+        "edits": [{
+            "rule": 0,
+            "list": "actions",
+            "index": 1,
+            "change": "replace",
+            "statement": node,
+        }],
+    });
+    let (status, body) = session.api(&request.to_string());
+    assert_eq!(status, 200, "{body}");
+    let response: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(response["result"]["ok"], true, "{response}");
+    response["result"]["transaction"].clone()
+}
+
+/// `POST /apply` (ADR-0032 decision 5): the host re-validates the
+/// transaction against the files on disk, writes atomically, and serves
+/// the edited program under a new generation.
+#[cfg(feature = "ui")]
+#[test]
+fn apply_writes_the_transaction_and_serves_the_edit() {
+    let path = editable_input("apply-ok.ws");
+    let session = UiSession::start(&path);
+    let transaction = staged_transaction(&session);
+    // The pre-write generation the listing issued.
+    let (_, before) = session.api(r#"{"op":"rules","all":true}"#);
+    let before: serde_json::Value = serde_json::from_str(&before).unwrap();
+    let generation = before["result"]["snapshot"].as_u64().unwrap();
+
+    let (status, body) = session.apply(&transaction.to_string());
+    assert_eq!(status, 200, "{body}");
+    let applied: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(applied["ok"], true, "{applied}");
+
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("disabled"), "{text}");
+    let (_, rules) = session.api(r#"{"op":"rules","all":true,"content":true}"#);
+    let rules: serde_json::Value = serde_json::from_str(&rules).unwrap();
+    assert_eq!(
+        rules["result"]["rules"][0]["content"]["actions"][1]["disabled"],
+        serde_json::json!(true),
+        "{rules}"
+    );
+    // The write adopted a fresh generation: a numeric address the old
+    // program issued is now stale.
+    let request =
+        serde_json::json!({"op": "rules", "rule": 0, "snapshot": generation, "content": true});
+    let (_, stale) = session.api(&request.to_string());
+    assert!(
+        stale.contains("stale-id"),
+        "old generation refuses: {stale}"
+    );
+}
+
+/// A transaction whose `source_identity` no longer matches the file is
+/// refused `edit-stale-source` and writes nothing.
+#[cfg(feature = "ui")]
+#[test]
+fn apply_refuses_a_stale_transaction_and_writes_nothing() {
+    let path = editable_input("apply-stale.ws");
+    let session = UiSession::start(&path);
+    let transaction = staged_transaction(&session);
+
+    let original = std::fs::read_to_string(&path).unwrap();
+    let drifted = format!("{original}\n");
+    std::fs::write(&path, &drifted).unwrap();
+    let (status, body) = session.apply(&transaction.to_string());
+    assert_eq!(status, 200, "{body}");
+    let applied: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(applied["ok"], false, "{applied}");
+    assert_eq!(
+        applied["diagnostics"][0]["code"],
+        serde_json::json!("edit-stale-source"),
+        "{applied}"
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), drifted);
+}
+
+/// `/apply` gates like `/api`: the session token is required, and the
+/// body must deserialize as an edit transaction.
+#[cfg(feature = "ui")]
+#[test]
+fn apply_requires_the_session_token_and_a_transaction_body() {
+    let session = UiSession::start(&corpus_workshop("synthetic/basic-rule"));
+    let (status, _) = session.request("POST", "/apply", &session.authority, &[], "{}");
+    assert_eq!(status, 403, "the token is required");
+
+    let (status, body) = session.apply("not json");
+    assert_eq!(status, 400, "{body}");
+    assert!(body.contains("malformed-request"), "{body}");
+
+    // A transaction that cannot validate answers the refusal shape, not a
+    // transport error.
+    let (status, body) = session.apply(r#"{"edits":[]}"#);
+    assert_eq!(status, 200, "{body}");
+    let applied: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(applied["ok"], false, "{applied}");
+    assert_eq!(
+        applied["diagnostics"][0]["code"],
+        serde_json::json!("edit-empty-transaction"),
+        "{applied}"
+    );
+}
+
 /// Builds without the `ui` feature report the no-UI build and exit 2 —
 /// `cargo test` needs no Node toolchain (ADR-0032 decision 9).
 #[cfg(not(feature = "ui"))]
