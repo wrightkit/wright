@@ -38,6 +38,8 @@
   <span class="tok variable">{(node as VariableNode).variable}</span>
 {:else if 'subroutine' in node}
   <span class="tok variable">{(node as SubroutineNode).subroutine}</span>
+{:else if 'ambiguous' in node}
+  <span class="tok enum">{node.ambiguous}</span>
 {:else if node.call === 'globalVariable'}
   <Expr node={node.args[0]} {names} />
 {:else if node.call === 'playerVariable'}
