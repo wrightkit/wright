@@ -505,24 +505,20 @@ def run_cli_commands(
         sub = command.split()[-1]
         if sub in ("refs", "cfg") and sub not in addresses:
             return {"skipped": "no globally unique declared name"}
-        argv = [wright, *command.split()]
+        argv = [wright, *command.split(), "--renderer", "plain"]
         if sub in addresses:
             argv.append(addresses[sub])
         argv += [str(entry), "--kind", kind, "-f", form]
         if command == "compile":
             argv += ["-o", str(Path(scratch.name) / "compiled.ow"), "--force"]
-        outputs_bytes = []
-        latencies = []
-        counts = {}
-        failure = None
+        outputs_bytes, latencies, counts, failure = [], [], {}, None
         for _ in range(repeats if form == "json" else 1):
             start = time.monotonic()
             completed = subprocess.run(argv, capture_output=True, cwd=project_dir)
             latencies.append((time.monotonic() - start) * 1000.0)
             outputs_bytes.append(len(completed.stdout))
             if form == "text":
-                if completed.returncode not in (0, 1):
-                    failure = f"exit-{completed.returncode}"
+                failure = None if completed.returncode in (0, 1) else f"exit-{completed.returncode}"
                 continue
             try:
                 envelope = json.loads(completed.stdout)
@@ -576,11 +572,9 @@ def run_scenarios(
                     return 0, "no globally unique declared name"
                 word = placeholders[word]
             argv.append(word)
-        argv += [str(entry), "--kind", kind, "-f", "text"]
+        argv += [str(entry), "--kind", kind, "-f", "text", "--renderer", "plain"]
         completed = subprocess.run(argv, capture_output=True, cwd=project_dir)
-        failure = None
-        if completed.returncode not in (0, 1):
-            failure = f"exit-{completed.returncode}"
+        failure = None if completed.returncode in (0, 1) else f"exit-{completed.returncode}"
         return len(completed.stdout), failure
 
     with ThreadPoolExecutor(max_workers=jobs) as pool:

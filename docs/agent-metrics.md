@@ -12,7 +12,7 @@ corpus project, it records output size in bytes and estimated tokens
 (`bytes / 4`), median latency over repeated runs, and result-shape counts
 (items, per-kind breakdowns, findings per rule code). Agent operations repeat
 `--repeats` times (default 5) and CLI commands `--cli-repeats` times
-(default 3), since each CLI run is a full pipeline. CLI text forms are recorded alongside compact JSON defaults; text measurements record size and shape without latency. Correctness stays
+(default 3), since each CLI run is a full pipeline. CLI text forms are recorded alongside compact JSON defaults; text measurements record size and shape without latency and pin `--renderer plain`, since the GitHub Actions renderer moves the report to stderr and would measure an empty surface on CI runners. Correctness stays
 assertion-based in the owning test suites. These metrics watch drift in the
 agent-facing cost, not behavior.
 
