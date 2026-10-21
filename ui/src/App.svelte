@@ -17,6 +17,7 @@
    * page never composes or writes Workshop text. A stale refusal clears
    * the staged edits and re-reads the program.
    */
+  import { tick } from 'svelte'
   import { SvelteMap, SvelteSet } from 'svelte/reactivity'
   import { apply, call } from './lib/api'
   import Dialogs from './lib/Dialogs.svelte'
@@ -50,6 +51,7 @@
     EditStatementsResult,
     ProjectResult,
     ToolErrorInfo,
+    ToolResponse,
   } from './lib/types/generated/wright-agent-v1'
 
   interface RuleEntry {
@@ -93,6 +95,12 @@
   // `?debug` only: element counts by `elementCount.rules[].index`, which
   // is the `rules` listing id (#691); null until the call lands.
   let elementCounts = $state<Record<number, number> | null>(null)
+  // The shared `costEstimate?all` response: the Diagnostics dialog's
+  // cards and top rules and the `?debug` bar counts read the same call,
+  // so one fetch serves both surfaces.
+  let costEstimate = $state<ToolResponse | null>(null)
+  let costRequest: Promise<void> | null = null
+  let pageEl: HTMLDivElement | undefined = $state()
 
   const filtered = $derived(
     (rules ?? []).filter((entry) =>
@@ -236,29 +244,46 @@
   }
 
   /**
+   * The `costEstimate?all` response, fetched once and shared: a refusal or
+   * an unreachable endpoint is kept as the `{error}` body so the callers
+   * render it rather than retrying per surface.
+   */
+  function ensureCostEstimate(): Promise<void> {
+    costRequest ??= call({ op: 'costEstimate', all: true })
+      .then((response) => {
+        costEstimate = response
+      })
+      .catch((error) => {
+        costEstimate = {
+          error: {
+            code: 'endpoint-unreachable',
+            message: error instanceof Error ? error.message : String(error),
+          },
+        }
+      })
+    return costRequest
+  }
+
+  /**
    * `?debug` only: `elementCount.rules` ranks rules by count with `index`
    * naming the `rules` listing id, so the bars can show each rule's
    * element count. A refused or unreachable call leaves the cells empty.
    */
   async function loadElementCounts() {
-    try {
-      const response = await call({ op: 'costEstimate', all: true })
-      if ('result' in response) {
-        const entries =
-          ((response.result as CostEstimateResult).elementCount?.rules ?? []) as {
-            index?: unknown
-            count?: unknown
-          }[]
-        const counts: Record<number, number> = {}
-        for (const entry of entries) {
-          if (typeof entry.index === 'number' && typeof entry.count === 'number') {
-            counts[entry.index] = entry.count
-          }
+    await ensureCostEstimate()
+    if (costEstimate && 'result' in costEstimate) {
+      const entries =
+        ((costEstimate.result as CostEstimateResult).elementCount?.rules ?? []) as {
+          index?: unknown
+          count?: unknown
+        }[]
+      const counts: Record<number, number> = {}
+      for (const entry of entries) {
+        if (typeof entry.index === 'number' && typeof entry.count === 'number') {
+          counts[entry.index] = entry.count
         }
-        elementCounts = counts
       }
-    } catch {
-      // A debug decoration never blocks the page.
+      elementCounts = counts
     }
   }
 
@@ -295,7 +320,24 @@
         }
       })
     }
+    void ensureCostEstimate()
     dialog = 'diagnostics'
+  }
+
+  /**
+   * A dialog's reveal request (design.md § Dialogs): close the dialog,
+   * open the rule's bar, and scroll it into view. A filter that would
+   * hide the target is dropped — the reveal has to land. `elementCount`
+   * indexes and `finding.rule` both name `rules` listing ids.
+   */
+  async function revealRule(id: number) {
+    dialog = null
+    if (!filtered.some((entry) => entry.summary.id === id)) filter = ''
+    openRules.add(id)
+    await tick()
+    pageEl
+      ?.querySelector(`.rule-slot[data-rule-id="${id}"]`)
+      ?.scrollIntoView?.({ block: 'nearest' })
   }
 
   /**
@@ -399,7 +441,7 @@
   }
 </script>
 
-<div class="page">
+<div class="page" bind:this={pageEl}>
   <header class="title-row">
     <h1>Workshop</h1>
     {#if fileName}<span class="file-name">{fileName}</span>{/if}
@@ -480,7 +522,15 @@
     {/if}
   </section>
 
-  <Dialogs which={dialog === 'pending' ? null : dialog} {symbols} {findings} onclose={() => (dialog = null)} />
+  <Dialogs
+    which={dialog === 'pending' ? null : dialog}
+    {symbols}
+    {findings}
+    {costEstimate}
+    {names}
+    onreveal={(id) => void revealRule(id)}
+    onclose={() => (dialog = null)}
+  />
 
   <PendingChanges
     open={dialog === 'pending'}
