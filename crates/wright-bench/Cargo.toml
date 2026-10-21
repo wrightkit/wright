@@ -15,7 +15,7 @@ name = "wright-bench"
 path = "src/main.rs"
 
 [dependencies]
-libc.workspace = true
+nix = { version = "0.31", default-features = false, features = ["resource"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 hotpath = "0.28"

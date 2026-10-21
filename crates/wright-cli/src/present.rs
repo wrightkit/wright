@@ -220,16 +220,16 @@ impl RuntimeEnvironment {
     }
 }
 
-/// The terminal's actual column count via `TIOCGWINSZ`; `None` when stdout
-/// is not a terminal or the platform cannot answer. `COLUMNS` is checked
-/// separately — it doubles as the test override.
+/// The terminal's actual column count via `TIOCGWINSZ` (rustix's safe
+/// `tcgetwinsize`); `None` when stdout is not a terminal or the platform
+/// cannot answer. `COLUMNS` is checked separately — it doubles as the
+/// test override.
 #[cfg(unix)]
 fn terminal_columns() -> Option<u16> {
-    unsafe {
-        let mut size: libc::winsize = std::mem::zeroed();
-        (libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut size) == 0 && size.ws_col > 0)
-            .then_some(size.ws_col)
-    }
+    rustix::termios::tcgetwinsize(std::io::stdout())
+        .ok()
+        .map(|size| size.ws_col)
+        .filter(|col| *col > 0)
 }
 
 #[cfg(not(unix))]
