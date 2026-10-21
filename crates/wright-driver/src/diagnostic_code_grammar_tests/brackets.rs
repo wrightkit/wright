@@ -284,6 +284,63 @@ pub(super) fn in_pattern(masked: &[u8], pos: usize) -> bool {
     false
 }
 
+/// Whether `pos` sits inside a `use` item — `use a::b`,
+/// `pub use a::{b, c}`, nested `use a::{b::{c}}` trees included. A name
+/// there is a path segment of a declaration, never a produced value.
+/// The walk checks the statement head at `pos`'s level, then each
+/// enclosing bracket's head — a nested use tree's inner `{` head is
+/// `b::`, so the `use` lives one level out.
+pub(super) fn in_use_item(masked: &[u8], pos: usize) -> bool {
+    let mut at = pos;
+    for _ in 0..32 {
+        let (hs, he) = stmt_head(masked, at);
+        let head = as_str(masked, hs..he);
+        if depth0_words(head).iter().any(|&(_, w)| w == "use") {
+            return true;
+        }
+        match enclosing_open(masked, at) {
+            Some(open) => at = open,
+            None => return false,
+        }
+    }
+    false
+}
+
+/// Whether the `{` at `open` opens a struct/enum-variant literal —
+/// `S {`, `a::b::T {`, `Self {`, `S<T> {` — rather than a block or a
+/// `use` tree. The statement head decides: a construct keyword
+/// (`if`/`match`/`fn`/`use`/…) heads a block or item, `=>`/`->` marks
+/// an arm body or a return type, and qualifier words
+/// (`unsafe`/`async`/`move`/`const`/…) head blocks; a head ending in an
+/// identifier or `>` is a path — a struct literal. This is the check
+/// `block_role`'s `ExprBlock` bucket misses, so produced-value
+/// expansion must not absorb a struct literal's braces.
+pub(super) fn is_struct_lit_brace(masked: &[u8], open: usize) -> bool {
+    let (hs, he) = stmt_head(masked, open);
+    let head = as_str(masked, hs..he).trim_end();
+    if head.is_empty() || head.ends_with("=>") || head.contains("->") {
+        return false;
+    }
+    let words = depth0_words(head);
+    if words
+        .iter()
+        .any(|&(_, w)| CONSTRUCT_KWS.contains(&w) || w == "use")
+    {
+        return false;
+    }
+    if words.last().is_some_and(|&(_, w)| {
+        [
+            "unsafe", "async", "move", "do", "try", "const", "static", "let", "return", "pub",
+        ]
+        .contains(&w)
+    }) {
+        return false;
+    }
+    head.as_bytes()
+        .last()
+        .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_' || *b == b'>')
+}
+
 /// Whether `pos` sits inside a `#[]`/`#![]` attribute — walk enclosing
 /// brackets for a `[` preceded by `#`.
 pub(super) fn in_attribute(masked: &[u8], pos: usize) -> bool {

@@ -7,11 +7,18 @@
 //! A position is transparent when the value the subexpression carries
 //! is the value the whole expression produces; opaque callees stop the
 //! walk and their argument stays data (`f("lit")` classifies as `f`'s
-//! arg, not as the produced call result).
+//! arg, not as the produced call result). `concat!` is the one
+//! transparent macro — its arguments are pieces of the produced string,
+//! so they classify where the call lands. The same walk also extends a
+//! name's span over its receiver expression (`x.name`, `x..name`,
+//! `x..=name`) and over the callsite it heads (`name(…)`), because a
+//! deferred identifier's use is decided by the whole expression's slot.
+//! A struct literal's `{…}` is *not* a produced-value block — it is
+//! field inits — so it stops the walk and `slot.rs` reads the field.
 
 use super::brackets::{
-    enclosing_open, if_chain_start, is_match_body, last_construct_kw, next_nonws, prev_nonws,
-    stmt_head, word_before,
+    enclosing_open, if_chain_start, is_match_body, is_struct_lit_brace, last_construct_kw,
+    next_nonws, prev_nonws, stmt_head, word_before,
 };
 use super::source::{as_str, call_args, match_bracket};
 
@@ -70,7 +77,14 @@ fn callee_ident(masked: &[u8], end: usize) -> Callee {
     let mut s = end;
     while s > 0 {
         let b = masked[s - 1];
-        if b.is_ascii_alphanumeric() || b == b'_' || b == b':' || b == b'.' || b == b'!' {
+        // `!` continues the name only as the trailing macro bang —
+        // `!matches!(…)`'s leading `!` is negation, not callee text.
+        if b.is_ascii_alphanumeric()
+            || b == b'_'
+            || b == b':'
+            || b == b'.'
+            || (b == b'!' && s == end)
+        {
             s -= 1;
         } else {
             break;
@@ -554,19 +568,26 @@ fn enclosing_construct(masked: &[u8], s: usize, e: usize) -> Option<(usize, usiz
             }
             Some((start, next + 1))
         }
-        BlockRole::ExprBlock => Some((open, next + 1)),
+        // A struct literal's `{…}` is not an expr block — `S { name }`
+        // is a field init, not a produced tail — so it stops the walk
+        // and `statement_slot` reads the field.
+        BlockRole::ExprBlock => {
+            if is_struct_lit_brace(masked, open) {
+                None
+            } else {
+                Some((open, next + 1))
+            }
+        }
         BlockRole::Dead | BlockRole::FnBody => None,
     }
 }
 
 /// If `s..e` is the argument of a value-transparent call, the whole
 /// call's span — `Some(…)`, `x.unwrap_or(…)`, `Option::unwrap_or(o, …)`
-/// (last arg).
+/// (last arg), `concat!(…)` (its args are pieces of the produced
+/// string — the call's own slot decides them).
 fn enclosing_transparent_call(masked: &[u8], s: usize, e: usize) -> Option<(usize, usize)> {
     let open = enclosing_open(masked, s)?;
-    if masked[open] != b'(' {
-        return None;
-    }
     let close = match_bracket(masked, open)?;
     if e > close {
         return None;
@@ -575,6 +596,15 @@ fn enclosing_transparent_call(masked: &[u8], s: usize, e: usize) -> Option<(usiz
         return None;
     };
     let leaf = name.rsplit([':', '.']).next().unwrap_or(&name);
+    // `concat!("a", "b")` emits the joined literal — the only macro
+    // whose produced value *is* its args, so it is transparent. It
+    // accepts `(`/`[`/`{` alike; other macros take `(` only below.
+    if leaf == "concat!" {
+        return Some((name_start, close + 1));
+    }
+    if masked[open] != b'(' {
+        return None;
+    }
     if transparent_ctor(&name) {
         return Some((name_start, close + 1));
     }
@@ -620,9 +650,38 @@ pub(super) fn expand_transparent(masked: &[u8], s0: usize, e0: usize) -> (usize,
         {
             s = p;
         }
+        // `recv.name` member reads and `x..name`/`x..=name` range
+        // bounds — the name is a piece of the receiver/range
+        // expression, so the whole expression's slot decides the use.
+        if let Some(p) = prev_nonws(masked, s) {
+            if masked[p] == b'.' {
+                // `.` member (`recv.name`) or `..` range (`x..name`);
+                // `x?.name` lands on `.` too — `expr_start_before`
+                // walks the `?` back through the receiver either way.
+                let dots = if p > 0 && masked[p - 1] == b'.' {
+                    p - 1
+                } else {
+                    p
+                };
+                s = expr_start_before(masked, dots);
+            } else if p >= 2 && masked[p] == b'=' && masked[p - 1] == b'.' && masked[p - 2] == b'.'
+            {
+                s = expr_start_before(masked, p - 2);
+            }
+        }
         // `.to_string()`/`?`/combinator suffixes.
         if let Some(pe) = transparent_suffix_end(masked, e) {
             e = pe;
+        }
+        // `name(…)` — a callsite produces the callee's return value, so
+        // the use's slot is the whole call's slot. `if`/`let`/pattern
+        // parens are filtered out by the callee/pattern checks upstream
+        // of `slot_of`, and a literal never precedes `(`.
+        if let Some(a) = next_nonws(masked, e)
+            && masked[a] == b'('
+            && let Some(close) = match_bracket(masked, a)
+        {
+            e = close + 1;
         }
         // Transparent ctor or combinator arg.
         if let Some((cs, ce)) = enclosing_transparent_call(masked, s, e) {

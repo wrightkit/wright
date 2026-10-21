@@ -19,6 +19,12 @@
 //! identifier that resolves to no `&'static str`/`Kind` parameter —
 //! fails the census instead of being sampled (`#871`'s "enumerate or
 //! stop" rule).
+//!
+//! Residual, stated honestly: the census keys on the `SITES` needle
+//! list below — the `unknown`-family constructor and method spellings.
+//! A producer reached through any other spelling is a stated gap, not
+//! silently covered — a new producer spelling means extending `SITES`,
+//! never sampling.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};

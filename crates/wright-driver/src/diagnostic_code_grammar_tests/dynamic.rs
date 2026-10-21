@@ -487,9 +487,12 @@ pub(super) fn enumerate_dynamic(
 
         // `=> "lit"` arms, `return` values, and tail expressions inside
         // `fn <name>code(` bodies — the same name convention
-        // `slot::return_tail` applies: `code`/`.._code` produce codes,
-        // `by_code` is the entity channel, and a `code` segment anywhere
-        // else is ambiguous enough that the literal census fails on it.
+        // `slot::return_tail` applies: a `code` `_`-segment anywhere in
+        // the name (`code`, `provider_failure_code`, `code_for_kind`)
+        // makes the produced value a code, with `by_code` excluded as
+        // the entity channel. Other string-returning fns are not code
+        // positions — the literal census defers their returns under the
+        // fn name and lets the callsites decide.
         for (at, _) in text.match_indices("fn ") {
             let name_start = at + 3;
             let Some(name_len) =
@@ -498,7 +501,8 @@ pub(super) fn enumerate_dynamic(
                 continue;
             };
             let name = &text[name_start..name_start + name_len];
-            if !((name == "code" || name.ends_with("_code")) && !name.contains("by_code")) {
+            if name.contains("by_code") || !name.split('_').any(|s| s.eq_ignore_ascii_case("code"))
+            {
                 continue;
             }
             let Some(body) = text[name_start + name_len..]

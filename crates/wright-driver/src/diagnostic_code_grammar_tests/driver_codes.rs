@@ -16,12 +16,17 @@
 //! engine-kind tests for `kind`-built shapes.
 //!
 //! `wright-cli`, `wright-analyzer`, `wright-language`, and `wright-lsp`
-//! are scanned alongside `wright-driver`.
+//! are scanned alongside `wright-driver`; `wright-lpp` is not — its
+//! refusal codes pass through Wright verbatim, and only the
+//! `provider-refusal-` prefix it applies is grammar-checked by the
+//! vocabulary it produces. The pinned workshop-rs `kind` producers in
+//! `engine_kinds.rs` are the other stated residual: its `SITES` needle
+//! list documents what is covered and what is intentionally not.
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use super::classify::{FileCtx, Outcome, Scope, classify, resolve_deferred};
+use super::classify::{FileCtx, Flow, Outcome, ScanCtx, Scope, classify, resolve_deferred};
 use super::dynamic::{DynSite, enumerate_dynamic};
 use super::positions::CodeSite;
 use super::sinks::{collect_aliases, collect_code_sinks};
@@ -94,7 +99,7 @@ pub(super) fn driver_code_census() -> Census {
         );
         file_lits.insert(path.clone(), lits);
     }
-    let mut sinks = collect_code_sinks(&masked_files);
+    let (mut sinks, defined) = collect_code_sinks(&masked_files);
     collect_aliases(&masked_files, &mut sinks);
 
     let mut census = Census::default();
@@ -107,6 +112,7 @@ pub(super) fn driver_code_census() -> Census {
             analyzer: path.to_string_lossy().contains("wright-analyzer"),
             stage_glob: text.contains("Stage::*") || original.contains("use crate::diag::Stage::*"),
             sinks: &sinks,
+            defined: &defined,
         };
         for lit in &file_lits[path] {
             // A literal whose span was blanked sits in `#[cfg(test)]`
@@ -152,27 +158,32 @@ pub(super) fn driver_code_census() -> Census {
         }
     }
     // Deferred names resolve by use: any use at a code position makes
-    // the bound literal vocabulary.
+    // the bound literal vocabulary, and a use the classifier cannot
+    // read stays loud instead of silently counting as non-code.
+    let scan = ScanCtx {
+        files: &masked_files,
+        sinks: &sinks,
+        defined: &defined,
+    };
     for (lit, path, names, scope) in deferred {
-        if resolve_deferred(
-            &names,
-            &path,
-            &scope,
-            &masked_files,
-            &sinks,
-            &mut HashSet::new(),
-            0,
-        ) {
-            let (original, _) = &masked_files[&path];
-            census.deferred_vocab += 1;
-            census.vocabulary.push(CodeSite {
+        let (original, _) = &masked_files[&path];
+        match resolve_deferred(&names, &path, &scope, &scan, &mut HashSet::new(), 0) {
+            Flow::Vocab => {
+                census.deferred_vocab += 1;
+                census.vocabulary.push(CodeSite {
+                    file: path,
+                    line: line_of(original, lit.span.0),
+                    code: original[lit.content.0..lit.content.1].to_string(),
+                    scan: "deferred-use",
+                });
+            }
+            Flow::Other => census.deferred_other += 1,
+            Flow::Unknown(reason) => census.unresolved.push(LitSite {
                 file: path,
                 line: line_of(original, lit.span.0),
-                code: original[lit.content.0..lit.content.1].to_string(),
-                scan: "deferred-use",
-            });
-        } else {
-            census.deferred_other += 1;
+                text: original[lit.content.0..lit.content.1].to_string(),
+                reason,
+            }),
         }
     }
     enumerate_dynamic(

@@ -4,7 +4,8 @@
 //! collection elements, for-iterables, statements, and returns.
 
 use super::brackets::{
-    depth0_words, enclosing_open, next_nonws, prev_nonws, stmt_head, word_before,
+    depth0_words, enclosing_open, is_struct_lit_brace, next_nonws, prev_nonws, stmt_head,
+    word_before,
 };
 use super::classify::{FileCtx, Outcome, Scope};
 use super::expand::{BlockRole, Callee, block_role, callee_before, is_operand_end};
@@ -22,6 +23,12 @@ pub(super) fn slot_of(ctx: &FileCtx, s: usize, e: usize, crossed: bool) -> Outco
         match masked[a] {
             b'=' if masked.get(a + 1) == Some(&b'>') => {
                 return Outcome::Other("pattern-expr");
+            }
+            // `expr:` — a `name:` field key, an `x: T` annotation, a
+            // `'label:` — the value names a slot or is a label, never
+            // an emitted code by itself.
+            b':' if masked.get(a + 1) != Some(&b':') && (a == 0 || masked[a - 1] != b':') => {
+                return Outcome::Other("key");
             }
             b'+' | b'-' | b'*' | b'/' | b'%' | b'^' | b'&' | b'|' | b'<' | b'>' | b'!' | b'=' => {
                 return Outcome::Other("operand");
@@ -81,6 +88,15 @@ pub(super) fn slot_of(ctx: &FileCtx, s: usize, e: usize, crossed: bool) -> Outco
                 "in" => for_iterable(ctx, s),
                 "if" | "while" | "match" | "for" | "else" | "loop" | "unsafe" | "async"
                 | "move" | "do" | "await" | "assert" => Outcome::Other("keyword-operand"),
+                // A declaration keyword heads a binding/type/item site —
+                // `let name`, `let mut name`, `mod name`, `impl Name`,
+                // `x as Name` — a name there is declared or referenced
+                // by type, never a produced value.
+                "let" | "const" | "static" | "mut" | "ref" | "fn" | "mod" | "struct" | "enum"
+                | "union" | "trait" | "impl" | "type" | "use" | "extern" | "dyn" | "pub"
+                | "crate" | "as" | "where" | "Self" | "super" | "self" => {
+                    Outcome::Other("declaration")
+                }
                 _ => Outcome::Unresolved("keyword-before-literal"),
             }
         }
@@ -256,26 +272,26 @@ fn lhs_of_assign(ctx: &FileCtx, eq: usize, compound: bool) -> Outcome {
 }
 
 /// `return`/`break`/`yield` and fn-body tails: the value flows to the
-/// caller, so it is a code when the fn's own name ends with the channel
-/// noun — `provider_failure_code`, `fn code(&self) -> &str`. A `code`
-/// segment elsewhere in the name cannot prove the channel either way —
-/// `code_execution` modifies, `code_for` means "the code of" — except
-/// `by_code`, the established entity channel (`by_code_field` emits the
-/// `byCode=` record).
+/// caller, so it is a code when the fn's own name carries a `code`
+/// segment — `code`, `provider_failure_code`, `code_for_kind` — with
+/// `by_code` excluded as the established entity channel
+/// (`by_code_field` emits the `byCode=` record). Every other fn defers
+/// the literal under the fn's *name*: a callsite that reaches a code
+/// position (`deny(tag())`) proves the literal is a code, an
+/// unclassifiable callsite fails it as unresolved, and a fn never
+/// called at a code position resolves non-code.
 fn return_tail(ctx: &FileCtx, at: usize) -> Outcome {
     match enclosing_fn_span(ctx.masked, at) {
-        Some((name, _, _))
-            if (name == "code" || name.ends_with("_code")) && !name.contains("by_code") =>
-        {
-            Outcome::Vocab("code-fn-return")
-        }
         Some((name, _, _))
             if !name.contains("by_code")
                 && name.split('_').any(|s| s.eq_ignore_ascii_case("code")) =>
         {
-            Outcome::Unresolved("ambiguous-code-fn")
+            Outcome::Vocab("code-fn-return")
         }
-        Some(_) => Outcome::Other("fn-return"),
+        Some((name, _, _)) => Outcome::Deferred {
+            names: vec![name],
+            scope: Scope::AllFiles,
+        },
         None => Outcome::Unresolved("return-outside-fn"),
     }
 }
@@ -298,6 +314,28 @@ fn arg_or_element(ctx: &FileCtx, s: usize, e: usize) -> Outcome {
                     && stage_marker_at(masked, a, ctx.stage_glob)
                 {
                     return Outcome::Vocab("stage-tuple");
+                }
+                // `let (a, b) = (x, y)` — the RHS element binds the
+                // pattern name at its own index: a code-ish name is a
+                // code channel, any other name defers under it so a
+                // later `deny(code)` resolves the literal.
+                if let Some(names) = tuple_pattern_names(masked, open) {
+                    let args = call_args(masked, open);
+                    let index = args.iter().position(|&(a, b)| s >= a && s <= b);
+                    match index.and_then(|i| names.get(i).and_then(|n| n.clone())) {
+                        Some(name) if code_binding_name(&name, ctx.analyzer) => {
+                            return Outcome::Vocab("tuple-code-binding");
+                        }
+                        Some(name) => {
+                            return Outcome::Deferred {
+                                names: vec![name],
+                                scope: enclosing_fn_span(masked, open)
+                                    .map(|(_, b, be)| Scope::Range(b, be))
+                                    .unwrap_or(Scope::AllFiles),
+                            };
+                        }
+                        None => {}
+                    }
                 }
                 Outcome::Other("group-element")
             }
@@ -326,6 +364,62 @@ fn arg_or_element(ctx: &FileCtx, s: usize, e: usize) -> Outcome {
     }
 }
 
+/// `let (a, b) = (…)` — when `open` is the RHS tuple's `(`, the LHS
+/// pattern's element names in order. `None` entries are `_`, nested
+/// patterns, and typed elements — a literal never sits against one
+/// directly. `None` (the whole return) means the `(` is not a `let`
+/// destructure's RHS at all.
+fn tuple_pattern_names(masked: &[u8], open: usize) -> Option<Vec<Option<String>>> {
+    // The RHS `(` follows the `=` of a `let`/`if let`/`while let`
+    // binding — `==`, `=>`, `<=`, `>=`, `!=` are operators, not one.
+    let eq = prev_nonws(masked, open)?;
+    if masked[eq] != b'='
+        || masked.get(eq + 1) == Some(&b'=')
+        || matches!(
+            masked.get(eq.wrapping_sub(1)),
+            Some(b'=') | Some(b'!') | Some(b'<') | Some(b'>')
+        )
+    {
+        return None;
+    }
+    let (hs, he) = stmt_head(masked, eq);
+    let head = as_str(masked, hs..he);
+    // The last depth-0 `let` heads this binding. Its pattern must start
+    // with `(` — `let x`, `let x: (T, T)` are not tuple destructures.
+    let &(kat, _) = depth0_words(head)
+        .iter()
+        .rev()
+        .find(|&(_, w)| *w == "let")?;
+    let after_let = &head[kat + "let".len()..];
+    let trimmed = after_let
+        .trim_start()
+        .trim_start_matches("ref ")
+        .trim_start_matches("mut ");
+    if !trimmed.starts_with('(') {
+        return None;
+    }
+    let pat_open = hs + kat + "let".len() + (after_let.len() - trimmed.len());
+    Some(
+        call_args(masked, pat_open)
+            .iter()
+            .map(|&(a, b)| {
+                let el = as_str(masked, a..b)
+                    .trim()
+                    .trim_start_matches("ref ")
+                    .trim_start_matches("mut ")
+                    .trim_start_matches('&')
+                    .trim_start_matches("mut ")
+                    .trim();
+                // A bare identifier binds the element under its name.
+                (!el.is_empty()
+                    && el != "_"
+                    && el.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
+                .then(|| el.to_string())
+            })
+            .collect(),
+    )
+}
+
 /// `call(args)` — the callee decides the argument's role.
 fn call_arg(ctx: &FileCtx, callee: &str, callee_start: usize, open: usize, s: usize) -> Outcome {
     let masked = ctx.masked;
@@ -334,10 +428,26 @@ fn call_arg(ctx: &FileCtx, callee: &str, callee_start: usize, open: usize, s: us
         .iter()
         .position(|&(a, b)| s >= a && s <= b)
         .unwrap_or(args.len());
-    if callee.ends_with('!') {
-        return Outcome::Other("macro-arg");
-    }
     let leaf = callee.rsplit([':', '.']).next().unwrap_or(callee);
+    if callee.ends_with('!') {
+        let name = leaf.trim_end_matches('!');
+        return match name {
+            // `concat!` args are pieces of the produced string — the
+            // expander absorbs them into the call's span, so reaching
+            // here means the walk missed one: fail loudly.
+            "concat" => Outcome::Unresolved("concat-arg"),
+            // Macros whose produced value can never be a diagnostic
+            // code: formatting/printing/panicking templates, the
+            // assert family, data constructors (`vec!`, `json!`,
+            // `matches!`, …), `env!`/`include_*!` (their produced
+            // strings are external data), and the pinned third-party
+            // helpers (`hotpath::measure_block!`). An unlisted macro's
+            // argument is unclassifiable — it must be audited, not
+            // defaulted.
+            _ if KNOWN_DATA_MACROS.contains(&name) => Outcome::Other("macro-arg"),
+            _ => Outcome::Unresolved("unknown-macro-arg"),
+        };
+    }
     // `.` method calls give the receiver — the span before the `.`
     // before the leaf; `::` paths and bare names have none.
     let receiver_span = callee
@@ -394,6 +504,15 @@ fn call_arg(ctx: &FileCtx, callee: &str, callee_start: usize, open: usize, s: us
     {
         return Outcome::Fragment("code-append");
     }
+    // A qualified callsite whose leaf collides with a std method —
+    // `x.contains(…)`, `v.insert(…)` — is ambiguous: the receiver could
+    // be the registered sink's owner or a `String`/`Vec`. A literal
+    // cannot prove which, so it stays non-code (the dynamic report
+    // still lists code-channel-shaped *arguments* at these callsites).
+    // Bare calls are unambiguous — they resolve to the defined `fn`.
+    if callee.contains(['.', ':']) && AMBIGUOUS_SINKS.contains(&leaf) {
+        return Outcome::Other("ambiguous-callee");
+    }
     if let Some(indices) = ctx.sinks.get(leaf) {
         if indices.contains(&index) {
             return Outcome::Vocab("sink-arg");
@@ -401,12 +520,73 @@ fn call_arg(ctx: &FileCtx, callee: &str, callee_start: usize, open: usize, s: us
         return Outcome::Other("sink-other-arg");
     }
     if AMBIGUOUS_SINKS.contains(&leaf) {
-        // A literal cannot prove a code channel for a name that collides
-        // with a std method (`contains`, `insert`, `join`, …).
         return Outcome::Other("ambiguous-callee");
     }
-    Outcome::Other("call-arg")
+    // The argument of a callee the census can attribute is positively
+    // data: `recv.f(…)`/`path::f(…)` defer to the receiver's type or
+    // the owning module, and a `fn`/closure/type defined in the scanned
+    // sources had its parameter list audited — no `code` channel
+    // registered. A *bare* callee that resolves to nothing is
+    // unanalyzable — `unknown_fn(c)` proves nothing about `c`, so the
+    // use cannot clear a deferred literal.
+    if callee.contains(['.', ':']) || ctx.defined.contains(leaf) {
+        return Outcome::Other("call-arg");
+    }
+    Outcome::Unresolved("unknown-callee")
 }
+
+/// Macro callees whose arguments can never produce a diagnostic code —
+/// `call_arg` whitelists them as `Other`; any other `!`-callee's
+/// argument is unclassifiable (`Unresolved`), and `concat!` is
+/// transparent to the expander so its args never reach this table.
+const KNOWN_DATA_MACROS: &[&str] = &[
+    "assert",
+    "assert_eq",
+    "assert_matches",
+    "assert_ne",
+    "cfg",
+    "column",
+    "compile_error",
+    "concat_idents",
+    "dbg",
+    "debug",
+    "debug_assert",
+    "debug_assert_eq",
+    "debug_assert_ne",
+    "env",
+    "eprint",
+    "eprintln",
+    "error",
+    "file",
+    "format",
+    "format_args",
+    "format_args_nl",
+    "include",
+    "include_bytes",
+    "include_str",
+    "info",
+    "json",
+    "json_internal",
+    "line",
+    "log",
+    "matches",
+    "measure_block",
+    "module_path",
+    "option_env",
+    "panic",
+    "print",
+    "println",
+    "stringify",
+    "thread_local",
+    "todo",
+    "trace",
+    "unimplemented",
+    "unreachable",
+    "vec",
+    "warn",
+    "write",
+    "writeln",
+];
 
 /// The cooked text of `masked[a..b]` when it is exactly one literal.
 fn lit_content(ctx: &FileCtx, a: usize, b: usize) -> Option<String> {
@@ -457,6 +637,19 @@ fn receiver_has_code_entry(ctx: &FileCtx, rs: usize, re: usize) -> bool {
 /// is either the fn body's tail or a discarded one).
 fn statement_slot(ctx: &FileCtx, s: usize, e: usize, crossed: bool) -> Outcome {
     let masked = ctx.masked;
+    // A `{` that opens a struct literal is not a block — `S { name }`/
+    // `S { name, }` is a shorthand field init whose *field* name decides
+    // the channel (`S { code }` is a code, `S { msg }` is data).
+    if let Some(open) = enclosing_open(masked, s)
+        && masked[open] == b'{'
+        && is_struct_lit_brace(masked, open)
+        && let field = as_str(masked, s..e).trim()
+    {
+        if is_code_field(field, ctx.analyzer) {
+            return Outcome::Vocab("struct-code-field");
+        }
+        return Outcome::Other("struct-field");
+    }
     if let Some(a) = next_nonws(masked, e)
         && masked[a] == b'}'
         && let Some(open) = enclosing_open(masked, s)

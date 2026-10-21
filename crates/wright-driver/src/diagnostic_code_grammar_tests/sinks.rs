@@ -1,7 +1,8 @@
 //! Sink collection for `super::driver_codes::driver_code_census`: which
 //! `fn`/closure names take a string-typed `code` (or analyzer `id`)
-//! parameter and at which argument indices, plus the direct `use`/`let`
-//! aliases that forward to those names.
+//! parameter and at which callsite argument indices, plus the direct
+//! `use`/`let` aliases that forward to those names and the set of every
+//! `fn`/closure/`struct`/`enum` name defined in the scanned sources.
 //!
 //! Two facts the census relies on:
 //!
@@ -10,9 +11,16 @@
 //!   `String`, `impl Into<String>`, `impl AsRef<str>`, or a bare generic
 //!   `T` bound — in the generics list or the `where` clause — that
 //!   mentions a string trait);
-//! - every callsite of such a fn exposes the argument at *each*
-//!   registered index as a code position — a fn with two code-named
+//! - the registered indices are *callsite* indices: a leading `self`
+//!   receiver binds no callsite argument, so `fn deny(&self, code:
+//!   &str)` registers `code` at index 0 and `recv.deny("x")` classifies
+//!   its first argument as the code position. A fn with two code-named
 //!   parameters registers both, not just the first.
+//!
+//! The defined-name set backs the unknown-callee rule in `slot.rs`: an
+//! argument of a bare callee the census cannot resolve to any `fn`,
+//! closure, or type is unclassifiable and must fail, while the argument
+//! of a defined fn is positively data — its parameters were audited.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -20,10 +28,17 @@ use std::path::PathBuf;
 use super::source::{as_str, call_args, match_bracket};
 
 /// `fn` names whose parameter list carries a string-typed `code`
-/// parameter, with the set of that parameter's indices (receiver
-/// excluded). Any callsite's argument at one of those indices is a code
-/// position.
+/// parameter, with the set of that parameter's *callsite* indices —
+/// a `self` receiver occupies no callsite slot, so its successors'
+/// indices shift down by one. Any callsite's argument at one of those
+/// indices is a code position.
 pub(super) type CodeSinks = BTreeMap<String, BTreeSet<usize>>;
+
+/// Every `fn` name, `let`-bound closure variable, and
+/// `struct`/`enum`/`union` type name defined in the scanned sources —
+/// the callees the census can attribute. A bare callsite callee absent
+/// here is unanalyzable and fails closed.
+pub(super) type DefinedCallees = BTreeSet<String>;
 
 /// Sink names that collide with std collection/string methods. Their
 /// callsites are ambiguous (`Vec::contains` vs `LintRegistry::contains`)
@@ -193,13 +208,24 @@ fn is_code_param(pname: &str, ptype: &str, bounds: &[&str], analyzer: bool) -> b
 /// Collect `fn` names whose parameter list carries a string-typed `code`
 /// parameter (`code: &str`, `code: String`, `code: impl Into<String>`,
 /// a generic `code: T` whose bound mentions `Into`/`AsRef`/`str`),
-/// recording every such parameter's index (the receiver does not count).
-/// In wright-analyzer a string-typed `id:` parameter is a rule-code
-/// channel too. `let name = |code: &str, …|` closure bindings register
-/// under their variable so `cb("lit")` callsites classify. Built from
-/// the masked sources so `#[cfg(test)]` helpers never register.
-pub(super) fn collect_code_sinks(files: &BTreeMap<PathBuf, (String, Vec<u8>)>) -> CodeSinks {
+/// recording every such parameter's *callsite* index — a leading `self`
+/// receiver consumes a parameter index but no callsite argument, so
+/// every later parameter shifts down by one. In wright-analyzer a
+/// string-typed `id:` parameter is a rule-code channel too.
+/// `let name = |code: &str, …|` closure bindings register under their
+/// variable so `cb("lit")` callsites classify. Built from the masked
+/// sources so `#[cfg(test)]` helpers never register.
+///
+/// The second return value is [`DefinedCallees`]: every `fn` name and
+/// closure-binding name seen, plus `struct`/`enum`/`union` type names —
+/// whether or not a code parameter exists. `call_arg` uses it to tell
+/// an audited non-code callee (`Other`) from an unresolvable one
+/// (`Unresolved`).
+pub(super) fn collect_code_sinks(
+    files: &BTreeMap<PathBuf, (String, Vec<u8>)>,
+) -> (CodeSinks, DefinedCallees) {
     let mut sinks = BTreeMap::new();
+    let mut defined = BTreeSet::new();
     for (path, (original, masked)) in files {
         let analyzer = path.to_string_lossy().contains("wright-analyzer");
         let text = as_str(masked, 0..masked.len()).to_string();
@@ -212,6 +238,7 @@ pub(super) fn collect_code_sinks(files: &BTreeMap<PathBuf, (String, Vec<u8>)>) -
                 continue;
             };
             let name = original[name_start..name_end].to_string();
+            defined.insert(name.clone());
             // Capture the generics list `<'a, T: Bound>` and the `where`
             // clause after `)` — a bare-ident param type (`code: T`) is
             // a string channel only when its own bound says so, and the
@@ -274,9 +301,28 @@ pub(super) fn collect_code_sinks(files: &BTreeMap<PathBuf, (String, Vec<u8>)>) -
                 .unwrap_or("");
             let mut bounds: Vec<&str> = split_top_level(&text[name_end..generics_end]);
             bounds.extend(split_top_level(where_text));
-            // The receiver (`self`/`&self`/…) carries no `:` and does
-            // not consume a callsite argument — the index counts only
-            // real parameters.
+            // The receiver (`self`/`&self`/`&mut self`/`self: T`) is a
+            // parameter but takes no callsite argument — every later
+            // parameter's callsite index is one less than its parameter
+            // index, so `recv.f("x")` still hits `f`'s `code` channel.
+            let receiver = params
+                .first()
+                .map(|&(ps, pe)| {
+                    let mut p = as_str(masked, ps..pe).trim();
+                    if let Some(rest) = p.strip_prefix('&') {
+                        p = rest.trim_start();
+                        if let Some(rest) = p.strip_prefix('\'') {
+                            p = rest
+                                .trim_start_matches(|c: char| c.is_ascii_alphanumeric() || c == '_')
+                                .trim_start();
+                        }
+                    }
+                    p = p.strip_prefix("mut ").unwrap_or(p).trim_start();
+                    p == "self"
+                        || p.strip_prefix("self")
+                            .is_some_and(|r| r.trim_start().starts_with(':'))
+                })
+                .unwrap_or(false) as usize;
             for (index, (ps, pe)) in params.iter().enumerate() {
                 let param = as_str(masked, *ps..*pe).trim().to_string();
                 let Some((pname, ptype)) = param.split_once(':') else {
@@ -286,7 +332,7 @@ pub(super) fn collect_code_sinks(files: &BTreeMap<PathBuf, (String, Vec<u8>)>) -
                     sinks
                         .entry(name.clone())
                         .or_insert_with(BTreeSet::new)
-                        .insert(index);
+                        .insert(index - receiver);
                 }
             }
         }
@@ -334,6 +380,8 @@ pub(super) fn collect_code_sinks(files: &BTreeMap<PathBuf, (String, Vec<u8>)>) -
             if masked.get(j) != Some(&b'|') {
                 continue;
             }
+            // The binding is a closure — a defined callee name.
+            defined.insert(var.clone());
             let Some(pipe_end) = masked[j + 1..]
                 .iter()
                 .position(|b| *b == b'|')
@@ -368,8 +416,28 @@ pub(super) fn collect_code_sinks(files: &BTreeMap<PathBuf, (String, Vec<u8>)>) -
                 }
             }
         }
+        // `struct Name`/`enum Name`/`union Name` — tuple-struct and
+        // variant constructors are resolvable callees too.
+        for kw in ["struct ", "enum ", "union "] {
+            for (at, _) in text.match_indices(kw) {
+                if at > 0 && (masked[at - 1].is_ascii_alphanumeric() || masked[at - 1] == b'_') {
+                    continue;
+                }
+                let mut j = at + kw.len();
+                while j < masked.len() && masked[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                let nstart = j;
+                while j < masked.len() && (masked[j].is_ascii_alphanumeric() || masked[j] == b'_') {
+                    j += 1;
+                }
+                if j > nstart {
+                    defined.insert(original[nstart..j].to_string());
+                }
+            }
+        }
     }
-    sinks
+    (sinks, defined)
 }
 
 /// The leaf identifier of a `use`/`let`-bound path — `a::b::f` and
