@@ -29,6 +29,7 @@ const capabilitiesResult: CapabilitiesResult = {
   result_schemas: {},
   languages: [],
   profiles: [],
+  athena_version: '0.0.0',
 }
 
 const response: ToolResponse = { result: capabilitiesResult }

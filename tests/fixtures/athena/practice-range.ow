@@ -1,0 +1,63 @@
+settings {
+    main {
+        Description: "Practice Range: Workshop conformance mode"
+    }
+    modes {
+        Skirmish {
+            enabled maps {
+                Workshop Island
+            }
+        }
+    }
+}
+
+variables {
+    global:
+        0: score
+        1: delta
+    player:
+        0: streak
+}
+
+subroutines {
+    0: addScore
+}
+
+rule ("Subroutine addScore") {
+    event {
+        Subroutine;
+        addScore;
+    }
+    actions {
+        Modify Global Variable(score, Add, Global.delta);
+    }
+}
+
+rule ("init") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        Set Global Variable(score, 0);
+        Create HUD Text(All Players(All Teams), Custom String("Score: {0}", Global.score), Null, Null, Left, 0, Color(White), Color(White), Color(White), Visible To and String, Default Visibility);
+    }
+}
+
+rule ("kill") {
+    event {
+        Player Dealt Final Blow;
+        All;
+        All;
+    }
+    actions {
+        Modify Player Variable(Event Player, streak, Add, 1);
+        If(Compare((Event Player).streak, >=, 3));
+            Set Global Variable(delta, 2);
+            Call Subroutine(addScore);
+        Else;
+            Set Global Variable(delta, 1);
+            Call Subroutine(addScore);
+        End;
+        Wait(0.25, Ignore Condition);
+    }
+}

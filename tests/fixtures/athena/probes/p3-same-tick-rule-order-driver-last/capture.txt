@@ -1,0 +1,22 @@
+变量
+{
+	全局:
+		0: go
+		1: go2
+		2: t0
+}
+
+动作
+{
+	全局.go = 真;
+	全局.go2 = 真;
+	全局.t0 = 3.023;
+}
+
+[00:00:03] P3 first batch rule=A t_ms=16.00
+[00:00:03] P3 first batch rule=B t_ms=16.00
+[00:00:03] P3 first batch rule=C t_ms=16.00
+[00:00:04] P3 second batch rule=D1(no wait) t_ms=1024.00
+[00:00:04] P3 second batch rule=D3(wait 0.016) t_ms=1040.00
+[00:00:04] P3 second batch rule=D2(wait 0.032) t_ms=1056
+[00:00:05] P3 done

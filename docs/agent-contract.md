@@ -115,6 +115,7 @@ plus the operation in snake case:
 | `providerValidateEdit` | `wright_provider_validate_edit` |
 | `editStatements` | `wright_edit_statements` |
 | `lookup` | `wright_lookup` |
+| `simulate` | `wright_simulate` |
 
 `tools/list` contains a tool only when its operation is in this set and
 advertised by `capabilities.operations`. `initialize`, `tools/list`, and the
@@ -175,7 +176,7 @@ the successful `result` payload.
 
 | Operation | Request fields | Successful `result` |
 | --- | --- | --- |
-| `capabilities` | none | Service name/version, `wright-agent/v1`, result contract, operation names, `result_schemas` (operation to committed-schema definition), languages, and profiles |
+| `capabilities` | none | Service name/version, `wright-agent/v1`, result contract, operation names, `result_schemas` (operation to committed-schema definition), languages, profiles, and `athena_version` (the `athena` release `simulate` links, ADR-0033) |
 | `compile` | optional `output` (file path), optional `force`, optional `to` (output locale) | `wright-result/v1` compile envelope: verdict, diagnostics, `output.written_to` and `output.sha256`; the program text is written to the file and never returned. See [Compile output](#compile-output-adr-0025) |
 | `check` | optional `all` | `wright-result/v1` check envelope |
 | `analyze` | optional selection, optional `all` | `wright-result/v1` essential analysis envelope; the envelope's `snapshot` scopes the ids `result` issues (#595) |
@@ -198,6 +199,7 @@ the successful `result` payload.
 | `editStatements` | `inputIdentity`, `edits`, optional `sources`, `snapshot` when a `rule` is numeric | The assembled `EditTransaction` plus the edit-validation payload — see [statement edits](agent-contract-edits.md) |
 | `lookup` | required `language`; optional `query`, `kind`, `within`, `locale`, `limit` | Owner vocabulary entries with accepted spellings and rendered signatures, or an explicit `unavailable` payload naming the owner |
 | `listEntries` | required `language`, `kind`; optional `within`, `locale`, `pageSize`, `cursor` | One page of the owner's vocabulary of a kind, in owner order, with `total` and `nextCursor` (see [vocabulary operations](agent-contract-vocabulary.md#listing-vocabulary-adr-0031)) |
+| `simulate` | `inputIdentity`; `seconds` or `scenario` (exactly one); optional `sources` | `wright-result/v1` envelope carrying the unchanged `athena` trace — see [simulate](agent-contract-simulate.md) (ADR-0033) |
 
 ### Compile output (ADR-0025)
 

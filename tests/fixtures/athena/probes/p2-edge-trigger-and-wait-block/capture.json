@@ -1,0 +1,28 @@
+{
+  "probe": "p2-edge-trigger-and-wait-block",
+  "client": {
+    "version": "2.25.0.0 - 154461.1",
+    "date": "2026-10-19",
+    "locale": "zh-CN"
+  },
+  "runs": 3,
+  "probe_sha256": "b9b5b592813bcc0bcfbca4fa2447674c31634acfe663613bf0e5850701fd10fd",
+  "hypothesis": "Ongoing is edge-triggered; an edge that occurs while the rule is in a Wait is dropped; a still-true condition at Wait end does not rerun",
+  "observed": [
+    {
+      "run": 1,
+      "start_t_ms": 0,
+      "end_t_ms": 1008
+    },
+    {
+      "run": 2,
+      "start_t_ms": 2624,
+      "end_t_ms": 3632
+    },
+    {
+      "total_runs": 2
+    }
+  ],
+  "result": "match",
+  "notes": "Three saved captures agree for the recorded probe hash; result is final under the capture convention. Client version 2.25.0.0 - 154461.1 was read from the client for runs 2 and 3; run 1 version was not recorded. All captures have five log lines and final variables f=true, runs=2, t0=3.023."
+}

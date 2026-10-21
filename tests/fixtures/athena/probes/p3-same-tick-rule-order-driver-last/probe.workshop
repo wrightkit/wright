@@ -1,0 +1,136 @@
+variables
+{
+	global:
+		0: go
+		1: go2
+		2: t0
+}
+
+rule("P3 A")
+{
+	event
+	{
+		Ongoing - Global;
+	}
+
+	conditions
+	{
+		Global.go == True;
+	}
+
+	actions
+	{
+		Log To Inspector(Custom String("P3 first batch rule=A t_ms={0}", (Total Time Elapsed - Global.t0) * 1000, Null, Null));
+	}
+}
+
+rule("P3 B")
+{
+	event
+	{
+		Ongoing - Global;
+	}
+
+	conditions
+	{
+		Global.go == True;
+	}
+
+	actions
+	{
+		Log To Inspector(Custom String("P3 first batch rule=B t_ms={0}", (Total Time Elapsed - Global.t0) * 1000, Null, Null));
+	}
+}
+
+rule("P3 C")
+{
+	event
+	{
+		Ongoing - Global;
+	}
+
+	conditions
+	{
+		Global.go == True;
+	}
+
+	actions
+	{
+		Log To Inspector(Custom String("P3 first batch rule=C t_ms={0}", (Total Time Elapsed - Global.t0) * 1000, Null, Null));
+	}
+}
+
+rule("P3 D1 no wait")
+{
+	event
+	{
+		Ongoing - Global;
+	}
+
+	conditions
+	{
+		Global.go2 == True;
+	}
+
+	actions
+	{
+		Log To Inspector(Custom String("P3 second batch rule=D1(no wait) t_ms={0}", (Total Time Elapsed - Global.t0) * 1000, Null, Null));
+	}
+}
+
+rule("P3 D2 wait 0.032")
+{
+	event
+	{
+		Ongoing - Global;
+	}
+
+	conditions
+	{
+		Global.go2 == True;
+	}
+
+	actions
+	{
+		Wait(0.032, Ignore Condition);
+		Log To Inspector(Custom String("P3 second batch rule=D2(wait 0.032) t_ms={0}", (Total Time Elapsed - Global.t0) * 1000, Null, Null));
+	}
+}
+
+rule("P3 D3 wait 0.016")
+{
+	event
+	{
+		Ongoing - Global;
+	}
+
+	conditions
+	{
+		Global.go2 == True;
+	}
+
+	actions
+	{
+		Wait(0.016, Ignore Condition);
+		Log To Inspector(Custom String("P3 second batch rule=D3(wait 0.016) t_ms={0}", (Total Time Elapsed - Global.t0) * 1000, Null, Null));
+	}
+}
+
+rule("P3 driver")
+{
+	event
+	{
+		Ongoing - Global;
+	}
+
+	actions
+	{
+		Wait(3, Ignore Condition);
+		Global.t0 = Total Time Elapsed;
+		Global.go = True;
+		Wait(1, Ignore Condition);
+		Global.go2 = True;
+		Wait(1, Ignore Condition);
+		Log To Inspector(Custom String("P3 done", Null, Null, Null));
+	}
+}

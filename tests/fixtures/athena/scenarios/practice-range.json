@@ -1,0 +1,14 @@
+{
+  "scenarioVersion": 1,
+  "seconds": 2,
+  "players": [
+    { "id": "p1", "hero": "ana", "team": "team1", "state": { "streak": 2 } }
+  ],
+  "events": [
+    { "kind": "playerDealtFinalBlow", "time": 1, "eventPlayer": "p1" }
+  ],
+  "expect": [
+    { "kind": "global", "name": "score", "value": 2 },
+    { "kind": "playerVariable", "player": "p1", "name": "streak", "value": 3 }
+  ]
+}

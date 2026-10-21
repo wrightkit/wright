@@ -1,0 +1,54 @@
+variables
+{
+	global:
+		0: f
+		1: runs
+		2: t0
+}
+
+rule("P2 driver: toggles the flag on a fixed timeline")
+{
+	event
+	{
+		Ongoing - Global;
+	}
+
+	actions
+	{
+		Wait(3, Ignore Condition);
+		Global.runs = 0;
+		Global.t0 = Total Time Elapsed;
+		Global.f = True;
+		Wait(0.2, Ignore Condition);
+		Global.f = False;
+		Wait(0.2, Ignore Condition);
+		Global.f = True;
+		Wait(2, Ignore Condition);
+		Global.f = False;
+		Wait(0.2, Ignore Condition);
+		Global.f = True;
+		Wait(3, Ignore Condition);
+		Log To Inspector(Custom String("P2 total runs={0}", Global.runs, Null, Null));
+	}
+}
+
+rule("P2 target: waits 1 s while the flag toggles")
+{
+	event
+	{
+		Ongoing - Global;
+	}
+
+	conditions
+	{
+		Global.f == True;
+	}
+
+	actions
+	{
+		Global.runs += 1;
+		Log To Inspector(Custom String("P2 run#{0} start t_ms={1}", Global.runs, (Total Time Elapsed - Global.t0) * 1000));
+		Wait(1, Ignore Condition);
+		Log To Inspector(Custom String("P2 run#{0} end t_ms={1}", Global.runs, (Total Time Elapsed - Global.t0) * 1000));
+	}
+}

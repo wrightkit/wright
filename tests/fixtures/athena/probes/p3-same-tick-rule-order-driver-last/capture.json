@@ -1,0 +1,45 @@
+{
+  "probe": "p3-same-tick-rule-order-driver-last",
+  "client": {
+    "version": "2.25.0.0 - 154461.1",
+    "date": "2026-10-19",
+    "locale": "zh-CN"
+  },
+  "runs": 3,
+  "probe_sha256": "1283e8f48b373fdb0cb574ed47eefa95d33872cb7e8941c6ed28b2f1756b844b",
+  "hypothesis": "P3 driver placed after receiver rules; expected trace in docs/procedure.zh-CN.md",
+  "observed": [
+    {
+      "batch": 1,
+      "rule": "A",
+      "t_ms": 16
+    },
+    {
+      "batch": 1,
+      "rule": "B",
+      "t_ms": 16
+    },
+    {
+      "batch": 1,
+      "rule": "C",
+      "t_ms": 16
+    },
+    {
+      "batch": 2,
+      "rule": "D1",
+      "t_ms": 1024
+    },
+    {
+      "batch": 2,
+      "rule": "D3",
+      "t_ms": 1040
+    },
+    {
+      "batch": 2,
+      "rule": "D2",
+      "t_ms": 1056
+    }
+  ],
+  "result": "match",
+  "notes": "Three agreeing valid saved captures; final match. Seven log lines and final variables go=true, go2=true, t0=3.023. An earlier completed attempt was not exported and is not counted. Client version 2.25.0.0 - 154461.1 visually verified in the options menu during this session."
+}

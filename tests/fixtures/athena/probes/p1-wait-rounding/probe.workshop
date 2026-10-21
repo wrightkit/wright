@@ -1,0 +1,26 @@
+variables
+{
+	global:
+		0: i
+		1: t0
+}
+
+rule("P1 wait rounding: elapsed time for several requested waits")
+{
+	event
+	{
+		Ongoing - Global;
+	}
+
+	actions
+	{
+		Wait(3, Ignore Condition);
+		Global.i = 0;
+		While(Global.i < 6);
+			Global.t0 = Total Time Elapsed;
+			Wait(Value In Array(Array(0.001, 0.016, 0.017, 0.03, 0.1, 0.5), Global.i), Ignore Condition);
+			Log To Inspector(Custom String("P1 requested_ms={0} elapsed_ms={1}", Value In Array(Array(0.001, 0.016, 0.017, 0.03, 0.1, 0.5), Global.i) * 1000, (Total Time Elapsed - Global.t0) * 1000));
+			Global.i += 1;
+		End;
+	}
+}

@@ -32,6 +32,7 @@ const EXPECTED_V1_OPERATIONS: &[&str] = &[
     "editStatements",
     "lookup",
     "listEntries",
+    "simulate",
 ];
 
 fn workspace_root() -> PathBuf {
@@ -137,6 +138,15 @@ fn requests() -> Vec<Value> {
             "pageSize":null,
             "cursor":null
         }),
+        // ADR-0033: `inputIdentity` preconditions the program to simulate;
+        // `seconds` runs a scenario-free simulation under `athena`.
+        json!({
+            "op":"simulate",
+            "inputIdentity":"",
+            "sources":null,
+            "seconds":0.25,
+            "scenario":null
+        }),
     ]
 }
 
@@ -192,9 +202,10 @@ fn service_responses() -> Vec<(String, Value)> {
                     request["rule"] = json!(rule);
                     request["snapshot"] = json!(generation);
                 }
-                // ADR-0029: `inputIdentity` preconditions the program the
-                // statement addresses were read from.
-                "editStatements" => {
+                // ADR-0029/ADR-0033: `inputIdentity` preconditions the
+                // program the statement addresses were read from, or the
+                // program `simulate` runs.
+                "editStatements" | "simulate" => {
                     request["inputIdentity"] = json!(input_identity);
                 }
                 _ => {}

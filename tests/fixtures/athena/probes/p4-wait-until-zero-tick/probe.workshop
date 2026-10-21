@@ -1,0 +1,30 @@
+variables
+{
+	global:
+		0: t0
+}
+
+rule("P4 Wait Until vs Wait: zero-tick behavior and timeout rounding")
+{
+	event
+	{
+		Ongoing - Global;
+	}
+
+	actions
+	{
+		Wait(3, Ignore Condition);
+		Global.t0 = Total Time Elapsed;
+		Wait Until(True, 0);
+		Log To Inspector(Custom String("P4a Wait Until(True, 0) elapsed_ms={0}", (Total Time Elapsed - Global.t0) * 1000, Null, Null));
+		Global.t0 = Total Time Elapsed;
+		Wait(0, Ignore Condition);
+		Log To Inspector(Custom String("P4b Wait(0) elapsed_ms={0}", (Total Time Elapsed - Global.t0) * 1000, Null, Null));
+		Global.t0 = Total Time Elapsed;
+		Wait Until(False, 0.03);
+		Log To Inspector(Custom String("P4c Wait Until(False, 0.03) elapsed_ms={0}", (Total Time Elapsed - Global.t0) * 1000, Null, Null));
+		Global.t0 = Total Time Elapsed;
+		Wait Until(False, 0.1);
+		Log To Inspector(Custom String("P4d Wait Until(False, 0.1) elapsed_ms={0}", (Total Time Elapsed - Global.t0) * 1000, Null, Null));
+	}
+}

@@ -125,6 +125,7 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
             "wright_provider_validate_edit",
             "wright_edit_statements",
             "wright_lookup",
+            "wright_simulate",
         ]
     );
     let caps = run_lines("stdio", &input, &[r#"{"op":"capabilities"}"#]);
@@ -197,6 +198,31 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
     assert_eq!(
         edit_statements["inputSchema"]["required"],
         json!(["inputIdentity", "edits"])
+    );
+    // ADR-0033: `wright_simulate`'s schema omits `sources` like the edit
+    // tools and keeps `inputIdentity` required; `seconds`/`scenario` stay
+    // optional alternates.
+    let simulate = tools
+        .iter()
+        .find(|t| t["name"] == "wright_simulate")
+        .unwrap();
+    assert!(
+        simulate["inputSchema"]["properties"]
+            .get("sources")
+            .is_none(),
+        "wright_simulate omits sources"
+    );
+    assert_eq!(
+        simulate["inputSchema"]["required"],
+        json!(["inputIdentity"])
+    );
+    assert!(
+        simulate["inputSchema"]["properties"]
+            .get("seconds")
+            .is_some()
+            && simulate["inputSchema"]["properties"]
+                .get("scenario")
+                .is_some()
     );
     // #532: the report tools expose `all` in their derived input schemas.
     for name in ["wright_analyze", "wright_inspect", "wright_lint"] {
@@ -273,6 +299,15 @@ fn mcp_transport_results_match_the_service_contract() {
         (
             "wright_lookup",
             serde_json::json!({"language": "workshop", "query": "wait"}),
+        ),
+        // ADR-0033: the MCP tool maps to `ToolRequest::Simulate` and its
+        // payload is the same wright-result envelope stdio returns.
+        (
+            "wright_simulate",
+            serde_json::json!({
+                "inputIdentity": wright_driver::input_identity(&source),
+                "seconds": 0.25,
+            }),
         ),
     ];
     let mut mcp_lines = vec![];

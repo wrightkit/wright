@@ -1,0 +1,39 @@
+{
+  "probe": "p1-wait-rounding",
+  "client": {
+    "version": "2.25.0.0 - 154461.1",
+    "date": "2026-10-19",
+    "locale": "zh-CN"
+  },
+  "runs": 3,
+  "probe_sha256": "33ab7f3d01d9db88391486cf1c0b069aaa8ec0b8faebe79f34aa4a89e50e2a30",
+  "hypothesis": "wait rounds up to a whole number of ticks (tick = 0.016 s)",
+  "observed": [
+    {
+      "requested_ms": 1,
+      "elapsed_ms": 16.0
+    },
+    {
+      "requested_ms": 16,
+      "elapsed_ms": 16.0
+    },
+    {
+      "requested_ms": 17,
+      "elapsed_ms": 32.0
+    },
+    {
+      "requested_ms": 30,
+      "elapsed_ms": 32.0
+    },
+    {
+      "requested_ms": 100,
+      "elapsed_ms": 112.0
+    },
+    {
+      "requested_ms": 500,
+      "elapsed_ms": 512.0
+    }
+  ],
+  "result": "match",
+  "notes": "Three saved captures agree for the recorded probe hash; result is final under the capture convention. Client version 2.25.0.0 - 154461.1 was read from the client for runs 2 and 3; run 1 version was not recorded. All captures have six log lines and final variables i=6, t0=3.231."
+}

@@ -1,0 +1,102 @@
+variables
+{
+	global:
+		0: f
+		1: t0
+		2: nIgnore
+		3: nAbort
+		4: nRestart
+		5: endIgnore
+		6: endAbort
+		7: endRestart
+}
+
+rule("P6 driver")
+{
+	event
+	{
+		Ongoing - Global;
+	}
+
+	actions
+	{
+		Wait(3, Ignore Condition);
+		Global.t0 = Total Time Elapsed;
+		Global.f = True;
+		Log To Inspector(Custom String("P6 flag=true t_ms={0}", (Total Time Elapsed - Global.t0) * 1000, Null, Null));
+		Wait(0.2, Ignore Condition);
+		Global.f = False;
+		Log To Inspector(Custom String("P6 flag=false t_ms={0}", (Total Time Elapsed - Global.t0) * 1000, Null, Null));
+		Wait(0.2, Ignore Condition);
+		Global.f = True;
+		Log To Inspector(Custom String("P6 flag=true t_ms={0}", (Total Time Elapsed - Global.t0) * 1000, Null, Null));
+		Wait(0.2, Ignore Condition);
+		Global.f = False;
+		Log To Inspector(Custom String("P6 flag=false t_ms={0}", (Total Time Elapsed - Global.t0) * 1000, Null, Null));
+		Wait(2, Ignore Condition);
+		Log To Inspector(Custom String("P6 done t_ms={0}", (Total Time Elapsed - Global.t0) * 1000, Null, Null));
+	}
+}
+
+rule("P6 Ignore Condition")
+{
+	event
+	{
+		Ongoing - Global;
+	}
+
+	conditions
+	{
+		Global.f == True;
+	}
+
+	actions
+	{
+		Global.nIgnore = Global.nIgnore + 1;
+		Wait(1, Ignore Condition);
+		Global.endIgnore = Global.endIgnore + 1;
+		Log To Inspector(Custom String("P6 Ignore end t_ms={0}", (Total Time Elapsed - Global.t0) * 1000, Null, Null));
+	}
+}
+
+rule("P6 Abort When False")
+{
+	event
+	{
+		Ongoing - Global;
+	}
+
+	conditions
+	{
+		Global.f == True;
+	}
+
+	actions
+	{
+		Global.nAbort = Global.nAbort + 1;
+		Wait(1, Abort When False);
+		Global.endAbort = Global.endAbort + 1;
+		Log To Inspector(Custom String("P6 Abort end t_ms={0}", (Total Time Elapsed - Global.t0) * 1000, Null, Null));
+	}
+}
+
+rule("P6 Restart When True")
+{
+	event
+	{
+		Ongoing - Global;
+	}
+
+	conditions
+	{
+		Global.f == True;
+	}
+
+	actions
+	{
+		Global.nRestart = Global.nRestart + 1;
+		Wait(1, Restart When True);
+		Global.endRestart = Global.endRestart + 1;
+		Log To Inspector(Custom String("P6 Restart end t_ms={0}", (Total Time Elapsed - Global.t0) * 1000, Null, Null));
+	}
+}

@@ -1,0 +1,17 @@
+{
+  "scenarioVersion": 1,
+  "seconds": 2,
+  "players": [
+    {
+      "id": "p1",
+      "hero": "ana",
+      "team": "team1"
+    }
+  ],
+  "events": [
+    {
+      "kind": "playerDealtFinalBlow",
+      "time": 1
+    }
+  ]
+}

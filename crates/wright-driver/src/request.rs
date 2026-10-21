@@ -356,6 +356,42 @@ pub enum ToolRequest {
         #[serde(default)]
         cursor: Option<String>,
     },
+    /// Simulate the loaded project under `athena` (ADR-0033): a thin pass
+    /// to the simulator's `run_text`/`run_scenario` entry points over the
+    /// effective program's canonical Workshop text — a source-language
+    /// project's provider-compiled artifact included — returning the trace
+    /// unchanged inside a `wright-result/v1` envelope. `athena` owns
+    /// execution semantics and the trace contract; `complete`,
+    /// `not_modeled`, and `missing_input` outcomes are all trace content —
+    /// the request is refused only when it cannot be served at all (a stale
+    /// `inputIdentity`, a malformed `scenario` or `seconds`, or a project
+    /// that does not load).
+    #[serde(rename = "simulate")]
+    Simulate {
+        /// The freshness precondition (ADR-0033): must equal the
+        /// `inputIdentity` of the program to simulate — the value `project`
+        /// reports, or the identity of the supplied `sources` text. A
+        /// mismatch refuses `edit-stale-source` and runs nothing.
+        #[serde(rename = "inputIdentity")]
+        input_identity: String,
+        /// The caller's current text for the loaded input source, with the
+        /// same optional semantics as `validateEditTransaction` (#472): when
+        /// supplied the program is loaded from that text, which is also the
+        /// precondition `inputIdentity` verifies against; when absent the
+        /// disk-loaded input's own text is simulated.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sources: Option<std::collections::BTreeMap<String, String>>,
+        /// The simulated seconds for a run without a scenario — `athena`'s
+        /// `Options.seconds`. Required when `scenario` is absent, and refused
+        /// when one is present because the scenario owns the simulated time.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        seconds: Option<f64>,
+        /// An `athena` scenario value (its `docs/scenario-format.md`),
+        /// passed through unchanged — Wright supplies no defaults for what
+        /// it omits, and `scenario.seconds` supplies the simulated time.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scenario: Option<serde_json::Value>,
+    },
 }
 
 /// The rule statement list a statement edit addresses (ADR-0029) — the

@@ -1,0 +1,19 @@
+变量
+{
+	全局:
+		0: i
+		1: t0
+}
+
+动作
+{
+	全局.i = 6;
+	全局.t0 = 3.231;
+}
+
+[00:00:03] P1 requested_ms=1 elapsed_ms=16.00
+[00:00:03] P1 requested_ms=16 elapsed_ms=16.00
+[00:00:03] P1 requested_ms=17 elapsed_ms=32.00
+[00:00:03] P1 requested_ms=30 elapsed_ms=32.00
+[00:00:03] P1 requested_ms=100 elapsed_ms=112.00
+[00:00:03] P1 requested_ms=500 elapsed_ms=512.00
