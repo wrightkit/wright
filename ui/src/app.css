@@ -490,56 +490,260 @@ details.debug pre {
   border-color: var(--gold);
 }
 
-.symbol-kind {
+/* View dialogs (#882, docs/ui/design.md § Dialogs): the shared chrome —
+   a centred title, the scrolling `--dlg` body, and the `--dlg-foot` band
+   with the one orange Confirm — then the Diagnostics cards, top rules,
+   and finding rows, and the Variables columns. The `.view` modifier keeps
+   the pending-changes and editor dialogs on their own chrome. */
+
+.dialog.view {
+  width: min(44rem, calc(100vw - 4rem));
+  max-width: 44rem;
+  padding: 0;
+  border-radius: 3px;
+}
+
+/* Flex only while open: the UA `dialog:not([open])` rule must keep the
+   closed dialog out of the page. */
+dialog.view[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.dialog.view .dlg-title {
+  flex: none;
+  margin: 0;
+  padding: 1.1rem 1.25rem 0.9rem;
+  text-align: center;
+  font-size: 1.05rem;
+}
+
+.dialog.view .dlg-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 1.25rem 1.25rem;
+}
+
+.dialog.view .dlg-foot {
+  flex: none;
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem;
+  background: var(--dlg-foot);
+  border-radius: 0 0 3px 3px;
+}
+
+.dialog.view .primary {
+  min-width: 9rem;
+  padding: 0.45rem 1.5rem;
+  border: 0;
+  background: var(--orange);
+  color: var(--white);
+  font-weight: 600;
+}
+
+.dialog.view .primary:hover {
+  filter: brightness(1.12);
+}
+
+/* Summary cards: a `--card` panel at the spec's one 14 px radius, a
+   label, a large italic figure over a 2 px rule, and a short
+   description. */
+.dialog.view .cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.dialog.view .stat-card {
+  background: var(--card);
+  border-radius: 14px;
+  padding: 0.9rem 1rem;
+}
+
+.dialog.view .stat-card h3 {
+  margin: 0;
   font-size: 0.75rem;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--muted);
-  margin: 0.9rem 0 0.2rem;
 }
 
-.symbol-list,
-.finding-list {
+.dialog.view .stat-card .figure {
+  margin: 0.15rem 0 0;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid color-mix(in srgb, var(--text) 50%, transparent);
+  font-size: 1.8rem;
+  font-style: italic;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.dialog.view .stat-card .meter {
+  height: 0.45rem;
+  margin-top: 0.55rem;
+  border-radius: 3px;
+  background: rgb(0 0 0 / 0.35);
+  overflow: hidden;
+}
+
+.dialog.view .stat-card .meter span {
+  display: block;
+  height: 100%;
+  background: var(--orange);
+}
+
+.dialog.view .stat-card .meter span.over {
+  background: var(--error);
+}
+
+.dialog.view .stat-card .desc {
+  margin: 0.55rem 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.dialog.view .stat-card .desc code {
+  color: var(--error);
+}
+
+.dialog.view .section-title {
+  margin: 0.25rem 0 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.dialog.view .top-rules,
+.dialog.view .finding-list {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+}
+
+.dialog.view .top-rules button {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.35rem 0.6rem;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+}
+
+.dialog.view .top-rules button:hover {
+  background: var(--bar-hover);
+}
+
+.dialog.view .top-rules .count {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  color: var(--muted);
+}
+
+/* Findings: one per row in alternating shades, severity coloured. A
+   located finding is a button that reveals its rule. */
+.dialog.view .finding-list li:nth-child(even) {
+  background: var(--card);
+}
+
+.dialog.view .finding {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 0.1rem 0.6rem;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: 0;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  font-size: 0.85rem;
+}
+
+.dialog.view button.finding {
+  cursor: pointer;
+}
+
+.dialog.view button.finding:hover {
+  background: var(--bar-hover);
+}
+
+.dialog.view .finding .sev {
+  padding-top: 0.1rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+}
+
+.dialog.view .finding.severity-error .sev {
+  color: var(--error);
+}
+
+.dialog.view .finding.severity-warning .sev {
+  color: var(--warn);
+}
+
+.dialog.view .finding.severity-info .sev {
+  color: var(--muted);
+}
+
+.dialog.view .finding .code {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  color: var(--dim);
+}
+
+.dialog.view .finding .loc {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+/* Variables: the Global and Player columns, subroutines centred under
+   them, each declared name in a dark box. */
+.dialog.view .var-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.dialog.view .var-columns h3,
+.dialog.view .var-subs h3 {
+  margin: 0 0 0.55rem;
+  text-align: center;
+  font-size: 0.95rem;
+}
+
+.dialog.view .var-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-.symbol-list li {
-  padding: 0.15rem 0;
+.dialog.view .var-list li {
+  padding: 0.35rem 0.65rem;
+  border-radius: 3px;
+  background: var(--card);
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-}
-
-.finding {
-  display: grid;
-  grid-template-columns: auto auto 1fr;
-  gap: 0.5rem;
-  padding: 0.3rem 0;
-  border-bottom: 1px solid rgb(255 255 255 / 0.12);
   font-size: 0.85rem;
 }
 
-.finding .sev {
-  text-transform: uppercase;
-  font-size: 0.7rem;
+.dialog.view .var-subs {
+  margin-top: 1rem;
 }
 
-.finding.severity-error .sev {
-  color: var(--error);
-}
-
-.finding.severity-warning .sev {
-  color: var(--warn);
-}
-
-.finding.severity-info .sev {
-  color: var(--muted);
-}
-
-.finding .loc {
-  grid-column: 1 / -1;
-  color: var(--muted);
-  font-size: 0.75rem;
+.dialog.view .var-subs .var-list {
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
 /* Editing layer (ADR-0032): selection checkboxes, the per-column selection
