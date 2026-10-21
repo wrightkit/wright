@@ -4,7 +4,9 @@
  * The #880 rule-bar coverage — one bar per rule in `rules` order, per-rule
  * open state, the event cell, the disabled name, and the debug element
  * count — plus the #879 page-shell coverage: the spec tokens on `:root`,
- * the title row, the icon toolbar, and the single-column layout.
+ * the title row, the icon toolbar, and the single-column layout, and the
+ * #883 session-locale coverage: `origin.locale` on load, the toolbar
+ * selector, and the in-place re-resolve a locale change runs.
  *
  * The async-overwrite defect class (#868) — an async read must not
  * overwrite state a newer action produced during its await:
@@ -422,6 +424,143 @@ describe('the rule bars (#880)', () => {
     expect(costCalls).toBe(1)
     expect(barOf(2).querySelector('.bar-count')?.textContent).toBe('30')
     expect(barOf(1).querySelector('.bar-count')?.textContent).toBe('12')
+  })
+})
+
+describe('the session locale (#883)', () => {
+  /** A handler whose `lookup` names show the request's own locale. */
+  const localeHandler =
+    (
+      summaries: RuleSummary[],
+      project: Record<string, unknown>,
+      locales: string[],
+      requests: { op: string; query?: string; locale?: string | null }[],
+    ) =>
+    (request: ToolRequest): Promise<ToolResponse> => {
+      if (request.op === 'project') {
+        return Promise.resolve({ result: project } as ToolResponse)
+      }
+      if (request.op === 'targetMetadata') {
+        return Promise.resolve({ result: { locales } } as ToolResponse)
+      }
+      if (request.op === 'rules' && request.all === true && request.content === true) {
+        requests.push({ op: 'rules' })
+        return Promise.resolve({ result: { rules: summaries } } as ToolResponse)
+      }
+      if (request.op === 'lookup' && typeof request.query === 'string') {
+        requests.push({ op: 'lookup', query: request.query, locale: request.locale })
+        return Promise.resolve(
+          lookupResult(request.query, `Name ${request.query}@${request.locale}`),
+        )
+      }
+      return Promise.reject(new Error(`unexpected request: ${JSON.stringify(request)}`))
+    }
+
+  it('takes the initial locale from origin.locale and falls back to en-US', async () => {
+    const summaries = [summaryFor(1, 'first', contentFor('ev.a'), 'ev.a')]
+    // The service spells locales lowercase (`zh-cn`, `en-us`).
+    const locales = ['en-us', 'de-de', 'zh-cn']
+    let requests: { op: string; query?: string; locale?: string | null }[] = []
+
+    // A zh-CN project opens in zh-CN: every `lookup` carries it, the
+    // selector shows each catalog locale in its own name, and the chrome
+    // strings follow.
+    api.handler = localeHandler(
+      summaries,
+      { origin: { kind: 'workshop', locale: 'zh-cn' }, sourceFiles: ['demo.ws'] },
+      locales,
+      requests,
+    )
+    mountApp()
+    await settle()
+
+    const select = host.querySelector<HTMLSelectElement>('select.locale')!
+    expect(select.value).toBe('zh-cn')
+    expect(select.closest('.toolbar')).not.toBeNull()
+    expect([...select.options].map((option) => [option.value, option.textContent])).toEqual([
+      ['en-us', 'English'],
+      ['de-de', 'Deutsch'],
+      ['zh-cn', '简体中文'],
+    ])
+    const lookups = requests.filter((request) => request.op === 'lookup')
+    expect(lookups.length).toBeGreaterThan(0)
+    expect([...new Set(lookups.map((request) => request.locale))]).toEqual(['zh-cn'])
+    expect(host.querySelector('.title-row h1')?.textContent).toBe('地图工坊')
+    expect(host.querySelector('.rule-count')?.textContent?.trim()).toBe('规则（1）')
+    void unmount(app!)
+    app = undefined
+    document.body.innerHTML = ''
+    requests = []
+
+    // A project that names no origin.locale falls back to en-US — the
+    // locale is never guessed from file text. The selector still shows it
+    // even when the catalog list does not spell it (`en-us` vs `en-US`).
+    api.handler = localeHandler(
+      summaries,
+      { origin: { kind: 'workshop' }, sourceFiles: ['demo.ws'] },
+      locales,
+      requests,
+    )
+    mountApp()
+    await settle()
+
+    expect(host.querySelector<HTMLSelectElement>('select.locale')!.value).toBe('en-US')
+    const fallback = requests.filter((request) => request.op === 'lookup')
+    expect(fallback.length).toBeGreaterThan(0)
+    expect([...new Set(fallback.map((request) => request.locale))]).toEqual(['en-US'])
+    expect(host.querySelector('.title-row h1')?.textContent).toBe('Workshop')
+  })
+
+  it('re-resolves on-screen names in the new locale without reloading rules', async () => {
+    const summaries = [
+      summaryFor(1, 'first', contentFor('ev.a'), 'ev.a'),
+      summaryFor(2, 'second', contentFor('ev.b'), 'ev.b'),
+    ]
+    const requests: { op: string; query?: string; locale?: string | null }[] = []
+    api.handler = localeHandler(
+      summaries,
+      { origin: { kind: 'workshop', locale: 'en-us' }, sourceFiles: ['demo.ws'] },
+      ['en-us', 'zh-cn'],
+      requests,
+    )
+
+    mountApp()
+    await settle()
+    // An open rule body and a set filter: neither may change on a switch.
+    click(barOf(1))
+    await settle()
+    const filter = host.querySelector<HTMLInputElement>('input.filter')!
+    filter.value = 'fir'
+    filter.dispatchEvent(new Event('input', { bubbles: true }))
+    flushSync()
+    expect(isOpen(1)).toBe(true)
+    expect(slot(1)!.querySelector('.event-row .event-value')?.textContent).toContain(
+      'Name ev.a@en-us',
+    )
+    requests.length = 0
+
+    const select = host.querySelector<HTMLSelectElement>('select.locale')!
+    select.value = 'zh-cn'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    await settle()
+
+    // No `rules` request went out: the listing, open bars, and the filter
+    // are untouched while every `lookup` carries the new locale.
+    expect(requests.filter((request) => request.op === 'rules')).toHaveLength(0)
+    const lookups = requests.filter((request) => request.op === 'lookup')
+    expect(lookups.length).toBeGreaterThan(0)
+    expect([...new Set(lookups.map((request) => request.locale))]).toEqual(['zh-cn'])
+    expect(filter.value).toBe('fir')
+    expect(isOpen(1)).toBe(true)
+
+    // The bar's event cell, the open body's event row, and the chrome all
+    // re-resolved in place.
+    expect(barOf(1).querySelector('.bar-event')?.textContent).toBe('Name ev.a@zh-cn')
+    const rows = [...slot(1)!.querySelectorAll('.event-row')]
+    expect(rows[0]?.querySelector('.event-label')?.textContent).toBe('事件')
+    expect(rows[0]?.querySelector('.event-value')?.textContent).toContain('Name ev.a@zh-cn')
+    expect(host.querySelector('.title-row h1')?.textContent).toBe('地图工坊')
+    expect(host.querySelector('.rule-count')?.textContent?.trim()).toBe('规则（2）')
   })
 })
 

@@ -11,6 +11,7 @@
    * without debug the count is absent from the DOM.
    */
   import SqButton from './SqButton.svelte'
+  import type { ChromeStrings } from './chrome'
 
   let {
     name,
@@ -18,6 +19,7 @@
     disabled = false,
     open = false,
     elements,
+    t,
     ontoggle,
   }: {
     name: string
@@ -30,6 +32,8 @@
     open?: boolean
     /** `?debug` only: the rule's element count; absent otherwise. */
     elements?: number
+    /** The session locale's chrome strings. */
+    t: ChromeStrings
     ontoggle: () => void
   } = $props()
 </script>
@@ -37,8 +41,8 @@
 <div class="rule-bar">
   <span class="chev" class:open>
     <SqButton
-      title={open ? 'Collapse rule' : 'Expand rule'}
-      label={open ? `Collapse ${name}` : `Expand ${name}`}
+      title={open ? t.collapseRule : t.expandRule}
+      label={open ? t.collapseRuleLabel(name) : t.expandRuleLabel(name)}
       onclick={ontoggle}
     >
       <path d="M9 6l6 6-6 6" />

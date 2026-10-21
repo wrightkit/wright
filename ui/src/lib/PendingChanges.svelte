@@ -8,6 +8,7 @@
    * page no longer displays.
    */
   import type { EditStatementsRequest } from './types/generated/wright-agent-v1'
+  import type { ChromeStrings } from './chrome'
   import { closeDialog, showModal } from './dialog'
   import type { PendingChange } from './edit'
 
@@ -18,6 +19,7 @@
     submitting,
     request,
     debug,
+    t,
     onsubmit,
     ondiscard,
     onclose,
@@ -30,6 +32,8 @@
     /** The `editStatements` request Submit would send — `?debug` only. */
     request: EditStatementsRequest | null
     debug: boolean
+    /** The session locale's chrome strings. */
+    t: ChromeStrings
     onsubmit: () => void
     ondiscard: () => void
     onclose: () => void
@@ -62,7 +66,7 @@
 </script>
 
 <dialog bind:this={dialogEl} onclose={onclose} class="dialog pending">
-  <h2>Pending changes</h2>
+  <h2>{t.pendingChanges}</h2>
   {#if refusal}
     <div class="refusal" data-testid="pending-refusal">
       {#each refusal as diagnostic, i (i)}
@@ -71,7 +75,7 @@
     </div>
   {/if}
   {#if changes.length === 0}
-    <p class="muted">No pending changes.</p>
+    <p class="muted">{t.noPending}</p>
   {:else}
     {#each groups as [rule, group] (rule)}
       <h3 class="pending-rule">{group.name}</h3>
@@ -95,14 +99,14 @@
     <button
       type="button"
       disabled={submitting || changes.length === 0}
-      onclick={ondiscard}>Discard all</button
+      onclick={ondiscard}>{t.discardAll}</button
     >
-    <button type="button" onclick={() => dialogEl && closeDialog(dialogEl)}>Cancel</button>
+    <button type="button" onclick={() => dialogEl && closeDialog(dialogEl)}>{t.cancel}</button>
     <button
       type="button"
       class="ok"
       disabled={submitting || changes.length === 0}
-      onclick={onsubmit}>{submitting ? 'Applying…' : 'Submit'}</button
+      onclick={onsubmit}>{submitting ? t.applying : t.submit}</button
     >
   </div>
 </dialog>

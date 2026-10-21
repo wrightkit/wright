@@ -11,6 +11,12 @@
    * only that rule's body. Names come from `lookup` by identity; the
    * Variables and Diagnostics dialogs read `symbols` and `findings`.
    *
+   * Session locale (#883, § Language): `project` → `origin.locale`, else
+   * `en-US`. Every `lookup` carries it; the toolbar selector re-resolves
+   * the on-screen names over `targetMetadata` → `locales` and changes
+   * nothing else — `rules`, open bars, and the filter stay put. Chrome
+   * text comes from `chrome.ts`'s locale table, never from the game.
+   *
    * Editing layer: statement edits stage in the page's pending map, submit
    * as one `editStatements` request against the `project` identity and the
    * listing's generation, and apply through the host `/apply` route — the
@@ -20,6 +26,7 @@
   import { tick } from 'svelte'
   import { SvelteMap, SvelteSet } from 'svelte/reactivity'
   import { apply, call } from './lib/api'
+  import { chromeStrings, localeName } from './lib/chrome'
   import Dialogs from './lib/Dialogs.svelte'
   import PendingChanges from './lib/PendingChanges.svelte'
   import RuleBar from './lib/RuleBar.svelte'
@@ -50,6 +57,7 @@
     CostEstimateResult,
     EditStatementsResult,
     ProjectResult,
+    TargetMetadataResult,
     ToolErrorInfo,
     ToolResponse,
   } from './lib/types/generated/wright-agent-v1'
@@ -69,6 +77,19 @@
 
   let rules = $state<RuleEntry[] | null>(null)
   let loadError = $state<string | null>(null)
+  // The session locale (#883): `project` → `origin.locale` once it loads,
+  // `en-US` before and when the project does not name one. `names`
+  // carries it on every `lookup`.
+  let sessionLocale = $state('en-US')
+  // `targetMetadata` → `locales`: the catalog locales the selector lists.
+  let targetLocales = $state<string[]>([])
+  const t = $derived(chromeStrings(sessionLocale))
+  // The selector's options: the catalog locales plus the session locale
+  // when the catalog does not spell it, so `value` always matches an
+  // option (the service spells locales `zh-cn`/`en-us`).
+  const localeOptions = $derived(
+    targetLocales.includes(sessionLocale) ? targetLocales : [sessionLocale, ...targetLocales],
+  )
   // Open state is per rule, keyed by the listing id: any number of rules
   // stay open at once and a rule filtered out keeps its open state (#880).
   const openRules = new SvelteSet<number>()
@@ -144,10 +165,13 @@
   }
 
   /**
-   * `project` carries both freshness and title data: `inputIdentity` is the
-   * precondition `editStatements` requires, and `sourceFiles` lists the
+   * `project` carries freshness, title, and language data: `inputIdentity`
+   * is the precondition `editStatements` requires, `sourceFiles` lists the
    * loaded sources in canonical file-id order so `[0]` is the entry source
-   * and only its base name shows in the title row (#879).
+   * and only its base name shows in the title row (#879), and
+   * `origin.locale` names the session locale — `en-US` when absent, never
+   * guessed from file text (#883). `names.setLocale` runs on every path so
+   * the parked `lookup`s unblock even when `project` never answers.
    */
   async function loadProject() {
     try {
@@ -158,11 +182,29 @@
         const entry = result.sourceFiles?.[0]
         const base = entry?.split(/[\\/]/).filter(Boolean).pop()
         fileName = base && base !== '.' ? base : null
+        sessionLocale = result.origin?.locale ?? 'en-US'
       }
     } catch {
       // An unreachable endpoint leaves the identity unset and the title
       // row without a file name; Submit refuses rather than composing a
       // request without a precondition.
+    } finally {
+      void names.setLocale(sessionLocale)
+    }
+  }
+
+  /**
+   * `targetMetadata` → `locales` feeds the locale selector (#883); an
+   * unreachable endpoint leaves the selector on the session locale alone.
+   */
+  async function loadMetadata() {
+    try {
+      const response = await call({ op: 'targetMetadata' })
+      if ('result' in response) {
+        targetLocales = (response.result as TargetMetadataResult).locales ?? []
+      }
+    } catch {
+      // The selector keeps the session locale as its only option.
     }
   }
 
@@ -292,7 +334,18 @@
     else openRules.add(id)
   }
 
+  /**
+   * The toolbar selector (#883): switch the session locale and re-resolve
+   * every on-screen name in place — `rules` is not re-read, open bars stay
+   * open, and the filter keeps its text.
+   */
+  function changeLocale(locale: string) {
+    sessionLocale = locale
+    void names.setLocale(locale)
+  }
+
   void loadProject()
+  void loadMetadata()
   void load()
 
   function openVariables() {
@@ -443,32 +496,43 @@
 
 <div class="page" bind:this={pageEl}>
   <header class="title-row">
-    <h1>Workshop</h1>
+    <h1>{t.title}</h1>
     {#if fileName}<span class="file-name">{fileName}</span>{/if}
   </header>
 
-  <div class="toolbar" role="toolbar" aria-label="Rules toolbar">
-    <span class="rule-count">Rules ({rules?.length ?? 0})</span>
-    <SqButton title="Diagnostics" onclick={openDiagnostics}>
+  <div class="toolbar" role="toolbar" aria-label={t.rulesToolbar}>
+    <span class="rule-count">{t.rulesCount(rules?.length ?? 0)}</span>
+    <SqButton title={t.diagnostics} onclick={openDiagnostics}>
       <path d="M3.5 12.5h4l2.5-7 4 13 2.5-6h4" />
     </SqButton>
     <div class="end">
       <input
         class="filter"
         type="search"
-        placeholder="Filter rules…"
+        placeholder={t.filterPlaceholder}
         bind:value={filter}
       />
-      <!-- #883 adds the locale selector here -->
+      <!-- The locale selector (#883): one option per catalog locale, each
+           in its own name; the session locale is selected. -->
+      <select
+        class="locale"
+        aria-label={t.language}
+        value={sessionLocale}
+        onchange={(event) => changeLocale(event.currentTarget.value)}
+      >
+        {#each localeOptions as option (option)}
+          <option value={option}>{localeName(option)}</option>
+        {/each}
+      </select>
       <span class="sep" aria-hidden="true"></span>
-      <SqButton title="Variables" onclick={openVariables}>
+      <SqButton title={t.variables} onclick={openVariables}>
         <path d="M9.5 6h11M9.5 12h11M9.5 18h11" />
         <circle cx="4.5" cy="6" r="1.4" fill="currentColor" stroke="none" />
         <circle cx="4.5" cy="12" r="1.4" fill="currentColor" stroke="none" />
         <circle cx="4.5" cy="18" r="1.4" fill="currentColor" stroke="none" />
       </SqButton>
       <SqButton
-        title="Pending changes"
+        title={t.pendingChanges}
         badge={pending.size}
         onclick={() => {
           submitRefusal = null
@@ -479,20 +543,20 @@
         <path d="M9 9h6M9 12.5h6M9 16h4" />
       </SqButton>
       <span class="sep" aria-hidden="true"></span>
-      <SqButton title="Add rule: rule-level edits are not available" label="Add rule" disabled>
+      <SqButton title={t.addRuleTitle} label={t.addRuleLabel} disabled>
         <path d="M12 5v14M5 12h14" />
       </SqButton>
       {#if debug}<span class="debug" data-debug>debug</span>{/if}
     </div>
   </div>
 
-  <section class="rule-list" aria-label="Rules">
+  <section class="rule-list" aria-label={t.rulesRegion}>
     {#if loadError}
       <p class="refusal">{loadError}</p>
     {:else if rules === null}
-      <p class="muted">Loading rules…</p>
+      <p class="muted">{t.loadingRules}</p>
     {:else if filtered.length === 0}
-      <p class="muted">No rules match.</p>
+      <p class="muted">{t.noRulesMatch}</p>
     {:else}
       {#each filtered as entry (entry.summary.id)}
         {@const isOpen = openRules.has(entry.summary.id)}
@@ -503,6 +567,7 @@
             disabled={entry.state.phase === 'ready' && entry.state.content.disabled}
             open={isOpen}
             elements={debug ? (elementCounts?.[entry.summary.id]) : undefined}
+            {t}
             ontoggle={() => toggle(entry.summary.id)}
           />
           {#if isOpen}
@@ -513,6 +578,7 @@
                 {names}
                 {debug}
                 {pending}
+                {t}
                 onedit={oneditFor(entry.summary.id)}
               />
             </div>
@@ -528,6 +594,7 @@
     {findings}
     {costEstimate}
     {names}
+    {t}
     onreveal={(id) => void revealRule(id)}
     onclose={() => (dialog = null)}
   />
@@ -539,6 +606,7 @@
     {submitting}
     request={pendingRequest}
     {debug}
+    {t}
     onsubmit={() => void submitPending()}
     ondiscard={() => {
       pending.clear()
@@ -551,6 +619,7 @@
     target={editNode}
     {names}
     disabled={editDisabled}
+    {t}
     onsave={editorSave}
     onclose={() => (editTarget = null)}
   />

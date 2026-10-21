@@ -22,6 +22,7 @@
     ToolErrorInfo,
     ToolResponse,
   } from './types/generated/wright-agent-v1'
+  import type { ChromeStrings } from './chrome'
   import { closeDialog, showModal } from './dialog'
   import type { Names } from './names'
 
@@ -32,6 +33,7 @@
     costEstimate,
     names,
     onreveal,
+    t,
     onclose,
   }: {
     which: 'variables' | 'diagnostics' | null
@@ -42,6 +44,8 @@
     names: Names
     /** Reveal a `rules` listing id: close the dialog and open its bar. */
     onreveal: (rule: number) => void
+    /** The session locale's chrome strings. */
+    t: ChromeStrings
     onclose: () => void
   } = $props()
 
@@ -172,13 +176,13 @@
     if (event.target === dialogEl && dialogEl) closeDialog(dialogEl)
   }}
 >
-  <h2 class="dlg-title">{which === 'variables' ? 'Variables' : 'Diagnostics'}</h2>
+  <h2 class="dlg-title">{which === 'variables' ? t.variables : t.diagnostics}</h2>
   <div class="dlg-body">
     {#if which === 'variables'}
       {#if symbols === null}
-        <p class="muted">Loading…</p>
+        <p class="muted">{t.loading}</p>
       {:else if noSymbols}
-        <p class="muted">No variables or subroutines declared.</p>
+        <p class="muted">{t.noVariables}</p>
       {:else}
         <div class="var-columns">
           <section>
@@ -209,7 +213,7 @@
       {/if}
     {:else if which === 'diagnostics'}
       {#if findings === null && costEstimate === null}
-        <p class="muted">Loading…</p>
+        <p class="muted">{t.loading}</p>
       {:else}
         {#if costError}
           <div class="cards">
@@ -283,7 +287,7 @@
             {/each}
           </ul>
         {:else if findings !== null}
-          <p class="muted">No diagnostics.</p>
+          <p class="muted">{t.noDiagnostics}</p>
         {/if}
       {/if}
     {/if}
@@ -292,7 +296,7 @@
     <button
       type="button"
       class="primary"
-      onclick={() => dialogEl && closeDialog(dialogEl)}>Confirm</button
+      onclick={() => dialogEl && closeDialog(dialogEl)}>{t.confirm}</button
     >
   </div>
 </dialog>
