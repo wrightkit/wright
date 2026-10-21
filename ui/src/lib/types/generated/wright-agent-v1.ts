@@ -837,6 +837,10 @@ export interface ProjectResult {
    */
   inputIdentity: string
   files: number
+  /**
+   * The loaded input's source files in canonical file-id order — file 0 is the entry source; entries are display paths.
+   */
+  sourceFiles?: string[]
   globalVariables: number
   playerVariables: number
   subroutines: number

@@ -1,11 +1,13 @@
 <script lang="ts">
   /**
-   * The structured Workshop rule view (ADR-0032). Rule order and content
-   * come from `rules` — one `rules?all&content` call when every rule can
-   * be expressed, otherwise per-rule `rules?rule&content` calls so a
-   * refusal replaces only that rule's body. Names come from `lookup` by
-   * identity; the Variables and Diagnostics dialogs read `symbols` and
-   * `findings`.
+   * The structured Workshop rule view (ADR-0032) under the in-game page
+   * shell (#879): spec backdrop and tokens, the title row, and the icon
+   * toolbar (docs/ui/design.md § Tokens, § Main screen 1–2). Rule order
+   * and content come from `rules` — one `rules?all&content` call when
+   * every rule can be expressed, otherwise per-rule `rules?rule&content`
+   * calls so a refusal replaces only that rule's body. Names come from
+   * `lookup` by identity; the Variables and Diagnostics dialogs read
+   * `symbols` and `findings`.
    *
    * Editing layer: statement edits stage in the page's pending map, submit
    * as one `editStatements` request against the `project` identity and the
@@ -31,6 +33,7 @@
   } from './lib/edit'
   import { Names } from './lib/names'
   import RuleView from './lib/RuleView.svelte'
+  import SqButton from './lib/SqButton.svelte'
   import {
     debugEnabled,
     ruleStateFromError,
@@ -41,6 +44,7 @@
   } from './lib/view'
   import type {
     EditStatementsResult,
+    ProjectResult,
     ToolErrorInfo,
   } from './lib/types/generated/wright-agent-v1'
 
@@ -61,6 +65,7 @@
   let loadError = $state<string | null>(null)
   let selected = $state<number | null>(null)
   let filter = $state('')
+  let fileName = $state<string | null>(null)
   let symbols = $state<unknown[] | null>(null)
   let findings = $state<unknown[] | null>(null)
   let dialog = $state<'variables' | 'diagnostics' | 'pending' | null>(null)
@@ -111,17 +116,26 @@
     }
   }
 
-  /** The `inputIdentity` freshness precondition `editStatements` carries. */
+  /**
+   * `project` carries both freshness and title data: `inputIdentity` is the
+   * precondition `editStatements` requires, and `sourceFiles` lists the
+   * loaded sources in canonical file-id order so `[0]` is the entry source
+   * and only its base name shows in the title row (#879).
+   */
   async function loadProject() {
     try {
       const response = await call({ op: 'project' })
       if ('result' in response) {
-        const result = response.result as { inputIdentity?: string }
+        const result = response.result as ProjectResult
         inputIdentity = result.inputIdentity ?? null
+        const entry = result.sourceFiles?.[0]
+        const base = entry?.split(/[\\/]/).filter(Boolean).pop()
+        fileName = base && base !== '.' ? base : null
       }
     } catch {
-      // An unreachable endpoint leaves the identity unset; Submit refuses
-      // rather than composing a request without a precondition.
+      // An unreachable endpoint leaves the identity unset and the title
+      // row without a file name; Submit refuses rather than composing a
+      // request without a precondition.
     }
   }
 
@@ -171,8 +185,8 @@
     }
   }
 
-  void load()
   void loadProject()
+  void load()
 
   function openVariables() {
     if (symbols === null) {
@@ -299,32 +313,52 @@
   }
 </script>
 
-<div class="layout">
-  <header class="top">
-    <h1>wright ui</h1>
-    <input
-      class="filter"
-      type="search"
-      placeholder="Filter rules…"
-      bind:value={filter}
-    />
-    <button type="button" onclick={openVariables}>Variables</button>
-    <button type="button" onclick={openDiagnostics}>
-      Diagnostics
-    </button>
-    <button
-      type="button"
-      onclick={() => {
-        submitRefusal = null
-        dialog = 'pending'
-      }}
-    >
-      Pending{#if pending.size > 0}{' '}({pending.size}){/if}
-    </button>
-    {#if debug}<span class="debug" data-debug>debug</span>{/if}
+<div class="page">
+  <header class="title-row">
+    <h1>Workshop</h1>
+    {#if fileName}<span class="file-name">{fileName}</span>{/if}
   </header>
 
-  <nav class="rule-list" aria-label="Rules">
+  <div class="toolbar" role="toolbar" aria-label="Rules toolbar">
+    <span class="rule-count">Rules ({rules?.length ?? 0})</span>
+    <SqButton title="Diagnostics" onclick={openDiagnostics}>
+      <path d="M3.5 12.5h4l2.5-7 4 13 2.5-6h4" />
+    </SqButton>
+    <div class="end">
+      <input
+        class="filter"
+        type="search"
+        placeholder="Filter rules…"
+        bind:value={filter}
+      />
+      <!-- #883 adds the locale selector here -->
+      <span class="sep" aria-hidden="true"></span>
+      <SqButton title="Variables" onclick={openVariables}>
+        <path d="M9.5 6h11M9.5 12h11M9.5 18h11" />
+        <circle cx="4.5" cy="6" r="1.4" fill="currentColor" stroke="none" />
+        <circle cx="4.5" cy="12" r="1.4" fill="currentColor" stroke="none" />
+        <circle cx="4.5" cy="18" r="1.4" fill="currentColor" stroke="none" />
+      </SqButton>
+      <SqButton
+        title="Pending changes"
+        badge={pending.size}
+        onclick={() => {
+          submitRefusal = null
+          dialog = 'pending'
+        }}
+      >
+        <path d="M6 4h12v16H6z" />
+        <path d="M9 9h6M9 12.5h6M9 16h4" />
+      </SqButton>
+      <span class="sep" aria-hidden="true"></span>
+      <SqButton title="Add rule: rule-level edits are not available" label="Add rule" disabled>
+        <path d="M12 5v14M5 12h14" />
+      </SqButton>
+      {#if debug}<span class="debug" data-debug>debug</span>{/if}
+    </div>
+  </div>
+
+  <section class="rule-list" aria-label="Rules">
     {#if loadError}
       <p class="refusal">{loadError}</p>
     {:else if rules === null}
@@ -349,15 +383,15 @@
         </button>
       {/each}
     {/if}
-  </nav>
+  </section>
 
-  <main class="view">
+  <section class="view">
     {#if openRule}
       <RuleView summary={openRule.summary} state={openRule.state} {names} {debug} {pending} {onedit} />
     {:else}
       <p class="muted">Select a rule.</p>
     {/if}
-  </main>
+  </section>
 
   <Dialogs which={dialog === 'pending' ? null : dialog} {symbols} {findings} onclose={() => (dialog = null)} />
 

@@ -402,6 +402,7 @@
         "origin": { "$ref": "#/$defs/Origin" },
         "inputIdentity": { "type": "string", "description": "SHA-256 hex digest of the input's primary entry source (the provider's `sourceIdentity` for provider projects). For a single-file input it covers the whole input; for a provider directory project it hashes only the entry file, so member-file edits do not change it — use `stale-id` refusals for freshness, not this value." },
         "files": { "type": "integer", "minimum": 0 },
+        "sourceFiles": { "type": "array", "items": { "type": "string" }, "description": "The loaded input's source files in canonical file-id order — file 0 is the entry source; entries are display paths." },
         "globalVariables": { "type": "integer", "minimum": 0 },
         "playerVariables": { "type": "integer", "minimum": 0 },
         "subroutines": { "type": "integer", "minimum": 0 },

@@ -181,7 +181,7 @@ the successful `result` payload.
 | `check` | optional `all` | `wright-result/v1` check envelope |
 | `analyze` | optional selection, optional `all` | `wright-result/v1` essential analysis envelope; the envelope's `snapshot` scopes the ids `result` issues (#595) |
 | `inspect` | optional `all` | `wright-result/v1` overview and rule names; the envelope's `snapshot` scopes the ids `result` issues |
-| `project` | none | Loaded program origin, files, counts, and findings summary; `snapshot` scopes the ids it reports |
+| `project` | none | Loaded program origin, `sourceFiles` (source paths, entry file first), file count, counts, and findings summary; `snapshot` scopes the ids it reports |
 | `rules` | optional selection, optional `content`, `snapshot` when `rule` is numeric | `{"rules": [...], "snapshot": n}` — canonical Workshop rules. Each entry carries `id`, `name`, `event` (the rule's event binding, `subroutine:<name>` for subroutine rules), and `span`; `selection` joins when a selection is applied. See [Rule content](#rule-content-adr-0024) |
 | `symbols` | optional selection, optional `all` | `{"symbols": [...], "snapshot": n}` — symbols; `selection` joins when `file`/`max` is applied |
 | `references` | required `symbol` (id or name), `snapshot` when an address is numeric, optional selection and `all` | Usage header and references for the symbol, with `snapshot` scoping the ids; `{"references": [...], "selection": {...}}` when a selection is applied. Each reference carries `owningRule` — the owning rule's `{id, name, span}` — so a consumer renders a rule location without a `rules` lookup (#792) |
