@@ -7,6 +7,8 @@ use wright_analyzer::canonical::SemanticIndex;
 use super::{Address, StatementEditRequest, ToolErrorInfo, ToolResponse, ToolService};
 use crate::CompilerSession;
 use crate::diag::{Diagnostic, Stage};
+use crate::edit::{EditTransaction, EditValidation};
+use crate::result::exit_code_from;
 
 impl<'a> ToolService<'a> {
     /// The `editStatements` input-kind gate (ADR-0029), evaluated before
@@ -198,5 +200,61 @@ impl<'a> ToolService<'a> {
             transaction: Some(transaction),
             preview: validation.preview,
         })
+    }
+
+    /// The `wright ui` host write path (ADR-0032 decision 5 — host
+    /// behaviour, not a `wright-agent/v1` operation): the transaction an
+    /// `editStatements` result carried is re-validated against the files
+    /// on disk — the freshness recheck — before the atomic write stages.
+    /// A stale or invalid transaction refuses with diagnostics and writes
+    /// nothing; a successful write refreshes the served snapshot so the
+    /// next read sees the edited program. The caller never supplies
+    /// `sources` here: the host always edits the disk-loaded input.
+    pub fn apply_edit_transaction(&mut self, transaction: &EditTransaction) -> EditValidation {
+        let refuse = |diagnostics: Vec<Diagnostic>| EditValidation {
+            ok: false,
+            exit: exit_code_from(&diagnostics),
+            diagnostics,
+            preview: None,
+        };
+        // With `sources` absent the validation re-reads the named files
+        // from disk: every edit's `source_identity` — the `inputIdentity`
+        // `editStatements` stamped — is checked against the current bytes
+        // before anything writes, and the edited text is reparsed through
+        // the session's own Workshop path.
+        let validation = self.session.validate_edit_transaction(None, transaction);
+        if !validation.ok {
+            return validation;
+        }
+        let previews = validation.preview.clone().unwrap_or_default();
+        // `write_previews` keys its expected identities by `edit.source`;
+        // a transaction whose spellings do not cover a previewed source
+        // refuses rather than panicking the host.
+        if previews.iter().any(|preview| {
+            !transaction
+                .edits
+                .iter()
+                .any(|edit| edit.source == preview.source)
+        }) {
+            return refuse(vec![Diagnostic::error(
+                "edit-unknown-source",
+                Stage::Discovery,
+                "the transaction's edits do not cover every source its preview writes",
+            )]);
+        }
+        if let Err(diagnostic) = crate::edit::write_previews(&previews, transaction) {
+            return refuse(vec![diagnostic]);
+        }
+        // The write changed the served input's fingerprint: refresh now
+        // so the next program-reading request serves the edited program,
+        // and surface a load failure here rather than on the next read.
+        if let Err(error) = self.refresh() {
+            return refuse(vec![Diagnostic::error(
+                error.code,
+                Stage::Discovery,
+                error.message,
+            )]);
+        }
+        validation
     }
 }

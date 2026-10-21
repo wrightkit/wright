@@ -5,6 +5,7 @@
    * read-only views of the service results.
    */
   import type { Finding, Symbol } from './types/generated/wright-agent-v1'
+  import { closeDialog, showModal } from './dialog'
 
   let {
     which,
@@ -22,8 +23,8 @@
 
   $effect(() => {
     if (!dialogEl) return
-    if (which !== null && !dialogEl.open) dialogEl.showModal()
-    if (which === null && dialogEl.open) dialogEl.close()
+    if (which !== null && !dialogEl.open) showModal(dialogEl)
+    if (which === null && dialogEl.open) closeDialog(dialogEl)
   })
 
   // Rules already have their own column; the dialog shows declared

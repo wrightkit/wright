@@ -1,10 +1,13 @@
-//! `wright ui` — the local read-only Workshop project view (ADR-0032).
+//! `wright ui` — the local Workshop project view (ADR-0032).
 //!
 //! The command binds a loopback HTTP server on an ephemeral port, prints a
 //! URL carrying a per-session token in its fragment, opens the default
-//! browser, and serves until interrupted. The single endpoint passes
+//! browser, and serves until interrupted. `POST /api` passes
 //! `wright-agent/v1` bodies to `ToolService` and returns its responses
-//! unchanged; the UI implements no Workshop semantics of its own.
+//! unchanged; `POST /apply` writes the transaction an `editStatements`
+//! result carried, after re-validating it against the files on disk —
+//! the host owns the write, the page never touches files (decision 5).
+//! The UI implements no Workshop semantics of its own.
 //!
 //! Without the `ui` Cargo feature no UI assets are embedded and the command
 //! reports the no-UI build instead of serving.
@@ -67,6 +70,7 @@ mod server {
     use std::process::ExitCode;
 
     use wright_driver::config::{InputSpec, SessionConfig, SourceKind};
+    use wright_driver::edit::EditTransaction;
     use wright_driver::result::exit;
     use wright_driver::service::ToolService;
     use wright_driver::source_provider::SourceBackend;
@@ -75,8 +79,11 @@ mod server {
 
     include!(concat!(env!("OUT_DIR"), "/ui_assets.rs"));
 
-    /// The one endpoint; bodies are `wright-agent/v1` unchanged.
+    /// Bodies are `wright-agent/v1` unchanged.
     const API_PATH: &str = "/api";
+    /// The host write path (ADR-0032 decision 5); bodies are the
+    /// `EditTransaction` an `editStatements` result returned.
+    const APPLY_PATH: &str = "/apply";
     /// Requests are a few hundred bytes of JSON; the cap keeps a local
     /// client from streaming unbounded memory into the process.
     const MAX_BODY: u64 = 1024 * 1024;
@@ -268,10 +275,49 @@ mod server {
             .unwrap_or(path);
         match (request.method().as_str(), path) {
             ("POST", API_PATH) => api(service, request, token),
+            ("POST", APPLY_PATH) => apply(service, request, token),
             ("GET", "/") => asset("index.html"),
             ("GET", name) => asset(name.trim_start_matches('/')),
             _ => respond(404, "text/plain; charset=utf-8", b"not found".to_vec()),
         }
+    }
+
+    /// The preamble every endpoint shares: the session token must match,
+    /// then the body is read under the cap and must be UTF-8. `Err` is the
+    /// already-built refusal response.
+    fn read_request_body(
+        request: &mut tiny_http::Request,
+        token: &str,
+    ) -> Result<String, tiny_http::Response<Cursor<Vec<u8>>>> {
+        let expected = format!("Bearer {token}");
+        if header(request, "Authorization") != Some(expected.as_str()) {
+            return Err(respond(
+                403,
+                "text/plain; charset=utf-8",
+                b"forbidden: missing or wrong session token".to_vec(),
+            ));
+        }
+        let mut body = Vec::new();
+        let read = request
+            .as_reader()
+            .take(MAX_BODY + 1)
+            .read_to_end(&mut body);
+        if read.is_err() || body.len() as u64 > MAX_BODY {
+            return Err(respond(
+                400,
+                "application/json",
+                br#"{"error":{"code":"malformed-request","message":"request body is unreadable or too large"}}"#
+                    .to_vec(),
+            ));
+        }
+        String::from_utf8(body).map_err(|_| {
+            respond(
+                400,
+                "application/json",
+                br#"{"error":{"code":"malformed-request","message":"request is not valid UTF-8"}}"#
+                    .to_vec(),
+            )
+        })
     }
 
     /// `POST /api`: the request body is a `wright-agent/v1` request; the
@@ -282,37 +328,9 @@ mod server {
         request: &mut tiny_http::Request,
         token: &str,
     ) -> tiny_http::Response<Cursor<Vec<u8>>> {
-        let expected = format!("Bearer {token}");
-        if header(request, "Authorization") != Some(expected.as_str()) {
-            return respond(
-                403,
-                "text/plain; charset=utf-8",
-                b"forbidden: missing or wrong session token".to_vec(),
-            );
-        }
-        let mut body = Vec::new();
-        let read = request
-            .as_reader()
-            .take(MAX_BODY + 1)
-            .read_to_end(&mut body);
-        if read.is_err() || body.len() as u64 > MAX_BODY {
-            return respond(
-                400,
-                "application/json",
-                br#"{"error":{"code":"malformed-request","message":"request body is unreadable or too large"}}"#
-                    .to_vec(),
-            );
-        }
-        let body = match std::str::from_utf8(&body) {
+        let body = match read_request_body(request, token) {
             Ok(body) => body,
-            Err(_) => {
-                return respond(
-                    400,
-                    "application/json",
-                    br#"{"error":{"code":"malformed-request","message":"request is not valid UTF-8"}}"#
-                        .to_vec(),
-                );
-            }
+            Err(response) => return response,
         };
         // `serve` writes the dispatch result as one newline-terminated
         // line; the endpoint returns the same bytes, terminator included,
@@ -320,7 +338,42 @@ mod server {
         respond(
             200,
             "application/json",
-            format!("{}\n", serve::dispatch(service, body)).into_bytes(),
+            format!("{}\n", serve::dispatch(service, &body)).into_bytes(),
+        )
+    }
+
+    /// `POST /apply`: the request body is the `EditTransaction` an
+    /// `editStatements` result carried. The host re-validates it against
+    /// the files on disk — the freshness recheck — writes it through the
+    /// same atomic path `lint --fix --write` uses, and refreshes the
+    /// session so the next read serves the edited program (ADR-0032
+    /// decision 5). A stale or invalid transaction answers the
+    /// `validateEditTransaction` refusal shape and writes nothing.
+    fn apply(
+        service: &mut ToolService<'_>,
+        request: &mut tiny_http::Request,
+        token: &str,
+    ) -> tiny_http::Response<Cursor<Vec<u8>>> {
+        let body = match read_request_body(request, token) {
+            Ok(body) => body,
+            Err(response) => return response,
+        };
+        let transaction = match serde_json::from_str::<EditTransaction>(&body) {
+            Ok(transaction) => transaction,
+            Err(_) => {
+                return respond(
+                    400,
+                    "application/json",
+                    br#"{"error":{"code":"malformed-request","message":"the apply body is not an edit transaction"}}"#
+                        .to_vec(),
+                );
+            }
+        };
+        let result = service.apply_edit_transaction(&transaction);
+        respond(
+            200,
+            "application/json",
+            format!("{}\n", serde_json::to_string(&result).expect("serializes")).into_bytes(),
         )
     }
 
