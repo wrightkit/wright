@@ -29,6 +29,7 @@ pub use wright_analyzer::service::ErrorInfo as ToolErrorInfo;
 pub use wright_analyzer::service::Response as ToolResponse;
 use wright_analyzer::service::{Request, Response};
 
+mod callgraph;
 mod capabilities;
 mod cost;
 mod edit_statements;
@@ -886,6 +887,7 @@ impl<'a> ToolService<'a> {
     }
 
     /// The selection's validity as a structured error: an unknown `rule` id
+    /// or a `file` naming no source file of the loaded program (ADR-0035)
     /// would silently select nothing and report a clean result (#430).
     fn selection_check(
         &self,
@@ -896,7 +898,21 @@ impl<'a> ToolService<'a> {
             .map_err(|message| ToolErrorInfo {
                 code: "invalid-selection".to_string(),
                 message,
-            })
+            })?;
+        let loaded = &self.snapshot().loaded;
+        if let Some(file) = selection.file.as_deref()
+            && let Some(message) = crate::select::file_error(
+                file,
+                &loaded.source_files,
+                &crate::select::file_bases(&loaded.input),
+            )
+        {
+            return Err(ToolErrorInfo {
+                code: "invalid-selection".to_string(),
+                message,
+            });
+        }
+        Ok(())
     }
 
     /// Bound one list-shaped semantic operation's result (#531): without
@@ -912,18 +928,22 @@ impl<'a> ToolService<'a> {
         max: Option<usize>,
         selected: bool,
     ) -> ToolResponse {
+        let loaded = &self.snapshot().loaded;
+        let file_bases = crate::select::file_bases(&loaded.input);
+        // ADR-0035: a `file` value matching no source file of the loaded
+        // program is `invalid-selection`, never a silently empty result.
+        if let Some(file) = file
+            && let Some(message) =
+                crate::select::file_error(file, &loaded.source_files, &file_bases)
+        {
+            return invalid_selection(message);
+        }
         let items = match result {
             serde_json::Value::Array(items) => items,
             _ => Vec::new(),
         };
-        let (kept, outcome) = crate::select::select_list(
-            items,
-            file,
-            &crate::select::file_bases(&self.snapshot().loaded.input),
-            json_span_path,
-            keep,
-            max,
-        );
+        let (kept, outcome) =
+            crate::select::select_list(items, file, &file_bases, json_span_path, keep, max);
         if !selected {
             return self.ok(serde_json::Value::Array(kept));
         }
@@ -943,15 +963,15 @@ impl<'a> ToolService<'a> {
         max: &Option<usize>,
         content: bool,
     ) -> ToolResponse {
+        // `rules` `rule` names the operation's subject (ADR-0035): a name
+        // address keeps its `unknown-rule`/`ambiguous-rule` refusal; only
+        // an out-of-range numeric index is a selection error.
         let rule_id = match rule {
             Some(address) => match self.rule_address(address) {
                 Ok(id) if (id as usize) < self.snapshot().loaded.program.rules.len() => {
                     Some(id as u64)
                 }
                 Ok(id) => return invalid_selection(format!("unknown rule {id}")),
-                Err(error) if error.code == "unknown-rule" => {
-                    return invalid_selection(error.message);
-                }
                 Err(error) => return ToolResponse::Error { error },
             },
             None => None,
@@ -1129,55 +1149,6 @@ impl<'a> ToolService<'a> {
         }
     }
 
-    /// `callGraph`: caller rules → callee subroutines. The selection fields
-    /// are `caller` (a declared rule name), `callee` (a declared subroutine
-    /// name), and `max` (#531).
-    fn call_graph(
-        &self,
-        caller: Option<&str>,
-        callee: Option<&str>,
-        max: Option<usize>,
-    ) -> ToolResponse {
-        let program = &self.snapshot().loaded.program;
-        if let Some(caller) = caller
-            && !program.rules.iter().any(|rule| rule.name == caller)
-        {
-            return invalid_selection(format!("unknown caller rule '{caller}'"));
-        }
-        if let Some(callee) = callee
-            && !program
-                .subroutines
-                .iter()
-                .any(|subroutine| subroutine.name == callee)
-        {
-            return invalid_selection(format!("unknown callee subroutine '{callee}'"));
-        }
-        let edges = program
-            .rules
-            .iter()
-            .filter(|rule| !rule.disabled)
-            .flat_map(|rule| {
-                wright_analyzer::canonical::live_actions(&rule.actions).filter_map(
-                    move |(_, action)| {
-                        wright_analyzer::canonical::subroutine_callee(action)
-                            .map(|callee| json!({ "caller": rule.name, "callee": callee }))
-                    },
-                )
-            })
-            .collect::<Vec<_>>();
-        self.select_result(
-            "edges",
-            serde_json::Value::Array(edges),
-            None,
-            |edge| {
-                caller.is_none_or(|caller| edge["caller"].as_str() == Some(caller))
-                    && callee.is_none_or(|callee| edge["callee"].as_str() == Some(callee))
-            },
-            max,
-            caller.is_some() || callee.is_some() || max.is_some(),
-        )
-    }
-
     /// `lint`: per-rule id and effective severity, effective configuration,
     /// and findings over the loaded program through the same semantic-service
     /// path as the CLI `lint` workflow (no duplicated rule execution, #98).
@@ -1262,7 +1233,7 @@ impl<'a> ToolService<'a> {
 
 /// An unknown selection/filter value is a structured usage error, never a
 /// silent empty result (#430, #531).
-fn invalid_selection(message: String) -> ToolResponse {
+pub(crate) fn invalid_selection(message: String) -> ToolResponse {
     ToolResponse::Error {
         error: ToolErrorInfo {
             code: "invalid-selection".to_string(),

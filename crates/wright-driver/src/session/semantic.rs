@@ -92,6 +92,7 @@ fn semantic_facts(
                     let mut entry = serde_json::json!({
                         "id": r["id"],
                         "name": r["name"],
+                        "address": r["address"],
                         "span": r.get("span").cloned().unwrap_or(serde_json::Value::Null),
                         "controlFlow": {
                             "blocks": blocks.len(),

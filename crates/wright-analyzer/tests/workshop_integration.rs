@@ -1530,9 +1530,10 @@ fn name_resolution_finds_unique_symbols_and_rules() {
     assert_eq!(score.name, "score");
     assert_eq!(score.id.index(), 0);
     assert_eq!(service.resolve_rule("player starts").unwrap(), 1);
+    // ADR-0035: a bare symbol address never resolves a rule.
     assert_eq!(
-        service.resolve_symbol("player starts").unwrap().id.index(),
-        4
+        service.resolve_symbol("player starts").unwrap_err().code,
+        "unknown-symbol"
     );
 }
 
@@ -1549,14 +1550,11 @@ fn name_resolution_rejects_unknown_and_ambiguous_names() {
     assert_eq!(error.code, "unknown-rule");
     assert!(service.resolve_symbol("solo").is_ok());
 
-    let error = service.resolve_symbol("dup").unwrap_err();
-    assert_eq!(error.code, "ambiguous-symbol");
-    for candidate in ["globalVariable 0", "rule 2", "rule 3"] {
-        assert!(error.message.contains(candidate), "{error:?}");
-    }
+    // ADR-0035: a rule never competes with a variable for a bare symbol name.
+    assert_eq!(service.resolve_symbol("dup").unwrap().name, "dup");
     let error = service.resolve_rule("dup").unwrap_err();
     assert_eq!(error.code, "ambiguous-rule");
-    for candidate in ["rule 0", "rule 1"] {
+    for candidate in ["dup#1", "dup#2"] {
         assert!(error.message.contains(candidate), "{error:?}");
     }
 }

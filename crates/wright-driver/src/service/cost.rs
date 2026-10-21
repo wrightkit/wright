@@ -138,6 +138,7 @@ impl<'a> ToolService<'a> {
                         let mut entry = json!({
                             "index": index,
                             "name": loaded.program.rules[*index].name,
+                            "address": self.semantic().canonical_rule_address(*index),
                             "count": node.count,
                             "span": wright_analyzer::canonical::span_json(
                                 loaded.program.rule_span(*index),
@@ -293,6 +294,7 @@ impl<'a> ToolService<'a> {
             "rule": {
                 "id": rule_id,
                 "name": loaded.program.rules[rule_id].name,
+                "address": self.semantic().canonical_rule_address(rule_id),
                 "count": node.count,
                 "span": wright_analyzer::canonical::span_json(
                     loaded.program.rule_span(rule_id),

@@ -7,7 +7,7 @@
 export type RulesRequest = {
   op: 'rules'
   /**
-   * Selection (ADR-0024): exactly this rule, addressed by id or declared name.
+   * Selection (ADR-0024/ADR-0035): exactly this rule, addressed by numeric index or rule address — a declared `NAME` or `NAME#N` selecting the Nth declaration of that name (`#N` for unnamed rules). A name that selects nothing is `unknown-rule`; one selecting several rules is `ambiguous-rule`.
    */
   rule?: number | string
   /**
@@ -15,7 +15,7 @@ export type RulesRequest = {
    */
   snapshot?: number
   /**
-   * Selection (#531): only rules located in this source file; any spelling that resolves to the same file selects it.
+   * Selection (#531): only rules located in this source file; any spelling that resolves to the same file selects it. A spelling naming no loaded source file is refused `invalid-selection` (ADR-0035).
    */
   file?: string
   /**
@@ -34,7 +34,7 @@ export type RulesRequest = {
 export type ReferencesRequest = {
   op: 'references'
   /**
-   * Symbol id or declared name. A numeric id must carry the `snapshot` generation that issued it; a missing or mismatched `snapshot` is refused `stale-id`. Names are always current and ignore `snapshot`.
+   * Symbol id or address (ADR-0035). A bare `NAME` selects only non-rule symbols — rule names never match here — and fails `ambiguous-symbol` when several non-rule kinds share it; `KIND:NAME` (`globalVariable:`, `playerVariable:`, `subroutine:`) selects one kind. A numeric id must carry the `snapshot` generation that issued it; a missing or mismatched `snapshot` is refused `stale-id`. Names are always current and ignore `snapshot`.
    */
   symbol: number | string
   /**
@@ -42,7 +42,7 @@ export type ReferencesRequest = {
    */
   kind?: 'declaration' | 'definition' | 'read' | 'write' | 'call'
   /**
-   * Selection (#531): only references inside this rule, addressed by index or declared name. A numeric index is scoped by the same `snapshot` requirement as `symbol`.
+   * Selection (#531/ADR-0035): only references inside this rule, addressed by index or rule address (`NAME` or `NAME#N` in declaration order). A numeric index is scoped by the same `snapshot` requirement as `symbol`; a name ignores it.
    */
   rule?: number | string
   /**
@@ -50,7 +50,7 @@ export type ReferencesRequest = {
    */
   snapshot?: number
   /**
-   * Selection (#531): only references located in this source file; any spelling that resolves to the same file selects it.
+   * Selection (#531): only references located in this source file; any spelling that resolves to the same file selects it. A spelling naming no loaded source file is refused `invalid-selection` (ADR-0035).
    */
   file?: string
   /**
@@ -65,7 +65,7 @@ export type ReferencesRequest = {
 export type UsageRequest = {
   op: 'usage'
   /**
-   * Symbol id or declared name. A numeric id must carry the `snapshot` generation that issued it; a missing or mismatched `snapshot` is refused `stale-id`. Names are always current and ignore `snapshot`.
+   * Symbol id or address (ADR-0035): a bare `NAME` selects only non-rule symbols and fails `ambiguous-symbol` on cross-kind collisions; `KIND:NAME` (`globalVariable:`, `playerVariable:`, `subroutine:`) selects one kind. A numeric id must carry the `snapshot` generation that issued it; a missing or mismatched `snapshot` is refused `stale-id`. Names are always current and ignore `snapshot`.
    */
   symbol: number | string
   /**
@@ -76,7 +76,7 @@ export type UsageRequest = {
 export type CfgRequest = {
   op: 'cfg'
   /**
-   * Rule index or declared name. A numeric index must carry the `snapshot` generation that issued it; a missing or mismatched `snapshot` is refused `stale-id`. Names are always current and ignore `snapshot`.
+   * Rule index or address (ADR-0035): a declared `NAME` or `NAME#N` selecting the Nth declaration of that name. A numeric index must carry the `snapshot` generation that issued it; a missing or mismatched `snapshot` is refused `stale-id`. Names are always current and ignore `snapshot`.
    */
   rule: number | string
   /**
@@ -98,7 +98,7 @@ export type CfgRequest = {
 }
 export type StatementEdit = {
   /**
-   * The rule holding the statement list: its index in the program or its declared name. A numeric index must carry the `snapshot` generation that issued it; a name ignores `snapshot`.
+   * The rule holding the statement list: its index in the program or its rule address (`NAME` or `NAME#N` in declaration order, ADR-0035) — an unknown address is `unknown-rule`, a duplicated bare name `ambiguous-rule`. A numeric index must carry the `snapshot` generation that issued it; a name ignores `snapshot`.
    */
   rule: number | string
   /**
@@ -290,7 +290,13 @@ export interface CheckRequest {
 export interface AnalyzeRequest {
   op: 'analyze'
   severity?: 'error' | 'warning' | 'info'
+  /**
+   * Selection (#531): only findings produced by this lint rule id (the finding `code`). An unregistered id is refused `invalid-selection`.
+   */
   rule?: string
+  /**
+   * Selection (#531): only findings located in this source file; any spelling that resolves to the same file selects it. A spelling naming no loaded source file is refused `invalid-selection` (ADR-0035).
+   */
   file?: string
   max?: number
   /**
@@ -315,7 +321,7 @@ export interface SymbolsRequest {
    */
   kind?: 'globalVariable' | 'playerVariable' | 'subroutine' | 'rule' | null
   /**
-   * Selection (#531): only symbols located in this source file; any spelling that resolves to the same file selects it.
+   * Selection (#531): only symbols located in this source file; any spelling that resolves to the same file selects it. A spelling naming no loaded source file is refused `invalid-selection` (ADR-0035).
    */
   file?: string
   /**
@@ -330,7 +336,13 @@ export interface SymbolsRequest {
 export interface FindingsRequest {
   op: 'findings'
   severity?: 'error' | 'warning' | 'info'
+  /**
+   * Selection (#531): only findings produced by this lint rule id (the finding `code`). An unregistered id is refused `invalid-selection`.
+   */
   rule?: string
+  /**
+   * Selection (#531): only findings located in this source file; any spelling that resolves to the same file selects it. A spelling naming no loaded source file is refused `invalid-selection` (ADR-0035).
+   */
   file?: string
   max?: number
   /**
@@ -348,7 +360,13 @@ export interface PersistentObjectsRequest {
 export interface LintRequest {
   op: 'lint'
   severity?: 'error' | 'warning' | 'info'
+  /**
+   * Selection (#531): only findings produced by this lint rule id (the finding `code`). An unregistered id is refused `invalid-selection`.
+   */
   rule?: string
+  /**
+   * Selection (#531): only findings located in this source file; any spelling that resolves to the same file selects it. A spelling naming no loaded source file is refused `invalid-selection` (ADR-0035).
+   */
   file?: string
   max?: number
   /**
@@ -362,7 +380,7 @@ export interface LintRulesRequest {
 export interface CallGraphRequest {
   op: 'callGraph'
   /**
-   * Selection (#531): only edges out of this declared rule name.
+   * Selection (#531/ADR-0035): only edges out of this rule, addressed by rule address (`NAME` or `NAME#N` in declaration order). A duplicated bare name is refused `ambiguous-rule` — edges never merge across same-named rules. `callerAddress` on each edge is a reusable spelling.
    */
   caller?: string
   /**
@@ -382,9 +400,12 @@ export interface CostEstimateRequest {
   op: 'costEstimate'
   severity?: 'error' | 'warning' | 'info'
   /**
-   * A declared rule name selects that rule's element-cost drill-down (#724): `rule` (identity, count, span), `statements[]` (direct children ranked by recursive count) and `byNode[]` (each node's own contribution summed per canonical node name, with occurrences) replace the whole-program `elementCount`/`findings` view. The drill-down reports no findings, so `severity`/`file`/`max` do not apply to it.
+   * A rule address (`NAME` or `NAME#N`, ADR-0035) selects that rule's element-cost drill-down (#724): `rule` (identity, count, span), `statements[]` (direct children ranked by recursive count) and `byNode[]` (each node's own contribution summed per canonical node name, with occurrences) replace the whole-program `elementCount`/`findings` view. The drill-down reports no findings, so `severity`/`file`/`max` do not apply to it.
    */
   rule?: string
+  /**
+   * Selection (#531): only findings located in this source file; any spelling that resolves to the same file selects it. A spelling naming no loaded source file is refused `invalid-selection` (ADR-0035).
+   */
   file?: string
   max?: number
   /**
@@ -753,6 +774,10 @@ export interface ActionableFinding {
   location?: string
   evidence: string
   boundedness?: string
+  /**
+   * The owning rule's canonical address (ADR-0035).
+   */
+  ruleAddress?: string
   repeated?: RepeatedValue
 }
 /**
@@ -869,6 +894,10 @@ export interface RuleSummary {
   id: number
   name: string
   /**
+   * The rule's canonical address (ADR-0035): the bare declared `NAME` when it selects this rule unambiguously, otherwise `NAME#N` in declaration order (`#N` for unnamed rules). Passing it back selects the same rule — or fails `ambiguous-rule` when no unambiguous spelling exists.
+   */
+  address: string
+  /**
    * The rule's event binding: a canonical event id, or `subroutine:<name>` for a subroutine rule.
    */
   event?: string
@@ -930,7 +959,7 @@ export interface Reference {
   action: number | null
   value: number | null
   /**
-   * The owning rule's identity — `{id, name, span}` like a `rules` list entry — so a consumer renders a rule location without a second lookup (#792); null when the reference has no owning rule.
+   * The owning rule's identity — `{id, name, address, span}` like a `rules` list entry — so a consumer renders a rule location without a second lookup (#792); null when the reference has no owning rule. `address` is the canonical rule address (ADR-0035).
    */
   owningRule: {
     [k: string]: unknown
@@ -981,6 +1010,10 @@ export interface Finding {
   message: string
   span: Span
   rule: number | null
+  /**
+   * The owning rule's canonical address (ADR-0035) — `NAME` or `NAME#N`; reusable as a `rule`/`--rule` selector.
+   */
+  ruleAddress: string
   action: number | null
   value: number | null
   evidence: string
@@ -1071,11 +1104,19 @@ export interface LintConfiguration {
 export interface SkippedRule {
   id: string
   rule: number
+  /**
+   * The skipped rule's canonical address (ADR-0035).
+   */
+  ruleAddress: string
   reason: string
   [k: string]: unknown
 }
 export interface CallGraphEdge {
   caller: string
+  /**
+   * The calling rule's canonical address (ADR-0035); reusable as the `caller` filter.
+   */
+  callerAddress: string
   callee: string
   [k: string]: unknown
 }
@@ -1107,7 +1148,17 @@ export interface CostEstimateResult {
      */
     total?: number
     budget: number
-    rules?: unknown[]
+    rules?: {
+      index: number
+      name: string
+      /**
+       * The rule's canonical address (ADR-0035); reusable as `costEstimate`'s `rule`.
+       */
+      address: string
+      count: number
+      span: Span
+      [k: string]: unknown
+    }[]
     [k: string]: unknown
   }
   elementCountUnavailable?: string

@@ -1,0 +1,202 @@
+//! Rule and symbol address-grammar resolution over the semantic index
+//! (ADR-0035): `NAME#N` ordinals, literal `#` names, canonical addresses,
+//! and `KIND:NAME` symbol selection.
+
+use std::sync::Arc;
+
+use serde_json::Value;
+use workshop_rs::catalog::Locale;
+use workshop_rs::parser;
+use workshop_rs::{Event, Program, Rule};
+use wright_analyzer::registry::{LintConfig, LintRegistry};
+use wright_analyzer::service::{Origin, SemanticService};
+
+fn service_for(program: Program) -> SemanticService<'static> {
+    SemanticService::with_shared_program(
+        Arc::new(program),
+        Origin {
+            kind: "unknown".to_string(),
+            locale: None,
+        },
+        LintConfig::default(),
+        Arc::new(LintRegistry::default()),
+    )
+}
+
+fn workshop_service_from_text(text: &str) -> SemanticService<'static> {
+    let catalog = workshop_rs::catalog::Catalog::builtin_ref().unwrap();
+    let program = parser::parse_with_context(text, catalog, &Locale::new("en-US"), catalog)
+        .unwrap_or_else(|error| panic!("Workshop source must parse: {error}"));
+    SemanticService::with_shared_program(
+        Arc::new(program),
+        Origin {
+            kind: "workshop".to_string(),
+            locale: Some(Locale::new("en-US").to_string()),
+        },
+        LintConfig::default(),
+        Arc::new(LintRegistry::default()),
+    )
+}
+
+/// A program of Ongoing-Global rules by name, for the address grammar.
+fn rules_service(names: &[&str]) -> SemanticService<'static> {
+    let mut program = Program::new();
+    for name in names {
+        program.rule(Rule::new(*name, Event::Global));
+    }
+    service_for(program)
+}
+
+// `NAME#N` selects the Nth rule named `NAME`; a literal `#` name stays
+// selectable while no ordinal reading exists, and out-of-range ordinals fail.
+#[test]
+fn rule_addresses_resolve_names_ordinals_and_literals() {
+    let service = rules_service(&["a", "b", "a"]);
+    assert_eq!(service.resolve_rule("a#1").unwrap(), 0);
+    assert_eq!(service.resolve_rule("a#2").unwrap(), 2);
+    assert_eq!(service.resolve_rule("b").unwrap(), 1);
+    assert_eq!(
+        service.resolve_rule("a#3").unwrap_err().code,
+        "unknown-rule"
+    );
+    assert_eq!(
+        service.resolve_rule("a").unwrap_err().code,
+        "ambiguous-rule"
+    );
+
+    // A literal `#` name wins while no `NAME#N` reading exists.
+    let service = rules_service(&["a#2"]);
+    assert_eq!(service.resolve_rule("a#2").unwrap(), 0);
+
+    // Both readings collide: `a#2` names the literal rule and the second
+    // `a`; `a#2#1` re-selects the literal rule by its own ordinal.
+    let service = rules_service(&["a", "a", "a#2"]);
+    let error = service.resolve_rule("a#2").unwrap_err();
+    assert_eq!(error.code, "ambiguous-rule");
+    for candidate in ["a#2", "a#2#1"] {
+        assert!(error.message.contains(candidate), "{error:?}");
+    }
+    assert_eq!(service.resolve_rule("a#2#1").unwrap(), 2);
+    assert_eq!(service.resolve_rule("a#1").unwrap(), 0);
+
+    // Unnamed rules are `#N` over the empty name.
+    let service = rules_service(&["", "x", ""]);
+    assert_eq!(service.resolve_rule("#1").unwrap(), 0);
+    assert_eq!(service.resolve_rule("#2").unwrap(), 2);
+    assert_eq!(service.resolve_rule("x").unwrap(), 1);
+}
+
+// `inspect rules` prints every rule's canonical address; a reuse selects
+// its own rule or fails ambiguous when the grammar leaves no name-only
+// spelling for it.
+#[test]
+fn canonical_rule_addresses_round_trip_through_the_grammar() {
+    let service = rules_service(&["a", "a", "a#2", "", "solo"]);
+    let rules: Value = serde_json::from_str(&service.handle_json(r#"{"op":"listRules"}"#)).unwrap();
+    let rules = rules["result"].as_array().unwrap();
+    let addresses: Vec<&str> = rules
+        .iter()
+        .map(|rule| rule["address"].as_str().unwrap())
+        .collect();
+    assert_eq!(addresses, ["a#1", "a#2", "a#2#1", "#1", "solo"]);
+    for rule in rules {
+        let address = rule["address"].as_str().unwrap();
+        match service.resolve_rule(address) {
+            Ok(resolved) => {
+                assert_eq!(resolved, rule["id"].as_u64().unwrap() as usize, "{address}")
+            }
+            // The second `a` beside a literal `a#2` has no name address.
+            Err(error) => assert_eq!(error.code, "ambiguous-rule", "{address}: {error:?}"),
+        }
+    }
+}
+
+// A bare symbol address never resolves a rule; `KIND:NAME` selects the
+// same symbol through its kind.
+#[test]
+fn symbol_addresses_exclude_rules_and_take_kinds() {
+    let service = workshop_service_from_text(
+        r#"
+variables {
+    global:
+        0: score
+}
+rule ("player starts") {
+    event {
+        Ongoing - Each Player;
+        All;
+        All;
+    }
+}
+"#,
+    );
+    let score = service.resolve_symbol("score").unwrap();
+    assert_eq!(
+        service.resolve_symbol("globalVariable:score").unwrap().id,
+        score.id
+    );
+    assert_eq!(
+        service.resolve_symbol("player starts").unwrap_err().code,
+        "unknown-symbol"
+    );
+    // A rule sharing the variable's name does not make `score` ambiguous.
+    let service = workshop_service_from_text(
+        r#"
+variables {
+    global:
+        0: dup
+}
+rule ("dup") {
+    event {
+        Ongoing - Global;
+    }
+}
+rule ("dup") {
+    event {
+        Ongoing - Global;
+    }
+}
+"#,
+    );
+    assert_eq!(service.resolve_symbol("dup").unwrap().name, "dup");
+    assert_eq!(
+        service.resolve_symbol("globalVariable:dup").unwrap().id,
+        service.resolve_symbol("dup").unwrap().id
+    );
+}
+
+// A bare symbol name shared by a `globalVariable` and a `subroutine` fails
+// `ambiguous-symbol` naming both `KIND:NAME` forms; the explicit kind
+// selects one.
+#[test]
+fn symbol_addresses_disambiguate_kinds_across_collisions() {
+    let service = workshop_service_from_text(
+        r#"
+variables {
+    global:
+        0: x
+}
+subroutines {
+    0: x
+}
+rule ("uses x") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        Set Global Variable(x, 1);
+    }
+}
+"#,
+    );
+    let error = service.resolve_symbol("x").unwrap_err();
+    assert_eq!(error.code, "ambiguous-symbol");
+    for candidate in ["globalVariable:x", "subroutine:x"] {
+        assert!(error.message.contains(candidate), "{error:?}");
+    }
+    assert_eq!(
+        service.resolve_symbol("globalVariable:x").unwrap().name,
+        "x"
+    );
+    assert_eq!(service.resolve_symbol("subroutine:x").unwrap().name, "x");
+}

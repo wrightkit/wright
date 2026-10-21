@@ -52,7 +52,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         request_def: "RulesRequest",
         drop_fields: &[],
         mcp: true,
-        description: "The canonical Workshop rules in the loaded program, optionally narrowed by `rule`, `file`, or `max`; `content` adds each rule's conditions and actions as canonical call trees. A numeric `rule` requires the `snapshot` generation that issued it.",
+        description: "The canonical Workshop rules in the loaded program, optionally narrowed by `rule`, `file`, or `max`; `content` adds each rule's conditions and actions as canonical call trees. `rule` accepts a numeric id, a name, or a `NAME#N` ordinal; a numeric `rule` requires the `snapshot` generation that issued it.",
         result: "the program's rules and issuing snapshot, `selection` joined when a selector or `content` was sent",
     },
     ToolSpec {
@@ -68,7 +68,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         request_def: "ReferencesRequest",
         drop_fields: &[],
         mcp: true,
-        description: "References to a symbol, addressed by its numeric id or its declared name, optionally narrowed by `kind` (`declaration`, `definition`, `read`, `write`, `call`), `rule`, `file`, or `max`. A numeric `symbol` or `rule` requires the `snapshot` generation that issued it.",
+        description: "References to a symbol, addressed by its numeric id, its `NAME`, or `KIND:NAME`, optionally narrowed by `kind` (`declaration`, `definition`, `read`, `write`, `call`), `rule` (a numeric id, `NAME`, or `NAME#N`), `file`, or `max`. A numeric `symbol` or `rule` requires the `snapshot` generation that issued it.",
         result: "the symbol's usage header, references, and issuing snapshot; `selection` joined when a selector was sent",
     },
     ToolSpec {
@@ -76,7 +76,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         request_def: "UsageRequest",
         drop_fields: &[],
         mcp: true,
-        description: "Usage counts for a symbol, addressed by its numeric id or its declared name. A numeric `symbol` requires the `snapshot` generation that issued it.",
+        description: "Usage counts for a symbol, addressed by its numeric id, its `NAME`, or `KIND:NAME`. A numeric `symbol` requires the `snapshot` generation that issued it.",
         result: "the symbol's usage counts, its resolved id and kind, and the issuing snapshot",
     },
     ToolSpec {
@@ -84,7 +84,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         request_def: "CfgRequest",
         drop_fields: &[],
         mcp: true,
-        description: "The control-flow graph of one rule, addressed by its index or name, optionally narrowed by `kind` (`entry`, `exit`, `block`, `if`, `while`, `for`) or `max`. A numeric `rule` requires the `snapshot` generation that issued it.",
+        description: "The control-flow graph of one rule, addressed by its numeric id, `NAME`, or `NAME#N`, optionally narrowed by `kind` (`entry`, `exit`, `block`, `if`, `while`, `for`) or `max`. A numeric `rule` requires the `snapshot` generation that issued it.",
         result: "the rule's control-flow graph plus selection when a selector was sent",
     },
     ToolSpec {
@@ -196,7 +196,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         request_def: "EditStatementsRequest",
         drop_fields: &["sources"],
         mcp: true,
-        description: "Insert, replace, or delete a raw Workshop rule's `conditions`/`actions` statements with `rule-content-v1` statement nodes — the same shape `rules` returns — instead of composing Workshop source by hand. Every `rule`+`list`+`index` address names a position in the program before any edit; `inputIdentity` must be the current `project` identity and a numeric `rule` needs the `snapshot` generation that issued it. Returns the assembled source-edit transaction and its validation preview; nothing is written.",
+        description: "Insert, replace, or delete a raw Workshop rule's `conditions`/`actions` statements with `rule-content-v1` statement nodes — the same shape `rules` returns — instead of composing Workshop source by hand. Every `rule`+`list`+`index` address names a position in the program before any edit; `inputIdentity` must be the current `project` identity and `rule` accepts a numeric id, `NAME`, or `NAME#N`; a numeric `rule` needs the `snapshot` generation that issued it. Returns the assembled source-edit transaction and its validation preview; nothing is written.",
         result: "the assembled transaction, the validation status and diagnostics, and its preview when valid",
     },
     ToolSpec {

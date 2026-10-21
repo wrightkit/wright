@@ -192,10 +192,11 @@
     },
     "RuleSummary": {
       "type": "object",
-      "required": ["id", "name", "span"],
+      "required": ["id", "name", "address", "span"],
       "properties": {
         "id": { "type": "integer", "minimum": 0 },
         "name": { "type": "string" },
+        "address": { "type": "string", "description": "The rule's canonical address (ADR-0035): the bare declared `NAME` when it selects this rule unambiguously, otherwise `NAME#N` in declaration order (`#N` for unnamed rules). Passing it back selects the same rule — or fails `ambiguous-rule` when no unambiguous spelling exists." },
         "event": { "type": "string", "description": "The rule's event binding: a canonical event id, or `subroutine:<name>` for a subroutine rule." },
         "span": { "$ref": "#/$defs/Span" },
         "content": {
@@ -233,7 +234,7 @@
         "rule": { "type": ["integer", "null"], "minimum": 0 },
         "action": { "type": ["integer", "null"], "minimum": 0 },
         "value": { "type": ["integer", "null"], "minimum": 0 },
-        "owningRule": { "type": ["object", "null"], "description": "The owning rule's identity — `{id, name, span}` like a `rules` list entry — so a consumer renders a rule location without a second lookup (#792); null when the reference has no owning rule." }
+        "owningRule": { "type": ["object", "null"], "description": "The owning rule's identity — `{id, name, address, span}` like a `rules` list entry — so a consumer renders a rule location without a second lookup (#792); null when the reference has no owning rule. `address` is the canonical rule address (ADR-0035)." }
       },
       "additionalProperties": true
     },
@@ -257,19 +258,21 @@
         "location": { "type": "string", "description": "Source path and 1-based line/column; full spans are available through findings." },
         "evidence": { "type": "string" },
         "boundedness": { "type": "string" },
+        "ruleAddress": { "type": "string", "description": "The owning rule's canonical address (ADR-0035)." },
         "repeated": { "$ref": "#/$defs/RepeatedValue", "description": "Present on `repeated-value` findings only (#791)." }
       },
       "additionalProperties": false
     },
     "Finding": {
       "type": "object",
-      "required": ["code", "severity", "message", "span", "rule", "action", "value", "evidence", "boundedness", "repeated"],
+      "required": ["code", "severity", "message", "span", "rule", "ruleAddress", "action", "value", "evidence", "boundedness", "repeated"],
       "properties": {
         "code": { "type": "string" },
         "severity": { "enum": ["error", "warning", "info"] },
         "message": { "type": "string" },
         "span": { "$ref": "#/$defs/Span" },
         "rule": { "type": ["integer", "null"], "minimum": 0 },
+        "ruleAddress": { "type": "string", "description": "The owning rule's canonical address (ADR-0035) — `NAME` or `NAME#N`; reusable as a `rule`/`--rule` selector." },
         "action": { "type": ["integer", "null"], "minimum": 0 },
         "value": { "type": ["integer", "null"], "minimum": 0 },
         "evidence": { "type": "string" },
@@ -315,10 +318,11 @@
     },
     "SkippedRule": {
       "type": "object",
-      "required": ["id", "rule", "reason"],
+      "required": ["id", "rule", "ruleAddress", "reason"],
       "properties": {
         "id": { "type": "string" },
         "rule": { "type": "integer", "minimum": 0 },
+        "ruleAddress": { "type": "string", "description": "The skipped rule's canonical address (ADR-0035)." },
         "reason": { "type": "string" }
       },
       "additionalProperties": true
@@ -659,8 +663,12 @@
     },
     "CallGraphEdge": {
       "type": "object",
-      "required": ["caller", "callee"],
-      "properties": { "caller": { "type": "string" }, "callee": { "type": "string" } },
+      "required": ["caller", "callerAddress", "callee"],
+      "properties": {
+        "caller": { "type": "string" },
+        "callerAddress": { "type": "string", "description": "The calling rule's canonical address (ADR-0035); reusable as the `caller` filter." },
+        "callee": { "type": "string" }
+      },
       "additionalProperties": true
     },
     "CallGraphResult": {
@@ -705,7 +713,21 @@
           "properties": {
             "total": { "type": "integer", "minimum": 0, "description": "Canonical element total; absent when the count cannot run — elementCountUnavailable names the reason. The budget still reports even when the count is unavailable." },
             "budget": { "type": "integer", "minimum": 0 },
-            "rules": { "type": "array" }
+            "rules": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["index", "name", "address", "count", "span"],
+                "properties": {
+                  "index": { "type": "integer", "minimum": 0 },
+                  "name": { "type": "string" },
+                  "address": { "type": "string", "description": "The rule's canonical address (ADR-0035); reusable as `costEstimate`'s `rule`." },
+                  "count": { "type": "integer", "minimum": 0 },
+                  "span": { "$ref": "#/$defs/Span" }
+                },
+                "additionalProperties": true
+              }
+            }
           },
           "additionalProperties": true
         },
@@ -1064,8 +1086,8 @@
             "info"
           ]
         },
-        "rule": { "type": "string" },
-        "file": { "type": "string" },
+        "rule": { "type": "string", "description": "Selection (#531): only findings produced by this lint rule id (the finding `code`). An unregistered id is refused `invalid-selection`." },
+        "file": { "type": "string", "description": "Selection (#531): only findings located in this source file; any spelling that resolves to the same file selects it. A spelling naming no loaded source file is refused `invalid-selection` (ADR-0035)." },
         "max": { "type": "integer", "minimum": 0 },
         "all": { "type": "boolean", "default": false, "description": "Return every list item instead of the default cap; explicit filters and max still apply." }
       },
@@ -1095,13 +1117,13 @@
             { "type": "integer", "minimum": 0 },
             { "type": "string" }
           ],
-          "description": "Selection (ADR-0024): exactly this rule, addressed by id or declared name."
+          "description": "Selection (ADR-0024/ADR-0035): exactly this rule, addressed by numeric index or rule address — a declared `NAME` or `NAME#N` selecting the Nth declaration of that name (`#N` for unnamed rules). A name that selects nothing is `unknown-rule`; one selecting several rules is `ambiguous-rule`."
         },
         "snapshot": {
           "$ref": "#/$defs/Snapshot",
           "description": "Required when `rule` is a numeric index: the generation that issued the id. A string `rule` name ignores it."
         },
-        "file": { "type": "string", "description": "Selection (#531): only rules located in this source file; any spelling that resolves to the same file selects it." },
+        "file": { "type": "string", "description": "Selection (#531): only rules located in this source file; any spelling that resolves to the same file selects it. A spelling naming no loaded source file is refused `invalid-selection` (ADR-0035)." },
         "max": { "type": "integer", "minimum": 0, "description": "Selection (#531): report at most this many rules; the response's `selection.withheld` counts what the bound dropped." },
         "content": { "type": "boolean", "description": "ADR-0024: add each returned rule's canonical content (`workshop-rs/rule-content-v1`). Without `max`, at most 20 rules are returned; the selection-wrapped result is always used." },
         "all": { "type": "boolean", "default": false, "description": "Return every list item instead of the default cap; explicit filters and max still apply." }
@@ -1134,7 +1156,7 @@
           ],
           "description": "Selection (#531): only symbols of this kind."
         },
-        "file": { "type": "string", "description": "Selection (#531): only symbols located in this source file; any spelling that resolves to the same file selects it." },
+        "file": { "type": "string", "description": "Selection (#531): only symbols located in this source file; any spelling that resolves to the same file selects it. A spelling naming no loaded source file is refused `invalid-selection` (ADR-0035)." },
         "max": { "type": "integer", "minimum": 0, "description": "Selection (#531): report at most this many symbols; the response's `selection.withheld` counts what the bound dropped." },
         "all": { "type": "boolean", "default": false, "description": "Return every list item instead of the default cap; explicit filters and max still apply." }
       },
@@ -1154,7 +1176,7 @@
           ],
           "minimum": 0,
           "maximum": 4294967295,
-          "description": "Symbol id or declared name. A numeric id must carry the `snapshot` generation that issued it; a missing or mismatched `snapshot` is refused `stale-id`. Names are always current and ignore `snapshot`."
+          "description": "Symbol id or address (ADR-0035). A bare `NAME` selects only non-rule symbols — rule names never match here — and fails `ambiguous-symbol` when several non-rule kinds share it; `KIND:NAME` (`globalVariable:`, `playerVariable:`, `subroutine:`) selects one kind. A numeric id must carry the `snapshot` generation that issued it; a missing or mismatched `snapshot` is refused `stale-id`. Names are always current and ignore `snapshot`."
         },
         "kind": {
           "enum": [
@@ -1173,13 +1195,13 @@
           ],
           "minimum": 0,
           "maximum": 4294967295,
-          "description": "Selection (#531): only references inside this rule, addressed by index or declared name. A numeric index is scoped by the same `snapshot` requirement as `symbol`."
+          "description": "Selection (#531/ADR-0035): only references inside this rule, addressed by index or rule address (`NAME` or `NAME#N` in declaration order). A numeric index is scoped by the same `snapshot` requirement as `symbol`; a name ignores it."
         },
         "snapshot": {
           "$ref": "#/$defs/Snapshot",
           "description": "Required when `symbol` or `rule` is a numeric address: the generation that issued the id. Ignored when every address is a declared name."
         },
-        "file": { "type": "string", "description": "Selection (#531): only references located in this source file; any spelling that resolves to the same file selects it." },
+        "file": { "type": "string", "description": "Selection (#531): only references located in this source file; any spelling that resolves to the same file selects it. A spelling naming no loaded source file is refused `invalid-selection` (ADR-0035)." },
         "max": { "type": "integer", "minimum": 0, "description": "Selection (#531): report at most this many references; the response's `selection.withheld` counts what the bound dropped." },
         "all": { "type": "boolean", "default": false, "description": "Return every list item instead of the default cap; explicit filters and max still apply." }
       },
@@ -1209,7 +1231,7 @@
       "type": "object",
       "properties": {
         "op": { "const": "usage" },
-        "symbol": { "type": ["integer", "string"], "minimum": 0, "maximum": 4294967295, "description": "Symbol id or declared name. A numeric id must carry the `snapshot` generation that issued it; a missing or mismatched `snapshot` is refused `stale-id`. Names are always current and ignore `snapshot`." },
+        "symbol": { "type": ["integer", "string"], "minimum": 0, "maximum": 4294967295, "description": "Symbol id or address (ADR-0035): a bare `NAME` selects only non-rule symbols and fails `ambiguous-symbol` on cross-kind collisions; `KIND:NAME` (`globalVariable:`, `playerVariable:`, `subroutine:`) selects one kind. A numeric id must carry the `snapshot` generation that issued it; a missing or mismatched `snapshot` is refused `stale-id`. Names are always current and ignore `snapshot`." },
         "snapshot": {
           "$ref": "#/$defs/Snapshot",
           "description": "Required when `symbol` is a numeric id: the generation that issued the id. A string `symbol` name ignores it."
@@ -1238,7 +1260,7 @@
           ],
           "minimum": 0,
           "maximum": 4294967295,
-          "description": "Rule index or declared name. A numeric index must carry the `snapshot` generation that issued it; a missing or mismatched `snapshot` is refused `stale-id`. Names are always current and ignore `snapshot`."
+          "description": "Rule index or address (ADR-0035): a declared `NAME` or `NAME#N` selecting the Nth declaration of that name. A numeric index must carry the `snapshot` generation that issued it; a missing or mismatched `snapshot` is refused `stale-id`. Names are always current and ignore `snapshot`."
         },
         "snapshot": {
           "$ref": "#/$defs/Snapshot",
@@ -1284,8 +1306,8 @@
             "info"
           ]
         },
-        "rule": { "type": "string" },
-        "file": { "type": "string" },
+        "rule": { "type": "string", "description": "Selection (#531): only findings produced by this lint rule id (the finding `code`). An unregistered id is refused `invalid-selection`." },
+        "file": { "type": "string", "description": "Selection (#531): only findings located in this source file; any spelling that resolves to the same file selects it. A spelling naming no loaded source file is refused `invalid-selection` (ADR-0035)." },
         "max": { "type": "integer", "minimum": 0 },
         "all": { "type": "boolean", "default": false, "description": "Return every list item instead of the default cap; explicit filters and max still apply." }
       },
@@ -1316,8 +1338,8 @@
             "info"
           ]
         },
-        "rule": { "type": "string" },
-        "file": { "type": "string" },
+        "rule": { "type": "string", "description": "Selection (#531): only findings produced by this lint rule id (the finding `code`). An unregistered id is refused `invalid-selection`." },
+        "file": { "type": "string", "description": "Selection (#531): only findings located in this source file; any spelling that resolves to the same file selects it. A spelling naming no loaded source file is refused `invalid-selection` (ADR-0035)." },
         "max": { "type": "integer", "minimum": 0 },
         "all": { "type": "boolean", "default": false, "description": "Return every list item instead of the default cap; explicit filters and max still apply." }
       },
@@ -1331,7 +1353,7 @@
       "type": "object",
       "properties": {
         "op": { "const": "callGraph" },
-        "caller": { "type": "string", "description": "Selection (#531): only edges out of this declared rule name." },
+        "caller": { "type": "string", "description": "Selection (#531/ADR-0035): only edges out of this rule, addressed by rule address (`NAME` or `NAME#N` in declaration order). A duplicated bare name is refused `ambiguous-rule` — edges never merge across same-named rules. `callerAddress` on each edge is a reusable spelling." },
         "callee": { "type": "string", "description": "Selection (#531): only edges into this declared subroutine name." },
         "max": { "type": "integer", "minimum": 0, "description": "Selection (#531): report at most this many edges; the response's `selection.withheld` counts what the bound dropped." },
         "all": { "type": "boolean", "default": false, "description": "Return every list item instead of the default cap; explicit filters and max still apply." }
@@ -1352,8 +1374,8 @@
             "info"
           ]
         },
-        "rule": { "type": "string", "description": "A declared rule name selects that rule's element-cost drill-down (#724): `rule` (identity, count, span), `statements[]` (direct children ranked by recursive count) and `byNode[]` (each node's own contribution summed per canonical node name, with occurrences) replace the whole-program `elementCount`/`findings` view. The drill-down reports no findings, so `severity`/`file`/`max` do not apply to it." },
-        "file": { "type": "string" },
+        "rule": { "type": "string", "description": "A rule address (`NAME` or `NAME#N`, ADR-0035) selects that rule's element-cost drill-down (#724): `rule` (identity, count, span), `statements[]` (direct children ranked by recursive count) and `byNode[]` (each node's own contribution summed per canonical node name, with occurrences) replace the whole-program `elementCount`/`findings` view. The drill-down reports no findings, so `severity`/`file`/`max` do not apply to it." },
+        "file": { "type": "string", "description": "Selection (#531): only findings located in this source file; any spelling that resolves to the same file selects it. A spelling naming no loaded source file is refused `invalid-selection` (ADR-0035)." },
         "max": { "type": "integer", "minimum": 0 },
         "all": { "type": "boolean", "default": false, "description": "Return every list item instead of the default cap; explicit filters and max still apply." }
       },
@@ -1406,7 +1428,7 @@
     "StatementEdit": {
       "type": "object",
       "properties": {
-        "rule": { "type": ["integer", "string"], "minimum": 0, "maximum": 4294967295, "description": "The rule holding the statement list: its index in the program or its declared name. A numeric index must carry the `snapshot` generation that issued it; a name ignores `snapshot`." },
+        "rule": { "type": ["integer", "string"], "minimum": 0, "maximum": 4294967295, "description": "The rule holding the statement list: its index in the program or its rule address (`NAME` or `NAME#N` in declaration order, ADR-0035) — an unknown address is `unknown-rule`, a duplicated bare name `ambiguous-rule`. A numeric index must carry the `snapshot` generation that issued it; a name ignores `snapshot`." },
         "list": { "enum": ["conditions", "actions"], "description": "The statement list inside the rule — the same two lists `rule-content-v1` exports." },
         "index": { "type": "integer", "minimum": 0, "description": "For `insert`, the index the new statements are placed before (`index == list length` appends); for `replace`/`delete`, the index of the statement to change — the flat index space `rules` reports." },
         "change": { "enum": ["insert", "replace", "delete"], "description": "The change to make at the address." },

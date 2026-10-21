@@ -184,17 +184,17 @@ the successful `result` payload.
 | `analyze` | optional selection, optional `all` | `wright-result/v1` essential analysis envelope; the envelope's `snapshot` scopes the ids `result` issues (#595) |
 | `inspect` | optional `all` | `wright-result/v1` overview and rule names; the envelope's `snapshot` scopes the ids `result` issues |
 | `project` | none | Loaded program origin, `sourceFiles` (source paths, entry file first), file count, counts, and findings summary; `snapshot` scopes the ids it reports |
-| `rules` | optional selection, optional `content`, `snapshot` when `rule` is numeric | `{"rules": [...], "snapshot": n}` — canonical Workshop rules. Each entry carries `id`, `name`, `event` (the rule's event binding, `subroutine:<name>` for subroutine rules), and `span`; `selection` joins when a selection is applied. See [Rule content](#rule-content-adr-0024) |
+| `rules` | optional selection, optional `content`, `snapshot` when `rule` is numeric | `{"rules": [...], "snapshot": n}` — canonical Workshop rules. Each entry carries `id`, `name`, `address`, `event` (`subroutine:<name>` for subroutine rules), and `span`; `selection` joins when a selection is applied. See [Rule content](#rule-content-adr-0024) |
 | `symbols` | optional selection, optional `all` | `{"symbols": [...], "snapshot": n}` — symbols; `selection` joins when `file`/`max` is applied |
-| `references` | required `symbol` (id or name), `snapshot` when an address is numeric, optional selection and `all` | Usage header and references for the symbol, with `snapshot` scoping the ids; `{"references": [...], "selection": {...}}` when a selection is applied. Each reference carries `owningRule` — the owning rule's `{id, name, span}` — so a consumer renders a rule location without a `rules` lookup (#792) |
-| `usage` | required `symbol` (id or name), `snapshot` when `symbol` is numeric | Usage counts for the symbol, plus its resolved `id`, `kind`, and the `snapshot` scoping them |
-| `cfg` | required `rule` (index or name), `snapshot` when `rule` is numeric, optional selection and `all` | Control-flow graph for the rule, plus `selection` when a selection is applied |
+| `references` | required `symbol` (id or `NAME`/`KIND:NAME`; `NAME` matches non-rule symbols only), `snapshot` when an address is numeric, optional selection and `all` | Usage header and references for the symbol, with `snapshot` scoping the ids; `{"references": [...], "selection": {...}}` when a selection is applied. Each reference carries `owningRule` — the owning rule's `{id, name, address, span}` — so a consumer renders a rule location without a `rules` lookup (#792) |
+| `usage` | required `symbol` (id or `NAME`/`KIND:NAME`), `snapshot` when `symbol` is numeric | Usage counts for the symbol, plus its resolved `id`, `kind`, and the `snapshot` scoping them |
+| `cfg` | required `rule` (index or `NAME`/`NAME#N`), `snapshot` when `rule` is numeric, optional selection and `all` | Control-flow graph for the rule, plus `selection` when a selection is applied |
 | `findings` | optional selection, optional `all` | `{"findings": [...], "snapshot": n}` — Wright static-analysis findings; `selection` joins when applied |
 | `persistentObjects` | optional `all` | `{"persistentObjects": [...], "snapshot": n}` — persistent Workshop object facts |
 | `lint` | optional selection, optional `all` | Finding counts by severity and actionable findings, with `snapshot` scoping the rule indexes it reports; effective policy is available from `lintRules` |
 | `lintRules` | none | Registered lint rules with full metadata and effective configuration; `snapshot` scopes the rule indexes `skipped` reports |
-| `callGraph` | optional selection, optional `all` | Subroutine call graph; `{"edges": [...], "selection": {...}}` when a selection is applied |
-| `costEstimate` | optional selection, optional `rule`, optional `all` | Exact generated-resource counts (`programRules` counts every declared rule, disabled included — the same inventory `program.rules` reports; `exact.emittedBytes` reports `null` plus `emittedBytesUnavailable` when emission fails, never `0`), `elementCount` (the canonical Workshop structure counted against the client element budget; `rules` ranked by count, largest first. `index` is the canonical rule position and each entry carries a resolved `span`; the 5 largest by default, `all: true` for every rule; when the count cannot run `elementCount` carries only `budget` — the known limit still reports — and `elementCountUnavailable` names the reason, never a zero (ADR-0030 decision 3)), findings (the same configured-registry set `lint` serves, each with a resolved `span`), `skipped` rule evaluations (canonical CFG unavailable — the same disclosure `lint` carries), and `selection` when applied. With `rule` the result is the rule drill-down (#724): `rule` (identity, `count`, `span`), `statements[]` (direct children ranked by recursive `count`, each with `name`, `count`, `span`) and `byNode[]` (each node's own `base_count + adjustment` cost summed per canonical node name with `occurrences`; the entries sum to the rule's `count`) | The default result carries no run-cache comparison — an agent requests one explicitly by passing the reference record as inline data, not a file path (ADR-0027, #723). |
+| `callGraph` | optional selection, optional `all` | Subroutine call graph; edges carry `caller`, `callerAddress`, `callee`; `{"edges": [...], "selection": {...}}` when a selection is applied |
+| `costEstimate` | optional selection, optional `rule`, optional `all` | Exact generated-resource counts (`programRules` counts every declared rule, disabled included; `exact.emittedBytes` reports `null` plus `emittedBytesUnavailable` when emission fails, never `0`), `elementCount` (the Workshop structure counted against the client element budget; `rules` ranked largest first. `index` is the canonical rule position and each entry carries `address` and a resolved `span`; the 5 largest by default, `all: true` for every rule; when the count cannot run `elementCount` carries only `budget` — the known limit still reports — and `elementCountUnavailable` names the reason, never a zero (ADR-0030 decision 3)), findings (the configured set `lint` serves, with resolved `span`), `skipped` rule evaluations (the `lint` disclosure), and `selection` when applied. With `rule` (`NAME`/`NAME#N`) the result is the rule drill-down (#724): `rule` (identity `address`, `count`, `span`), `statements[]` (direct children ranked by recursive `count`, each with `name`, `count`, `span`) and `byNode[]` (each node's own `base_count + adjustment` cost summed per canonical node name with `occurrences`; the entries sum to the rule's `count`) | The default result carries no run-cache comparison — an agent requests one explicitly by passing the reference record as inline data, not a file path (ADR-0027, #723). |
 | `targetMetadata` | none | Canonical target/catalog metadata |
 | `validateEditTransaction` | `transaction`, optional `sources` | Atomic validation status, diagnostics, and previews when valid |
 | `providerValidateEdit` | `language_id`, `transaction`, optional `documents`, `sources`, `project_root` | Provider-validated transaction or structured refusal |
@@ -330,29 +330,29 @@ payloads issue no program ids. Positional fields such as `rule`, `action`,
 the current program rather than reusable addresses, but they are always
 computed from the program that was live at request time.
 
-### Name addressing (#429)
+### Name and address grammar (#429, ADR-0035)
 
-`references` and `usage` accept `symbol` as either a numeric symbol id or the
-declared symbol name; `cfg` accepts `rule` as either the rule index or the
-declared rule name. Names resolve against the loaded program's semantic index
-in the driver, so a request never has to learn the program's numbering.
-Symbol ids and rule indexes are different spaces (a rule's symbol id is not
-its rule index). Numeric ids keep their established meaning, and both
-addressings return the same payload for the same target. A `snapshot` on a
-name-addressed request is ignored (#595): names always resolve against the
-served program, whatever generation the caller last observed.
+`rule` on `rules`/`references`/`cfg`/`costEstimate`/`editStatements`
+`edits[]`, `callGraph`'s `caller`, and CLI `--rule`/`--caller`/`cfg
+<RULE>` share one grammar resolved by the shared semantic index: `NAME`
+selects a uniquely-named rule; `NAME#N` the `N`th declaration of `NAME`
+(1-based, no leading zeroes; unnamed rules take `#N`). A literal name may
+contain `#`, so both readings compete — one resolves, none is
+`unknown-rule`, more is `ambiguous-rule` listing canonical addresses
+(lone `a#2` resolves literally; `a`, `a`, `a#2` makes `a#2` ambiguous,
+`a#2#1` selects the literal). Outputs carry the
+canonical address — `rules[].address`, `owningRule.address`, finding
+`ruleAddress`, `callGraph` `callerAddress`, `costEstimate`
+`elementCount.rules[]`/`rule` `address`, lint `skipped[].ruleAddress`,
+condition-tree `ruleAddress` — `NAME` when unambiguous, else `NAME#N`;
+reused it selects that rule or fails `ambiguous-rule`.
 
-An unmatched name returns a structured `unknown-symbol` or `unknown-rule`
-error whose message names up to three nearest declared names (case-insensitive edit
-distance of at most 1 for names shorter than six
-characters and 2 otherwise, ties in declaration order), or the `symbols` /
-`rules` operation when none is near (#567). The candidates travel in the
-message only, as ADR-0021 decision 6 does for owner vocabulary. A name shared
-by more than one symbol, or more than one rule for `cfg`, returns
-`ambiguous-symbol`/`ambiguous-rule` listing the candidate numeric ids.
-Resolution never guesses or returns an empty success. `usage`
-also echoes the resolved `id` and `kind` so a name-addressed caller
-can correlate the result with `symbols`.
+`references`/`usage` `symbol` takes `NAME` (non-rule symbols) or
+`KIND:NAME` (`globalVariable`/`playerVariable`/`subroutine`); a
+cross-kind collision is `ambiguous-symbol` naming each candidate.
+Symbol ids and rule indexes stay different spaces; `snapshot` on a name
+address is ignored (#595). Unmatched is `unknown-symbol`/`unknown-rule` with the #429
+nearest-name message (or `symbols`/`rules`, #567); `usage` echoes `id`/`kind`.
 
 ### Finding selection (#430)
 
@@ -364,8 +364,10 @@ can correlate the result with `symbols`.
   structured `invalid-selection` error, never a silent empty result.
 * `file`: one source file. The reported `span.path` spelling differs per
   surface, so the argument resolves to the same canonical file. The path as
-  passed, root-relative, or absolute spellings all select it. `costEstimate`
-  findings carry no span, so `file` selects nothing there.
+  passed, root-relative, or absolute spellings all select it. A spelling
+  naming no loaded source file is `invalid-selection` (ADR-0035); a match
+  selecting nothing stays an empty success.
+  `costEstimate` findings carry no span, so `file` selects nothing there.
 * `max`: a bound on the reported count, applied after filtering.
 
 The CLI options `--severity`, `--rule-id`, `--file`, and `--max` on `lint`,
@@ -411,8 +413,8 @@ value, such as a kind outside the listed domain or a `rule`/`caller`/`callee`
 that matches nothing in the loaded program, is a structured
 `invalid-selection` error, never a silent empty result.
 
-* `rules`: `rule` (exactly one rule, by index or declared name), `file`,
-  `max`. The removed `name` field is a `malformed-request` error, never
+* `rules`: `rule` (one rule by index or `NAME`/`NAME#N`), `file`, `max`.
+  The removed `name` field is a `malformed-request` error, never
   silently ignored (ADR-0035).
 * `symbols`: `file`, `max`, plus the pre-existing `kind` (`globalVariable`,
   `playerVariable`, `subroutine`, `rule`). `kind` predates this selection
@@ -420,14 +422,15 @@ that matches nothing in the loaded program, is a structured
   array; `file`/`max` wrap the result, and a `kind` sent alongside them
   counts inside the reported selection.
 * `references`: `kind` (`declaration`, `definition`, `read`, `write`,
-  `call`), `rule` (only references inside this rule, addressed by index or
-  declared name), `file`, `max`.
+  `call`), `rule` (references inside this rule, by index or
+  `NAME`/`NAME#N`), `file`, `max`.
 * `cfg`: `kind` (`entry`, `exit`, `block`, `if`, `while`, `for`), `max`.
   Selection filters `blocks`, which keep their original `id`s, so
   `successors` and the `entry`/`exit` fields still address the full
   graph's block numbering.
-* `callGraph`: `caller` (a declared rule name), `callee` (a declared
-  subroutine name), `max`.
+* `callGraph`: `caller` (one rule by `NAME`/`NAME#N`; a duplicate is
+  `ambiguous-rule`, never merged), `callee` (a declared subroutine
+  name), `max`.
 
 The `file` field resolves like finding selection: any spelling that resolves
 to the same source file selects it. A capped list reports a `truncation` member with its total, shown and withheld counts, and an `expand` hint. Unselected arrays become `{items, truncation}` only when capped. Explicit selection wrappers retain their own totals. The CLI options
@@ -454,9 +457,9 @@ carries `program`, the same summary members `analyze`'s `program` reports —
 origin, files, and declaration counts — and `check`, `lint`, `analyze`, and
 `inspect` carry `next`, a list of complete `wright` command lines a renderer
 prints as `next:` records or a summary footer. A `references`/`inspect`
-reference also carries `owningRule` — `{id, name, span}` like a `rules` list
-entry, or null when nothing owns it — so a consumer renders the owning rule's
-location without a second lookup.
+reference also carries `owningRule` — `{id, name, address, span}` like a
+`rules` list entry, or null when nothing owns it — so a consumer renders the
+owning rule's location without a second lookup.
 
 Full fact dumps are available only through the in-process `CompilerSession`
 API; external callers use the narrower semantic operations.

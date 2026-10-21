@@ -29,11 +29,12 @@ use wright_driver::result::{
 
 use super::{
     Presentation, RenderContext, ResultPresentation, array_len, cfg_edge_count, count, dim,
-    display_location_path, finding_location, finding_location_span, finding_severity_label,
-    finding_severity_rank, inline_location, is_real_source_path, location_suffix, notable_callers,
-    persistent_object_summary, query_items, render_diff_lines, render_node, renderable_group_spans,
-    rule_name, severity_rank, source_context, span_position, summary_status, symbol_kind_heading,
-    unmapped_positions, unmapped_positions_note,
+    display_location_path, edge_caller, finding_location, finding_location_span,
+    finding_severity_label, finding_severity_rank, inline_location, is_real_source_path,
+    location_suffix, notable_callers, persistent_object_summary, query_items, render_diff_lines,
+    render_node, renderable_group_spans, rule_address, rule_name, severity_rank, source_context,
+    span_position, summary_status, symbol_kind_heading, tree_rule, unmapped_positions,
+    unmapped_positions_note,
 };
 
 /// The envelope's tag word (ADR-0030 decision 4): `summary_status` covers
@@ -918,9 +919,9 @@ impl TerminalReport for EssentialResult {
             if let Some(rules) = value["rules"].as_array() {
                 heading(ctx, "Rules");
                 for rule in rules {
-                    let name = match rule["name"].as_str() {
-                        Some("") | None => format!("rule {}", rule["id"]),
+                    let name = match rule_address(rule) {
                         Some(name) => name.to_string(),
+                        None => format!("rule {}", rule["id"]),
                     };
                     line(ctx, 1, &name);
                 }
@@ -1080,10 +1081,7 @@ fn analyze_body(ctx: &RenderContext<'_>, value: &Value) {
             2,
             &format!(
                 "\"{}\" condition {}: {}{}",
-                match tree["rule"].as_str() {
-                    Some("") | None => "<unnamed>",
-                    Some(name) => name,
-                },
+                tree_rule(tree),
                 count(tree, "index") + 1,
                 elements(count(tree, "elements")),
                 location_suffix(tree.get("span")),
@@ -1177,7 +1175,7 @@ impl TerminalReport for RulesResult {
             return;
         }
         for rule in rules {
-            let name = rule["name"].as_str().unwrap_or("<unnamed>");
+            let name = rule_name(rule);
             let event = rule["event"].as_str().unwrap_or("?");
             match rule.get("span").and_then(inline_location) {
                 Some(location) => line(ctx, 1, &format!("{name} [{event}] --> {location}")),
@@ -1274,10 +1272,10 @@ impl TerminalReport for RefsResult {
             return;
         }
         for reference in references.iter() {
-            // `owningRule` names the rule when the driver carries it
-            // (#807); the positional indexes remain the fallback.
-            let context = match reference["owningRule"]["name"].as_str() {
-                Some(name) if !name.is_empty() => format!(" (rule {name})"),
+            // `owningRule` identifies the rule when the driver carries it
+            // (#807); ADR-0035 prefers its canonical `address`.
+            let context = match rule_address(&reference["owningRule"]) {
+                Some(name) => format!(" (rule {name})"),
                 _ => match (reference["rule"].as_u64(), reference["action"].as_u64()) {
                     (Some(rule), Some(action)) => format!(" (rule {rule}, action {action})"),
                     (Some(rule), None) => format!(" (rule {rule})"),
@@ -1427,9 +1425,7 @@ impl TerminalReport for CallGraphResult {
             *fan_in
                 .entry(edge["callee"].as_str().unwrap_or("<unnamed>"))
                 .or_default() += 1;
-            *fan_out
-                .entry(edge["caller"].as_str().unwrap_or("<unnamed>"))
-                .or_default() += 1;
+            *fan_out.entry(edge_caller(edge)).or_default() += 1;
         }
         line(
             ctx,
@@ -1470,7 +1466,7 @@ impl TerminalReport for CallGraphResult {
                 2,
                 &format!(
                     "{} -> {}",
-                    edge["caller"].as_str().unwrap_or("<unnamed>"),
+                    edge_caller(edge),
                     edge["callee"].as_str().unwrap_or("<unnamed>")
                 ),
             );

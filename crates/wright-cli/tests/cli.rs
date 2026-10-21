@@ -1920,7 +1920,8 @@ fn inspect_cost_verdict_and_file_selection() {
 
     // Cost findings carry resolved source locations (#722), so `--file`
     // narrows the reported set like `lint` — a matching file keeps its
-    // finding and a non-matching one reports an empty set.
+    // finding; a file that is not a source file of the loaded program is
+    // `invalid-selection`, never an empty result (ADR-0035).
     let output = run(&[
         "inspect",
         "cost",
@@ -1944,15 +1945,16 @@ fn inspect_cost_verdict_and_file_selection() {
         "-f",
         "json",
     ]);
-    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.status.code(), Some(1));
     let envelope = parse_json(&output.stdout);
+    assert_eq!(envelope["diagnostics"][0]["code"], "invalid-selection");
     assert!(
-        envelope["result"]["findings"]
-            .as_array()
+        envelope["diagnostics"][0]["message"]
+            .as_str()
             .unwrap()
-            .is_empty(),
-        "a non-matching file empties the reported set: {}",
-        envelope["result"]
+            .contains("other-file.txt"),
+        "the diagnostic names the unmatched file: {}",
+        envelope["diagnostics"][0]["message"]
     );
 
     let output = run(&[
@@ -3714,7 +3716,9 @@ fn callgraph_reports_subroutine_call_edges() {
     assert_eq!(envelope["command"], "callgraph");
     assert_eq!(
         envelope["result"],
-        serde_json::json!([{ "caller": "player starts", "callee": "showStatus" }])
+        serde_json::json!([
+            { "caller": "player starts", "callerAddress": "player starts", "callee": "showStatus" }
+        ])
     );
 
     let output = run(&["inspect", "callgraph", path]);
@@ -4514,94 +4518,6 @@ fn analyze_lint_and_cost_report_the_same_rule_and_finding_totals() {
 }
 
 #[test]
-fn query_commands_reject_unknown_and_ambiguous_names() {
-    let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
-    let path = path.to_str().unwrap();
-    for (command_args, code) in [
-        (&["inspect", "refs", "nope"][..], "unknown-symbol"),
-        (&["inspect", "cfg", "nope"][..], "unknown-rule"),
-    ] {
-        let output = run(&[command_args, &[path, "-f", "json"]].concat());
-        assert_eq!(
-            output.status.code(),
-            Some(1),
-            "{command_args:?}: {}",
-            command_result(&output)
-        );
-        assert!(output.stderr.is_empty(), "JSON mode: no stderr");
-        let envelope = parse_json(&output.stdout);
-        assert_eq!(envelope["ok"], false);
-        assert_eq!(envelope["diagnostics"][0]["code"], code);
-        assert_eq!(envelope["diagnostics"][0]["stage"], "analysis");
-        assert!(
-            envelope["result"].is_null(),
-            "a failed query carries no result"
-        );
-    }
-
-    // A name shared across symbol kinds (or rules) is ambiguous, never
-    // silently resolved to one candidate.
-    let dup = temp_file(
-        "dup.ws",
-        r#"variables {
-    global:
-        0: dup
-}
-rule ("dup") {
-    event {
-        Ongoing - Global;
-    }
-    actions {
-        Set Global Variable(dup, 1);
-    }
-}
-rule ("dup") {
-    event {
-        Ongoing - Global;
-    }
-    actions {
-        Set Global Variable(dup, 2);
-    }
-}
-"#,
-    );
-    for (command_args, code) in [
-        (&["inspect", "refs", "dup"][..], "ambiguous-symbol"),
-        (&["inspect", "cfg", "dup"][..], "ambiguous-rule"),
-    ] {
-        let output = run(&[command_args, &[dup.to_str().unwrap(), "-f", "json"]].concat());
-        assert_eq!(output.status.code(), Some(1), "{command_args:?}");
-        let envelope = parse_json(&output.stdout);
-        assert_eq!(envelope["diagnostics"][0]["code"], code);
-        assert!(
-            envelope["diagnostics"][0]["message"]
-                .as_str()
-                .unwrap()
-                .contains("dup"),
-            "the diagnostic lists candidates: {}",
-            envelope["diagnostics"][0]["message"]
-        );
-    }
-
-    // Text mode reports the same structured diagnostic on stderr, and a
-    // failed query shows no fabricated default result (#446).
-    let output = run(&["inspect", "refs", "nope", path]);
-    assert_eq!(output.status.code(), Some(1));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("unknown-symbol"), "{stderr}");
-    assert!(stderr.contains("unknown symbol 'nope'"), "{stderr}");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("ERROR refs"), "{stdout}");
-    assert!(
-        !stdout.contains("<unknown>") && !stdout.contains("read(s)"),
-        "a failed query prints no default result metadata: {stdout}"
-    );
-
-    let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
-    let _ = std::fs::remove_dir_all(dup.parent().unwrap());
-}
-
-#[test]
 fn inspect_names_the_detail_query_commands() {
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
     let output = run(&["inspect", path.to_str().unwrap()]);
@@ -4629,9 +4545,10 @@ fn inspect_names_the_detail_query_commands() {
 
 #[test]
 fn inspect_names_unnamed_rules_by_index() {
-    // An unnamed rule has no name to address it by; the preview must carry
-    // its index instead of repeating indistinguishable `<unnamed>` lines
-    // (#446, real-world rule ("") blocks such as overpy-pixelart).
+    // An unnamed rule prints its canonical `#N` address (ADR-0035) — the
+    // spelling `cfg`/`--rule` accepts — instead of an indistinguishable
+    // `<unnamed>` (#446, real-world rule ("") blocks such as
+    // overpy-pixelart).
     let path = temp_file(
         "unnamed.ws",
         "rule (\"\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Wait(1);\n    }\n}\n",
@@ -4639,7 +4556,7 @@ fn inspect_names_unnamed_rules_by_index() {
     let output = run(&["inspect", path.to_str().unwrap()]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("rule: name=<unnamed> id=0"), "{stdout}");
+    assert!(stdout.contains("rule: name=#1 id=0"), "{stdout}");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
