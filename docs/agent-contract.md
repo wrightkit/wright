@@ -113,6 +113,7 @@ plus the operation in snake case:
 | `targetMetadata` | `wright_target_metadata` |
 | `validateEditTransaction` | `wright_validate_edit_transaction` |
 | `providerValidateEdit` | `wright_provider_validate_edit` |
+| `editStatements` | `wright_edit_statements` |
 | `lookup` | `wright_lookup` |
 
 `tools/list` contains a tool only when its operation is in this set and
@@ -194,6 +195,7 @@ the successful `result` payload.
 | `targetMetadata` | none | Canonical target/catalog metadata |
 | `validateEditTransaction` | `transaction`, optional `sources` | Atomic validation status, diagnostics, and previews when valid |
 | `providerValidateEdit` | `language_id`, `transaction`, optional `documents`, `sources`, `project_root` | Provider-validated transaction or structured refusal |
+| `editStatements` | `inputIdentity`, `edits`, optional `sources`, `snapshot` when a `rule` is numeric | The assembled `EditTransaction` plus the edit-validation payload — see [statement edits](agent-contract-edits.md) |
 | `lookup` | required `language`; optional `query`, `kind`, `within`, `locale`, `limit` | Owner vocabulary entries with accepted spellings and rendered signatures, or an explicit `unavailable` payload naming the owner |
 | `listEntries` | required `language`, `kind`; optional `within`, `locale`, `pageSize`, `cursor` | One page of the owner's vocabulary of a kind, in owner order, with `total` and `nextCursor` (see [vocabulary operations](agent-contract-vocabulary.md#listing-vocabulary-adr-0031)) |
 
@@ -507,6 +509,15 @@ owns the source semantics and Wright orchestrates the transaction:
   acknowledgment idiom, not a cost reduction: at once-per-execution
   positions it freezes nothing, it marks the repeated evaluation as
   intentional so the finding retires.
+
+### Statement edits (ADR-0029)
+
+`editStatements` (#855) is the structured form of the raw Workshop edit:
+statement-level insert/replace/delete on a rule's `conditions`/`actions`
+lists carrying `rule-content-v1` documents instead of composed source,
+returning the assembled `EditTransaction` plus its
+`validateEditTransaction` validation. Its request and result rules are in
+[agent-contract-edits.md](agent-contract-edits.md).
 
 ### Provider-backed edits
 

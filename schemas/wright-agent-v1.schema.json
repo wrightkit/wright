@@ -25,6 +25,7 @@
         { "$ref": "#/$defs/TargetMetadataRequest" },
         { "$ref": "#/$defs/ValidateEditTransactionRequest" },
         { "$ref": "#/$defs/ProviderValidateEditRequest" },
+        { "$ref": "#/$defs/EditStatementsRequest" },
         { "$ref": "#/$defs/LookupRequest" },
         { "$ref": "#/$defs/ListEntriesRequest" }
       ]
@@ -78,6 +79,7 @@
         { "$ref": "#/$defs/TargetMetadataResult" },
         { "$ref": "#/$defs/ValidateEditTransactionResult" },
         { "$ref": "#/$defs/ProviderValidateEditResult" },
+        { "$ref": "#/$defs/EditStatementsResult" },
         { "$ref": "#/$defs/LookupResult" },
         { "$ref": "#/$defs/ListEntriesResult" }
       ]
@@ -728,6 +730,18 @@
     },
     "ValidateEditTransactionResult": { "$ref": "#/$defs/EditValidationPayload" },
     "ProviderValidateEditResult": { "$ref": "#/$defs/ProviderMutationPayload" },
+    "EditStatementsResult": {
+      "type": "object",
+      "required": ["ok", "exit", "diagnostics"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "exit": { "type": "integer", "minimum": 0 },
+        "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/Diagnostic" } },
+        "transaction": { "$ref": "#/$defs/EditTransaction", "description": "The transaction the service assembled from the statement edits — present when the edits could be planned, so the caller can apply or replay it through its own write path." },
+        "preview": { "type": "array", "items": { "$ref": "#/$defs/SourcePreview" }, "description": "Each edited source after the transaction — present when the transaction validates, like `validateEditTransaction`." }
+      },
+      "additionalProperties": true
+    },
     "LookupEntry": {
       "type": "object",
       "required": ["identity", "kind", "spelling", "displayName"],
@@ -1323,6 +1337,50 @@
       },
       "required": ["op", "language_id", "transaction"],
       "additionalProperties": false
+    },
+    "EditStatementsRequest": {
+      "type": "object",
+      "properties": {
+        "op": { "const": "editStatements" },
+        "inputIdentity": { "type": "string", "description": "The freshness precondition (ADR-0029): the `inputIdentity` of the program the statement addresses were read from — the value `project` reports, or the identity of the supplied `sources` text. A mismatch refuses `edit-stale-source`." },
+        "sources": { "anyOf": [{ "$ref": "#/$defs/Sources" }, { "type": "null" }], "description": "Optional current text of the loaded input source, keyed by its source spelling: when supplied the program the addresses name is loaded from that text, which is also the precondition each assembled edit's `source_identity` verifies against; omitted or null uses the disk-loaded program." },
+        "snapshot": { "$ref": "#/$defs/Snapshot", "description": "Required when any `edits[].rule` is a numeric index: the generation that issued it. Declared rule names ignore it." },
+        "edits": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/StatementEdit" },
+          "description": "The statement edits. Every `rule`+`list`+`index` address names a position in the program before any edit in this request applies; two edits at the same address refuse `edit-duplicate-address`."
+        }
+      },
+      "required": ["op", "inputIdentity", "edits"],
+      "additionalProperties": false
+    },
+    "StatementEdit": {
+      "type": "object",
+      "properties": {
+        "rule": { "type": ["integer", "string"], "minimum": 0, "maximum": 4294967295, "description": "The rule holding the statement list: its index in the program or its declared name. A numeric index must carry the `snapshot` generation that issued it; a name ignores `snapshot`." },
+        "list": { "enum": ["conditions", "actions"], "description": "The statement list inside the rule — the same two lists `rule-content-v1` exports." },
+        "index": { "type": "integer", "minimum": 0, "description": "For `insert`, the index the new statements are placed before (`index == list length` appends); for `replace`/`delete`, the index of the statement to change — the flat index space `rules` reports." },
+        "change": { "enum": ["insert", "replace", "delete"], "description": "The change to make at the address." },
+        "statements": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/RuleContentStatement" }, "description": "Required on `insert`: the `rule-content-v1` statement documents to insert, in order — statements that belong at one position (an `if`, its body, its `end`) go in one insert." },
+        "statement": { "$ref": "#/$defs/RuleContentStatement", "description": "Required on `replace`: the replacement `rule-content-v1` statement document." }
+      },
+      "required": ["rule", "list", "index", "change"],
+      "allOf": [
+        {
+          "if": { "properties": { "change": { "const": "insert" } }, "required": ["change"] },
+          "then": { "required": ["statements"] }
+        },
+        {
+          "if": { "properties": { "change": { "const": "replace" } }, "required": ["change"] },
+          "then": { "required": ["statement"] }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "RuleContentStatement": {
+      "type": "object",
+      "description": "A `workshop-rs/rule-content-v1` statement document — the same node shape `rules` returns in `conditions`/`actions`: `{\"value\": <value node>}` for a condition, `{\"call\": \"<id>\", \"args\": [...]}` for an action; `disabled` may accompany either. `span`/`spans` keys are output-only and refused."
     },
     "LookupRequest": {
       "type": "object",

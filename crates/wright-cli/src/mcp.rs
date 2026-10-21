@@ -215,11 +215,12 @@ mod tests {
             "wright_target_metadata",
             "wright_validate_edit_transaction",
             "wright_provider_validate_edit",
+            "wright_edit_statements",
             "wright_lookup",
         ] {
             assert!(names.iter().any(|n| n == name), "missing {name}");
         }
-        assert_eq!(names.len(), 19);
+        assert_eq!(names.len(), 20);
         assert!(names.iter().all(|name| name.starts_with("wright_")));
     }
 
@@ -246,6 +247,17 @@ mod tests {
         assert_eq!(input["required"], json!(["language"]));
         assert!(input["properties"].get("op").is_none());
         assert!(input["properties"].get("within").is_some());
+        // ADR-0029: `editStatements` drops `sources` like the other edit
+        // tools and keeps `inputIdentity`/`edits` required.
+        let edit_statements = TOOL_SPECS
+            .iter()
+            .find(|spec| spec.op == "editStatements")
+            .unwrap();
+        let input = input_schema(&defs, edit_statements, edit_statements.drop_fields);
+        assert!(input["properties"].get("op").is_none());
+        assert!(input["properties"].get("sources").is_none());
+        assert!(input["properties"].get("edits").is_some());
+        assert_eq!(input["required"], json!(["inputIdentity", "edits"]));
 
         for op in ["analyze", "inspect", "lint"] {
             let spec = TOOL_SPECS.iter().find(|spec| spec.op == op).unwrap();

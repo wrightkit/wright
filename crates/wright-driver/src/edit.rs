@@ -320,9 +320,9 @@ pub(crate) fn edit_kind_gate(kind: SourceKind, provider_operation: &str) -> Opti
 }
 
 /// Whether a `sources` key names the resolved input file: plain path
-/// spellings compare by canonical identity, and a `file://` URI spelling
-/// of the same path — including a percent-encoded one — binds too.
-fn same_source(source: &str, resolved: &ResolvedInput) -> bool {
+/// spellings and `file://` URI spellings (even percent-encoded) of the
+/// same path compare by canonical identity.
+pub(crate) fn same_source(source: &str, resolved: &ResolvedInput) -> bool {
     resolved
         .path
         .as_deref()
