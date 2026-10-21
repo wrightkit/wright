@@ -65,13 +65,48 @@ pub(super) fn read_rs_tree(dir: &Path) -> BTreeMap<PathBuf, String> {
     files
 }
 
+/// One source literal — a string, raw string, byte string, or char —
+/// with the byte ranges of the whole token and of its cooked content.
+/// The literal census enumerates these; nothing inside them can match a
+/// structural scan because the mask blanks their contents.
+#[derive(Clone, Copy)]
+pub(super) struct Lit {
+    /// Byte range covering the whole token, delimiters included.
+    pub span: (usize, usize),
+    /// Byte range of the content between the delimiters.
+    pub content: (usize, usize),
+    /// The literal's kind.
+    pub kind: LitKind,
+}
+
+/// What kind of literal a [`Lit`] is.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum LitKind {
+    /// A `"…"` string literal.
+    Str,
+    /// An `r"…"`/`r#"…"#`/`b"…"`/`br"…"`/`c"…"` raw or byte string.
+    Raw,
+    /// A `'…'`/`b'…'` char literal.
+    Char,
+}
+
 /// A byte copy of `src` with the contents of comments, string/char literals,
 /// and raw strings replaced by spaces (delimiters kept, positions and
 /// newlines preserved), so structural scanning never matches inside a
 /// literal.
 pub(super) fn mask_rust(src: &str) -> Vec<u8> {
+    mask_rust_full(src).0
+}
+
+/// `mask_rust` plus the span of every literal it masked, so the literal
+/// census can enumerate them without re-lexing. Delimiters are kept for
+/// every kind: `"…"` masks to `"   "`, `r"…"` to `r"   "`,
+/// `br#"…"#` to `br#"   "#`. A literal whose span is all spaces in the
+/// `#[cfg(test)]`-blanked mask sits in test code.
+pub(super) fn mask_rust_full(src: &str) -> (Vec<u8>, Vec<Lit>) {
     let bytes = src.as_bytes();
     let mut mask = bytes.to_vec();
+    let mut lits = Vec::new();
     let mut blank = |range: std::ops::Range<usize>| {
         for pos in range {
             if mask[pos] != b'\n' {
@@ -81,6 +116,7 @@ pub(super) fn mask_rust(src: &str) -> Vec<u8> {
     };
     let mut i = 0;
     while i < bytes.len() {
+        let word_before = i > 0 && (bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_');
         match bytes[i] {
             b'/' if bytes.get(i + 1) == Some(&b'/') => {
                 let end = src[i..].find('\n').map(|n| i + n).unwrap_or(bytes.len());
@@ -98,23 +134,46 @@ pub(super) fn mask_rust(src: &str) -> Vec<u8> {
                 blank(i..end);
                 i = end;
             }
-            b'r' => {
-                // Possibly a raw string: r"..." or r#"..."#…
+            b'b' | b'r' | b'c' if !word_before => {
+                // String prefixes: `r"…"`/`r#"…"#`, `b"…"`/`br"…"`/`br#"…"#`,
+                // `c"…"`/`cr"…"`. `b'x'`/`c`/`r` plain identifiers fall
+                // through when no `'`/`"` follows the prefix.
                 let mut j = i + 1;
-                while bytes.get(j) == Some(&b'#') {
+                if bytes[i] == b'b' && bytes.get(j) == Some(&b'\'') {
+                    // A `b'x'`/`b'\n'` byte char — the token starts at
+                    // `b`, so the prefix must come out of the mask too.
+                    if let Some((lit, end)) = char_lit(bytes, i + 1, i) {
+                        blank(lit.content.0..lit.content.1);
+                        lits.push(lit);
+                        i = end;
+                    } else {
+                        i += 1;
+                    }
+                    continue;
+                }
+                if matches!(bytes[i], b'b' | b'c') && bytes.get(j) == Some(&b'r') {
                     j += 1;
                 }
-                if bytes.get(j) != Some(&b'"') {
+                let mut k = j;
+                while bytes.get(k) == Some(&b'#') {
+                    k += 1;
+                }
+                if bytes.get(k) != Some(&b'"') {
                     i += 1;
                     continue;
                 }
-                let hashes = j - i - 1;
-                let close = format!("\"{}", "#".repeat(hashes));
-                let end = src[j + 1..]
+                let close = format!("\"{}", "#".repeat(k - j));
+                let content_start = k + 1;
+                let end = src[content_start..]
                     .find(&close)
-                    .map(|n| j + 1 + n + close.len())
+                    .map(|n| content_start + n + close.len())
                     .unwrap_or(bytes.len());
-                blank(i..end);
+                lits.push(Lit {
+                    span: (i, end),
+                    content: (content_start, end - close.len()),
+                    kind: LitKind::Raw,
+                });
+                blank(content_start..end - close.len());
                 i = end;
             }
             b'"' => {
@@ -125,52 +184,80 @@ pub(super) fn mask_rust(src: &str) -> Vec<u8> {
                     }
                     end += 1;
                 }
-                blank(i + 1..end.min(bytes.len()));
+                let end = end.min(bytes.len());
+                lits.push(Lit {
+                    span: (i, (end + 1).min(bytes.len())),
+                    content: (i + 1, end),
+                    kind: LitKind::Str,
+                });
+                blank(i + 1..end);
                 i = (end + 1).min(bytes.len());
             }
-            b'\'' if bytes.get(i + 1) == Some(&b'\\') => {
-                // An escaped char literal (`'\n'`, `'\''`, `'\u{1F600}'`):
-                // scan to the closing quote. Lifetimes never carry `\`.
-                let mut end = i + 2;
-                if bytes.get(end) == Some(&b'\'') {
-                    end += 1; // `'\''` — the escaped char is a quote itself
-                }
-                while end < bytes.len()
-                    && bytes[end] != b'\''
-                    && bytes[end] != b'\n'
-                    && end - i <= 12
-                {
-                    end += 1;
-                }
-                if end < bytes.len() && bytes[end] == b'\'' && end > i + 2 {
-                    blank(i + 1..end);
-                    i = end + 1;
-                } else {
-                    i += 1;
-                }
-            }
             b'\'' => {
-                // A bare char literal is exactly one char between quotes —
-                // `'x'`, `'é'` — so a `'a`/`'static` lifetime, whose next
-                // quote is never one char away, stays unmasked.
-                let len = match bytes.get(i + 1) {
-                    Some(b) if b.is_ascii() => 1,
-                    Some(b) if (0xC0..=0xDFu8).contains(b) => 2,
-                    Some(b) if (0xE0..=0xEFu8).contains(b) => 3,
-                    Some(b) if (0xF0..=0xF7u8).contains(b) => 4,
-                    _ => 0,
-                };
-                if len > 0 && bytes.get(i + 1 + len) == Some(&b'\'') {
-                    blank(i + 1..i + 1 + len);
-                    i += len + 2;
-                } else {
-                    i += 1;
+                // A char literal (`'x'`, `'é'`, `'\n'`, `'\u{1F600}'`)
+                // or a `'a`/`'static` lifetime — `char_lit` decides.
+                match char_lit(bytes, i, i) {
+                    Some((lit, end)) => {
+                        blank(lit.content.0..lit.content.1);
+                        lits.push(lit);
+                        i = end;
+                    }
+                    None => i += 1,
                 }
             }
             _ => i += 1,
         }
     }
-    mask
+    (mask, lits)
+}
+
+/// The literal and end-of-token for a `'…'`/`b'…'` char literal whose
+/// `'` is at `q`; `start` is the token start (`q` itself, or the `b`
+/// prefix for byte chars). `None` when the quote opens a lifetime —
+/// a bare char is exactly one char between quotes, an escaped char
+/// scans to a bounded close, and lifetimes match neither.
+fn char_lit(bytes: &[u8], q: usize, start: usize) -> Option<(Lit, usize)> {
+    if bytes.get(q + 1) == Some(&b'\\') {
+        // An escaped char (`'\n'`, `'\''`, `'\u{1F600}'`) — scan to
+        // the closing quote. Lifetimes never carry `\`.
+        let mut end = q + 2;
+        if bytes.get(end) == Some(&b'\'') {
+            end += 1; // `'\''` — the escaped char is a quote itself
+        }
+        while end < bytes.len() && bytes[end] != b'\'' && bytes[end] != b'\n' && end - q <= 12 {
+            end += 1;
+        }
+        if end < bytes.len() && bytes[end] == b'\'' && end > q + 2 {
+            return Some((
+                Lit {
+                    span: (start, end + 1),
+                    content: (q + 1, end),
+                    kind: LitKind::Char,
+                },
+                end + 1,
+            ));
+        }
+        return None;
+    }
+    // `'x'`, `'é'` — the next quote is exactly one char away.
+    let len = match bytes.get(q + 1) {
+        Some(b) if b.is_ascii() => 1,
+        Some(b) if (0xC0..=0xDFu8).contains(b) => 2,
+        Some(b) if (0xE0..=0xEFu8).contains(b) => 3,
+        Some(b) if (0xF0..=0xF7u8).contains(b) => 4,
+        _ => 0,
+    };
+    if len > 0 && bytes.get(q + 1 + len) == Some(&b'\'') {
+        return Some((
+            Lit {
+                span: (start, q + 2 + len),
+                content: (q + 1, q + 1 + len),
+                kind: LitKind::Char,
+            },
+            q + 2 + len,
+        ));
+    }
+    None
 }
 
 pub(super) fn as_str(mask: &[u8], range: std::ops::Range<usize>) -> &str {
@@ -317,6 +404,29 @@ pub(super) fn enclosing_fn(mask: &[u8], pos: usize) -> Option<(String, Vec<(Stri
                 })
                 .collect();
             return Some((text[name_start..name_end].to_string(), params));
+        }
+        search_end = fn_at;
+    }
+}
+
+/// The (name, body-open, body-close) of the nearest `fn` whose body
+/// encloses `pos` — the local scope a `let`-bound literal can flow
+/// through.
+pub(super) fn enclosing_fn_span(mask: &[u8], pos: usize) -> Option<(String, usize, usize)> {
+    let text = String::from_utf8_lossy(mask);
+    let mut search_end = pos;
+    loop {
+        let fn_at = text[..search_end].rfind("fn ")?;
+        let name_start = fn_at + 3;
+        let name_end = text[name_start..]
+            .find(|c: char| !c.is_alphanumeric() && c != '_')
+            .map(|n| name_start + n)?;
+        let paren = text[name_end..].find('(').map(|n| name_end + n)?;
+        let params_end = match_bracket(mask, paren)?;
+        let body = text[params_end..].find('{').map(|n| params_end + n)?;
+        let body_end = match_bracket(mask, body)?;
+        if pos > body && pos < body_end {
+            return Some((text[name_start..name_end].to_string(), body, body_end));
         }
         search_end = fn_at;
     }

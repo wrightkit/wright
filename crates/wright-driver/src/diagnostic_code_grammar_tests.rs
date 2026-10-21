@@ -7,8 +7,16 @@
 //!
 //! The test enumerates the vocabulary rather than sampling it:
 //!
-//! - every fixed code literal is collected from the code positions in
-//!   this crate's own source (`driver_codes`);
+//! - every string literal in every production `.rs` file of the five
+//!   scanned crates is classified literal-first (`driver_codes` +
+//!   `classify`/`brackets`/`expand`/`slot`): `Vocab` literals are the
+//!   fixed-code vocabulary and are grammar-checked, `Fragment`
+//!   literals are code pieces checked for the code charset, `Other`
+//!   and `Deferred`-resolved literals carry positive non-code
+//!   evidence, and an `Unresolved` literal fails the test with its
+//!   file, line, and text — a `code:` literal inside any syntax (a
+//!   `let`-RHS struct expression included) can never silently slip
+//!   the frontier;
 //! - `unknown-<kind>` is driven through `workshop_diag` with every
 //!   `kind` the pinned `workshop-rs` engine can report — the census
 //!   (`engine_kinds`) reads the engine's own production source and
@@ -26,11 +34,22 @@
 //! `#[non_exhaustive]` types (`SemanticIssue`, `CatalogError`) cannot
 //! be constructed here, so their mappings are exercised through the
 //! engine's public producers (`inspect`) and the fixed-literal census.
+//!
+//! Boundary, stated honestly: the literal census is fail-closed for
+//! literals only. Values produced at runtime (format-built codes,
+//! variables, fn returns) are covered by the `debug_assert!` chokes and
+//! engine-kind tests, and aliased/indirect callsites are runtime-covered
+//! only — the static census does not claim to enumerate them.
 
+mod brackets;
+mod classify;
 mod driver_codes;
+mod dynamic;
 mod engine_kinds;
+mod expand;
 mod positions;
 mod sinks;
+mod slot;
 mod source;
 
 use std::collections::BTreeSet;
@@ -82,6 +101,32 @@ fn assert_whitespace_free(code: &str, site: &str) {
     );
 }
 
+/// Prefixes whose remainder is owner- or provider-typed spelling kept
+/// verbatim by contract (`machine-contract.md`): `provider-refusal-`
+/// carries the LPP `refusalCode`, `lookup.` carries the protocol's
+/// registered refusal identity (`lookup.unknownWithin`, name-lookup.md
+/// §21). The Wright-owned prefix still obeys the grammar; the owner
+/// tail only promises whitespace-freedom.
+const OWNER_TYPED_PREFIXES: &[&str] = &["provider-refusal-", "lookup."];
+
+/// Grammar-check a censused code: wholly Wright-owned codes obey the
+/// declared grammar in full; a code under an [`OWNER_TYPED_PREFIXES`]
+/// prefix grammar-checks its prefix and whitespace-checks the owner
+/// tail — the same rule `provider_failure_codes_obey_the_contract`
+/// applies to `provider-refusal-<refusalCode>`.
+fn assert_census_code(code: &str, site: &str) {
+    if let Some((prefix, rest)) = OWNER_TYPED_PREFIXES
+        .iter()
+        .find_map(|p| code.strip_prefix(p).map(|rest| (*p, rest)))
+    {
+        assert!(!rest.is_empty(), "{site}: empty owner tail in {code:?}");
+        assert_whitespace_free(rest, site);
+        assert_wright_code(&prefix[..prefix.len() - 1], site);
+        return;
+    }
+    assert_wright_code(code, site);
+}
+
 // ===== shared fixtures =====
 
 fn origin() -> Origin {
@@ -107,22 +152,64 @@ fn resolved_input() -> ResolvedInput {
 // ===== the tests =====
 
 /// Every fixed code literal in a production code position matches the
-/// declared grammar. Non-literal positions are not classified: they are
-/// reported as dynamic positions whose produced values the
-/// `debug_assert!` code-token checks inside the universal chokes
-/// (`Diagnostic::error`, `refusal`) validate on any exercised path.
+/// declared grammar. The literal census is fail-closed: every literal
+/// in the scanned trees is classified, an unclassifiable literal fails
+/// here with its file/line/text, and non-literal positions are reported
+/// as dynamic positions whose produced values the `debug_assert!`
+/// code-token checks inside the universal chokes (`Diagnostic::error`,
+/// `refusal`) validate on any exercised path.
 #[test]
 fn fixed_codes_obey_the_declared_grammar() {
-    let (codes, dynamic) = driver_codes::driver_code_census();
+    let census = driver_codes::driver_code_census();
+    eprintln!(
+        "classified {} literals: {} vocabulary, {} fragments, {} deferred→vocab, \
+         {} deferred→other, {} other, {} unresolved",
+        census.literals_total,
+        census.vocabulary.len(),
+        census.fragments.len(),
+        census.deferred_vocab,
+        census.deferred_other,
+        census.other,
+        census.unresolved.len(),
+    );
     eprintln!(
         "enumerated {} dynamic code positions (runtime-checked):",
-        dynamic.len()
+        census.dynamic.len()
     );
-    for entry in &dynamic {
-        eprintln!("  {entry}");
+    for entry in &census.dynamic {
+        eprintln!(
+            "  {}:{} [{}] {}",
+            entry.file.display(),
+            entry.line,
+            entry.scan,
+            entry.ctx
+        );
     }
-    assert!(!codes.is_empty(), "the census found no fixed codes");
-    let unique: BTreeSet<(&PathBuf, usize, &String, &str)> = codes
+    assert!(
+        !census.dynamic.is_empty(),
+        "the dynamic-position report is empty — non-literal code positions must be listed"
+    );
+    for site in &census.unresolved {
+        eprintln!(
+            "UNRESOLVED {}:{} [{}] {:?}",
+            site.file.display(),
+            site.line,
+            site.reason,
+            site.text
+        );
+    }
+    assert!(
+        census.unresolved.is_empty(),
+        "{} literals could not be classified — extend the position rules \
+         or pin a file/line exception; see the UNRESOLVED lines above",
+        census.unresolved.len()
+    );
+    assert!(
+        !census.vocabulary.is_empty(),
+        "the census found no fixed codes"
+    );
+    let unique: BTreeSet<(&PathBuf, usize, &String, &str)> = census
+        .vocabulary
         .iter()
         .map(|site| (&site.file, site.line, &site.code, site.scan))
         .collect();
@@ -132,7 +219,23 @@ fn fixed_codes_obey_the_declared_grammar() {
         eprintln!("  {code}");
     }
     for (file, line, code, scan) in &unique {
-        assert_wright_code(code, &format!("{}:{line} [{scan}]", file.display()));
+        assert_census_code(code, &format!("{}:{line} [{scan}]", file.display()));
+    }
+    // Fragments only need the code charset and whitespace-freedom —
+    // `PROVIDER_REFUSAL_CODE_PREFIX` ends in `.`/`::` by design.
+    for site in &census.fragments {
+        assert!(
+            !site.code.chars().any(char::is_whitespace)
+                && site
+                    .code
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == ':'),
+            "{}:{} [{}]: code fragment {:?} violates the declared grammar",
+            site.file.display(),
+            site.line,
+            site.scan,
+            site.code
+        );
     }
     // Sites only reachable through specific scans prove those scans run —
     // pinned to file + code so vocabulary membership cannot satisfy them
