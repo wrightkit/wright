@@ -403,383 +403,84 @@ pub(super) fn rhs_span(masked: &[u8], eq: usize, limit: usize) -> (usize, usize)
     (start, end)
 }
 
-/// The span `(open_brace, close)` of each `match` body inside `masked`,
-/// searched from `from`. The scrutinee expression may itself contain
-/// braces (closures, struct literals), so the body brace is the first
-/// `{` at depth 0 after the `match` keyword.
-fn match_bodies(masked: &[u8], from: usize) -> Vec<(usize, usize)> {
-    let mut bodies = Vec::new();
-    let mut i = from;
-    while i + 5 <= masked.len() {
-        if &masked[i..i + 5] == b"match"
-            && (i == 0 || !(masked[i - 1].is_ascii_alphanumeric() || masked[i - 1] == b'_'))
-            && masked
-                .get(i + 5)
-                .is_none_or(|b| !(b.is_ascii_alphanumeric() || *b == b'_'))
-        {
-            let mut j = i + 5;
-            let mut depth = 0i32;
-            let mut brace = None;
-            while j < masked.len() {
-                match masked[j] {
-                    b'{' if depth == 0 => {
-                        brace = Some(j);
-                        break;
-                    }
-                    b'(' | b'[' | b'{' => depth += 1,
-                    b')' | b']' | b'}' => {
-                        depth -= 1;
-                        if depth < 0 {
-                            break;
-                        }
-                    }
-                    b';' if depth == 0 => break,
-                    _ => {}
-                }
-                j += 1;
-            }
-            if let Some(open) = brace
-                && let Some(close) = match_bracket(masked, open)
-            {
-                bodies.push((open, close));
-                // Continue inside the body so nested `match`es in the
-                // scrutinee or arm values are collected too.
-                i = open + 1;
-                continue;
-            }
-        }
-        i += 1;
-    }
-    bodies
+/// Whether `, <ws><path>::Stage::` appears in `bytes` —
+/// whitespace-tolerant and path-qualified-tolerant
+/// (`crate::diag::Stage::Frontend`). `stage_glob` additionally accepts
+/// a bare `UpperCamel` variant (`use Stage::*` + `Frontend`), but only
+/// when the file actually glob-imports `Stage` — a `(x, Severity::W)`
+/// or `(x, Some(v))` tuple is not a stage position.
+pub(super) fn stage_marker(bytes: &[u8], stage_glob: bool) -> bool {
+    (0..bytes.len()).any(|i| bytes[i] == b',' && stage_marker_at(bytes, i, stage_glob))
 }
 
-/// Whether `, <ws>Stage::` appears in `bytes` — whitespace-tolerant, so
-/// rustfmt multi-line tuples (`"…",\n    Stage::Frontend`) count too.
-pub(super) fn stage_marker(bytes: &[u8]) -> bool {
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b',' {
-            let mut j = i + 1;
-            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
-                j += 1;
-            }
-            if bytes[j..].starts_with(b"Stage::") {
-                return true;
-            }
-        }
-        i += 1;
+/// Whether the `,` at `at` is followed (after whitespace) by a
+/// `Stage::` path — qualified (`crate::diag::Stage::`) or, under
+/// `stage_glob`, a bare `UpperCamel` variant not immediately followed
+/// by `(` (`Some(`, `Ok(` are calls, not unit variants).
+pub(super) fn stage_marker_at(bytes: &[u8], at: usize, stage_glob: bool) -> bool {
+    if bytes.get(at) != Some(&b',') {
+        return false;
     }
-    false
+    let mut j = at + 1;
+    while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+        j += 1;
+    }
+    let mut end = j;
+    while end < bytes.len()
+        && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_' || bytes[end] == b':')
+    {
+        end += 1;
+    }
+    let segment = &bytes[j..end];
+    if segment.windows(7).any(|w| w == b"Stage::") {
+        return true;
+    }
+    stage_glob
+        && !segment.is_empty()
+        && segment[0].is_ascii_uppercase()
+        && !segment.contains(&b':')
+        && segment
+            .iter()
+            .all(|b| b.is_ascii_alphanumeric() || *b == b'_')
+        && bytes.get(end) != Some(&b'(')
 }
 
-/// Whether every `=>` arm of every `match` inside `masked_rhs` produces a
-/// `, Stage::` tuple — the shape the tuple-arm scan covers. A `match`-free
-/// RHS defers to passthrough; a `match` with any unmarked arm fails
-/// closed. An arm value ends at the next top-level `,`, the next arm's
-/// `=>`, or the match's `}` — a comma-free block arm can not swallow the
-/// arms after it.
-pub(super) fn match_arms_stage_ok(masked_rhs: &str) -> bool {
-    let bytes = masked_rhs.as_bytes();
-    for (open, close) in match_bodies(bytes, 0) {
-        let mut depth = 1i32;
-        let mut i = open + 1;
-        while i < close {
-            match bytes[i] {
-                b'{' | b'(' | b'[' => depth += 1,
-                b'}' | b')' | b']' => depth -= 1,
-                b'=' if depth == 1 && bytes.get(i + 1) == Some(&b'>') => {
-                    let vstart = i + 2;
-                    let mut vend = close;
-                    let mut arm_depth = 0i32;
-                    for (j, &b) in bytes.iter().enumerate().take(close).skip(vstart) {
-                        match b {
-                            b'{' | b'(' | b'[' => arm_depth += 1,
-                            b'}' | b')' | b']' => {
-                                if arm_depth == 0 {
-                                    vend = j;
-                                    break;
-                                }
-                                arm_depth -= 1;
-                            }
-                            b',' if arm_depth == 0 => {
-                                vend = j;
-                                break;
-                            }
-                            b'=' if arm_depth == 0 && bytes.get(j + 1) == Some(&b'>') => {
-                                vend = j;
-                                break;
-                            }
-                            _ => {}
-                        }
-                    }
-                    if !stage_marker(&bytes[vstart..vend]) {
-                        return false;
-                    }
-                    i = vend;
+/// The basename-qualified call whose argument list encloses `at` —
+/// `mem::replace(&mut d.code, v)` yields `mem::replace` plus the `(`
+/// position. `None` when `at` is not inside a `(` call arg list.
+pub(super) fn enclosing_call(masked: &[u8], at: usize) -> Option<(String, usize)> {
+    let mut depth = 0i32;
+    let mut j = at;
+    while j > 0 {
+        j -= 1;
+        match masked[j] {
+            b')' | b']' | b'}' => depth += 1,
+            b'(' | b'[' | b'{' => {
+                if depth > 0 {
+                    depth -= 1;
                     continue;
                 }
-                _ => {}
+                if masked[j] != b'(' {
+                    return None;
+                }
+                let mut e = j;
+                while e > 0 && masked[e - 1].is_ascii_whitespace() {
+                    e -= 1;
+                }
+                let mut s = e;
+                while s > 0
+                    && (masked[s - 1].is_ascii_alphanumeric()
+                        || masked[s - 1] == b'_'
+                        || masked[s - 1] == b':'
+                        || masked[s - 1] == b'!'
+                        || masked[s - 1] == b'.')
+                {
+                    s -= 1;
+                }
+                return Some((as_str(masked, s..e).to_string(), j));
             }
-            i += 1;
+            _ => {}
         }
     }
-    true
-}
-
-/// Whether `name` is bound by the pattern of ANY match arm containing
-/// `pos` — e.g. `Some(code) if pred(code) => (code, …)` binds `code` in
-/// the pattern, the guard, and the value; an outer arm's binding is still
-/// in scope for positions inside a nested arm that does not rebind it.
-pub(super) fn arm_pattern_binds(masked: &[u8], pos: usize, name: &str) -> bool {
-    let bytes = masked;
-    let mut i = 0;
-    while i + 1 < bytes.len() {
-        if bytes[i] == b'=' && bytes[i + 1] == b'>' {
-            // The arm's level is the bracket depth just before `=>`.
-            let mut depth = 0i32;
-            for &b in &bytes[..i] {
-                match b {
-                    b'{' | b'(' | b'[' => depth += 1,
-                    b'}' | b')' | b']' => depth -= 1,
-                    _ => {}
-                }
-            }
-            // Arm value: from after `=>` to the next `,` or `=>` at the
-            // same depth, or the `}` that closes the match — a comma-free
-            // block arm can not swallow later arms.
-            let mut vend = bytes.len();
-            let mut d = depth;
-            for (j, &b) in bytes.iter().enumerate().skip(i + 2) {
-                match b {
-                    b'{' | b'(' | b'[' => d += 1,
-                    b'}' | b')' | b']' => {
-                        if d == depth {
-                            vend = j;
-                            break;
-                        }
-                        d -= 1;
-                    }
-                    b',' if d == depth => {
-                        vend = j;
-                        break;
-                    }
-                    b'=' if d == depth && bytes.get(j + 1) == Some(&b'>') => {
-                        vend = j;
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-            // Pattern start: the `,`/`{` at `depth` before the arrow.
-            let mut pstart = 0;
-            {
-                let mut pd = depth;
-                for j in (0..i).rev() {
-                    match bytes[j] {
-                        b'}' | b')' | b']' => pd += 1,
-                        b'{' | b'(' | b'[' => {
-                            if pd == depth {
-                                pstart = j + 1;
-                                break;
-                            }
-                            pd -= 1;
-                        }
-                        b',' if pd == depth => {
-                            pstart = j + 1;
-                            break;
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            // The arm binds `name` across pattern, guard, and value.
-            if pos >= pstart && pos <= vend {
-                let pattern = as_str(masked, pstart..i);
-                let binds = pattern.match_indices(name).any(|(idx, _)| {
-                    let before = pattern[..idx].chars().last();
-                    let after = pattern[idx + name.len()..].chars().next();
-                    !before.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
-                        && !after.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
-                });
-                if binds {
-                    return true;
-                }
-            }
-            i += 2;
-            continue;
-        }
-        i += 1;
-    }
-    false
-}
-
-/// Whether `pos` sits inside a destructuring pattern — a `let`/`if let`/
-/// `while let` pattern (terminated by a top-level `=`/`;`), a `for`
-/// pattern (terminated by ` in `), or a match arm's pattern region
-/// (before its `=>`). Field scans must skip patterns: `code:`/`code`
-/// there names a binding, not a produced code.
-pub(super) fn in_pattern_position(masked: &[u8], pos: usize) -> bool {
-    let text = as_str(masked, 0..masked.len());
-    // `let …`/`if let …`/`while let …` pattern: pos before the top-level
-    // `=`/`;` that ends the nearest preceding `let` pattern.
-    if let Some(lt) = text[..pos].rfind("let ") {
-        let mut depth = 0i32;
-        let mut in_pattern = true;
-        for &b in masked.iter().take(pos).skip(lt + 4) {
-            match b {
-                b'(' | b'[' | b'{' => depth += 1,
-                b')' | b']' | b'}' => depth -= 1,
-                b'=' | b';' if depth == 0 => {
-                    in_pattern = false;
-                    break;
-                }
-                _ => {}
-            }
-        }
-        if in_pattern {
-            return true;
-        }
-    }
-    // `for …` pattern: pos before a top-level ` in `.
-    if let Some(ft) = text[..pos].rfind("for ") {
-        let mut depth = 0i32;
-        let mut in_pattern = true;
-        let mut j = ft + 4;
-        while j < pos {
-            match masked[j] {
-                b'(' | b'[' | b'{' => depth += 1,
-                b')' | b']' | b'}' => depth -= 1,
-                _ => {}
-            }
-            if depth == 0 && masked[j..].starts_with(b" in ") {
-                in_pattern = false;
-                break;
-            }
-            j += 1;
-        }
-        if in_pattern {
-            return true;
-        }
-    }
-    // Match arm pattern: inside a match body, before the arm's `=>` —
-    // scanning forward, a `=>` at body depth precedes any `,`/`}`.
-    for (open, close) in match_bodies(masked, 0) {
-        if pos <= open || pos >= close {
-            continue;
-        }
-        let mut depth = 0i32;
-        for j in pos..close {
-            match masked[j] {
-                b'{' | b'(' | b'[' => depth += 1,
-                b'}' | b')' | b']' => {
-                    if depth == 0 {
-                        break; // end of the match body — `pos` was a value
-                    }
-                    depth -= 1;
-                }
-                b',' if depth == 0 => break, // value boundary
-                b'=' if depth == 0 && masked.get(j + 1) == Some(&b'>') => return true,
-                _ => {}
-            }
-        }
-    }
-    false
-}
-
-/// Whether `name` is bound by a `|…|` closure parameter list whose body
-/// contains `pos` — e.g. `|code: &str| { …code… }` inside a fn.
-pub(super) fn closure_param_binds(masked: &[u8], pos: usize, name: &str) -> bool {
-    let mut i = 0;
-    while i < pos && i < masked.len() {
-        if masked[i] != b'|' || masked.get(i + 1) == Some(&b'|') {
-            i += 1;
-            continue;
-        }
-        // Find the closing `|` of the param list (params are idents,
-        // `mut`, types, commas — no `|` and no operators).
-        let mut j = i + 1;
-        let mut close = None;
-        while j < masked.len() && masked[j] != b'\n' {
-            match masked[j] {
-                b'|' => {
-                    close = Some(j);
-                    break;
-                }
-                b'(' | b'[' | b'{' | b')' | b']' | b'}' | b';' | b'=' | b'<' | b'>' | b'&'
-                | b'*' => {
-                    // Not a param list — or a `&`/`Type<…>` we can still
-                    // parse; `(`/`{`/`;`/`=` end it.
-                    if matches!(
-                        masked[j],
-                        b'(' | b'[' | b'{' | b')' | b']' | b'}' | b';' | b'='
-                    ) {
-                        break;
-                    }
-                }
-                _ => {}
-            }
-            j += 1;
-        }
-        let Some(close) = close else {
-            i += 1;
-            continue;
-        };
-        // The closure body: `{…}` to its match, else a single expression
-        // to the next top-level `,`/`;`/`)`/`]`/`}` at the closure's depth.
-        let mut k = close + 1;
-        while k < masked.len() && masked[k].is_ascii_whitespace() {
-            k += 1;
-        }
-        let body_end = if masked.get(k) == Some(&b'{') {
-            match_bracket(masked, k).unwrap_or(masked.len())
-        } else {
-            // Expression: it ends at a separator at the depth the closure
-            // sits at — approximate with the depth at `i`.
-            let mut depth = 0i32;
-            for &b in &masked[..i] {
-                match b {
-                    b'{' | b'(' | b'[' => depth += 1,
-                    b'}' | b')' | b']' => depth -= 1,
-                    _ => {}
-                }
-            }
-            let mut end = masked.len();
-            let mut d = depth;
-            for (n, &b) in masked.iter().enumerate().skip(close + 1) {
-                match b {
-                    b'{' | b'(' | b'[' => d += 1,
-                    b'}' | b')' | b']' => {
-                        if d == depth {
-                            end = n;
-                            break;
-                        }
-                        d -= 1;
-                    }
-                    b',' | b';' if d == depth => {
-                        end = n;
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-            end
-        };
-        if pos > close && pos < body_end {
-            let param_text = as_str(masked, i + 1..close);
-            if param_text.split(',').any(|p| {
-                p.trim()
-                    .split(':')
-                    .next()
-                    .unwrap_or("")
-                    .trim()
-                    .trim_start_matches("mut ")
-                    .trim()
-                    == name
-            }) {
-                return true;
-            }
-        }
-        i = close + 1;
-    }
-    false
+    None
 }

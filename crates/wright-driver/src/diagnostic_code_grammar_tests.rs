@@ -31,6 +31,9 @@ mod classify;
 mod driver_codes;
 mod engine_kinds;
 mod format;
+mod patterns;
+mod resolve;
+mod sinks;
 mod source;
 
 use std::collections::BTreeSet;

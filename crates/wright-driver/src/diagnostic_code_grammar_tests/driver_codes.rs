@@ -5,21 +5,31 @@
 //! A code position is anywhere a value can reach a diagnostic `code`:
 //!
 //! - first arguments of `Diagnostic::error`/`warning`/`info`;
-//! - `code:` field values and `, code` shorthand fields in struct
-//!   literals; in `wright-analyzer`, `id:` literal fields too — the
-//!   registry's rule ids are the vocabulary `.id`/`.id()` passthroughs
-//!   surface as `code`. Non-literal `id` values (`Symbol.id`, JSON-RPC
-//!   ids) are entity ids, not diagnostic codes, and stay out;
-//! - `"code"` JSON keys and `["code"]` subscript writes (the envelope's
+//! - `code:`/`*_code:` field values and `, code`/`*_code` shorthand
+//!   fields in struct literals; in `wright-analyzer`, `id:` literal
+//!   fields too — the registry's rule ids are the vocabulary
+//!   `.id`/`.id()` passthroughs surface as `code`. Non-literal `id`
+//!   values (`Symbol.id`, JSON-RPC ids) are entity ids, not diagnostic
+//!   codes, and stay out;
+//! - `"code"` JSON keys, `["code"(..)] =` subscript writes, and
+//!   `insert("code", v)`-style key-then-value calls (the envelope's
 //!   serialized face);
-//! - `.code` writes: `=`, `+=`, `push_str`/`push`/`insert`/`extend`/
-//!   `replace_range`;
-//! - `(expr, Stage::…)` tuple arms;
-//! - `=>` arms inside string-returning `fn <name>code(` bodies;
+//! - `.code`/`.provider_code`/`.refusal_code` writes: `=`, `+=`,
+//!   mutating methods (`push_str`/`push`/`insert`/`insert_str`/`extend`/
+//!   `replace_range`/`clone_from` classify their operands; `truncate`/
+//!   `clear`/case folds/`write_fmt` fail closed; reads pass; unknown
+//!   methods fail closed), plus `mem::`/`ptr::`/`write!`/`writeln!`
+//!   calls that take the field as a target;
+//! - `(expr, Stage::…)` tuple arms — whitespace-, path-, and
+//!   glob-import-tolerant;
+//! - `=>` arms, `return` values, and tail expressions inside
+//!   string-returning `fn <name>code(` bodies;
 //! - arguments at the position of any `code`-typed (`&str`/`String`/
-//!   `impl Into<String>`) parameter of an in-crate fn — this covers
-//!   `refusal(`, `self.error(`, `unknown(`, and friends, and keeps
-//!   coverage when a new `code`-param fn appears.
+//!   `impl Into<String>`/generic `T: Into<String>`) parameter of an
+//!   in-crate fn, or of a `let cb = |code: &str, …|` closure binding —
+//!   this covers `refusal(`, `self.error(`, `unknown(`, and friends,
+//!   and keeps coverage when a new `code`-param fn appears. In
+//!   wright-analyzer a string-typed `id` parameter registers too.
 //!
 //! Every position's expression is then classified: a literal enters the
 //! grammar-checked vocabulary; a bare `code` value resolves its binding
@@ -45,17 +55,16 @@ use std::path::{Path, PathBuf};
 
 use super::classify::{
     CodeSite, Sites, check_shorthand_field, classify_arm_value, classify_rhs, classify_tuple_code,
-    is_entity_id, plausibly_string, push_literal,
+    is_code_channel, is_entity_id, push_literal,
 };
+use super::format::check_write_fmt;
+use super::patterns::in_pattern_position;
+use super::resolve::{classify_code_method, plausibly_string};
+use super::sinks::{AMBIGUOUS_SINKS, code_fns, collect_code_sinks};
 use super::source::{
-    as_str, blank_cfg_test_items, call_args, crate_src, in_pattern_position, line_of, mask_rust,
-    match_bracket, read_rs_tree, rhs_span, skeleton,
+    as_str, blank_cfg_test_items, call_args, crate_src, enclosing_call, line_of, mask_rust,
+    match_bracket, read_rs_tree, rhs_span, skeleton, stage_marker_at,
 };
-
-/// `fn` names whose parameter list carries a string-typed `code`
-/// parameter, with that parameter's index (receiver excluded). Any
-/// callsite's argument at that index is a code position.
-type CodeSinks = BTreeMap<String, usize>;
 
 /// Collect every literal diagnostic code from the scanned crates, plus
 /// every code position whose value cannot be classified.
@@ -95,15 +104,15 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
 
     for (path, (original, masked)) in &masked_files {
         let text = as_str(masked, 0..masked.len()).to_string();
-        let analyzer = path.to_string_lossy().contains("wright-analyzer");
+        let stage_glob = text.contains("Stage::*");
         let mut sites = Sites {
             codes: &mut codes,
             unclassified: &mut unclassified,
             original,
             masked,
             file: path,
-            code_names: &["code"],
             code_fns: &code_fns,
+            stage_glob,
         };
 
         // Every callsite of an in-crate fn taking a string `code`
@@ -132,127 +141,127 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
                 if !plausibly_string(&skeleton(&original[span.0..span.1])) {
                     continue;
                 }
+                // A name shared with a std collection/string method
+                // (`contains`, `insert`, `get`, …) collides with
+                // non-code receivers. Its callsites only classify an
+                // argument that names a code channel — literal and
+                // arbitrary-typed args stay out (`registry.contains(id)`
+                // vs `set.contains(&"risks")`; the codes a real
+                // `contains` sees are already enumerated at their own
+                // sites).
+                if AMBIGUOUS_SINKS.contains(&name.as_str())
+                    && !is_code_channel(
+                        &sites,
+                        skeleton(&original[span.0..span.1]).trim_start_matches(['&', '*']),
+                    )
+                {
+                    continue;
+                }
                 classify_rhs(&mut sites, span.0, span.1);
             }
         }
 
-        // `code:`/`id:` field values (word boundary on the name, so
-        // `provider_code:`/`grid:` stay out). Values run to the next
-        // top-level `,`/`}`/`)`/`]`.
-        for field in sites
-            .code_names
-            .iter()
-            .map(|name| format!("{name}:"))
-            .collect::<Vec<_>>()
-        {
-            let field = field.as_str();
-            for (at, _) in text.match_indices(field) {
-                if at > 0
-                    && (text.as_bytes()[at - 1].is_ascii_alphanumeric()
-                        || text.as_bytes()[at - 1] == b'_')
-                {
-                    continue;
-                }
-                let mut depth = 0i32;
-                let mut vend = masked.len();
-                for (i, &b) in masked.iter().enumerate().skip(at + field.len()) {
-                    match b {
-                        b'(' | b'[' | b'{' => depth += 1,
-                        b')' | b']' | b'}' => {
-                            if depth == 0 {
-                                vend = i;
-                                break;
-                            }
-                            depth -= 1;
-                        }
-                        b',' if depth == 0 => {
-                            vend = i;
-                            break;
-                        }
-                        _ => {}
-                    }
-                }
-                let vstart = at
-                    + field.len()
-                    + (text[at + field.len()..].len()
-                        - text[at + field.len()..].trim_start().len());
-                while vend > vstart && (text.as_bytes()[vend - 1] as char).is_ascii_whitespace() {
-                    vend -= 1;
-                }
-                // Type positions (`code: String` declarations, `code: &str`
-                // params) and destructure patterns (`let Diagnostic {
-                // code: c }`, match arms) are not code values.
-                let value = text[vstart..vend].trim();
-                if value.is_empty() || looks_like_type(value) || in_pattern_position(masked, at) {
-                    continue;
-                }
-                classify_rhs(&mut sites, vstart, vend);
+        // `name:` field values — `code` itself or any `.._code` suffix
+        // (`provider_code:`, `refusal_code:`, `failure_code:`, …); in
+        // wright-analyzer `id:` too (entity ids still filtered below).
+        // `::` path separators and destructure patterns stay out.
+        // Values run to the next top-level `,`/`}`/`)`/`]`; `<>` counts
+        // when written tight (`Cow<'_, str>`) so a comma inside a type
+        // can not truncate the value.
+        for (at, _) in text.match_indices(':') {
+            if masked.get(at + 1) == Some(&b':') || (at > 0 && masked[at - 1] == b':') {
+                continue;
             }
-        }
-
-        // Analyzer rule-code vocabulary: `id: "lint-…"` literals in the
-        // registry are the codes `.id`/`.id()` passthroughs surface.
-        // `id` is overloaded — entity ids (`SymbolId::from_index`,
-        // `.index()`, numeric JSON-RPC ids) are not diagnostic codes and
-        // stay out; every other non-literal value must classify.
-        if analyzer {
-            for (at, _) in text.match_indices("id:") {
-                if at > 0
-                    && (text.as_bytes()[at - 1].is_ascii_alphanumeric()
-                        || text.as_bytes()[at - 1] == b'_')
-                    || in_pattern_position(masked, at)
-                {
-                    continue;
-                }
-                let mut depth = 0i32;
-                let mut vend = masked.len();
-                for (i, &b) in masked.iter().enumerate().skip(at + "id:".len()) {
-                    match b {
-                        b'(' | b'[' | b'{' => depth += 1,
-                        b')' | b']' | b'}' => {
-                            if depth == 0 {
-                                vend = i;
-                                break;
-                            }
-                            depth -= 1;
-                        }
-                        b',' if depth == 0 => {
+            let mut nstart = at;
+            while nstart > 0
+                && (masked[nstart - 1].is_ascii_alphanumeric() || masked[nstart - 1] == b'_')
+            {
+                nstart -= 1;
+            }
+            let name = &text[nstart..at];
+            if !is_code_channel(&sites, name) {
+                continue;
+            }
+            let mut depth = 0i32;
+            let mut vend = masked.len();
+            for (i, &b) in masked.iter().enumerate().skip(at + 1) {
+                match b {
+                    b'(' | b'[' | b'{' => depth += 1,
+                    b'<' if i > 0
+                        && (masked[i - 1].is_ascii_alphanumeric()
+                            || masked[i - 1] == b'>'
+                            || masked[i - 1] == b'_'
+                            || masked[i - 1] == b':') =>
+                    {
+                        depth += 1;
+                    }
+                    b'>' if depth > 0 => depth -= 1,
+                    b')' | b']' | b'}' => {
+                        if depth == 0 {
                             vend = i;
                             break;
                         }
-                        _ => {}
+                        depth -= 1;
                     }
+                    b',' if depth == 0 => {
+                        vend = i;
+                        break;
+                    }
+                    _ => {}
                 }
-                let vstart = at
-                    + "id:".len()
-                    + (text[at + "id:".len()..].len()
-                        - text[at + "id:".len()..].trim_start().len());
-                while vend > vstart && (text.as_bytes()[vend - 1] as char).is_ascii_whitespace() {
-                    vend -= 1;
-                }
+            }
+            let vstart = at + 1 + (text[at + 1..].len() - text[at + 1..].trim_start().len());
+            while vend > vstart && (text.as_bytes()[vend - 1] as char).is_ascii_whitespace() {
+                vend -= 1;
+            }
+            // Type positions (`code: String` declarations, `code: &str`
+            // params) and destructure patterns (`let Diagnostic {
+            // code: c }`, match arms) are not code values.
+            let value = text[vstart..vend].trim();
+            if value.is_empty() || looks_like_type(value) || in_pattern_position(masked, at) {
+                continue;
+            }
+            if name == "id" {
                 if push_literal(sites.codes, original, path, (vstart, vend)) {
                     continue;
                 }
                 let shape = skeleton(&original[vstart..vend]);
-                if looks_like_type(&shape) || is_entity_id(&shape) {
+                if is_entity_id(&shape) {
                     continue;
                 }
-                classify_rhs(&mut sites, vstart, vend);
             }
+            classify_rhs(&mut sites, vstart, vend);
         }
 
-        // `"code"` JSON keys and `["code"]` subscript writes — scanned on
-        // `original` (masked has `""`) but only at real literal sites
-        // (masked shows `"` + blanked content; comments are fully blank).
+        // `"code"` JSON keys, `["code"]`/`["code".to_string()]` subscript
+        // writes, and `insert("code", v)`-style key-then-value calls —
+        // scanned on `original` (masked has `""`) but only at real
+        // literal sites (masked shows `"` + blanked content; comments
+        // are fully blank).
         for (at, _) in original.match_indices("\"code\"") {
             if masked.get(at) != Some(&b'"') || masked.get(at + 1) != Some(&b' ') {
                 continue; // inside a comment or a larger literal
             }
             let mut after = at + "\"code\"".len();
-            while after < masked.len() && masked[after].is_ascii_whitespace() {
-                after += 1;
+            // `.to_string()`/`.to_owned()`/`.as_str()`/`.as_mut_str()`
+            // suffixes on the key literal do not change the key.
+            loop {
+                while after < masked.len() && masked[after].is_ascii_whitespace() {
+                    after += 1;
+                }
+                let mut stripped = false;
+                for suffix in [".to_string()", ".to_owned()", ".as_str()", ".as_mut_str()"] {
+                    if masked[after..].starts_with(suffix.as_bytes()) {
+                        after += suffix.len();
+                        stripped = true;
+                        break;
+                    }
+                }
+                if !stripped {
+                    break;
+                }
             }
-            // `["code"] =` subscript write: `]` then `=` (not `==`).
+            // `["code"(..)] =` subscript write: `]` then `=` (not `==`).
             if masked.get(after) == Some(&b']') {
                 let mut i = after + 1;
                 while i < masked.len() && masked[i].is_ascii_whitespace() {
@@ -287,12 +296,36 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
                     vend -= 1;
                 }
                 classify_rhs(&mut sites, vstart, vend);
+                continue;
+            }
+            // `insert("code", v)` / `("code", v)` — a `"code"` literal
+            // followed by `,` keys the values after it; each is a code
+            // position inside the enclosing `(…)`/`[…]`/`{…}`.
+            if masked.get(after) == Some(&b',')
+                && let Some((_, open)) = enclosing_call(masked, at)
+                && let Some(close) = match_bracket(masked, open)
+            {
+                let mut depth = 0i32;
+                let mut seg = after + 1;
+                for (i, &b) in masked.iter().enumerate().take(close).skip(after + 1) {
+                    match b {
+                        b'(' | b'[' | b'{' => depth += 1,
+                        b')' | b']' | b'}' => depth -= 1,
+                        b',' if depth == 0 => {
+                            classify_rhs(&mut sites, seg, i);
+                            seg = i + 1;
+                        }
+                        _ => {}
+                    }
+                }
+                classify_rhs(&mut sites, seg, close);
             }
         }
 
-        // `.code`/`.provider_code`/`.refusal_code` writes: `=`, `+=`, and
-        // mutating methods whose operand is a code value — the write side
-        // of the read passthrough whitelist.
+        // `.code`/`.provider_code`/`.refusal_code` writes: `=`, `+=`,
+        // mutating methods, and `mem::`/`ptr::`/`write!` calls that take
+        // the field as a target — the write side of the read passthrough
+        // whitelist.
         for field in [".code", ".provider_code", ".refusal_code"] {
             for (at, _) in text.match_indices(field) {
                 let mut i = at + field.len();
@@ -310,19 +343,43 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
                         let (vstart, vend) = rhs_span(masked, i + 1, masked.len());
                         classify_rhs(&mut sites, vstart, vend);
                     }
-                    Some(b'.') => {
-                        let after_dot = i + 1;
-                        for method in ["push_str(", "push(", "insert(", "extend(", "replace_range("]
-                        {
-                            if masked[after_dot..].starts_with(method.as_bytes()) {
-                                let open = after_dot + method.len() - 1;
-                                for arg in call_args(masked, open) {
-                                    // `insert(pos, s)`/`replace_range(range,
-                                    // s)` index operands are not strings.
-                                    if plausibly_string(&skeleton(&original[arg.0..arg.1])) {
-                                        classify_rhs(&mut sites, arg.0, arg.1);
-                                    }
+                    Some(b'.') => classify_code_method(&mut sites, i + 1),
+                    Some(b',') | Some(b')') => {
+                        // `mem::replace(&mut d.code, v)`,
+                        // `ptr::write(&mut d.code, v)`, `write!(d.code,
+                        // "…")` — a `.code` field inside a known mutating
+                        // call is a write position; every other arg is a
+                        // code position.
+                        let Some((callee, open)) = enclosing_call(masked, at) else {
+                            continue;
+                        };
+                        let args = call_args(masked, open);
+                        if callee == "write!" || callee == "writeln!" {
+                            check_write_fmt(&mut sites, &args, at);
+                            continue;
+                        }
+                        let replace_like = callee.ends_with("::replace")
+                            || callee.ends_with("::write")
+                            || callee.ends_with("::write_unaligned")
+                            || callee.ends_with("::copy")
+                            || callee.ends_with("::copy_nonoverlapping");
+                        let take_like = callee.ends_with("::take")
+                            || callee.ends_with("::swap")
+                            || callee.ends_with("::read")
+                            || callee.ends_with("::write_bytes")
+                            || callee.ends_with("::drop_in_place");
+                        if take_like {
+                            sites.unclassified.push(format!(
+                                "{}:{}: `{callee}` mutates a code outside the census",
+                                path.display(),
+                                line_of(original, at)
+                            ));
+                        } else if replace_like {
+                            for arg in args {
+                                if arg.0 <= at && at < arg.1 {
+                                    continue;
                                 }
+                                classify_rhs(&mut sites, arg.0, arg.1);
                             }
                         }
                     }
@@ -332,17 +389,12 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
         }
 
         // `(expr, Stage::…)` tuple arms: the expression before `,` + ws +
-        // `Stage::` is the code position — whitespace-tolerant so rustfmt
-        // multi-line tuples (`"…",\n    Stage::Frontend`) are covered.
+        // a `Stage::` path is the code position — whitespace-tolerant so
+        // rustfmt multi-line tuples are covered, path-tolerant so
+        // `crate::diag::Stage::Frontend` counts, and glob-tolerant so
+        // `use Stage::*` + a bare `Frontend` counts.
         for (at, _) in text.match_indices(',') {
-            let mut stage_at = at + 1;
-            while stage_at < masked.len() && masked[stage_at].is_ascii_whitespace() {
-                stage_at += 1;
-            }
-            if !masked
-                .get(stage_at..)
-                .is_some_and(|s| s.starts_with(b"Stage::"))
-            {
+            if !stage_marker_at(masked, at, stage_glob) {
                 continue;
             }
             let mut end = at;
@@ -416,7 +468,13 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
                 }
             }
             let expr = original[start..end].trim();
-            if expr.starts_with("Stage::") {
+            if expr.starts_with("Stage::")
+                || expr.contains("::Stage::")
+                || (stage_glob
+                    && !expr.is_empty()
+                    && expr.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                    && expr.chars().next().is_some_and(char::is_uppercase))
+            {
                 continue; // a `Stage::X, Stage::Y` list, not a code tuple
             }
             classify_tuple_code(&mut sites, start, end);
@@ -487,6 +545,84 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
                 }
                 classify_arm_value(&mut sites, arm_at, expr_start, expr_start + expr_end);
             }
+            // `return`/`tail` values inside a `*code` fn body are code
+            // positions too — `fn wright_refusal_code() -> String {
+            // "x".to_string() }` produces a code that never passes a
+            // `=>` arm. `match`/block/`for`-style values stay out: their
+            // arms are scanned above and they can not carry a bare tail.
+            for (r, _) in text[body..body_end].match_indices("return") {
+                let ra = body + r;
+                if ra > 0 && (masked[ra - 1].is_ascii_alphanumeric() || masked[ra - 1] == b'_') {
+                    continue;
+                }
+                let mut vs = ra + "return".len();
+                while vs < body_end && masked[vs].is_ascii_whitespace() {
+                    vs += 1;
+                }
+                if vs >= body_end || masked[vs] == b';' {
+                    continue;
+                }
+                let (rstart, rend) = rhs_span(masked, vs - 1, body_end);
+                let shape = skeleton(&original[rstart..rend]);
+                if ["match", "{", "for", "while", "loop", "unsafe"]
+                    .iter()
+                    .any(|k| shape.starts_with(k))
+                {
+                    continue;
+                }
+                classify_rhs(&mut sites, rstart, rend);
+            }
+            // The body's tail expression: text after the last top-level
+            // `;` (blocks descend until a non-block tail shows).
+            {
+                let mut depth = 0i32;
+                let mut tail_start = body + 1;
+                for (i, &b) in masked.iter().enumerate().take(body_end).skip(body + 1) {
+                    match b {
+                        b'(' | b'[' | b'{' => depth += 1,
+                        b')' | b']' | b'}' => depth -= 1,
+                        b';' if depth == 0 => tail_start = i + 1,
+                        _ => {}
+                    }
+                }
+                loop {
+                    let mut ts = tail_start;
+                    while ts < body_end && masked[ts].is_ascii_whitespace() {
+                        ts += 1;
+                    }
+                    let mut te = body_end;
+                    while te > ts && masked[te - 1].is_ascii_whitespace() {
+                        te -= 1;
+                    }
+                    if ts >= te {
+                        break;
+                    }
+                    if masked[ts] == b'{'
+                        && let Some(inner_end) = match_bracket(masked, ts)
+                    {
+                        depth = 0;
+                        tail_start = ts + 1;
+                        for (i, &b) in masked.iter().enumerate().take(inner_end).skip(ts + 1) {
+                            match b {
+                                b'(' | b'[' | b'{' => depth += 1,
+                                b')' | b']' | b'}' => depth -= 1,
+                                b';' if depth == 0 => tail_start = i + 1,
+                                _ => {}
+                            }
+                        }
+                        continue;
+                    }
+                    let shape = skeleton(&original[ts..te]);
+                    if !shape.is_empty()
+                        && !["match", "for", "while", "loop", "unsafe"]
+                            .iter()
+                            .any(|k| shape.starts_with(k))
+                    {
+                        classify_rhs(&mut sites, ts, te);
+                    }
+                    break;
+                }
+            }
         }
 
         // Shorthand `code`/`id` fields inside any struct literal in
@@ -524,10 +660,11 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
                 stmt -= 1;
             }
             let head = text[stmt..head_word_start].trim_start();
-            // A top-level `=`/`=>`/`(`/`,`/`return`/`. ` in the head puts
-            // the literal in expression position. Without one a leading
-            // `let`/`if let`/`for`/`match`/… keyword is a pattern or
-            // declaration — skip.
+            // A top-level `=`/`=>`/`(`/`,`/`return`/`break`/`|`/`[`/… in
+            // the head puts the literal in expression position. Only a
+            // leading pattern/declaration keyword keeps it out — a match
+            // scrutinee (`match D { … }`) and `return`/`break` values
+            // are expressions and stay in.
             let mut in_expr = false;
             let mut head_depth = 0i32;
             for &b in masked[stmt..head_word_start].iter() {
@@ -545,15 +682,6 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
                 .rsplit(|c: char| c.is_ascii_whitespace() || c == ':' || c == '(' || c == ',')
                 .next();
             if !in_expr
-                && !matches!(last_word, Some("return" | "=>" | "(" | "," | "."))
-                && !head.ends_with("=>")
-                && !head.ends_with('(')
-                && !head.ends_with(',')
-                && !head.is_empty()
-            {
-                continue;
-            }
-            if !in_expr
                 && matches!(
                     last_word,
                     Some(
@@ -561,7 +689,6 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
                             | "if"
                             | "for"
                             | "while"
-                            | "match"
                             | "loop"
                             | "impl"
                             | "struct"
@@ -581,7 +708,6 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
                             | "async"
                             | "pub"
                             | "do"
-                            | "return"
                     )
                 )
             {
@@ -618,106 +744,6 @@ pub(super) fn driver_code_census() -> (Vec<CodeSite>, Vec<String>) {
         }
     }
     (codes, unclassified)
-}
-
-/// Collect `fn` names whose parameter list carries a string-typed `code`
-/// parameter (`code: &str`, `code: String`, `code: impl Into<String>`),
-/// with the parameter's index (the receiver does not count). Built from
-/// the masked sources so `#[cfg(test)]` helpers never register.
-fn collect_code_sinks(files: &BTreeMap<PathBuf, (String, Vec<u8>)>) -> CodeSinks {
-    let mut sinks = BTreeMap::new();
-    for (original, masked) in files.values() {
-        let text = as_str(masked, 0..masked.len()).to_string();
-        for (at, _) in text.match_indices("fn ") {
-            let name_start = at + 3;
-            let name_end = text[name_start..]
-                .find(|c: char| !c.is_alphanumeric() && c != '_')
-                .map(|n| name_start + n);
-            let Some(name_end) = name_end else {
-                continue;
-            };
-            let name = original[name_start..name_end].to_string();
-            // Skip generics `<'a>` / `<'a, T>` before the param list.
-            let mut p = name_end;
-            while p < masked.len() && masked[p].is_ascii_whitespace() {
-                p += 1;
-            }
-            if masked.get(p) == Some(&b'<') {
-                let mut depth = 0i32;
-                let mut q = p;
-                while q < masked.len() {
-                    match masked[q] {
-                        b'<' => depth += 1,
-                        b'>' => {
-                            depth -= 1;
-                            if depth == 0 {
-                                break;
-                            }
-                        }
-                        _ => {}
-                    }
-                    q += 1;
-                }
-                p = q + 1;
-                while p < masked.len() && masked[p].is_ascii_whitespace() {
-                    p += 1;
-                }
-            }
-            if masked.get(p) != Some(&b'(') {
-                continue;
-            }
-            let params = call_args(masked, p);
-            // The receiver (`self`/`&self`/…) carries no `:` and does not
-            // consume a callsite argument — index counts only real params.
-            let mut index = 0usize;
-            for (ps, pe) in params {
-                let param = as_str(masked, ps..pe).trim();
-                let Some((pname, ptype)) = param.split_once(':') else {
-                    continue;
-                };
-                let pname = pname.trim().trim_start_matches("mut ").trim();
-                let ptype = ptype.trim();
-                let string_typed =
-                    ptype.contains("str") || ptype.contains("String") || ptype.contains("Into");
-                if pname == "code" && string_typed {
-                    sinks.entry(name.clone()).or_insert(index);
-                }
-                index += 1;
-            }
-        }
-    }
-    sinks
-}
-
-/// Names of string-returning `fn <name>code(` — the fns whose `=>` arms
-/// the census already scans. An outermost call to one in a code position
-/// produces a code through that scanned body.
-fn code_fns(files: &BTreeMap<PathBuf, (String, Vec<u8>)>) -> std::collections::BTreeSet<String> {
-    let mut fns = std::collections::BTreeSet::new();
-    for (original, masked) in files.values() {
-        let text = as_str(masked, 0..masked.len()).to_string();
-        for (at, _) in text.match_indices("fn ") {
-            let name_start = at + 3;
-            let Some(name_end) = text[name_start..]
-                .find(|c: char| !c.is_alphanumeric() && c != '_')
-                .map(|n| name_start + n)
-            else {
-                continue;
-            };
-            let name = &original[name_start..name_end];
-            if !name.ends_with("code") {
-                continue;
-            }
-            let Some(brace) = text[name_end..].find('{').map(|n| name_end + n) else {
-                continue;
-            };
-            let returns = text[name_end..brace].rsplit("->").next().unwrap_or("");
-            if returns.contains("str") || returns.contains("String") {
-                fns.insert(name.to_string());
-            }
-        }
-    }
-    fns
 }
 
 /// Whether a `code:`/`id:` "value" is actually a type annotation.

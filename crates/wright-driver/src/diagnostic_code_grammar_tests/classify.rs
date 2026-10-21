@@ -6,10 +6,9 @@
 use std::path::{Path, PathBuf};
 
 use super::format::check_format_literal;
-use super::source::{
-    arm_pattern_binds, as_str, call_args, closure_param_binds, enclosing_fn, enclosing_fn_body,
-    line_of, match_arms_stage_ok, match_bracket, rhs_span, skeleton, stage_marker,
-};
+use super::patterns::arm_pattern_binds;
+use super::resolve::resolve_code_binding;
+use super::source::{as_str, line_of, match_bracket, skeleton};
 
 /// One literal found in a code position, with its site for diagnostics.
 pub(super) struct CodeSite {
@@ -26,14 +25,53 @@ pub(super) struct Sites<'a> {
     pub(super) original: &'a str,
     pub(super) masked: &'a [u8],
     pub(super) file: &'a Path,
-    /// Field/variable names that carry diagnostic codes. Only `code`:
-    /// `id` is overloaded — analyzer rule codes live in `id:` literals
-    /// (censused separately) while `Symbol.id`/`RuleDefinition.id` and
-    /// JSON-RPC ids are entity ids, not diagnostic codes.
-    pub(super) code_names: &'a [&'a str],
     /// `fn`s returning `&str`/`String` — outermost calls to them in a code
     /// position produce codes through their scanned bodies.
     pub(super) code_fns: &'a std::collections::BTreeSet<String>,
+    /// Whether this file glob-imports `Stage` (`use …Stage::*`) so a
+    /// bare `Frontend` can serve as a `, Stage::` tuple marker.
+    pub(super) stage_glob: bool,
+}
+
+/// Whether a bare ident `shape` names a code channel: `code` itself or
+/// a `.._code`-suffixed field/binding (`provider_code`,
+/// `refusal_code`, `failure_code`, …). Preposition-prefixed names
+/// (`by_code`, `per_code`, `for_code`, …) are "indexed by code"
+/// containers, not codes. In wright-analyzer `id` is a rule-code
+/// channel too; elsewhere `id` names entity ids and stays out.
+pub(super) fn is_code_channel(sites: &Sites<'_>, shape: &str) -> bool {
+    if !shape.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return false;
+    }
+    if shape == "code" {
+        return true;
+    }
+    const PREPOSITION_CODE: &[&str] = &[
+        "by_code",
+        "per_code",
+        "for_code",
+        "of_code",
+        "in_code",
+        "on_code",
+        "to_code",
+        "as_code",
+        "at_code",
+        "vs_code",
+        "with_code",
+        "via_code",
+        "over_code",
+        "under_code",
+        "after_code",
+        "before_code",
+        "between_code",
+        "during_code",
+        "from_code",
+        "into_code",
+    ];
+    if shape.ends_with("_code") && !PREPOSITION_CODE.contains(&shape) {
+        return true;
+    }
+    shape == "id" && sites.file.to_string_lossy().contains("wright-analyzer")
 }
 
 /// A code position inside a `(expr, Stage::…)` tuple: a bare `code`/`id`
@@ -41,8 +79,7 @@ pub(super) struct Sites<'a> {
 /// is classified like any code position.
 pub(super) fn classify_tuple_code(sites: &mut Sites<'_>, start: usize, end: usize) {
     let shape = skeleton(&sites.original[start..end]);
-    if sites.code_names.contains(&shape.as_str()) && arm_pattern_binds(sites.masked, start, &shape)
-    {
+    if is_code_channel(sites, &shape) && arm_pattern_binds(sites.masked, start, &shape) {
         return;
     }
     classify_rhs(sites, start, end);
@@ -52,21 +89,17 @@ pub(super) fn classify_tuple_code(sites: &mut Sites<'_>, start: usize, end: usiz
 /// rule as tuple positions.
 pub(super) fn classify_arm_value(sites: &mut Sites<'_>, arm_at: usize, start: usize, end: usize) {
     let shape = skeleton(&sites.original[start..end]);
-    if sites.code_names.contains(&shape.as_str()) && arm_pattern_binds(sites.masked, arm_at, &shape)
-    {
+    if is_code_channel(sites, &shape) && arm_pattern_binds(sites.masked, arm_at, &shape) {
         return;
     }
     classify_rhs(sites, start, end);
 }
 
 /// One top-level field segment of a struct literal. A segment that trims
-/// to exactly a code name is a shorthand binding to resolve. In
-/// wright-analyzer `id` is also a rule-code channel (`RuleInfo { id }`);
-/// elsewhere `id` names an entity id and is not shorthand-scanned.
+/// to exactly a code name is a shorthand binding to resolve.
 pub(super) fn check_shorthand_field(sites: &mut Sites<'_>, start: usize, end: usize, at: usize) {
     let field = as_str(sites.masked, start..end).trim();
-    let analyzer_id = field == "id" && sites.file.to_string_lossy().contains("wright-analyzer");
-    if sites.code_names.contains(&field) || analyzer_id {
+    if is_code_channel(sites, field) {
         resolve_code_binding(sites, at, field);
     }
 }
@@ -81,7 +114,12 @@ pub(super) fn push_literal(
     span: (usize, usize),
 ) -> bool {
     let text = original[span.0..span.1].trim();
-    let inner = text.strip_prefix("Some(").unwrap_or(text).trim_start();
+    let inner = text
+        .trim_start_matches(['&', '*'])
+        .trim_start()
+        .strip_prefix("Some(")
+        .unwrap_or(text.trim_start_matches(['&', '*']).trim_start())
+        .trim_start();
     let Some(rest) = inner.strip_prefix('"') else {
         return false;
     };
@@ -96,49 +134,52 @@ pub(super) fn push_literal(
     true
 }
 
-/// Literals nested inside `unwrap_or("…")`/`unwrap_or_else(|| "…"…)`/
-/// `or("…")`/`or_else(|| "…")` fallbacks of a code-position expression are
-/// themselves possible codes — census them.
-fn census_fallback_literals(sites: &mut Sites<'_>, start: usize, end: usize) {
+/// Args of `unwrap_or`/`or`/`map`/`and_then`-family combinators inside a
+/// code-position expression carry codes too — fallbacks, mapped results,
+/// closure bodies. Each arg is classified (`|…|` closures resolve their
+/// body through `classify_rhs`'s `|`-peel).
+fn classify_combinator_args(sites: &mut Sites<'_>, start: usize, end: usize) {
     let expr = &sites.original[start..end];
-    for marker in ["unwrap_or(", "||", "or(", "or_else("] {
+    for marker in [
+        "unwrap_or(",
+        "unwrap_or_else(",
+        "or_else(",
+        ".or(",
+        ".map(",
+        ".map_or(",
+        ".map_or_else(",
+        ".and_then(",
+        ".then(",
+        ".then_some(",
+        ".then_some_or(",
+        ".zip(",
+        ".and(",
+        ".filter_map(",
+        ".flat_map(",
+        ".map_while(",
+        ".scan(",
+        ".find_map(",
+        ".chain(",
+    ] {
         for (off, _) in expr.match_indices(marker) {
-            let lit_at = start + off + marker.len();
-            // Peel `Some(` wrappers — `or(Some("lit"))` and
-            // `|| Some("lit")` carry the literal one level down.
-            let mut rest = expr[off + marker.len()..].trim_start();
-            while let Some(inner) = rest.strip_prefix("Some(") {
-                rest = inner.trim_start();
-            }
-            // `|| format!("…")` — the closure body is a format literal.
-            if let Some(fmt) = rest.strip_prefix("format!") {
-                let fmt_start = lit_at + (expr[off + marker.len()..].len() - rest.len());
-                if fmt.starts_with('(')
-                    && let Some(open) = sites.masked[fmt_start..]
-                        .iter()
-                        .position(|&b| b == b'(')
-                        .map(|p| fmt_start + p)
-                    && let Some(close) = match_bracket(sites.masked, open)
-                {
-                    check_format_literal(sites, fmt_start, close + 1);
+            let open = start + off + marker.len() - 1;
+            let Some(close) = match_bracket(sites.masked, open) else {
+                continue;
+            };
+            let mut depth = 0i32;
+            let mut seg = open + 1;
+            for i in open + 1..close {
+                match sites.masked[i] {
+                    b'(' | b'[' | b'{' => depth += 1,
+                    b')' | b']' | b'}' => depth -= 1,
+                    b',' if depth == 0 => {
+                        classify_rhs(sites, seg, i);
+                        seg = i + 1;
+                    }
+                    _ => {}
                 }
-                continue;
             }
-            let Some(inner) = rest.strip_prefix('"') else {
-                continue;
-            };
-            let Some(width) = inner.find('"') else {
-                continue;
-            };
-            let literal = &inner[..width];
-            if literal.is_empty() {
-                continue;
-            }
-            sites.codes.push(CodeSite {
-                file: sites.file.to_path_buf(),
-                line: line_of(sites.original, lit_at),
-                code: literal.to_string(),
-            });
+            classify_rhs(sites, seg, close);
         }
     }
 }
@@ -154,7 +195,37 @@ pub(super) fn classify_rhs(sites: &mut Sites<'_>, start: usize, end: usize) {
     if push_literal(sites.codes, sites.original, sites.file, (start, end)) {
         return;
     }
-    census_fallback_literals(sites, start, end);
+    // `a + b` concatenation in a code position: every operand is a code
+    // position of its own (`"ok".to_string() + &suffix()` classifies the
+    // tail, not just the leading literal).
+    {
+        let mut depth = 0i32;
+        let mut plus = Vec::new();
+        for i in start..end {
+            match sites.masked[i] {
+                b'(' | b'[' | b'{' => depth += 1,
+                b')' | b']' | b'}' => depth -= 1,
+                b'+' if depth == 0
+                    && sites.masked.get(i + 1) != Some(&b'=')
+                    && sites.masked.get(i + 1) != Some(&b'+')
+                    && sites.masked.get(i.wrapping_sub(1)) != Some(&b'+') =>
+                {
+                    plus.push(i);
+                }
+                _ => {}
+            }
+        }
+        if !plus.is_empty() {
+            let mut seg = start;
+            for i in plus {
+                classify_plus_operand(sites, seg, i);
+                seg = i + 1;
+            }
+            classify_plus_operand(sites, seg, end);
+            return;
+        }
+    }
+    classify_combinator_args(sites, start, end);
     let expr = &sites.original[start..end];
     // Peel wrappers — `Some(…)`, `.to_string()`/`.into()`/`.clone()`/
     // `.as_deref()`/`.as_str()`/`.unwrap_or_default()` suffixes, and
@@ -162,6 +233,19 @@ pub(super) fn classify_rhs(sites: &mut Sites<'_>, start: usize, end: usize) {
     // shape after every step so `Some(code)` and `code.to_string()` both
     // reach binding resolution instead of a shape whitelist.
     let mut normalized: String = expr.chars().filter(|c| !c.is_whitespace()).collect();
+    // Whether the most recent tail cut carried the code through its base
+    // (`unwrap_or*`/`or*`/…) — or only gated it (`then`/`and`), or was a
+    // transformer (`map`/`and_then`/…) whose arg decides: an arg that
+    // returns the element (`|d| d`, `str::to_string`) means the base
+    // carries the code, an arg that produces a field/literal
+    // (`|d| d.code`, `|| "lit"`) makes the base a container.
+    enum CutKind {
+        None,
+        Carries,
+        Gate,
+        Transformer(String),
+    }
+    let mut last_cut = CutKind::None;
     loop {
         while let Some(rest) = normalized
             .strip_prefix('&')
@@ -169,13 +253,34 @@ pub(super) fn classify_rhs(sites: &mut Sites<'_>, start: usize, end: usize) {
         {
             normalized = rest.to_string();
         }
+        // A trailing `,` is rustfmt's multi-line tail, not part of the
+        // expression (`Some(expr,)`).
+        if normalized.ends_with(',') {
+            normalized.truncate(normalized.len() - 1);
+            continue;
+        }
+        // `|…|` / `||` closure body — the produced value is inside.
+        if normalized.starts_with('|')
+            && let Some(pipe) = normalized[1..].find('|').map(|p| p + 2)
+        {
+            normalized = normalized[pipe..].to_string();
+            continue;
+        }
+        // A literal surfaced by peeling (`|| "lit".to_string()` →
+        // `"lit"`) — find it in the original span and census it.
+        if normalized.starts_with('"')
+            && let Some(rel) = sites.original[start..end].find('"')
+            && push_literal(sites.codes, sites.original, sites.file, (start + rel, end))
+        {
+            return;
+        }
         if normalized.starts_with("format!(") && normalized.ends_with(')') {
             check_format_literal(sites, start, end);
             return;
         }
         let shape = skeleton(&normalized);
-        if sites.code_names.contains(&shape.as_str()) {
-            resolve_code_binding(sites, start, &shape);
+        if is_code_channel(sites, &shape) {
+            resolve_at(sites, start, end, &shape);
             return;
         }
         if producer(&normalized, sites.code_fns) || passthrough(&shape) {
@@ -201,11 +306,121 @@ pub(super) fn classify_rhs(sites: &mut Sites<'_>, start: usize, end: usize) {
             }
         }
         if !peeled && normalized.ends_with(')') {
-            for cut in [".unwrap_or_else(", ".unwrap_or(", ".or_else(", ".or("] {
+            // Value-carrying cuts: the base flows into the result.
+            for cut in [
+                ".unwrap_or_else(",
+                ".unwrap_or(",
+                ".unwrap(",
+                ".unwrap_unchecked(",
+                ".unwrap_or_default(",
+                ".or_else(",
+                ".or(",
+                ".map_err(",
+                ".filter(",
+                ".inspect(",
+                ".flatten(",
+                ".copied(",
+                ".cloned(",
+                ".transpose(",
+                ".ok(",
+                ".err(",
+                ".expect(",
+                ".take(",
+                ".as_deref(",
+                ".as_ref(",
+                ".as_mut(",
+                ".into_iter(",
+                ".zip(",
+                // Iterator adapters and consumers: the element flows
+                // through (`x.iter().map(f).next()`'s `next`).
+                ".iter(",
+                ".iter_mut(",
+                ".next(",
+                ".nth(",
+                // `.find(` stays unlisted: `str::find` yields an index
+                // while `Iterator::find` yields the element — an
+                // ambiguous cut must fail closed.
+                ".first(",
+                ".last(",
+                ".get(",
+                ".min(",
+                ".max(",
+                ".min_by(",
+                ".max_by(",
+                ".min_by_key(",
+                ".max_by_key(",
+                ".collect(",
+                ".skip(",
+                ".skip_while(",
+                ".take_while(",
+                ".chain(",
+                ".enumerate(",
+                ".rev(",
+                ".cycle(",
+                ".step_by(",
+                ".peekable(",
+                ".split(",
+                ".splitn(",
+                ".rsplit(",
+                ".lines(",
+                ".chars(",
+                ".bytes(",
+                ".join(",
+                ".concat(",
+            ] {
                 if let Some(index) = normalized.rfind(cut) {
                     normalized.truncate(index);
+                    last_cut = CutKind::Carries;
                     peeled = true;
                     break;
+                }
+            }
+            // Gate cuts: the base is a `bool`/discriminant — the value
+            // comes only from the args (already classified above).
+            if !peeled {
+                for cut in [
+                    ".then(",
+                    ".then_some(",
+                    ".then_some_or(",
+                    ".and(",
+                    // Predicates and counts inspect the base; the
+                    // result is `bool`/`usize`/`()`, never a code.
+                    ".any(",
+                    ".all(",
+                    ".position(",
+                    ".rposition(",
+                    ".count(",
+                    ".for_each(",
+                    ".try_for_each(",
+                ] {
+                    if let Some(index) = normalized.rfind(cut) {
+                        normalized.truncate(index);
+                        last_cut = CutKind::Gate;
+                        peeled = true;
+                        break;
+                    }
+                }
+            }
+            // Transformer cuts: the arg decides whether the element
+            // flows through — keep the removed tail for the check.
+            if !peeled {
+                for cut in [
+                    ".map(",
+                    ".and_then(",
+                    ".filter_map(",
+                    ".map_or(",
+                    ".map_or_else(",
+                    ".flat_map(",
+                    ".map_while(",
+                    ".scan(",
+                    ".find_map(",
+                ] {
+                    if let Some(index) = normalized.rfind(cut) {
+                        last_cut = CutKind::Transformer(normalized[index..].to_string());
+                        normalized.truncate(index);
+                        peeled = true;
+                        break;
+                    }
                 }
             }
         }
@@ -216,9 +431,34 @@ pub(super) fn classify_rhs(sites: &mut Sites<'_>, start: usize, end: usize) {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_')
         {
-            resolve_code_binding(sites, start, &normalized);
+            match &last_cut {
+                // `bool.then(f)`/`opt.and(o)` — the base is a gate, not
+                // a code position.
+                CutKind::Gate => return,
+                // `x.map(|d| d.code)` — the code flows through the
+                // arg's field read; `x` is a container. `x.map(|d| d)`/
+                // `x.map(str::to_string)` — the element flows out, so
+                // `x` carries the code and resolves.
+                CutKind::Transformer(tail) if !transformer_passes_element(tail) => return,
+                _ => resolve_at(sites, start, end, &normalized),
+            }
             return;
         }
+    }
+    // A bare non-code ident in a code position still traces its binding
+    // (`id` stays out — it is overloaded and its channel checks live in
+    // `is_code_channel`/`resolve_code_binding`'s own filters).
+    if normalized
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && normalized
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && normalized != "id"
+    {
+        resolve_at(sites, start, end, &normalized);
+        return;
     }
     sites.unclassified.push(format!(
         "{}:{}: {}",
@@ -226,6 +466,138 @@ pub(super) fn classify_rhs(sites: &mut Sites<'_>, start: usize, end: usize) {
         line_of(sites.original, start),
         expr.trim()
     ));
+}
+
+/// Resolve `name` at its own position — after peeling, `start` still
+/// points at the whole expression (`&_x.map(|s| s.to_string())`), so a
+/// `|s|` closure parameter that follows `start` stays invisible. The
+/// last word-boundary occurrence of `name` inside the span is the use
+/// being classified.
+fn resolve_at(sites: &mut Sites<'_>, start: usize, end: usize, name: &str) {
+    let span = &sites.original[start..end.min(sites.original.len())];
+    let at = last_ident_pos(span, name)
+        .map(|p| start + p)
+        .unwrap_or(start);
+    resolve_code_binding(sites, at, name);
+}
+
+/// The last occurrence of `name` in `text` at identifier boundaries
+/// (`s.to_string` finds the `s`, not the `s` inside `to_string`).
+fn last_ident_pos(text: &str, name: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut i = text.len();
+    while let Some(off) = text[..i].rfind(name) {
+        let before_ok =
+            off == 0 || !bytes[off - 1].is_ascii_alphanumeric() && bytes[off - 1] != b'_';
+        let after_ok = bytes
+            .get(off + name.len())
+            .is_none_or(|b| !b.is_ascii_alphanumeric() && *b != b'_');
+        if before_ok && after_ok {
+            return Some(off);
+        }
+        i = off;
+    }
+    None
+}
+
+/// Whether a transformer tail (`.map(args…)`, `.map_or(d, f)`) returns
+/// its element: the LAST top-level arg — the transformer — peels to a
+/// bare ident (`|d| d`, `|s| s.to_string()`) or a fn path
+/// (`str::to_string`, `helper::make`). Anything else (`|d| d.code`,
+/// `|| "lit"`, `|_| f()`) produces the value — the base is a container.
+fn transformer_passes_element(tail: &str) -> bool {
+    let Some(open) = tail.find('(') else {
+        return false;
+    };
+    let args = &tail[open + 1..tail.len().saturating_sub(1)];
+    // Last top-level `,`-separated arg is the transformer (`map_or(d,
+    // f)`'s `f`); single-arg transformers split to themselves.
+    let mut depth = 0i32;
+    let mut seg = 0usize;
+    for (i, c) in args.char_indices() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => seg = i + 1,
+            _ => {}
+        }
+    }
+    let mut body = args[seg..].trim();
+    // `|…|` closure body — the produced value is inside.
+    if let Some(rest) = body.strip_prefix('|')
+        && let Some(pipe) = rest.find('|')
+    {
+        body = rest[pipe + 1..].trim();
+    }
+    // Transparent wrappers around the element.
+    loop {
+        let mut step = false;
+        for prefix in ["&", "*", "Some(", "Ok("] {
+            if let Some(rest) = body.strip_prefix(prefix) {
+                body = rest.strip_suffix(')').unwrap_or(rest).trim();
+                step = true;
+                break;
+            }
+        }
+        if !step {
+            for suffix in [
+                ".to_string()",
+                ".to_owned()",
+                ".clone()",
+                ".into()",
+                ".as_str()",
+                ".as_deref()",
+                ".unwrap()",
+            ] {
+                if let Some(rest) = body.strip_suffix(suffix) {
+                    body = rest.trim();
+                    step = true;
+                    break;
+                }
+            }
+        }
+        if !step {
+            break;
+        }
+    }
+    // A bare ident returns the element itself; a `path::name` is a fn
+    // reference that transforms the element — both carry the base.
+    !body.is_empty()
+        && body
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && body
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':')
+}
+
+/// One `+`-concatenated operand: a literal is a fragment — its
+/// characters must be grammar-valid but it is not a whole code and is
+/// not censused; anything else classifies normally.
+fn classify_plus_operand(sites: &mut Sites<'_>, start: usize, end: usize) {
+    let text = sites.original[start..end]
+        .trim()
+        .trim_start_matches(['&', '*'])
+        .trim_start();
+    if let Some(rest) = text.strip_prefix('"')
+        && let Some(close) = rest.find('"')
+    {
+        let literal = &rest[..close];
+        if !literal
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-')
+        {
+            sites.unclassified.push(format!(
+                "{}:{}: `+` operand literal produces a grammar-invalid code: {}",
+                sites.file.display(),
+                line_of(sites.original, start),
+                literal
+            ));
+        }
+        return;
+    }
+    classify_rhs(sites, start, end);
 }
 
 /// Verified code producers — the whole peeled expression must be the
@@ -271,6 +643,27 @@ pub(super) fn passthrough(shape: &str) -> bool {
         || shape.ends_with(".id")
         || shape.ends_with(".id()")
         || shape == "finding[\"\"]" // skeleton of `finding["code"]`
+        // `None` produces no code — it flows out of `Option` code
+        // channels the way `Some(x)`'s `x` flows in.
+        || shape == "None"
+        // `key(item).1` — a tuple-index read; the code was produced at
+        // the tuple's own site (the `(expr, Stage::)` scan).
+        || shape
+            .rsplit('.')
+            .next()
+            .is_some_and(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))
+        // `path::name` — a fn reference (`x.map(str::to_string)`) or
+        // associated value spelled at its own site. The last segment
+        // must start lowercase so `Module::SCREAMING_CONST` can not
+        // smuggle an unverified literal.
+        || (shape.contains("::")
+            && shape
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':')
+            && shape
+                .rsplit("::")
+                .next()
+                .is_some_and(|s| s.chars().next().is_some_and(|c| c.is_ascii_lowercase())))
 }
 
 /// Whether a skeleton is clearly a non-string entity id — `SymbolId`,
@@ -287,257 +680,4 @@ pub(super) fn is_entity_id(shape: &str) -> bool {
         || shape.contains("asu64")
         || shape.contains("asi64")
         || (!shape.is_empty() && shape.chars().all(|c| c.is_ascii_digit()))
-}
-
-/// Resolve what a bare `code`/`id` value (shorthand field, ctor argument,
-/// or `code:`/`id:` field) binds inside the enclosing fn. Every `let`
-/// binding and bare `name =` rebind in the fn body is classified — a
-/// shadowing inner `let` can not hide behind an outer parameter. With no
-/// binding in the body, a same-named parameter passes through a value
-/// whose producer is covered at the caller, a match-arm pattern binding
-/// defers to the `, Stage::`/arm scans, and anything else is
-/// unclassified.
-pub(super) fn resolve_code_binding(sites: &mut Sites<'_>, at: usize, name: &str) {
-    let unclassified_at = |sites: &mut Sites<'_>, why: &str| {
-        sites.unclassified.push(format!(
-            "{}:{}: `{name}` value {why}",
-            sites.file.display(),
-            line_of(sites.original, at)
-        ));
-    };
-    let Some((body, body_end)) = enclosing_fn_body(sites.masked, at) else {
-        unclassified_at(sites, "outside a fn");
-        return;
-    };
-    let text = as_str(sites.masked, 0..sites.masked.len());
-    let mut bound = false;
-    for (let_at, _) in text[body..body_end].match_indices("let ") {
-        let stmt = body + let_at + "let ".len();
-        // The `let` pattern runs to a top-level `=` or `;`.
-        let mut depth = 0i32;
-        let mut pend = stmt;
-        let mut eq = None;
-        for j in stmt..body_end {
-            match sites.masked[j] {
-                b'(' | b'[' | b'{' => depth += 1,
-                b')' | b']' | b'}' if depth > 0 => depth -= 1,
-                b'=' if depth == 0 && sites.masked.get(j + 1) != Some(&b'=') => {
-                    pend = j;
-                    eq = Some(j);
-                    break;
-                }
-                b';' if depth == 0 => {
-                    pend = j;
-                    break;
-                }
-                _ => {}
-            }
-        }
-        let pattern = text[stmt..pend].trim_end_matches(|c: char| c.is_ascii_whitespace());
-        let Some(eq) = eq else {
-            continue;
-        };
-        // Find where the pattern binds the name (word boundary). `name:`
-        // inside a `{…}` destructure is the FIELD name (`{ code: c }`
-        // binds `c`), not a binding of `name`.
-        let Some(name_at) = pattern.match_indices(name).map(|(i, _)| i).find(|&i| {
-            let before = pattern[..i].chars().last();
-            let after = pattern[i + name.len()..].chars().next();
-            !before.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
-                && !after.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
-                && !pattern[i + name.len()..].trim_start().starts_with(':')
-        }) else {
-            continue;
-        };
-        bound = true;
-        // `name` inside `{…}`/`(…)` in the pattern destructures an
-        // already-produced value — classify the RHS unless it is a match
-        // feeding the `, Stage::` arm scan, in which case every arm must
-        // carry a Stage marker.
-        let shallow = !pattern[..name_at].trim_end().contains(['{', '(']);
-        let (rstart, rend) = rhs_span(sites.masked, eq, body_end);
-        let skel = skeleton(&sites.original[rstart..rend]);
-        // `id` is overloaded in the analyzer: entity ids (`SymbolId`,
-        // indexes, numeric casts) are not diagnostic codes.
-        if name == "id" && is_entity_id(&skel) {
-            continue;
-        }
-        if shallow {
-            // A `name`-to-`name` binding traces to an earlier binding this
-            // scan already classifies. A numeric RHS is a safe segment
-            // for non-`code` names (`format!("x-{}", n)`).
-            if skel != name && !(name != "code" && skel.chars().all(|c| c.is_ascii_digit())) {
-                classify_rhs(sites, rstart, rend);
-            }
-        } else {
-            // Destructuring binds a value produced elsewhere:
-            // - a `match` RHS feeds the `, Stage::` arm scan — every arm
-            //   must carry the marker;
-            // - a tuple RHS with `, Stage::` is covered by the tuple scan;
-            // - a `Some(`/enum/tuple constructor RHS produces the value
-            //   right here — classify it so `Some("bad code")` is
-            //   censused;
-            // - a `.code`/`.id`-family field read defers to that field's
-            //   scanned write site; for `id`, a bare ident/field read
-            //   (`RuleDefinition { id } = def`) likewise defers to the
-            //   struct's `id:` site;
-            // - anything else — a call, method, or opaque ident — can not
-            //   be traced to a scanned write site: fail closed.
-            let rhs_text = &text[eq + 1..rend];
-            if rhs_text.contains("match") {
-                if !match_arms_stage_ok(rhs_text) {
-                    unclassified_at(sites, "bound by a match arm the Stage:: scan misses");
-                }
-            } else if !stage_marker(rhs_text.as_bytes()) {
-                if skel.starts_with("Some(")
-                    || skel.starts_with("Ok(")
-                    || skel.starts_with("Err(")
-                    || skel.starts_with('(')
-                    || skel.starts_with('"')
-                {
-                    classify_rhs(sites, rstart, rend);
-                } else if skel.ends_with(".code")
-                    || skel.ends_with(".id")
-                    || skel.ends_with(".provider_code")
-                    || skel.ends_with(".refusal_code")
-                    || (name == "id" && ident_or_field(&skel))
-                {
-                    // Produced at that field's own scanned write site.
-                } else {
-                    unclassified_at(
-                        sites,
-                        "is destructured from a value the census can not trace",
-                    );
-                }
-            }
-        }
-    }
-    // Whether `name` is bound as a code channel in this fn: a `let`
-    // binding (classified above), a string-typed parameter (`code: i64`
-    // in a JSON-RPC helper is not a code channel), a match-arm pattern
-    // binding, or a `|…|` closure parameter.
-    let param = enclosing_fn(sites.masked, at).and_then(|(_, params)| {
-        params
-            .iter()
-            .find(|(p, _)| p == name)
-            .map(|(_, t)| t.clone())
-    });
-    let param_is_string = param
-        .as_deref()
-        .is_some_and(|t| t.contains("str") || t.contains("String") || t.contains("Into"));
-    let bound_elsewhere =
-        arm_pattern_binds(sites.masked, at, name) || closure_param_binds(sites.masked, at, name);
-    let code_channel = bound || param_is_string || bound_elsewhere;
-
-    // Mutating a code binding produces codes: `code = …`, `code += …`,
-    // `code.push_str(…)`, `code.push(…)`, `code.insert(…)`, `code.extend(…)`,
-    // `code.replace_range(…)` — every operand is a code position. A
-    // `name` inside a `let` pattern is a binding site, not a mutation.
-    if code_channel {
-        for (name_at, _) in text[body..body_end].match_indices(name) {
-            let a = body + name_at;
-            if a > 0
-                && (sites.masked[a - 1].is_ascii_alphanumeric()
-                    || sites.masked[a - 1] == b'_'
-                    || sites.masked[a - 1] == b'.')
-            {
-                continue;
-            }
-            // Inside a `let` pattern? The pattern runs to a top-level
-            // `=`/`;`; anything before that binds rather than mutates.
-            if let Some(lt) = text[body..a].rfind("let ") {
-                let lt = body + lt;
-                let mut d = 0i32;
-                let mut in_pattern = true;
-                for j in lt + 4..a {
-                    match sites.masked[j] {
-                        b'(' | b'[' | b'{' => d += 1,
-                        b')' | b']' | b'}' => d -= 1,
-                        b'=' | b';' if d == 0 => {
-                            in_pattern = false;
-                            break;
-                        }
-                        _ => {}
-                    }
-                }
-                if in_pattern {
-                    continue;
-                }
-            }
-            let mut i = a + name.len();
-            while i < body_end && sites.masked[i].is_ascii_whitespace() {
-                i += 1;
-            }
-            match masked_get(sites.masked, i) {
-                Some(b'=')
-                    if masked_get(sites.masked, i + 1) != Some(b'=')
-                        && masked_get(sites.masked, i + 1) != Some(b'>') =>
-                {
-                    let (rstart, rend) = rhs_span(sites.masked, i, body_end);
-                    let skel = skeleton(&sites.original[rstart..rend]);
-                    if plausibly_string(&skel) && !(name == "id" && is_entity_id(&skel)) {
-                        classify_rhs(sites, rstart, rend);
-                    }
-                }
-                Some(b'+') if masked_get(sites.masked, i + 1) == Some(b'=') => {
-                    let (rstart, rend) = rhs_span(sites.masked, i + 1, body_end);
-                    let skel = skeleton(&sites.original[rstart..rend]);
-                    if plausibly_string(&skel) && !(name == "id" && is_entity_id(&skel)) {
-                        classify_rhs(sites, rstart, rend);
-                    }
-                }
-                Some(b'.') => {
-                    for method in ["push_str(", "push(", "insert(", "extend(", "replace_range("] {
-                        let j = i + 1;
-                        if sites.masked[j..].starts_with(method.as_bytes()) {
-                            let open = j + method.len() - 1;
-                            for arg in call_args(sites.masked, open) {
-                                if plausibly_string(&skeleton(&sites.original[arg.0..arg.1])) {
-                                    classify_rhs(sites, arg.0, arg.1);
-                                }
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    if bound || param.is_some() || bound_elsewhere {
-        return;
-    }
-    unclassified_at(sites, &format!("has no `{name}` binding in its fn"));
-}
-
-/// Whether a callsite argument can possibly be a `&str`/`String`/
-/// `Into<String>` value — literals, idents, paths, `format!`, method
-/// calls, `&`-references all can; `vec![…]`, `json!(…)`, `[…]`, `{…}`,
-/// and numbers cannot. Used to disambiguate same-named fns whose `code`
-/// slot is not a string channel, and to skip non-string operands of
-/// `code` mutations.
-pub(super) fn plausibly_string(shape: &str) -> bool {
-    !shape.starts_with("vec!")
-        && !shape.starts_with("json!")
-        && !shape.starts_with('\'')
-        && !shape.starts_with('[')
-        && !shape.starts_with('{')
-        && !shape
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_digit() || (c == '-' && shape.len() > 1))
-}
-
-/// Whether a skeleton is a bare ident or a field/index read (`x`,
-/// `x.y`, `self.x`, `x[..]`, `&x`) — a value produced at its own write
-/// site, not an opaque call.
-fn ident_or_field(skel: &str) -> bool {
-    !skel.contains('(')
-        && !skel.is_empty()
-        && skel.chars().all(|c| {
-            c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | ':' | '[' | ']' | '"' | '&' | '*')
-        })
-}
-
-fn masked_get(masked: &[u8], i: usize) -> Option<u8> {
-    masked.get(i).copied()
 }
