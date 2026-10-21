@@ -112,6 +112,10 @@ pub(crate) fn lookup(
 }
 
 pub(crate) fn refusal(code: &str, message: impl Into<String>) -> ToolResponse {
+    debug_assert!(
+        crate::diag::code_token_ok(code),
+        "refusal code {code:?} violates the machine contract"
+    );
     ToolResponse::Error {
         error: ToolErrorInfo {
             code: code.to_string(),

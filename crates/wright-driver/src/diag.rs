@@ -123,12 +123,26 @@ pub(crate) fn source_span(span: workshop_rs::source::Span, path: String) -> Sour
     }
 }
 
+/// The one guarantee every diagnostic code must keep, including codes
+/// that carry an owner- or provider-typed token verbatim: a nonempty,
+/// whitespace-free token. The fuller `[a-z0-9-]` segment grammar lives in
+/// `docs/cli/machine-contract.md` and is enforced on Wright-owned codes
+/// by the diagnostic-code contract test.
+pub(crate) fn code_token_ok(code: &str) -> bool {
+    !code.is_empty() && !code.chars().any(char::is_whitespace)
+}
+
 /// Convenience constructors for internal diagnostics.
 impl Diagnostic {
     /// An error diagnostic in the given stage.
     pub fn error(code: impl Into<String>, stage: Stage, message: impl Into<String>) -> Diagnostic {
+        let code = code.into();
+        debug_assert!(
+            code_token_ok(&code),
+            "diagnostic code {code:?} violates the machine contract (empty or whitespace)"
+        );
         Diagnostic {
-            code: code.into(),
+            code,
             stage,
             severity: Severity::Error,
             message: message.into(),

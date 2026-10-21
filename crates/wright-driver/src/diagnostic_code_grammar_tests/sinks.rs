@@ -208,7 +208,8 @@ pub(super) fn collect_code_sinks(files: &BTreeMap<PathBuf, (String, Vec<u8>)>) -
                 let generic_string = bare_ident
                     && ptype.chars().next().is_some_and(char::is_uppercase)
                     && bounds.split([',', '>']).any(|bound| {
-                        let bound = bound.trim_start();
+                        let bound = bound.trim_start_matches(['<', ' ', '\t']);
+                        let bound = bound.strip_prefix("where ").unwrap_or(bound);
                         (bound.starts_with(&format!("{ptype}:"))
                             || bound.starts_with(&format!("{ptype} :")))
                             && (bound.contains("Into")
@@ -296,37 +297,4 @@ pub(super) fn collect_code_sinks(files: &BTreeMap<PathBuf, (String, Vec<u8>)>) -
         }
     }
     sinks
-}
-
-/// Names of string-returning `fn <name>code(` — the fns whose `=>` arms
-/// the census already scans. An outermost call to one in a code position
-/// produces a code through that scanned body.
-pub(super) fn code_fns(
-    files: &BTreeMap<PathBuf, (String, Vec<u8>)>,
-) -> std::collections::BTreeSet<String> {
-    let mut fns = std::collections::BTreeSet::new();
-    for (original, masked) in files.values() {
-        let text = as_str(masked, 0..masked.len()).to_string();
-        for (at, _) in text.match_indices("fn ") {
-            let name_start = at + 3;
-            let Some(name_end) = text[name_start..]
-                .find(|c: char| !c.is_alphanumeric() && c != '_')
-                .map(|n| name_start + n)
-            else {
-                continue;
-            };
-            let name = &original[name_start..name_end];
-            if !name.ends_with("code") {
-                continue;
-            }
-            let Some(brace) = text[name_end..].find('{').map(|n| name_end + n) else {
-                continue;
-            };
-            let returns = text[name_end..brace].rsplit("->").next().unwrap_or("");
-            if returns.contains("str") || returns.contains("String") {
-                fns.insert(name.to_string());
-            }
-        }
-    }
-    fns
 }
