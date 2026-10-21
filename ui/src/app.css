@@ -1,7 +1,7 @@
-/* `wright ui` page shell (#879): the design spec's backdrop, tokens, title,
-   and toolbar (docs/ui/design.md § Tokens, § Main screen items 1–2). Rule
-   bars, the rule body, and dialog contents keep their interim styles;
-   #880–#882 restyle them. */
+/* `wright ui` page shell (#879) and rule bars (#880): the design spec's
+   backdrop, tokens, title, toolbar, and expanding rule bars (docs/ui/
+   design.md § Tokens, § Main screen items 1–3). The rule body and dialog
+   contents keep their interim styles; #881–#882 restyle them. */
 
 :root {
   color-scheme: light;
@@ -164,44 +164,84 @@ select {
   color: var(--dim);
 }
 
-/* The rule list and the rule body keep their read-only content; #880/#881
-   restyle them. The list is a plain column — the page scrolls as a whole. */
+/* Rule bars (§ Main screen item 3): one full-width bar per rule, a white
+   square chevron button outside the bar on its left. The list is a plain
+   column — the page scrolls as a whole; there is no per-list scroll box. */
 .rule-list {
   display: flex;
   flex-direction: column;
+  gap: 0.45rem;
   padding: 0.75rem 0;
 }
 
-.rule-item {
+.rule-slot {
   display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
-  width: 100%;
+  flex-direction: column;
+}
+
+.rule-bar {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+/* The chevron points right when closed and rotates down when open. */
+.chev {
+  display: inline-flex;
+}
+
+.chev svg {
+  transition: transform 0.15s ease;
+}
+
+.chev.open svg {
+  transform: rotate(90deg);
+}
+
+.bar {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   border: 0;
-  background: none;
+  border-radius: 3px;
+  background: var(--bar);
   color: var(--text);
   text-align: left;
-  padding: 0.45rem 0.75rem;
+  padding: 0.55rem 0.85rem;
   cursor: pointer;
-  border-radius: 3px;
 }
 
-.rule-item:hover {
-  background: var(--bar);
+.bar:hover {
+  background: var(--bar-hover);
 }
 
-.rule-item.selected {
-  background: var(--bar);
-  box-shadow: inset 3px 0 0 var(--gold);
-}
-
-.rule-item.disabled .rule-name {
+/* A disabled rule's name is dimmed and struck through — no badge. */
+.bar.disabled .bar-name {
   color: var(--dim);
   text-decoration: line-through;
 }
 
-.view {
-  padding: 0.5rem 0 2rem;
+.bar-side {
+  margin-left: auto;
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.bar-event {
+  color: var(--muted);
+}
+
+.bar-count {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* The open rule body is indented under its bar (§ Main screen item 4). */
+.rule-body {
+  margin-left: calc(40px + 0.5rem);
 }
 
 .rule-title {
