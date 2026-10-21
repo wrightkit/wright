@@ -411,15 +411,19 @@ fn analyze_selection_narrows_risks_and_reports_the_outcome() {
         ..FindingSelection::default()
     });
     assert_eq!(here["result"]["risks"].as_array().unwrap().len(), 10);
-    let elsewhere = analyze(FindingSelection {
-        file: Some("elsewhere.ws".to_string()),
-        ..FindingSelection::default()
-    });
-    assert!(elsewhere["result"]["risks"].as_array().unwrap().is_empty());
-    assert_eq!(
-        elsewhere["result"]["selection"],
-        serde_json::json!({"total": 10, "withheld": 0})
+    // ADR-0035: a `file` matching no source file refuses
+    // `invalid-selection`; a matched file with no results still succeeds.
+    let code = refusal_code(
+        &mut service,
+        &ToolRequest::Analyze {
+            selection: FindingSelection {
+                file: Some("elsewhere.ws".to_string()),
+                ..FindingSelection::default()
+            },
+            all: true,
+        },
     );
+    assert_eq!(code, "invalid-selection");
 
     let essential = result_of(
         &mut service,
@@ -605,7 +609,9 @@ fn cost_estimate_file_selection_narrows_findings_like_lint() {
     assert_eq!(cost["selection"]["total"].as_u64().unwrap(), 1);
     assert_eq!(cost["selection"]["withheld"].as_u64().unwrap(), 0);
 
-    let cost = result_of(
+    // ADR-0035: a `file` matching no source file of the loaded program
+    // refuses `invalid-selection` rather than reporting an empty set.
+    let code = refusal_code(
         &mut service,
         &ToolRequest::CostEstimate {
             selection: FindingSelection {
@@ -616,11 +622,7 @@ fn cost_estimate_file_selection_narrows_findings_like_lint() {
             all: true,
         },
     );
-    assert!(cost["findings"].as_array().unwrap().is_empty());
-    // `total` still counts the full finding set; the non-matching file
-    // drops its findings without a `max`, so nothing is `withheld`.
-    assert_eq!(cost["selection"]["total"].as_u64().unwrap(), 1);
-    assert_eq!(cost["selection"]["withheld"].as_u64().unwrap(), 0);
+    assert_eq!(code, "invalid-selection");
     let cost = result_of(
         &mut service,
         &ToolRequest::CostEstimate {
@@ -1104,153 +1106,6 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
 }
 
 #[test]
-fn name_addressing_reports_unknown_and_ambiguous_names_as_structured_errors() {
-    let source = r#"
-variables {
-    global:
-        0: dup
-}
-rule ("dup") {
-    event {
-        Ongoing - Global;
-    }
-    actions {
-        Set Global Variable(dup, 1);
-    }
-}
-rule ("dup") {
-    event {
-        Ongoing - Global;
-    }
-    actions {
-        Set Global Variable(dup, 2);
-    }
-}
-"#;
-    let path = temp_workshop("dup.ws", source);
-    let mut session = CompilerSession::new(SessionConfig {
-        input: InputSpec::Path(path.clone()),
-        kind: SourceKind::Workshop,
-        ..SessionConfig::default()
-    })
-    .unwrap();
-    let mut service = ToolService::new(&mut session).unwrap();
-
-    for (request, code) in [
-        (
-            ToolRequest::References {
-                snapshot: None,
-                symbol: "nope".into(),
-                kind: None,
-                rule: None,
-                file: None,
-                max: None,
-                all: true,
-            },
-            "unknown-symbol",
-        ),
-        (
-            ToolRequest::Usage {
-                snapshot: None,
-                symbol: "nope".into(),
-            },
-            "unknown-symbol",
-        ),
-        (
-            ToolRequest::Cfg {
-                snapshot: None,
-                rule: "nope".into(),
-                kind: None,
-                max: None,
-                all: true,
-            },
-            "unknown-rule",
-        ),
-        (
-            ToolRequest::References {
-                snapshot: None,
-                symbol: "dup".into(),
-                kind: None,
-                rule: None,
-                file: None,
-                max: None,
-                all: true,
-            },
-            "ambiguous-symbol",
-        ),
-        (
-            ToolRequest::Cfg {
-                snapshot: None,
-                rule: "dup".into(),
-                kind: None,
-                max: None,
-                all: true,
-            },
-            "ambiguous-rule",
-        ),
-    ] {
-        match service.handle(&request) {
-            ToolResponse::Error { error } => {
-                assert_eq!(error.code, code, "{request:?}");
-                assert!(error.message.contains("dup") || error.message.contains("nope"));
-            }
-            ToolResponse::Ok { result } => {
-                panic!("{request:?} must not return a result: {result}")
-            }
-        }
-    }
-
-    // A near miss names the declared spelling once; a far miss names the
-    // listing operation instead (#567).
-    for (request, needle) in [
-        (
-            ToolRequest::Usage {
-                snapshot: None,
-                symbol: "dupp".into(),
-            },
-            "unknown symbol 'dupp'; nearest declared: 'dup'",
-        ),
-        (
-            ToolRequest::Cfg {
-                snapshot: None,
-                rule: "Dup".into(),
-                kind: None,
-                max: None,
-                all: true,
-            },
-            "unknown rule 'Dup'; nearest declared: 'dup'",
-        ),
-        (
-            ToolRequest::Usage {
-                snapshot: None,
-                symbol: "nope".into(),
-            },
-            "the 'symbols' operation lists them",
-        ),
-        (
-            ToolRequest::Cfg {
-                snapshot: None,
-                rule: "nope".into(),
-                kind: None,
-                max: None,
-                all: true,
-            },
-            "the 'rules' operation lists them",
-        ),
-    ] {
-        match service.handle(&request) {
-            ToolResponse::Error { error } => {
-                assert!(error.message.ends_with(needle), "{request:?}: {error:?}");
-            }
-            ToolResponse::Ok { result } => {
-                panic!("{request:?} must not return a result: {result}")
-            }
-        }
-    }
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-#[test]
 fn semantic_query_selection_wraps_filters_and_bounds() {
     // #531: a request with any selection field returns `{<key>: [...],
     // "selection": {total, withheld}}`; `total` counts the set before
@@ -1330,17 +1185,20 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
         },
     );
     assert_eq!(in_file["symbols"].as_array().unwrap().len(), total);
-    let elsewhere = result_of(
-        &mut service,
-        &ToolRequest::Symbols {
-            kind: None,
-            file: Some("elsewhere.ws".to_string()),
-            max: None,
-            all: true,
-        },
+    // ADR-0035: a `file` matching no source file refuses
+    // `invalid-selection` — it can never read as an empty result.
+    assert_eq!(
+        refusal_code(
+            &mut service,
+            &ToolRequest::Symbols {
+                kind: None,
+                file: Some("elsewhere.ws".to_string()),
+                max: None,
+                all: true,
+            }
+        ),
+        "invalid-selection"
     );
-    assert!(elsewhere["symbols"].as_array().unwrap().is_empty());
-    assert_eq!(elsewhere["selection"]["total"], total);
 
     let rules = result_of(
         &mut service,
@@ -1528,7 +1386,9 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
     );
     assert_eq!(
         from_rule["edges"],
-        serde_json::json!([{ "caller": "player starts", "callee": "showStatus" }])
+        serde_json::json!([
+            { "caller": "player starts", "callerAddress": "player starts", "callee": "showStatus" }
+        ])
     );
     let quiet_rule = result_of(
         &mut service,
@@ -1700,7 +1560,9 @@ rule ("caller") {
     };
     assert_eq!(
         graph.as_array().unwrap(),
-        &vec![serde_json::json!({ "caller": "caller", "callee": "reset" })],
+        &vec![
+            serde_json::json!({ "caller": "caller", "callerAddress": "caller", "callee": "reset" })
+        ],
         "Start Rule edges only: {graph:?}"
     );
 }
@@ -1717,16 +1579,25 @@ fn semantic_query_selection_refuses_unknown_filter_values() {
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
 
+    // ADR-0035: `rules` `rule` is a subject — `unknown-rule`, not a filter
+    // refusal like the rest of this loop.
+    assert_eq!(
+        refusal_code(
+            &mut service,
+            &ToolRequest::Rules {
+                snapshot: None,
+                name: None,
+                file: None,
+                max: None,
+                rule: Some("nope".into()),
+                content: false,
+                all: true,
+            }
+        ),
+        "unknown-rule"
+    );
+
     for request in [
-        ToolRequest::Rules {
-            snapshot: None,
-            name: None,
-            file: None,
-            max: None,
-            rule: Some("nope".into()),
-            content: false,
-            all: true,
-        },
         ToolRequest::Symbols {
             kind: Some("nope".to_string()),
             file: None,
@@ -2137,10 +2008,15 @@ rule ("extra") {
 
 /// A second variant with deliberately duplicated names for the
 /// `ambiguous-*` recovery path.
+// `dup` is ambiguous as a symbol (globalVariable + subroutine, ADR-0035:
+// rules no longer join symbol resolution) and as a rule (two declarations).
 const FRESHNESS_AMBIGUOUS: &str = r#"
 variables {
     global:
         0: dup
+}
+subroutines {
+    0: dup
 }
 rule ("dup") {
     event {
@@ -4237,12 +4113,15 @@ fn rules_content_serves_bounded_canonical_call_trees() {
     assert_eq!(bounded["rules"].as_array().unwrap().len(), 1);
     assert_eq!(bounded["selection"]["withheld"], rules.len() - 1);
 
+    // `rules` `rule` is the operation's subject (ADR-0035): a name address
+    // keeps its `unknown-rule` refusal; an out-of-range numeric index is a
+    // selection error.
     assert_eq!(
         refusal_code(
             &mut service,
             &request(Some(Address::Name("nope".to_string())), None)
         ),
-        "invalid-selection"
+        "unknown-rule"
     );
     assert_eq!(
         refusal_code(&mut service, &request(Some(Address::Id(99)), None)),

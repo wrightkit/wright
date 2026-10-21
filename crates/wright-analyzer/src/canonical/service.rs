@@ -186,7 +186,9 @@ impl<'a> SemanticService<'a> {
                     JsonValue::Array(
                         references
                             .into_iter()
-                            .map(|reference| reference_json(self.program.as_ref(), reference))
+                            .map(|reference| {
+                                reference_json(&self.index, self.program.as_ref(), reference)
+                            })
                             .collect(),
                     )
                 })
@@ -194,16 +196,23 @@ impl<'a> SemanticService<'a> {
         })
     }
 
-    /// Resolve a symbol by its exact declared name (#429); see
+    /// Resolve a symbol address — `NAME` or `KIND:NAME` (ADR-0035); see
     /// [`SemanticIndex::resolve_symbol`].
     pub fn resolve_symbol(&self, name: &str) -> Result<&Symbol, ErrorInfo> {
         self.index.resolve_symbol(name)
     }
 
-    /// Resolve a rule by its exact declared name to its rule index (#429);
-    /// see [`SemanticIndex::resolve_rule`].
+    /// Resolve a rule address — `NAME` or `NAME#N` (ADR-0035); see
+    /// [`SemanticIndex::resolve_rule`].
     pub fn resolve_rule(&self, name: &str) -> Result<RuleId, ErrorInfo> {
         self.index.resolve_rule(name)
+    }
+
+    /// The rule's canonical name address (ADR-0035) — the form Wright
+    /// prints beside `name` and the form callers pass back; see
+    /// [`SemanticIndex::canonical_rule_address`].
+    pub fn canonical_rule_address(&self, rule: RuleId) -> String {
+        self.index.canonical_rule_address(rule)
     }
 
     pub fn handle_json(&self, request_json: &str) -> String {
@@ -229,7 +238,7 @@ impl<'a> SemanticService<'a> {
         match request {
             Request::Version => Response::Ok { result: json!({"name": "wright-tool", "version": env!("CARGO_PKG_VERSION"), "capabilities": ["program", "rules", "symbols", "references", "usage", "cfg", "findings", "persistentObjects", "lintRules"]}) },
             Request::Program => Response::Ok { result: json!({"origin": self.origin, "globalVariables": self.program.global_variables.len(), "playerVariables": self.program.player_variables.len(), "subroutines": self.program.subroutines.len(), "rules": self.program.rules.len(), "findings": self.findings.len()}) },
-            Request::ListRules => Response::Ok { result: json!(self.program.rules.iter().enumerate().map(|(id, rule)| json!({"id": id, "name": rule.name, "event": event_name(&rule.event), "span": span_json(self.program.rule_span(id))})).collect::<Vec<_>>()) },
+            Request::ListRules => Response::Ok { result: json!(self.program.rules.iter().enumerate().map(|(id, rule)| json!({"id": id, "name": rule.name, "address": self.index.canonical_rule_address(id), "event": event_name(&rule.event), "span": span_json(self.program.rule_span(id))})).collect::<Vec<_>>()) },
             Request::GetRule { rule } => self.rule(*rule as usize),
             Request::GetRuleContent { rule } => self.rule_content(*rule as usize),
             Request::ListSymbols { kind } => Response::Ok { result: JsonValue::Array(self.symbols_json().iter().filter(|symbol| kind.as_deref().is_none_or(|kind| symbol["kind"].as_str() == Some(kind))).cloned().collect()) },
@@ -237,10 +246,10 @@ impl<'a> SemanticService<'a> {
             Request::FindReferences { symbol } => { let id = SymbolId::from_index(*symbol as usize); if self.index.symbol(id).is_none() { self.error("invalid-id", format!("unknown symbol {symbol}")) } else { Response::Ok { result: self.references_json()[id.index()].clone() } } }
             Request::GetUsage { symbol } => { let id = SymbolId::from_index(*symbol as usize); self.index.symbol(id).map_or_else(|| self.error("invalid-id", format!("unknown symbol {symbol}")), |data| { let usage = self.index.usage(id); Response::Ok { result: json!({"id": id.index(), "kind": data.kind.as_str(), "symbol": data.name, "reads": usage.reads, "writes": usage.writes, "calls": usage.calls, "rules": usage.rules}) } }) }
             Request::GetCfg { rule } => cfg_response(self.program.as_ref(), *rule as usize),
-            Request::GetFindings => Response::Ok { result: self.findings_json.get_or_init(|| json!(self.findings.iter().map(finding_json).collect::<Vec<_>>())).clone() },
+            Request::GetFindings => Response::Ok { result: self.findings_json.get_or_init(|| json!(self.findings.iter().map(|finding| finding_json(&self.index, finding)).collect::<Vec<_>>())).clone() },
             Request::GetPersistentObjects => Response::Ok { result: json!(persistent_objects(self.program.as_ref())) },
             Request::LintRules => Response::Ok {
-                result: self.lint_rules_json.get_or_init(|| lint_rules(&self.registry, &self.config, &self.skipped)).clone(),
+                result: self.lint_rules_json.get_or_init(|| lint_rules(&self.index, &self.registry, &self.config, &self.skipped)).clone(),
             }
         }
     }
@@ -249,7 +258,7 @@ impl<'a> SemanticService<'a> {
             return self.error("invalid-id", format!("unknown rule {id}"));
         };
         Response::Ok {
-            result: json!({"id": id, "name": rule.name, "span": span_json(self.program.rule_span(id)), "disabled": rule.disabled, "event": event_name(&rule.event), "conditions": rule.conditions.len(), "actions": rule.actions.len()}),
+            result: json!({"id": id, "name": rule.name, "address": self.index.canonical_rule_address(id), "span": span_json(self.program.rule_span(id)), "disabled": rule.disabled, "event": event_name(&rule.event), "conditions": rule.conditions.len(), "actions": rule.actions.len()}),
         }
     }
     /// The owner's rule-content document with Wright's statement spans added
@@ -308,6 +317,7 @@ fn request_label(request: &Request) -> &'static str {
     }
 }
 fn lint_rules(
+    index: &SemanticIndex,
     registry: &crate::registry::LintRegistry,
     config: &LintConfig,
     skipped: &[SkippedRule],
@@ -346,6 +356,15 @@ fn lint_rules(
             )
         })
         .collect::<serde_json::Map<_, _>>();
+    let skipped = skipped
+        .iter()
+        .map(|skip| {
+            let mut value = serde_json::to_value(skip).expect("skipped rule serializes");
+            value["ruleAddress"] =
+                serde_json::Value::String(index.canonical_rule_address(skip.rule));
+            value
+        })
+        .collect::<Vec<_>>();
     json!({
         "rules": rules,
         "config": {"rules": config_rules},
@@ -360,22 +379,25 @@ fn symbol_json(symbol: &Symbol) -> JsonValue {
     tests::BUILDS.with(|count| count.set(count.get() + 1));
     json!({"id": symbol.id.index(), "kind": symbol.kind.as_str(), "name": symbol.name, "span": span_json(symbol.span)})
 }
-fn finding_json(finding: &Finding) -> JsonValue {
+fn finding_json(index: &SemanticIndex, finding: &Finding) -> JsonValue {
     #[cfg(test)]
     tests::BUILDS.with(|count| count.set(count.get() + 1));
-    json!({"code": finding.code, "severity": finding.severity.as_str(), "message": finding.message, "span": span_json(finding.span), "rule": finding.rule, "action": finding.action, "value": finding.value, "evidence": finding.evidence.as_str(), "boundedness": finding.boundedness.map(Boundedness::as_str), "repeated": finding.repeated})
+    // `rule` is the positional coordinate; `ruleAddress` is the owning
+    // rule's canonical name address (ADR-0035) — the reusable identity.
+    json!({"code": finding.code, "severity": finding.severity.as_str(), "message": finding.message, "span": span_json(finding.span), "rule": finding.rule, "ruleAddress": index.canonical_rule_address(finding.rule), "action": finding.action, "value": finding.value, "evidence": finding.evidence.as_str(), "boundedness": finding.boundedness.map(Boundedness::as_str), "repeated": finding.repeated})
 }
-fn reference_json(program: &Program, reference: &Reference) -> JsonValue {
+fn reference_json(index: &SemanticIndex, program: &Program, reference: &Reference) -> JsonValue {
     #[cfg(test)]
     tests::BUILDS.with(|count| count.set(count.get() + 1));
     // #792: a consumer joining on `rule` (the numeric id) needs the owning
     // rule's identity to render a location — the same `{id, name, span}`
-    // shape `Request::ListRules` reports, `null` when the reference has no
-    // owning rule.
+    // shape `Request::ListRules` reports plus its canonical `address`
+    // (ADR-0035), `null` when the reference has no owning rule.
     let owning_rule = reference.rule.map_or(JsonValue::Null, |id| {
         json!({
             "id": id,
             "name": program.rules.get(id).map(|rule| rule.name.as_str()),
+            "address": index.canonical_rule_address(id),
             "span": span_json(program.rule_span(id)),
         })
     });

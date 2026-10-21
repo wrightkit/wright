@@ -20,7 +20,10 @@ use wright_driver::result::{
 
 use crate::cli::{ColorArg, CommonArgs, OutputFormatArg, RendererArg};
 
+pub(crate) mod addresses;
 pub(crate) mod terminal;
+
+pub(crate) use addresses::{edge_caller, rule_address, rule_name, tree_rule};
 
 use crate::plain;
 
@@ -1053,7 +1056,7 @@ impl ResultPresentation for RulesResult {
         }
         for rule in rules {
             let marks = ctx.presentation.section_marks();
-            let name = rule["name"].as_str().unwrap_or("<unnamed>");
+            let name = rule_name(rule);
             let event = rule["event"].as_str().unwrap_or("?");
             match rule.get("span").and_then(inline_location) {
                 Some(location) => println!("{}{name} [{event}] --> {location}", marks.head),
@@ -1161,7 +1164,12 @@ impl ResultPresentation for RefsResult {
             return;
         }
         for reference in references.iter() {
-            let context = match (reference["rule"].as_u64(), reference["action"].as_u64()) {
+            // ADR-0035: the owning rule prints as its canonical `address`;
+            // the numeric `rule` id is the fallback.
+            let owner = rule_address(&reference["owningRule"])
+                .map(String::from)
+                .or_else(|| reference["rule"].as_u64().map(|rule| rule.to_string()));
+            let context = match (owner, reference["action"].as_u64()) {
                 (Some(rule), Some(action)) => format!(" (rule {rule}, action {action})"),
                 (Some(rule), None) => format!(" (rule {rule})"),
                 _ => String::new(),
@@ -1308,16 +1316,13 @@ impl ResultPresentation for CallGraphResult {
             println!("  none");
             return;
         }
-        let mut fan_in: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
-        let mut fan_out: std::collections::BTreeMap<&str, usize> =
-            std::collections::BTreeMap::new();
+        let mut fan_in = std::collections::BTreeMap::<&str, usize>::new();
+        let mut fan_out = std::collections::BTreeMap::<&str, usize>::new();
         for edge in edges {
             *fan_in
                 .entry(edge["callee"].as_str().unwrap_or("<unnamed>"))
                 .or_default() += 1;
-            *fan_out
-                .entry(edge["caller"].as_str().unwrap_or("<unnamed>"))
-                .or_default() += 1;
+            *fan_out.entry(edge_caller(edge)).or_default() += 1;
         }
         println!(
             "  {} edge(s): {} calling rule(s), {} subroutine(s) called",
@@ -1343,7 +1348,7 @@ impl ResultPresentation for CallGraphResult {
         for edge in edges.iter() {
             println!(
                 "    {} -> {}",
-                edge["caller"].as_str().unwrap_or("<unnamed>"),
+                edge_caller(edge),
                 edge["callee"].as_str().unwrap_or("<unnamed>")
             );
         }
@@ -1933,18 +1938,6 @@ pub(crate) fn count(value: &serde_json::Value, key: &str) -> usize {
         .unwrap_or(0) as usize
 }
 
-/// The `analyze` human report (#445): a bounded, layered view that leads
-/// with Workshop cost, then structural complexity, stability/performance
-/// risk indicators, and cross-cutting state. Every line marks whether it is
-/// an exact count, a static fact, or a heuristic, and locations use real
-/// resolved paths — unmapped structures stay explicitly unmapped.
-pub(crate) fn rule_name(rule: &serde_json::Value) -> &str {
-    match rule["name"].as_str() {
-        Some("") | None => "<unnamed>",
-        Some(name) => name,
-    }
-}
-
 /// The inline location for a report entry: a real authored path when the
 /// fact carries one, a verbatim `<…>` marker for provider artifacts, or an
 /// explicit unmapped note when there is no location at all.
@@ -2120,10 +2113,9 @@ fn render_essential(result: &EssentialResult, ctx: &RenderContext<'_>) {
         );
         println!("\nRules");
         for rule in value["rules"].as_array().into_iter().flatten() {
-            if rule["name"].as_str().is_none_or(str::is_empty) {
-                println!("  rule {}", rule["id"]);
-            } else {
-                println!("  {}", rule_name(rule));
+            match rule_address(rule) {
+                Some(name) => println!("  {name}"),
+                None => println!("  rule {}", rule["id"]),
             }
         }
     } else {
@@ -2256,10 +2248,7 @@ fn render_essential_analyze(value: &serde_json::Value, ctx: &RenderContext<'_>) 
     for tree in value["conditionTrees"].as_array().into_iter().flatten() {
         println!(
             "    \"{}\" condition {}: {} element(s){}",
-            match tree["rule"].as_str() {
-                Some("") | None => "<unnamed>",
-                Some(name) => name,
-            },
+            tree_rule(tree),
             count(tree, "index") + 1,
             count(tree, "elements"),
             location_suffix(tree.get("span"))

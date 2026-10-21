@@ -14,9 +14,12 @@ spellings, literals, indentation, comments, section creation); Wright owns
 addressing, freshness, the assembled transaction, and its validation.
 
 * `edits[]` is a list of statement edits, each `{rule, list, index,
-  change, ...}`. `rule` is the rule index or declared name — a numeric
-  index must carry the request's `snapshot` generation like every other
-  numeric address (#595). `list` is `conditions` or `actions`. `index` is
+  change, ...}`. `rule` is the rule index or rule address — `NAME` or
+  `NAME#N` selecting the Nth declaration of that name (ADR-0035); an
+  unknown address is `unknown-rule` and a duplicated bare name
+  `ambiguous-rule` — a numeric index must carry the request's `snapshot`
+  generation like every other numeric address (#595), while a name
+  ignores it. `list` is `conditions` or `actions`. `index` is
   the flat position `rules` reports: for `insert` the position the new
   statements go before (`index == list length` appends); for `replace`
   and `delete` the statement to change. `insert` carries `statements` (a

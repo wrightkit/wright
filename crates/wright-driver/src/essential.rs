@@ -162,7 +162,7 @@ pub fn lint(result: &Value, all: bool) -> Value {
 }
 
 pub fn inspect(result: &Value, all: bool) -> Value {
-    let mut output = json!({"program":result["program"],"counts":{"rules":list(result,"rules").len(),"symbols":list(result,"symbols").len(),"references":list(result,"references").iter().map(|v|v.as_array().map_or(0,Vec::len)).sum::<usize>()},"rules":list(result,"rules").iter().map(|v|fields(v,&["id","name"])).collect::<Vec<_>>(),"expand":"inspect symbols, refs, cfg, callgraph, cost; --all / all: true for all rule names","next":crate::result::next::INSPECT});
+    let mut output = json!({"program":result["program"],"counts":{"rules":list(result,"rules").len(),"symbols":list(result,"symbols").len(),"references":list(result,"references").iter().map(|v|v.as_array().map_or(0,Vec::len)).sum::<usize>()},"rules":list(result,"rules").iter().map(|v|fields(v,&["id","name","address"])).collect::<Vec<_>>(),"expand":"inspect symbols, refs, cfg, callgraph, cost; --all / all: true for all rule names","next":crate::result::next::INSPECT});
     cap(&mut output, "rules", DEFAULT_ITEMS, all);
     output
 }
@@ -174,7 +174,10 @@ pub fn analyze(result: &Value, all: bool) -> Value {
     let mut hotspots = rules
         .iter()
         .map(|rule| {
-            let mut item = fields(rule, &["id", "name", "elements", "controlFlow", "span"]);
+            let mut item = fields(
+                rule,
+                &["id", "name", "address", "elements", "controlFlow", "span"],
+            );
             item["risks"] = json!(
                 risks
                     .iter()
@@ -209,6 +212,7 @@ pub fn analyze(result: &Value, all: bool) -> Value {
                 .map(move |condition| {
                     let mut item = fields(condition, &["index", "elements", "span"]);
                     item["rule"] = rule["name"].clone();
+                    item["ruleAddress"] = rule["address"].clone();
                     item
                 })
         })

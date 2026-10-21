@@ -363,11 +363,17 @@ fn mcp_transport_preserves_refusal_codes() {
         let dir = std::env::temp_dir().join(format!("wright-mcp-dup-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("dup.ws");
+        // ADR-0035: a bare `symbol` never matches rules, so the ambiguity
+        // is the global variable against the subroutine — both non-rule
+        // kinds named `dup`.
         std::fs::write(
             &path,
             r#"variables {
     global:
         0: dup
+}
+subroutines {
+    0: dup
 }
 rule ("dup") {
     event {

@@ -24,9 +24,9 @@ use wright_driver::result::{
 use wright_driver::{Diagnostic, SelectionOutcome, Status};
 
 use crate::present::{
-    RenderContext, ResultPresentation, count, display_location_path, finding_severity_rank,
-    inline_location, is_real_source_path, query_items, render_node, rule_name, severity_rank,
-    summary_status,
+    RenderContext, ResultPresentation, count, display_location_path, edge_caller,
+    finding_severity_rank, inline_location, is_real_source_path, query_items, render_node,
+    rule_address, rule_name, severity_rank, summary_status, tree_rule,
 };
 /// One buffered output line tagged with its stream, so diagnostics ride
 /// stderr while the report body stays on stdout.
@@ -1013,13 +1013,7 @@ fn essential_inspect(result: &EssentialResult, out: &mut Vec<Line>) {
         out.push(program);
     }
     for rule in result.result["rules"].as_array().into_iter().flatten() {
-        let mut items = vec![field(
-            "name",
-            rule["name"]
-                .as_str()
-                .filter(|name| !name.is_empty())
-                .unwrap_or("<unnamed>"),
-        )];
+        let mut items = vec![field("name", rule_name(rule))];
         if let Some(id) = rule["id"].as_u64() {
             items.push(format!("id={id}"));
         }
@@ -1118,13 +1112,7 @@ fn essential_analyze(result: &EssentialResult, out: &mut Vec<Line>) {
     }
     for tree in value["conditionTrees"].as_array().into_iter().flatten() {
         let mut items = vec![
-            field(
-                "rule",
-                match tree["rule"].as_str() {
-                    Some("") | None => "<unnamed>",
-                    Some(name) => name,
-                },
-            ),
+            field("rule", tree_rule(tree)),
             format!("index={}", count(tree, "index") + 1),
             format!("elements={}", count(tree, "elements")),
         ];
@@ -1302,11 +1290,11 @@ impl PlainReport for RefsResult {
             if let Some(at) = reference.get("span").and_then(at_field) {
                 items.push(at);
             }
-            // `owningRule` (#792) names the rule the reference belongs to —
-            // the identity `inspect cfg <RULE>` consumes; the numeric `rule`
-            // id is the fallback when the driver reports no owning rule.
-            if let Some(name) = reference["owningRule"]["name"].as_str() {
-                items.push(field("rule", name));
+            // `owningRule` (#792) identifies the reference's rule —
+            // ADR-0035 prints its canonical `address`; `name` and the
+            // numeric `rule` id are the fallbacks.
+            if let Some(address) = rule_address(&reference["owningRule"]) {
+                items.push(field("rule", address));
             } else if let Some(rule) = reference["rule"].as_u64() {
                 items.push(format!("rule={rule}"));
             }
@@ -1415,16 +1403,13 @@ impl PlainReport for CallGraphResult {
         out: &mut Vec<Line>,
     ) {
         let edges = query_items(&self.0, "edges");
-        let mut fan_in: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
-        let mut fan_out: std::collections::BTreeMap<&str, usize> =
-            std::collections::BTreeMap::new();
+        let mut fan_in = std::collections::BTreeMap::<&str, usize>::new();
+        let mut fan_out = std::collections::BTreeMap::<&str, usize>::new();
         for edge in edges {
             *fan_in
                 .entry(edge["callee"].as_str().unwrap_or("<unnamed>"))
                 .or_default() += 1;
-            *fan_out
-                .entry(edge["caller"].as_str().unwrap_or("<unnamed>"))
-                .or_default() += 1;
+            *fan_out.entry(edge_caller(edge)).or_default() += 1;
         }
         out.push((
             Stream::Out,
@@ -1452,7 +1437,7 @@ impl PlainReport for CallGraphResult {
                 Stream::Out,
                 format!(
                     "edge: {} {}",
-                    field("caller", edge["caller"].as_str().unwrap_or("<unnamed>")),
+                    field("caller", edge_caller(edge)),
                     field("callee", edge["callee"].as_str().unwrap_or("<unnamed>"))
                 ),
             ));

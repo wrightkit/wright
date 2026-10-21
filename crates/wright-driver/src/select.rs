@@ -14,8 +14,10 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use wright_analyzer::registry::LintRegistry;
 
+use crate::config::{InputSpec, SessionConfig};
 use crate::diag::{Diagnostic, Severity};
 use crate::input::ResolvedInput;
+use crate::session::Loaded;
 
 /// A finding/diagnostic selection: `severity`/`rule`/`file` filter the set,
 /// `max` truncates what remains.
@@ -117,6 +119,37 @@ impl FindingSelection {
             },
             file_bases,
         )
+    }
+
+    /// ADR-0035: a `file` selector names a source file of the loaded
+    /// program or the run fails `invalid-selection` — a selector can never
+    /// silently empty a result. Call after `apply_diagnostics` so the
+    /// unmatched filter cannot drop its own refusal; a refusal raises
+    /// `exit` to `SOURCE_ERROR`. `source_files` is `None` when nothing
+    /// loaded (the input error already reports the failure).
+    pub fn finish_diagnostics(
+        &self,
+        mut diagnostics: Vec<Diagnostic>,
+        exit: u8,
+        source_files: Option<&[String]>,
+        file_bases: &[PathBuf],
+    ) -> (Vec<Diagnostic>, u8) {
+        match self
+            .file
+            .as_deref()
+            .zip(source_files)
+            .and_then(|(file, files)| file_error(file, files, file_bases))
+        {
+            Some(message) => {
+                diagnostics.push(Diagnostic::error(
+                    "invalid-selection",
+                    crate::diag::Stage::Discovery,
+                    message,
+                ));
+                (diagnostics, exit.max(crate::result::exit::SOURCE_ERROR))
+            }
+            None => (diagnostics, exit),
+        }
     }
 
     /// Apply the selection to serialized findings (`code`, `severity`,
@@ -233,6 +266,96 @@ pub(crate) fn select_list<T>(
             max_severity: None,
         },
     )
+}
+
+/// How many source-file spellings an unmatched-`file` error lists
+/// (ADR-0035): the program's own files, bounded, with the total.
+const FILE_LIST_LIMIT: usize = 10;
+
+/// The session finish-path diagnostic pipeline: apply the configured
+/// selection to the accumulated diagnostics, then (ADR-0035) refuse
+/// `invalid-selection` when `file` names no source file of the loaded
+/// program — joining after the filter so it cannot drop its own refusal.
+/// Returns the diagnostics, the selection outcome, and the exit code.
+pub(crate) fn envelope_diagnostics(
+    config: &SessionConfig,
+    loaded: Option<&Loaded>,
+    diagnostics: Vec<Diagnostic>,
+) -> (Vec<Diagnostic>, Option<SelectionOutcome>, u8) {
+    let bases = finish_bases(config, loaded);
+    let exit = crate::result::exit_code_from(&diagnostics);
+    let (diagnostics, outcome) = config.selection.apply_diagnostics(diagnostics, &bases);
+    let (diagnostics, exit) = config.selection.finish_diagnostics(
+        diagnostics,
+        exit,
+        loaded.map(|loaded| loaded.source_files.as_slice()),
+        &bases,
+    );
+    (diagnostics, outcome, exit)
+}
+
+/// The bases under which `file` and reported `span.path` spellings resolve
+/// on the finish path (#430): the loaded input's cwd and root, or the
+/// config-derived equivalents so pre-load diagnostics select the same way.
+/// Extra bases are safe — they only ever add true file identities.
+fn finish_bases(config: &SessionConfig, loaded: Option<&Loaded>) -> Vec<PathBuf> {
+    if let Some(loaded) = loaded {
+        return file_bases(&loaded.input);
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let absolute = |path: &Path| {
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            cwd.join(path)
+        }
+    };
+    let mut bases = vec![cwd.clone()];
+    if let Some(root) = &config.root {
+        bases.push(absolute(root));
+    }
+    if let InputSpec::Path(path) = &config.input {
+        let path = absolute(path);
+        bases.push(path.clone());
+        if let Some(parent) = path.parent() {
+            bases.push(parent.to_path_buf());
+        }
+    }
+    bases
+}
+
+/// A `file` selector must name a source file of the loaded program
+/// (ADR-0035): it is matched against the program's own source spellings
+/// under the same bases `span.path` matching uses, so the value as passed,
+/// root-relative, or absolute all select the same file — no suffix
+/// matching. `Some` carries the `invalid-selection` message listing the
+/// program's source files (bounded, with the total); a `file` that matches
+/// a program file but selects nothing stays a valid empty result.
+pub(crate) fn file_error(
+    file: &str,
+    source_files: &[String],
+    file_bases: &[PathBuf],
+) -> Option<String> {
+    let matcher = FileMatch::new(file, file_bases);
+    if source_files
+        .iter()
+        .any(|source| matcher.matches(Some(source.as_str())))
+    {
+        return None;
+    }
+    let total = source_files.len();
+    let mut listed: Vec<String> = source_files
+        .iter()
+        .take(FILE_LIST_LIMIT)
+        .map(|source| format!("'{source}'"))
+        .collect();
+    if total > FILE_LIST_LIMIT {
+        listed.push("…".to_string());
+    }
+    Some(format!(
+        "unknown file '{file}'; the loaded program's source files ({total} total): {}",
+        listed.join(", ")
+    ))
 }
 
 /// The `file` dimension matched by file identity rather than one string
