@@ -2,7 +2,7 @@
 
 - Status: Proposed
 - Date: 2026-10-22
-- Related: [Issue #888](https://github.com/wrightkit/wright/issues/888), [Issue #889](https://github.com/wrightkit/wright/issues/889), [Issue #891](https://github.com/wrightkit/wright/issues/891), [ADR-0016](0016-current-directory-and-directory-project-targets.md), [ADR-0022](0022-shared-surface-for-semantic-queries.md), [ADR-0034](0034-snapshot-scoped-numeric-addresses.md), [Agent contract](../agent-contract.md)
+- Related: [Issue #888](https://github.com/wrightkit/wright/issues/888), [Issue #889](https://github.com/wrightkit/wright/issues/889), [Issue #891](https://github.com/wrightkit/wright/issues/891), [Issue #892](https://github.com/wrightkit/wright/issues/892), [ADR-0016](0016-current-directory-and-directory-project-targets.md), [ADR-0022](0022-shared-surface-for-semantic-queries.md), [ADR-0034](0034-snapshot-scoped-numeric-addresses.md), [Agent contract](../agent-contract.md)
 
 ## Context
 
@@ -44,6 +44,10 @@ Grammar rules that stay in force:
 - The CLI addresses rules and symbols by declared name. Numeric addresses belong to `wright serve` and carry a `snapshot` (ADR-0034).
 - Rules may share a name, so a name alone can be ambiguous. A rule selector accepts `NAME#N`, where `N` is the 1-based occurrence among rules with that declared name, in declaration order. An exact declared-name match always wins, so a rule literally named `a#2` stays addressable. `NAME#N` is stable across invocations and needs no `snapshot`. An `ambiguous-rule` error lists the `NAME#N` form and the location of each candidate, and `inspect rules` shows the form for duplicated names. Without this, a duplicated rule name has no selector at all: the current ambiguity error names rule indexes that no CLI option accepts.
 - A removed spelling is a usage error. No alias is kept.
+
+- `inspect refs <NAME>` resolves declared non-rule symbols only (variables, subroutines). A rule that shares a name with a variable does not make `refs <NAME>` ambiguous. Rules are addressed by `--rule`, `cfg <RULE>`, and `NAME#N`. When two non-rule symbols share a name, the error lists a `KIND:NAME` form for each candidate (for example `globalVariable:score`).
+- A rule name in text output uses the `NAME#N` form when the name is duplicated, so a printed rule can be passed back as a selector.
+- A selector narrows or fails; it is never ignored or silently empty. A `--file` value that matches no source file of the project is an `invalid-selection` error that lists the project's source files (bounded). Path resolution stays as is: as passed, root-relative, or absolute, with no suffix matching. A selector that a command cannot apply, such as `--file` on whole-program `inspect cost`, is a usage error, as `--rule` combined with `--file` already is.
 
 Error text is part of the vocabulary. A usage error or `invalid-selection` error names a runnable form of the command, and an unknown-name error names how to list the declared names. The driver returns one structured hint. The CLI renders it as a command (`wright inspect rules`). `wright serve` keeps the operation name (`rules`). This is specified by Issue #888.
 
