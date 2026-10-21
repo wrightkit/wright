@@ -472,10 +472,9 @@ impl CompilerSession {
 
     /// `rules` (ADR-0024): the `rules` operation's payload; `content` adds
     /// each selected rule's canonical content, `rule` selects one rule by
-    /// name, and `name`/`file`/`max` bound the reported set.
+    /// name, and `file`/`max` bound the reported set.
     pub fn rules(
         &mut self,
-        name: Option<String>,
         rule: Option<String>,
         file: Option<String>,
         max: Option<usize>,
@@ -483,7 +482,7 @@ impl CompilerSession {
     ) -> Envelope<RulesResult> {
         self.service_query("rules", move |service| {
             tool_result(service.handle_full(&ToolRequest::Rules {
-                name,
+                name: None,
                 rule: rule.map(Address::Name),
                 snapshot: None,
                 file,

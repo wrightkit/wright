@@ -1368,10 +1368,10 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
         &mut service,
         &ToolRequest::Rules {
             snapshot: None,
-            name: Some("player starts".to_string()),
+            name: None,
             file: None,
             max: None,
-            rule: None,
+            rule: Some("player starts".into()),
             content: false,
             all: true,
         },
@@ -1720,10 +1720,10 @@ fn semantic_query_selection_refuses_unknown_filter_values() {
     for request in [
         ToolRequest::Rules {
             snapshot: None,
-            name: Some("nope".to_string()),
+            name: None,
             file: None,
             max: None,
-            rule: None,
+            rule: Some("nope".into()),
             content: false,
             all: true,
         },

@@ -1,5 +1,5 @@
 //! Effective lint registry composition for a session: the built-in rules
-//! plus `packages:` pins (issue #843), `--rule` paths, then policy
+//! plus `packages:` pins (issue #843), `--rule-file` paths, then policy
 //! validation. Unknown effective-policy IDs are usage errors (#640).
 
 use wright_analyzer::registry::LintRegistry;
@@ -9,7 +9,7 @@ use crate::diag::{Diagnostic, Stage};
 
 /// Build the session's lint registry. `packages:` pins activate first —
 /// fetching pinned SHAs the store lacks — so package rule IDs exist before
-/// `--rule` paths and before selection/`rules:` validation.
+/// `--rule-file` paths and before selection/`rules:` validation.
 pub(super) fn compose(config: &SessionConfig) -> Result<LintRegistry, Diagnostic> {
     let mut registry = LintRegistry::default();
     crate::lint_package::activate_pinned(&config.lint, &config.lint_package, &mut registry)?;

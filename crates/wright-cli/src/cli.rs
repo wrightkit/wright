@@ -74,7 +74,7 @@ WORKFLOW OPTIONS:
 
 LINT OPTIONS:
     --lint-config <PATH>       Read project lint configuration YAML
-    --rule <PATH>              Load a local YAML rule file or directory (repeatable)
+    --rule-file <PATH>         Load a local YAML rule file or directory (repeatable)
     --disable-rule <ID>         Disable a lint rule (repeatable)
     --rule-severity <ID>:<SEV>  Override a lint rule severity (repeatable)
 
@@ -312,9 +312,11 @@ pub(crate) struct LookupArgs {
     /// The language vocabulary to query.
     #[arg(long, value_enum, value_name = "LANG", default_value_t = LookupLanguageArg::Workshop)]
     pub(crate) language: LookupLanguageArg,
-    /// Restrict entries to one kind.
-    #[arg(long, value_enum, value_name = "KIND")]
-    pub(crate) kind: Option<LookupKindArg>,
+    /// Restrict entries to one kind. `--only` is the category filter
+    /// spelling (ADR-0035); `--kind` already selects the input frontend on
+    /// workflow commands.
+    #[arg(long = "only", value_enum, value_name = "KIND")]
+    pub(crate) only: Option<LookupKindArg>,
     /// List the members, parameters, or settings children of this identity:
     /// an enum domain, a callable, or a settings path prefix.
     #[arg(long, value_name = "IDENTITY")]
@@ -442,9 +444,6 @@ pub(crate) struct RulesArgs {
     /// Report only the rule with this declared name.
     #[arg(long, value_name = "RULE")]
     pub(crate) rule: Option<String>,
-    /// Report only rules with this declared name.
-    #[arg(long = "only", value_name = "NAME")]
-    pub(crate) name: Option<String>,
     /// Report only rules located in this source file; any spelling that
     /// resolves to the same file selects it.
     #[arg(long, value_name = "PATH")]

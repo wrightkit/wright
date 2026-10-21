@@ -38,15 +38,15 @@ result.
 | `wright lint [INPUT] [--all] [--fix [--write]]` | Parse, lower, lint; report findings | finding counts by severity and actionable findings; `--all` lifts list caps; `--fix` previews each offered fix's validated diff, `--write` applies them |
 | `wright lint package <search\|install\|list\|outdated\|update\|remove>` | Discover, install, and manage GitHub lint rule packages in the Wright-owned store keyed by commit SHA (#844); takes no `INPUT` and never activates a package | per-package rows: source, status, SHA, entry directory, rule ids, and error detail ([lint configuration and findings](lint.md#lint-rule-packages-wright-lint-package-844)) |
 | `wright inspect [INPUT] [--all]` | Parse, lower, and inspect the program overview | overview, rule names, and the detail commands; `--all` lifts the rule-list cap |
-| `wright inspect rules [INPUT] [--content] [--rule RULE] [--only NAME] [--file PATH] [--max N]` | List rules; `--content` adds each selected rule's conditions and actions as canonical call trees (ADR-0024) | the rule list, with content when requested |
+| `wright inspect rules [INPUT] [--content] [--rule RULE] [--file PATH] [--max N]` | List rules; `--content` adds each selected rule's conditions and actions as canonical call trees (ADR-0024) | the rule list, with content when requested |
 | `wright inspect symbols [INPUT] [--only KIND] [--file PATH] [--max N]` | List semantic symbols, optionally narrowed to one kind | the symbol list with resolved locations |
 | `wright inspect refs <NAME> [INPUT] [--only KIND] [--rule RULE] [--file PATH] [--max N]` | References and usage counts for one symbol, addressed by name | usage-count header plus the reference list |
 | `wright inspect cfg <RULE> [INPUT] [--only KIND] [--max N]` | Control-flow graph of one rule, addressed by name | block/edge listing |
 | `wright inspect callgraph [INPUT] [--caller RULE] [--callee SUBROUTINE] [--max N]` | Subroutine call graph (caller rules to callee subroutines) | call edges |
 | `wright inspect cost [INPUT] [--rule RULE] [--no-cache] [--baseline NAME] [--save-baseline NAME] [--max-total N]` | Exact generated-resource counts plus static findings; `--rule` drills into one rule's element cost, and by default the run compares against the previous run's element cost | resource counts and findings plus the change against the previous run or named baseline, or the rule's statements and node-name shares |
 | `wright lookup [QUERY]` | Resolve a Workshop or OverPy display name, near spelling, or guess to the owner-accepted spelling and signature (#529); takes no input | one line per entry: signature or spelling, kind, identity |
-| `wright serve [INPUT] [--transport T] [--kind K] [--profile P] [--lint-config YAML] [--rule PATH] [--disable-rule ID] [--rule-severity ID:SEV]` | Serve `wright-agent/v1` over stdio, JSON-RPC 2.0, or MCP | one structured response per request |
-| `wright ui [INPUT] [--kind K] [--locale L] [--profile P] [--lint-config YAML] [--rule PATH] [--disable-rule ID] [--rule-severity ID:SEV] [--no-open]` | Serve the local read-only Workshop project view on loopback and open it in the default browser (ADR-0032); `--no-open` prints the URL only | the session URL on stdout |
+| `wright serve [INPUT] [--transport T] [--kind K] [--profile P] [--lint-config YAML] [--rule-file PATH] [--disable-rule ID] [--rule-severity ID:SEV]` | Serve `wright-agent/v1` over stdio, JSON-RPC 2.0, or MCP | one structured response per request |
+| `wright ui [INPUT] [--kind K] [--locale L] [--profile P] [--lint-config YAML] [--rule-file PATH] [--disable-rule ID] [--rule-severity ID:SEV] [--no-open]` | Serve the local read-only Workshop project view on loopback and open it in the default browser (ADR-0032); `--no-open` prints the URL only | the session URL on stdout |
 | `wright completion <SHELL>` | Generate static completion script for bash, zsh, fish, or powershell | the generated completion script |
 | `wright completion install [SHELL]` | Install generated completion into standard user-local directory | installation progress and guidance |
 | `wright update [self\|provider [NAME]]` | Update Wright-managed components: a standalone installation and installed first-party providers | update progress (text only) |
@@ -264,7 +264,7 @@ Resolution never guesses.
   spelled `--only` because `--kind` already selects the input frontend.
   The result reports the selected list and its selection total on every surface.
 * The query subcommands accept the same selection fields the agent
-  operations take (#531): `inspect rules` adds `--rule`, `--only` (a declared rule name), `--file`, `--max`, and `--content` (without `--max`, `--content` returns at most 20 rules unless `--all` is set), `inspect symbols` adds `--file`/`--max`,
+  operations take (#531): `inspect rules` adds `--rule`, `--file`, `--max`, and `--content` (without `--max`, `--content` returns at most 20 rules unless `--all` is set), `inspect symbols` adds `--only`/`--file`/`--max`,
   `inspect refs` adds `--only` (a reference kind), `--rule`, `--file`, and
   `--max`, `inspect cfg` adds `--only` (a block kind) and `--max`, and
   `inspect callgraph` adds `--caller`, `--callee`, and `--max`. With any
@@ -348,7 +348,7 @@ prints a one-line hint after each `unknown-*` diagnostic pointing here
   answers through the configured `opy-rs` provider's LPP lookup
   capability, and reports an explicit `unavailable` payload with exit 3
   when the provider does not negotiate it. Wright never guesses locally.
-* `--kind` narrows the entry kinds: `action`, `value`, `event`,
+* `--only` narrows the entry kinds: `action`, `value`, `event`,
   `enum-member`, `enum`, `setting`, `parameter`, `setting-path`,
   `member-action`, `member-value`, `structural`, `operator`. This is the
   union of the kinds both owners emit (#563). A kind one language never

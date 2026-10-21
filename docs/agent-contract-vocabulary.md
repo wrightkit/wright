@@ -48,7 +48,7 @@ The operation reads vocabulary alone, so it works over a session whose
 project cannot load.
 
 `wright lookup [QUERY]` exposes the same request on the CLI
-(`--language`, `--kind`, `--within`, `--locale`, `--limit`): text mode
+(`--language`, `--only`, `--within`, `--locale`, `--limit`): text mode
 prints one signature or spelling per line, and `-f json` prints this
 result payload. Text `check`/`compile` output points at the command after
 an `unknown-*` diagnostic; structured payloads are unchanged.

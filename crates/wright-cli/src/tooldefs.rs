@@ -52,7 +52,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         request_def: "RulesRequest",
         drop_fields: &[],
         mcp: true,
-        description: "The canonical Workshop rules in the loaded program, optionally narrowed by `name`, `rule`, `file`, or `max`; `content` adds each rule's conditions and actions as canonical call trees. A numeric `rule` requires the `snapshot` generation that issued it.",
+        description: "The canonical Workshop rules in the loaded program, optionally narrowed by `rule`, `file`, or `max`; `content` adds each rule's conditions and actions as canonical call trees. A numeric `rule` requires the `snapshot` generation that issued it.",
         result: "the program's rules and issuing snapshot, `selection` joined when a selector or `content` was sent",
     },
     ToolSpec {

@@ -329,6 +329,11 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
         json!({"op":"usage","symbol":1}),
         json!({"op":"cfg","rule":0}),
         json!({"op":"rules","rule":0}),
+        // ADR-0035: `name` is removed from `rules` — the schema no longer
+        // accepts it, and the service refuses a request carrying it
+        // `malformed-request` (the deserialization sentinel lets the
+        // refusal come from the service on every transport).
+        json!({"op":"rules","name":"intro"}),
     ] {
         assert!(
             !request_schema.is_valid(&request),

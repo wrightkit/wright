@@ -83,7 +83,7 @@ fn assert_default_surface_parity_on_input(
     let mut target = None;
     if operation == "cfg" || operation == "references" {
         let values = if operation == "cfg" {
-            session.rules(None, None, None, None, false).result.0
+            session.rules(None, None, None, false).result.0
         } else {
             session.symbols(None, None, None).result.0
         };

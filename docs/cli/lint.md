@@ -26,7 +26,7 @@ diagnostic and no lint findings. Packages live in a Wright-owned store
 The following lint-policy flags configure the registry and are repeatable:
 
 * `--lint-config <PATH>`: read project lint configuration YAML.
-* `--rule <PATH>`: load a local YAML rule file or directory.
+* `--rule-file <PATH>`: load a local YAML rule file or directory.
 * `--disable-rule <ID>`: disable a rule by stable ID (`min-wait-loop`,
   `duplicate-condition`, `expensive-loop-check`, `repeated-value`,
   `ongoing-condition-hot-path`, `while-without-wait`,
@@ -272,7 +272,7 @@ spans in generated text and carry no `fix`.
 packages hosted on GitHub. One repository carrying the `wrightkit-lint`
 topic is one package: the `rules/*.yaml|yml` files directly inside its
 `rules/` directory at one commit, each loading through the same SPEC-309
-declarative rule contract as a `--rule` file. Nested rule files, package
+declarative rule contract as a `--rule-file` file. Nested rule files, package
 code, and anything else in the archive are never extracted or executed.
 
 The Wright-owned store keeps one immutable directory per

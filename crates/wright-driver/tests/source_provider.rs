@@ -1937,7 +1937,7 @@ fn provider_backend_inspect_and_queries_run_the_compile_load() {
 
     let symbols = session.symbols(None, None, None);
     assert!(symbols.ok, "provider symbols: {:?}", symbols.diagnostics);
-    let rules = session.rules(None, None, None, None, true);
+    let rules = session.rules(None, None, None, true);
     assert!(
         rules.ok,
         "provider rules --content: {:?}",
