@@ -2,7 +2,7 @@
 
 - Status: Proposed
 - Date: 2026-10-22
-- Related: [Issue #888](https://github.com/wrightkit/wright/issues/888), [Issue #889](https://github.com/wrightkit/wright/issues/889), [ADR-0016](0016-current-directory-and-directory-project-targets.md), [ADR-0022](0022-shared-surface-for-semantic-queries.md), [ADR-0034](0034-snapshot-scoped-numeric-addresses.md), [Agent contract](../agent-contract.md)
+- Related: [Issue #888](https://github.com/wrightkit/wright/issues/888), [Issue #889](https://github.com/wrightkit/wright/issues/889), [Issue #891](https://github.com/wrightkit/wright/issues/891), [ADR-0016](0016-current-directory-and-directory-project-targets.md), [ADR-0022](0022-shared-surface-for-semantic-queries.md), [ADR-0034](0034-snapshot-scoped-numeric-addresses.md), [Agent contract](../agent-contract.md)
 
 ## Context
 
@@ -41,7 +41,8 @@ Consequences for current spellings:
 Grammar rules that stay in force:
 
 - A required subject is a positional argument (`refs <NAME>`, `cfg <RULE>`). Optional narrowing is a flag. `INPUT` is the last optional positional argument and defaults to the current directory (ADR-0016).
-- The CLI addresses rules and symbols by declared name only. Numeric addresses belong to `wright serve` and carry a `snapshot` (ADR-0034).
+- The CLI addresses rules and symbols by declared name. Numeric addresses belong to `wright serve` and carry a `snapshot` (ADR-0034).
+- Rules may share a name, so a name alone can be ambiguous. A rule selector accepts `NAME#N`, where `N` is the 1-based occurrence among rules with that declared name, in declaration order. An exact declared-name match always wins, so a rule literally named `a#2` stays addressable. `NAME#N` is stable across invocations and needs no `snapshot`. An `ambiguous-rule` error lists the `NAME#N` form and the location of each candidate, and `inspect rules` shows the form for duplicated names. Without this, a duplicated rule name has no selector at all: the current ambiguity error names rule indexes that no CLI option accepts.
 - A removed spelling is a usage error. No alias is kept.
 
 Error text is part of the vocabulary. A usage error or `invalid-selection` error names a runnable form of the command, and an unknown-name error names how to list the declared names. The driver returns one structured hint. The CLI renders it as a command (`wright inspect rules`). `wright serve` keeps the operation name (`rules`). This is specified by Issue #888.
@@ -60,6 +61,7 @@ No source-language compilation, diagnostic code, or normalized-output claim chan
 ## Scope boundaries
 
 - **Agent-contract field names.** The `rules` operation has both `name` (a declared name) and `rule` (an index or declared name). The `symbols`, `references`, and `cfg` operations use `kind` where the CLI uses `--only`. Whether to merge `name` into `rule` is a `wright serve` contract decision and needs its own record.
+- **Implicit previous-run cost comparison.** `inspect cost` keeps reading and writing `.wright/` and comparing against the previous run (ADR-0027). An agent gets the cost change without tracking earlier output, and the comparison survives context compaction. This ADR leaves that behavior unchanged. The determinism statement in `docs/cli/machine-contract.md` must say that the comparison depends on `.wright/` state unless `--no-cache` is set (tracked in #891).
 - **Cost entry points.** `analyze`, bare `inspect`, `inspect cost`, and `compile --baseline` all report element cost. Whether to reduce them is a separate product decision.
 - **Subject-first commands.** A shape such as `wright rule <NAME> --cost` is not decided here. There is no evidence yet that it outweighs ADR-0022's rule that the CLI uses the same names as the agent operations.
 - **Renderer defaults.** The agent guide asks for `--renderer plain` on every call. Whether `--renderer auto` should select plain output for non-terminal output is separate and untested here.
