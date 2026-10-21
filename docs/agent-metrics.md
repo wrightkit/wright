@@ -12,7 +12,7 @@ corpus project, it records output size in bytes and estimated tokens
 (`bytes / 4`), median latency over repeated runs, and result-shape counts
 (items, per-kind breakdowns, findings per rule code). Agent operations repeat
 `--repeats` times (default 5) and CLI commands `--cli-repeats` times
-(default 3), since each CLI run is a full pipeline. CLI text forms are recorded alongside compact JSON defaults; text measurements record size and shape without latency. Correctness stays
+(default 3), since each CLI run is a full pipeline. CLI text forms are recorded alongside compact JSON defaults; text measurements record size and shape without latency and pin `--renderer plain`, since the GitHub Actions renderer moves the report to stderr and would measure an empty surface on CI runners. Correctness stays
 assertion-based in the owning test suites. These metrics watch drift in the
 agent-facing cost, not behavior.
 
@@ -71,16 +71,12 @@ Blocking (independent of any recorded number):
   envelope with `ok: false`; a refusal is not a result, so it is never
   recorded as a measurement) unless the baseline recorded the identical marker;
 - a metric or project that vanished from the run;
-- **default output budget**: default `check`, `lint`, `analyze`, `inspect`,
-  and `inspect` query results must stay within `defaultTokenBudget` (1500
-  estimated tokens) in text, compact CLI JSON, and the corresponding agent
-  results on every corpus project. Static catalogs and `compile` are excluded.
-  This replaces the removed `*?brief` measurements; `--all` is an explicit
-  expansion and is not the default budget target.
 
 Drift (reported, not blocking):
 
-- **tokens and counts**: |delta| > 15% **and** > 30 absolute;
+- **tokens and counts**: |delta| > 15% **and** > 30 absolute. There is no
+  absolute token ceiling: a fixed number fails on the first legitimate output
+  change once a metric nears it;
 - **latencyMs** (see below): machine-relative. `check` derives a machine factor as the
   median run/baseline latency ratio across every comparable metric (≥10
   pairs) and bands each metric against `baseline * factor`; |delta| > 50%
