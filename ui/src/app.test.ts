@@ -473,7 +473,7 @@ describe('async results must not overwrite newer state', () => {
 
     expect(isOpen(2)).toBe(true)
     expect(isOpen(1)).toBe(false)
-    expect(slot(2)!.querySelector('.rule-title')?.textContent).toContain('rule two')
+    expect(slot(2)!.querySelector('.event-value')?.textContent).toContain('ev.two')
   })
 
   it('keeps a newer rule loading until its own lookups land when an old read resolves late', async () => {
@@ -510,14 +510,14 @@ describe('async results must not overwrite newer state', () => {
     // mark the newer rule's body ready.
     lookups.get('ev.one')!.resolve(lookupResult('ev.one', 'Event One'))
     await settle()
-    expect(slot(1)!.querySelector('header.event .tok.value')?.textContent).toBe('Event One')
-    expect(slot(2)!.querySelector('header.event')).toBeNull()
+    expect(slot(1)!.querySelector('.event-row .event-value')?.textContent).toContain('Event One')
+    expect(slot(2)!.querySelector('.event-row')).toBeNull()
     expect(slot(2)!.textContent).toContain('Loading rule…')
 
     // Once the newer rule's own lookups land, its body renders — resolved
     // names, never the stale read's.
     lookups.get('ev.two')!.resolve(lookupResult('ev.two', 'Event Two'))
     await settle()
-    expect(slot(2)!.querySelector('header.event .tok.value')?.textContent).toBe('Event Two')
+    expect(slot(2)!.querySelector('.event-row .event-value')?.textContent).toContain('Event Two')
   })
 })

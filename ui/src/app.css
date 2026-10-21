@@ -1,7 +1,8 @@
-/* `wright ui` page shell (#879) and rule bars (#880): the design spec's
-   backdrop, tokens, title, toolbar, and expanding rule bars (docs/ui/
-   design.md § Tokens, § Main screen items 1–3). The rule body and dialog
-   contents keep their interim styles; #881–#882 restyle them. */
+/* `wright ui` page shell (#879), rule bars (#880), and the rule body
+   (#881): the design spec's backdrop, tokens, title, toolbar, expanding
+   rule bars, event rows, statement columns, and syntax colours
+   (docs/ui/design.md § Tokens, § Main screen, § Statement text). The
+   dialog contents keep their interim styles; #882 restyles them. */
 
 :root {
   color-scheme: light;
@@ -31,6 +32,18 @@
   /* The table's "white control" row: `#f4f5f8` on `#111`. */
   --white: #f4f5f8;
   --on-white: #111;
+
+  /* § Statement text: one token per syntax class — components reference
+     the tokens, never the literals. */
+  --tok-action: #ffffff;
+  --tok-value: #8fd0ff;
+  --tok-enum: #f2c86b;
+  --tok-number: #b7e28a;
+  --tok-string: #f6a77c;
+  --tok-variable: #d1a6ff;
+  --tok-operator: #ff9e64;
+  --tok-literal: #6fe0e6;
+  --tok-punctuation: #a9b0c2;
 }
 
 body {
@@ -244,116 +257,185 @@ select {
   margin-left: calc(40px + 0.5rem);
 }
 
-.rule-title {
-  font-size: 1.1rem;
-  margin: 0 0 0.75rem;
+/* Event rows: a `--bar` label cell about three quarters of the width,
+   then a white value cell (`#f4f5f8` on `#111`) whose caret promises the
+   editing layer's select. */
+.event-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-bottom: 1.1rem;
 }
 
-.event {
+.event-row {
+  display: grid;
+  grid-template-columns: 3fr 1fr;
+  gap: 0.15rem;
+}
+
+.event-label {
   display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
+  align-items: center;
+  padding: 0.45rem 0.85rem;
   background: var(--bar);
   border-radius: 3px;
 }
 
-.event .event-filter {
-  color: var(--muted);
-  font-size: 0.85rem;
+.event-value {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.45rem 0.6rem 0.45rem 0.75rem;
+  background: var(--white);
+  color: var(--on-white);
+  border-radius: 3px;
+}
+
+.event-value svg {
+  flex: none;
+}
+
+/* Conditions left, Actions right, 40 px apart; below 900 px the columns
+   stack. The column head is a large light title with a muted count over
+   a 2 px light line. */
+.rule-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem 40px;
+}
+
+@media (max-width: 900px) {
+  .rule-cols {
+    grid-template-columns: 1fr;
+  }
 }
 
 .rule-view h3 {
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  display: flex;
+  align-items: center;
+  margin: 0 0 0.6rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 2px solid color-mix(in srgb, var(--text) 55%, transparent);
+  font-size: 1.35rem;
+  font-weight: 300;
+}
+
+.rule-view h3 .sel-all {
+  margin: 0 0.5rem 0 0;
+  flex: none;
+}
+
+.rule-view h3 .col-count {
   color: var(--muted);
-  margin: 1.25rem 0 0.4rem;
 }
 
 .statements {
   list-style: none;
   margin: 0;
   padding: 0;
-  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  font-size: 0.88rem;
 }
 
+/* One `--bar` row per statement, at least 38 px high; control-flow bodies
+   indent 18 px per level (`--depth`). */
 .statement {
-  padding: 0.22rem 0.5rem 0.22rem calc(0.5rem + var(--depth, 0) * 1.6rem);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 38px;
+  box-sizing: border-box;
+  padding: 0.15rem 0.6rem 0.15rem calc(0.6rem + var(--depth, 0) * 18px);
   border-radius: 3px;
-  white-space: pre-wrap;
   background: var(--bar);
   margin-bottom: 0.15rem;
+  cursor: pointer;
 }
 
+.statement-text {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+}
+
+/* A disabled statement is half opacity and struck through; there is no
+   separate disabled marker. */
 .statement.disabled {
-  opacity: 0.55;
+  opacity: 0.5;
+  text-decoration: line-through;
 }
 
-.disabled-badge {
-  font-family: -apple-system, "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
-  font-size: 0.7rem;
+/* The `?debug` line number sits at the row start in `--dim` monospace —
+   monospace is debug detail only (§ Type). */
+.line-no {
+  flex: none;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.75rem;
   color: var(--dim);
-  border: 1px solid var(--dim);
-  border-radius: 3px;
-  padding: 0 0.35rem;
-  margin-left: 0.5rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
 }
 
+/* An empty column shows a muted "none" row. */
+.none {
+  color: var(--muted);
+  padding: 0.3rem 0.6rem;
+}
+
+/* A refused rule renders the service refusal in the error style. */
 .refusal {
-  border: 1px solid #7d4040;
-  background: #341f1f;
-  border-radius: 4px;
+  border: 1px solid var(--error);
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  border-radius: 3px;
   padding: 0.75rem 1rem;
 }
 
 .refusal code {
-  color: #e0a0a0;
+  color: var(--error);
 }
 
 .muted {
   color: var(--muted);
 }
 
-/* Syntax classes (#804); the spec's class colours land with #881. */
+/* Syntax classes (§ Statement text): each class reads its colour from the
+   spec token defined on :root. */
 .tok {
   white-space: pre-wrap;
 }
 
 .tok.action {
-  color: #f0c674;
+  color: var(--tok-action);
+  font-weight: 700;
 }
 
 .tok.value {
-  color: #81a2be;
+  color: var(--tok-value);
 }
 
 .tok.enum {
-  color: #8abeb7;
+  color: var(--tok-enum);
 }
 
 .tok.number {
-  color: #de935f;
+  color: var(--tok-number);
 }
 
 .tok.string {
-  color: #b5bd68;
+  color: var(--tok-string);
 }
 
 .tok.variable {
-  color: #cc6666;
+  color: var(--tok-variable);
 }
 
 .tok.operator {
-  color: #b294bb;
+  color: var(--tok-operator);
 }
 
 .tok.literal {
-  color: #b294bb;
-  font-style: italic;
+  color: var(--tok-literal);
+}
+
+.tok.punctuation {
+  color: var(--tok-punctuation);
 }
 
 .debug {
@@ -364,11 +446,13 @@ select {
 
 details.debug {
   display: inline-block;
+  margin-left: 0;
 }
 
 details.debug pre {
   margin: 0.3rem 0;
   font-size: 0.7rem;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 }
 
 .dialog {
@@ -463,23 +547,15 @@ details.debug pre {
    dialog. Colours reuse the view's tokens — gold for selection/changed,
    the error hue for deletions. */
 
-.rule-view h3 {
-  display: flex;
-  align-items: center;
-}
-
-.rule-view h3 .sel-all {
-  margin: 0 0.45rem 0 0;
-}
-
-.statement {
-  cursor: pointer;
-}
-
 .statement .sel {
   opacity: 0;
-  margin: 0 0.45rem 0 0;
-  vertical-align: middle;
+  margin: 0;
+  flex: none;
+}
+
+.statement .pending-tag,
+.statement .debug {
+  margin-left: 0;
 }
 
 .statement:hover .sel,

@@ -1,12 +1,18 @@
 <script lang="ts">
   /**
-   * One value node rendered as syntax-coloured text. Every name comes from
-   * the warmed `Names` cache (lookup by identity); reserved call forms get
-   * their documented structural render, and an unresolvable call id renders
-   * verbatim — the page invents no names.
+   * One value node rendered as syntax-coloured text (docs/ui/design.md
+   * § Statement text): the call name then its arguments in parentheses,
+   * comparisons and arithmetic infix. Every token takes its spec table
+   * class (`tok <class>`), so parentheses, commas, member dots, and index
+   * brackets are `punctuation`; every name comes from the warmed `Names`
+   * cache (lookup by identity). Reserved call forms get their documented
+   * structural render — a global variable reads `Global.name` with the
+   * scope word from the `global` structural entry, a player variable
+   * reads `owner.name` — and an unresolvable call id renders verbatim;
+   * the page invents no names.
    */
   import Expr from './Expr.svelte'
-  import { enumIdentity, nodeClass, VALUE_KINDS } from './nodes'
+  import { enumIdentity, kindClass, nodeClass, VALUE_KINDS } from './nodes'
   import type { Names } from './names'
   import type { Node, VariableNode, SubroutineNode } from './types/generated/rule-content-v1'
 
@@ -21,6 +27,10 @@
     return resolved ? { name: resolved.name, kind: resolved.kind } : { name: call, kind: undefined }
   }
 </script>
+
+{#snippet punct(text: string)}
+  <span class="tok punctuation">{text}</span>
+{/snippet}
 
 {#if typeof node === 'number'}
   <span class="tok number">{node}</span>
@@ -41,16 +51,22 @@
 {:else if 'ambiguous' in node}
   <span class="tok enum">{node.ambiguous}</span>
 {:else if node.call === 'globalVariable'}
-  <Expr node={node.args[0]} {names} />
+  {@const scope = names.peek('global', ['structural'])}
+  <!-- The scope label's canonical display name is the lowercase `global`
+       keyword; the editor shows the capitalized form (`Global.score`). -->
+  {@const label = (scope?.name ?? 'Global').replace(/^\p{Ll}/u, (c) => c.toUpperCase())}
+  <span class="tok {kindClass(scope?.kind)}">{label}</span>{@render punct('.')}<Expr
+    node={node.args[0]}
+    {names}
+  />
 {:else if node.call === 'playerVariable'}
-  <Expr node={node.args[0]} {names} />.<Expr node={node.args[1]} {names} />
+  <Expr node={node.args[0]} {names} />{@render punct('.')}<Expr node={node.args[1]} {names} />
 {:else if node.call === 'memberAccess'}
-  <Expr node={node.args[0]} {names} />.{#if typeof node.args[1] === 'object' && node.args[1] !== null && 'string' in node.args[1]}<span
-        class="tok variable">{node.args[1].string}</span
-      >{:else}<Expr node={node.args[1]} {names} />{/if}{#if node.args.length > 2}[<Expr
-      node={node.args[2]}
-      {names}
-    />]{/if}
+  <Expr node={node.args[0]} {names} />{@render punct('.')}{#if typeof node.args[1] === 'object' && node.args[1] !== null && 'string' in node.args[1]}<span
+      class="tok variable">{node.args[1].string}</span
+    >{:else}<Expr node={node.args[1]} {names} />{/if}{#if node.args.length > 2}{@render punct(
+      '[',
+    )}<Expr node={node.args[2]} {names} />{@render punct(']')}{/if}
 {:else}
   {@const head = callName(node.call)}
   {@const cls = nodeClass(node, head.kind)}
@@ -61,6 +77,6 @@
   {:else if node.args.length === 0}
     <span class="tok {cls}">{head.name}</span>
   {:else}
-    <span class="tok {cls}">{head.name}</span>({#each node.args as arg, i (i)}{#if i > 0}{', '}{/if}<Expr node={arg} {names} />{/each})
+    <span class="tok {cls}">{head.name}</span>{@render punct('(')}{#each node.args as arg, i (i)}{#if i > 0}{@render punct(', ')}{/if}<Expr node={arg} {names} />{/each}{@render punct(')')}
   {/if}
 {/if}

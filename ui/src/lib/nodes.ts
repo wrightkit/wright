@@ -7,7 +7,12 @@
  */
 import type { Action, CallNode, Condition, Event, Node } from './types/generated/rule-content-v1'
 
-/** The eight syntax classes the issue's palette names. */
+/**
+ * The syntax classes the design spec's colour table names (docs/ui/
+ * design.md § Statement text). `punctuation` covers the structural marks
+ * `Expr` emits — parentheses, commas, member dots, index brackets — which
+ * no node produces.
+ */
 export type SyntaxClass =
   | 'action'
   | 'value'
@@ -17,9 +22,27 @@ export type SyntaxClass =
   | 'variable'
   | 'operator'
   | 'literal'
+  | 'punctuation'
 
 /** Reserved call ids whose documented forms read as variable accesses. */
 const VARIABLE_CALLS = new Set(['globalVariable', 'playerVariable', 'memberAccess'])
+
+/**
+ * The syntax class for a `lookup` entry kind: statement-position calls
+ * resolve with action/structural preferred, value-position calls prefer
+ * value/operator.
+ */
+export function kindClass(kind: string | undefined): SyntaxClass {
+  switch (kind) {
+    case 'operator':
+      return 'operator'
+    case 'action':
+    case 'structural':
+      return 'action'
+    default:
+      return 'value'
+  }
+}
 
 /**
  * The syntax class for a node. `kind` is the `lookup` entry kind for a call
@@ -34,15 +57,7 @@ export function nodeClass(node: Node, kind?: string): SyntaxClass {
   if ('enum' in node) return 'enum'
   if ('variable' in node || 'subroutine' in node) return 'variable'
   if (VARIABLE_CALLS.has((node as CallNode).call)) return 'variable'
-  switch (kind) {
-    case 'operator':
-      return 'operator'
-    case 'action':
-    case 'structural':
-      return 'action'
-    default:
-      return 'value'
-  }
+  return kindClass(kind)
 }
 
 /**
@@ -130,6 +145,11 @@ function collectNode(node: Node, out: { identity: string; kinds: string[] }[]): 
     out.push({ identity: node.localizedString, kinds: [] })
   } else if ('call' in node) {
     out.push({ identity: node.call, kinds: VALUE_KINDS })
+    // A global variable read renders `Global.name`; `global` is the
+    // structural catalog entry whose localized name is the scope word.
+    if (node.call === 'globalVariable') {
+      out.push({ identity: 'global', kinds: ['structural'] })
+    }
     for (const arg of node.args) collectNode(arg, out)
   }
 }
