@@ -1,6 +1,6 @@
 # ADR-0035: One meaning per selector spelling
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-22
 - Related: [Issue #888](https://github.com/wrightkit/wright/issues/888), [Issue #889](https://github.com/wrightkit/wright/issues/889), [Issue #891](https://github.com/wrightkit/wright/issues/891), [Issue #892](https://github.com/wrightkit/wright/issues/892), [ADR-0016](0016-current-directory-and-directory-project-targets.md), [ADR-0022](0022-shared-surface-for-semantic-queries.md), [ADR-0024](0024-structured-rule-content.md), [ADR-0027](0027-project-run-cache.md), [ADR-0029](0029-structured-statement-edits.md), [ADR-0034](0034-snapshot-scoped-numeric-addresses.md), [Agent contract](../agent-contract.md)
 
