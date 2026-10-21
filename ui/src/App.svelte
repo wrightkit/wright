@@ -2,12 +2,14 @@
   /**
    * The structured Workshop rule view (ADR-0032) under the in-game page
    * shell (#879): spec backdrop and tokens, the title row, and the icon
-   * toolbar (docs/ui/design.md § Tokens, § Main screen 1–2). Rule order
-   * and content come from `rules` — one `rules?all&content` call when
-   * every rule can be expressed, otherwise per-rule `rules?rule&content`
-   * calls so a refusal replaces only that rule's body. Names come from
-   * `lookup` by identity; the Variables and Diagnostics dialogs read
-   * `symbols` and `findings`.
+   * toolbar (docs/ui/design.md § Tokens, § Main screen 1–2). The rule
+   * list is the in-game expanding bars (#880, § Main screen 3): one bar
+   * per rule in `rules` order, any number open at once, the page
+   * scrolling as a whole. Rule order and content come from `rules` —
+   * one `rules?all&content` call when every rule can be expressed,
+   * otherwise per-rule `rules?rule&content` calls so a refusal replaces
+   * only that rule's body. Names come from `lookup` by identity; the
+   * Variables and Diagnostics dialogs read `symbols` and `findings`.
    *
    * Editing layer: statement edits stage in the page's pending map, submit
    * as one `editStatements` request against the `project` identity and the
@@ -15,10 +17,11 @@
    * page never composes or writes Workshop text. A stale refusal clears
    * the staged edits and re-reads the program.
    */
-  import { SvelteMap } from 'svelte/reactivity'
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity'
   import { apply, call } from './lib/api'
   import Dialogs from './lib/Dialogs.svelte'
   import PendingChanges from './lib/PendingChanges.svelte'
+  import RuleBar from './lib/RuleBar.svelte'
   import StatementEditor from './lib/StatementEditor.svelte'
   import {
     buildRequest,
@@ -43,6 +46,7 @@
     type RuleSummary,
   } from './lib/view'
   import type {
+    CostEstimateResult,
     EditStatementsResult,
     ProjectResult,
     ToolErrorInfo,
@@ -63,7 +67,9 @@
 
   let rules = $state<RuleEntry[] | null>(null)
   let loadError = $state<string | null>(null)
-  let selected = $state<number | null>(null)
+  // Open state is per rule, keyed by the listing id: any number of rules
+  // stay open at once and a rule filtered out keeps its open state (#880).
+  const openRules = new SvelteSet<number>()
   let filter = $state('')
   let fileName = $state<string | null>(null)
   let symbols = $state<unknown[] | null>(null)
@@ -77,27 +83,40 @@
   // Staged statement edits keyed `rule:list:index`; the map is `$state`
   // so staging a change re-renders the marks and the toolbar count.
   let pending = $state<Map<string, PendingChange>>(new SvelteMap())
-  let editTarget = $state<{ list: StatementList; index: number } | null>(null)
+  let editTarget = $state<{ rule: number; list: StatementList; index: number } | null>(null)
   let submitting = $state(false)
   let submitRefusal = $state<Refusal[] | null>(null)
+  // Bumped when the bars' event-name warm lands so `peek` re-reads; the
+  // cells stay empty until the first warm resolves rather than flashing
+  // a raw event id.
+  let namesVersion = $state(0)
+  // `?debug` only: element counts by `elementCount.rules[].index`, which
+  // is the `rules` listing id (#691); null until the call lands.
+  let elementCounts = $state<Record<number, number> | null>(null)
 
   const filtered = $derived(
     (rules ?? []).filter((entry) =>
       entry.summary.name.toLowerCase().includes(filter.trim().toLowerCase()),
     ),
   )
-  const openRule = $derived(filtered.find((entry) => entry.summary.id === selected))
+
+  /** The rule the open statement editor's target belongs to. */
+  const editEntry = $derived.by(() => {
+    const target = editTarget
+    if (target === null) return null
+    return (rules ?? []).find((entry) => entry.summary.id === target.rule) ?? null
+  })
 
   const editNode = $derived.by(() => {
-    if (editTarget === null || !openRule || openRule.state.phase !== 'ready') return null
-    const node = openRule.state.content[editTarget.list][editTarget.index] as
+    if (editTarget === null || !editEntry || editEntry.state.phase !== 'ready') return null
+    const node = editEntry.state.content[editTarget.list][editTarget.index] as
       | StatementNode
       | undefined
     return node ? { ...editTarget, node } : null
   })
   const editDisabled = $derived(
-    editNode && openRule && editTarget
-      ? effectiveDisabled(pending, openRule.summary.id, editTarget.list, editTarget.index, editNode.node)
+    editNode && editEntry && editTarget
+      ? effectiveDisabled(pending, editEntry.summary.id, editTarget.list, editTarget.index, editNode.node)
       : false,
   )
   const pendingRequest = $derived(
@@ -143,6 +162,7 @@
     // The bulk read expresses every rule in one call; when any rule's
     // content cannot be expressed the call refuses wholesale, so the page
     // falls back to per-rule reads and keeps each refusal in place.
+    if (debug) void loadElementCounts()
     const bulk = await call({ op: 'rules', all: true, content: true })
     if ('result' in bulk) {
       const result = bulk.result
@@ -156,7 +176,7 @@
         summary,
         state: ruleStateFromSummary(summary),
       }))
-      selected ??= rules[0]?.summary.id ?? null
+      warmEvents(summaries)
     } else {
       const list = await call({ op: 'rules', all: true })
       if ('error' in list) {
@@ -174,15 +194,77 @@
           : undefined
       snapshot = generation
       rules = summaries.map((summary) => ({ summary, state: { phase: 'loading' } }))
-      // Select before the per-rule reads finish: the list is clickable
-      // already, and a click must not be overwritten when they land.
-      selected ??= rules[0]?.summary.id ?? null
+      // Bars render while the per-rule reads finish: an open click during
+      // the reads is a state `rules` never overwrites.
+      warmEvents(summaries)
       await Promise.all(
         rules.map(async (entry) => {
           entry.state = await loadOne(entry.summary.id, generation)
         }),
       )
     }
+  }
+
+  /**
+   * Warm the bars' event ids so `peek` answers synchronously, then bump
+   * `namesVersion` so the cells re-read their names. `subroutine:` ids
+   * are not catalog identities and need no lookup.
+   */
+  function warmEvents(summaries: RuleSummary[]) {
+    const ids = summaries
+      .map((summary) => summary.event)
+      .filter(
+        (event): event is string =>
+          typeof event === 'string' && !event.startsWith('subroutine:'),
+      )
+    void names.warm(ids).then(() => {
+      namesVersion += 1
+    })
+  }
+
+  /**
+   * The bar's event cell (#880 requirement 2): the event's `lookup` name
+   * in the session locale, the subroutine name for a subroutine rule,
+   * and the raw event id when the lookup found no name.
+   */
+  function barEvent(summary: RuleSummary): string {
+    const event = summary.event
+    if (event === undefined) return ''
+    if (event.startsWith('subroutine:')) return event.slice('subroutine:'.length)
+    if (namesVersion === 0) return ''
+    return names.peek(event, ['event'])?.name ?? event
+  }
+
+  /**
+   * `?debug` only: `elementCount.rules` ranks rules by count with `index`
+   * naming the `rules` listing id, so the bars can show each rule's
+   * element count. A refused or unreachable call leaves the cells empty.
+   */
+  async function loadElementCounts() {
+    try {
+      const response = await call({ op: 'costEstimate', all: true })
+      if ('result' in response) {
+        const entries =
+          ((response.result as CostEstimateResult).elementCount?.rules ?? []) as {
+            index?: unknown
+            count?: unknown
+          }[]
+        const counts: Record<number, number> = {}
+        for (const entry of entries) {
+          if (typeof entry.index === 'number' && typeof entry.count === 'number') {
+            counts[entry.index] = entry.count
+          }
+        }
+        elementCounts = counts
+      }
+    } catch {
+      // A debug decoration never blocks the page.
+    }
+  }
+
+  function toggle(id: number) {
+    if (openRules.has(id)) openRules.delete(id)
+    else openRules.add(id)
   }
 
   void loadProject()
@@ -216,32 +298,36 @@
     dialog = 'diagnostics'
   }
 
-  /** The `rules` content node the open editor acts on. */
-  const onedit = {
+  /**
+   * The `rules` content node the open editor acts on. Each open rule's
+   * view gets callbacks bound to its listing id, so with several rules
+   * open the target is the rule that issued the call.
+   */
+  const oneditFor = (rule: number) => ({
     open: (list: StatementList, index: number) => {
-      editTarget = { list, index }
+      editTarget = { rule, list, index }
     },
     batch: (list: StatementList, indices: number[], action: BatchAction) => {
-      if (!openRule || openRule.state.phase !== 'ready') return
-      const { id, name } = openRule.summary
+      const entry = (rules ?? []).find((item) => item.summary.id === rule)
+      if (!entry || entry.state.phase !== 'ready') return
       if (action === 'delete') {
-        stageDeletes(pending, id, name, list, indices)
+        stageDeletes(pending, rule, entry.summary.name, list, indices)
         return
       }
       const target = action === 'disable'
       for (const index of indices) {
-        const node = openRule.state.content[list][index] as StatementNode | undefined
-        if (node) setDisabled(pending, id, name, list, index, node, target)
+        const node = entry.state.content[list][index] as StatementNode | undefined
+        if (node) setDisabled(pending, rule, entry.summary.name, list, index, node, target)
       }
     },
-  }
+  })
 
   function editorSave(disabled: boolean) {
-    if (!editNode || !openRule || !editTarget) return
+    if (!editNode || !editEntry || !editTarget) return
     setDisabled(
       pending,
-      openRule.summary.id,
-      openRule.summary.name,
+      editEntry.summary.id,
+      editEntry.summary.name,
       editTarget.list,
       editTarget.index,
       editNode.node,
@@ -367,29 +453,30 @@
       <p class="muted">No rules match.</p>
     {:else}
       {#each filtered as entry (entry.summary.id)}
-        <button
-          type="button"
-          class="rule-item"
-          class:selected={entry.summary.id === selected}
-          class:disabled={entry.state.phase === 'ready' && entry.state.content.disabled}
-          onclick={() => (selected = entry.summary.id)}
-          data-rule-id={entry.summary.id}
-        >
-          <span class="rule-name">{entry.summary.name}</span>
-          {#if entry.state.phase === 'ready' && entry.state.content.disabled}
-            <span class="disabled-badge">disabled</span>
+        {@const isOpen = openRules.has(entry.summary.id)}
+        <div class="rule-slot" data-rule-id={entry.summary.id}>
+          <RuleBar
+            name={entry.summary.name}
+            event={barEvent(entry.summary)}
+            disabled={entry.state.phase === 'ready' && entry.state.content.disabled}
+            open={isOpen}
+            elements={debug ? (elementCounts?.[entry.summary.id]) : undefined}
+            ontoggle={() => toggle(entry.summary.id)}
+          />
+          {#if isOpen}
+            <div class="rule-body">
+              <RuleView
+                summary={entry.summary}
+                state={entry.state}
+                {names}
+                {debug}
+                {pending}
+                onedit={oneditFor(entry.summary.id)}
+              />
+            </div>
           {/if}
-          {#if debug}<span class="debug" data-debug>#{entry.summary.id}</span>{/if}
-        </button>
+        </div>
       {/each}
-    {/if}
-  </section>
-
-  <section class="view">
-    {#if openRule}
-      <RuleView summary={openRule.summary} state={openRule.state} {names} {debug} {pending} {onedit} />
-    {:else}
-      <p class="muted">Select a rule.</p>
     {/if}
   </section>
 

@@ -101,6 +101,14 @@ const click = (el: Element) => {
   flushSync()
 }
 
+// The editing layer lives in an open rule's body (#880); the bar opens it.
+const bar = (id: number) =>
+  host.querySelector<HTMLButtonElement>(`.rule-slot[data-rule-id="${id}"] .bar`)!
+const openRule = async (id: number) => {
+  click(bar(id))
+  await settle()
+}
+
 // The shell's pending-changes view button is the icon button labelled
 // "Pending changes"; its spec count badge shows the staged-edit count.
 const pendingButton = () =>
@@ -153,6 +161,7 @@ describe('the editing layer', () => {
 
     mountApp()
     await settle()
+    await openRule(1)
     expect(rows()).toHaveLength(2)
 
     // Two statement checkboxes, then the batch bar's Disable.
@@ -232,6 +241,7 @@ describe('the editing layer', () => {
 
     mountApp()
     await settle()
+    await openRule(1)
     click(checkbox(rows()[0]))
     click(buttonByText(host.querySelector('.sel-bar')!, 'Delete'))
     expect(rows()[0].classList.contains('pending-delete')).toBe(true)
@@ -287,6 +297,7 @@ describe('the editing layer', () => {
 
     mountApp()
     await settle()
+    await openRule(1)
     click(checkbox(rows()[0]))
     click(buttonByText(host.querySelector('.sel-bar')!, 'Disable'))
     click(pendingButton())
@@ -319,6 +330,7 @@ describe('the editing layer', () => {
 
     mountApp()
     await settle()
+    await openRule(1)
     click(rows()[0])
     await settle()
 
