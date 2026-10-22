@@ -1,13 +1,12 @@
 ---
 source: crates/wright-cli/tests/terminal.rs
+assertion_line: 97
 expression: transcript(&out)
 ---
 exit: 1
 --- stdout ---
 <ESC>[41;37m ERROR <ESC>[0m check
   <ESC>[2m1 error, 2 warnings<ESC>[0m
-  <ESC>[2m1 file affected<ESC>[0m
---- stderr ---
 <ESC>[31merror<ESC>[0m[workshop.unknown-value.futurevaluething]: Workshop construct 'FutureValueThing' is unsupported (truly-unresolved-identifier)
   --> mixed.ws:13:26
   | 13 | 		Set Global Variable(B, FutureValueThing(2));
@@ -26,3 +25,5 @@ exit: 1
   | 4 | 		otherSetting: 2
   |   | 		^
   <ESC>[2m= analysis<ESC>[0m
+  <ESC>[2m1 file affected<ESC>[0m
+--- stderr ---
