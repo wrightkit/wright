@@ -1,21 +1,6 @@
 <script lang="ts">
-  /**
-   * One rule's body, indented under its bar (docs/ui/design.md § Main
-   * screen item 4): the event rows — Event, then Team, Player, or
-   * Subroutine as the event carries them — then the Conditions/Actions
-   * columns, whose statement rows indent 18 px per control-flow level and
-   * never show `End`. A rule whose content `rules` cannot express renders
-   * the service refusal in the error style while other rules still open.
-   * `?debug` adds line numbers at the row start and the node JSON; they
-   * are absent from the DOM otherwise.
-   *
-   * Editing layer (ADR-0032): statement rows carry hover-revealed
-   * checkboxes, shift-click ranges, a select-all per column, and a
-   * selection bar with Disable/Enable/Delete/Clear. Clicking a row opens
-   * its editor. Staged edits mark their rows (change/delete) until the
-   * pending list submits through `editStatements`.
-   */
   import { SvelteSet } from 'svelte/reactivity'
+  import SqButton from './SqButton.svelte'
   import Expr from './Expr.svelte'
   import type { ChromeStrings } from './chrome'
   import type { Names } from './names'
@@ -81,7 +66,7 @@
     conditions: new SvelteSet(),
     actions: new SvelteSet(),
   })
-  let anchor = $state<{ list: StatementList; index: number } | null>(null)
+  let anchor = $state<{ list: StatementList; index: number; extent: number } | null>(null)
   let hoverCol = $state<StatementList | null>(null)
   $effect(() => {
     void summary.id
@@ -100,16 +85,29 @@
   function selectRow(list: StatementList, index: number, event: MouseEvent) {
     const set = sel(list)
     if (event.shiftKey && anchor?.list === list) {
-      const [lo, hi] =
-        anchor.index <= index ? [anchor.index, index] : [index, anchor.index]
-      for (let i = lo; i <= hi; i++) set.add(i)
+      extendRange(list, index)
       return
     }
     // `click` is delegated, so `currentTarget` is the delegation root here;
     // the target is the checkbox itself (an input has no children).
     if ((event.target as HTMLInputElement).checked) set.add(index)
     else set.delete(index)
-    anchor = { list, index }
+    anchor = { list, index, extent: index }
+  }
+
+  function extendRange(list: StatementList, index: number) {
+    if (anchor?.list !== list) return
+    const lo = Math.min(anchor.index, index)
+    const hi = Math.max(anchor.index, index)
+    for (const i of visibleIndices(list)) {
+      if (i >= lo && i <= hi) sel(list).add(i)
+    }
+    anchor.extent = index
+  }
+
+  function clearSelection(list: StatementList) {
+    sel(list).clear()
+    if (anchor?.list === list) anchor = null
   }
 
   function selectAll(list: StatementList, visible: number[], checked: boolean) {
@@ -141,12 +139,18 @@
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
       event.preventDefault()
       selectAll(list, visibleIndices(list), true)
+    } else if (event.shiftKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+      if (anchor?.list !== list) return
+      const visible = visibleIndices(list)
+      const next = visible.indexOf(anchor.extent) + (event.key === 'ArrowDown' ? 1 : -1)
+      event.preventDefault()
+      if (next >= 0 && next < visible.length) extendRange(list, visible[next]!)
     } else if (event.key === 'Delete' && set.size > 0) {
       event.preventDefault()
       onedit.batch(list, [...set], 'delete')
     } else if (event.key === 'Escape' && set.size > 0) {
-      set.clear()
-      anchor = null
+      event.preventDefault()
+      clearSelection(list)
     }
   }
 
@@ -235,6 +239,31 @@
   </li>
 {/snippet}
 
+{#snippet columnActions(list: StatementList)}
+  {@const set = sel(list)}
+  <span class="column-actions">
+    {#if set.size > 0}
+      <span class="sel-count">{t.selectedCount(set.size)}</span>
+      <SqButton title={t.disable} onclick={() => onedit.batch(list, [...set], 'disable')}>
+        <path d="M6 6h12v12H6z" />
+      </SqButton>
+      <SqButton title={t.enable} onclick={() => onedit.batch(list, [...set], 'enable')}>
+        <path d="m8 5 11 7-11 7z" />
+      </SqButton>
+      <SqButton title={t.delete} onclick={() => onedit.batch(list, [...set], 'delete')}>
+        <path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7" />
+      </SqButton>
+      <SqButton title={t.clear} onclick={() => clearSelection(list)}>
+        <path d="m6 6 12 12M6 18 18 6" />
+      </SqButton>
+    {:else}
+      <SqButton title={t.addStatementTitle(noun(list))} label={t.addStatement(noun(list))} disabled>
+        <path d="M12 5v14M5 12h14" />
+      </SqButton>
+    {/if}
+  </span>
+{/snippet}
+
 <section class="rule-view">
   {#if ruleState.phase === 'loading' || (ruleState.phase === 'ready' && !namesReady)}
     <p class="muted">{t.loadingRule}</p>
@@ -296,6 +325,7 @@
               selectAll('conditions', condVisible, event.currentTarget.checked)}
           />
           {t.conditions} <span class="col-count">({content.conditions.length})</span>
+          {@render columnActions('conditions')}
         </h3>
         <ol class="statements" class:has-selection={condSel.size > 0}>
           {#each content.conditions as condition, i (i)}
@@ -313,21 +343,6 @@
             <li class="none">{t.none}</li>
           {/if}
         </ol>
-        {#if condSel.size > 0}
-          <div class="sel-bar" data-list="conditions">
-            <span class="sel-count">{t.selectedCount(condSel.size)}</span>
-            <button type="button" onclick={() => onedit.batch('conditions', [...condSel], 'disable')}
-              >{t.disable}</button
-            >
-            <button type="button" onclick={() => onedit.batch('conditions', [...condSel], 'enable')}
-              >{t.enable}</button
-            >
-            <button type="button" onclick={() => onedit.batch('conditions', [...condSel], 'delete')}
-              >{t.delete}</button
-            >
-            <button type="button" onclick={() => selection.conditions.clear()}>{t.clear}</button>
-          </div>
-        {/if}
       </div>
 
       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -349,6 +364,7 @@
             onchange={(event) => selectAll('actions', actVisible, event.currentTarget.checked)}
           />
           {t.actions} <span class="col-count">({actVisible.length})</span>
+          {@render columnActions('actions')}
         </h3>
         <ol class="statements" class:has-selection={actSel.size > 0}>
           {#each content.actions as action, i (i)}
@@ -369,21 +385,6 @@
             <li class="none">{t.none}</li>
           {/if}
         </ol>
-        {#if actSel.size > 0}
-          <div class="sel-bar" data-list="actions">
-            <span class="sel-count">{t.selectedCount(actSel.size)}</span>
-            <button type="button" onclick={() => onedit.batch('actions', [...actSel], 'disable')}
-              >{t.disable}</button
-            >
-            <button type="button" onclick={() => onedit.batch('actions', [...actSel], 'enable')}
-              >{t.enable}</button
-            >
-            <button type="button" onclick={() => onedit.batch('actions', [...actSel], 'delete')}
-              >{t.delete}</button
-            >
-            <button type="button" onclick={() => selection.actions.clear()}>{t.clear}</button>
-          </div>
-        {/if}
       </div>
     </div>
   {/if}

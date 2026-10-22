@@ -54,9 +54,10 @@ export interface ChromeStrings {
   selectAll: (noun: string) => string
   /** A statement row's checkbox aria label. */
   selectRow: (noun: string, index: number) => string
-  /** The selection bar's count. */
+  addStatement: (noun: string) => string
+  addStatementTitle: (noun: string) => string
   selectedCount: (count: number) => string
-  /** The selection bar's batch actions. */
+  /** The heading's batch actions. */
   disable: string
   enable: string
   delete: string
@@ -143,6 +144,8 @@ const enUS: ChromeStrings = {
   actionNoun: 'action',
   selectAll: (noun) => `select all ${noun}s`,
   selectRow: (noun, index) => `select ${noun} ${index}`,
+  addStatement: (noun) => `Add ${noun}`,
+  addStatementTitle: (noun) => `Add ${noun}: insertion is not available`,
   selectedCount: (count) => `${count} selected`,
   disable: 'Disable',
   enable: 'Enable',
@@ -208,6 +211,8 @@ const zhCN: ChromeStrings = {
   actionNoun: '动作',
   selectAll: (noun) => `选择所有${noun}`,
   selectRow: (noun, index) => `选择${noun} ${index}`,
+  addStatement: (noun) => `添加${noun}`,
+  addStatementTitle: (noun) => `添加${noun}：插入功能不可用`,
   selectedCount: (count) => `已选择 ${count} 项`,
   disable: '禁用',
   enable: '启用',

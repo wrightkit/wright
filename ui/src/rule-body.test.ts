@@ -377,6 +377,106 @@ describe('the debug layer (#881)', () => {
   })
 })
 
+describe('column selection', () => {
+  const actions = [
+    action('wait', [0]),
+    action('if', [true]),
+    action('wait', [1]),
+    action('end'),
+    action('wait', [2]),
+  ]
+
+  async function setup() {
+    const content = contentFor(
+      { id: 'global' },
+      [{ value: true }, { value: false }],
+      actions,
+    )
+    api.handler = handlerFor([summaryFor(1, 'selection', content)])
+    mountApp()
+    await settle()
+    await openRule(1)
+  }
+
+  const column = (list: 'conditions' | 'actions' = 'actions') =>
+    slot(1)!.querySelector<HTMLElement>(`.col[data-list="${list}"]`)!
+  const checks = (list: 'conditions' | 'actions' = 'actions') =>
+    [...column(list).querySelectorAll<HTMLInputElement>('input.sel')]
+  const selected = () => checks().map((check) => check.checked)
+  const key = (name: string, modifiers: KeyboardEventInit = {}) => {
+    const event = new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true, ...modifiers })
+    column().dispatchEvent(event)
+    flushSync()
+    return event
+  }
+  const hover = () => {
+    column().dispatchEvent(new MouseEvent('mouseenter'))
+    flushSync()
+  }
+
+  it.each(['conditions', 'actions'] as const)('replaces + with the count and square batch controls in the %s heading', async (list) => {
+    await setup()
+    const head = column(list).querySelector('h3')!
+    const add = head.querySelector<HTMLButtonElement>('button')!
+    expect(add.getAttribute('aria-label')).toBe(`Add ${list === 'actions' ? 'action' : 'condition'}`)
+    expect(add.disabled).toBe(true)
+    click(checks(list)[0]!)
+    expect(head.querySelector('.sel-count')?.textContent).toBe('1 selected')
+    expect([...head.querySelectorAll('button')].map((button) => button.getAttribute('aria-label')))
+      .toEqual(['Disable', 'Enable', 'Delete', 'Clear'])
+    expect(head.querySelectorAll('button.sq')).toHaveLength(4)
+    expect(slot(1)!.querySelector('.sel-bar')).toBeNull()
+    click(head.querySelector('button[aria-label="Clear"]')! as HTMLElement)
+    expect(head.querySelector('.sel-count')).toBeNull()
+    expect(head.querySelectorAll('button')).toHaveLength(1)
+  })
+
+  it.each([false, true])('shift-click selects only rendered rows across a partially contained block (reverse=%s)', async (reverse) => {
+    await setup()
+    const first = checks()[reverse ? 3 : 2]!
+    const last = checks()[reverse ? 2 : 3]!
+    click(first)
+    last.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }))
+    flushSync()
+    expect(selected()).toEqual([false, false, true, true])
+    expect(column().querySelector('.sel-count')?.textContent).toBe('2 selected')
+    click(column().querySelector('button[aria-label="Disable"]')! as HTMLElement)
+    expect(column().querySelectorAll('.pending-change')).toHaveLength(2)
+    expect(host.querySelector('.toolbar .sq-badge')?.textContent).toBe('2')
+  })
+
+  it('extends by visible rows with Shift+Arrow, including across hidden End markers and at column boundaries', async () => {
+    await setup()
+    hover()
+    expect(key('ArrowDown', { shiftKey: true }).defaultPrevented).toBe(false)
+    click(checks()[2]!)
+    expect(key('ArrowDown', { shiftKey: true }).defaultPrevented).toBe(true)
+    expect(selected()).toEqual([false, false, true, true])
+    key('ArrowDown', { shiftKey: true })
+    expect(selected()).toEqual([false, false, true, true])
+    key('ArrowUp', { shiftKey: true })
+    key('ArrowUp', { shiftKey: true })
+    expect(selected()).toEqual([false, true, true, true])
+    key('ArrowUp', { shiftKey: true })
+    key('ArrowUp', { shiftKey: true })
+    expect(selected()).toEqual([true, true, true, true])
+    expect(key('Escape').defaultPrevented).toBe(true)
+    expect(selected()).toEqual([false, false, false, false])
+    expect(key('ArrowDown', { shiftKey: true }).defaultPrevented).toBe(false)
+  })
+
+  it.each(['ctrlKey', 'metaKey'] as const)('%s+A selects visible rows and Delete stages only those rows', async (modifier) => {
+    await setup()
+    hover()
+    expect(key('a', { [modifier]: true }).defaultPrevented).toBe(true)
+    expect(selected()).toEqual([true, true, true, true])
+    expect(column().querySelector('.sel-count')?.textContent).toBe('4 selected')
+    key('Delete')
+    expect(column().querySelectorAll('.pending-delete')).toHaveLength(4)
+    expect(host.querySelector('.toolbar .sq-badge')?.textContent).toBe('4')
+  })
+})
+
 describe('a refused rule (#881)', () => {
   it('renders the refusal code and message in the body while the next rule opens', async () => {
     const good = summaryFor(

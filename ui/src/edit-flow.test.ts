@@ -164,11 +164,11 @@ describe('the editing layer', () => {
     await openRule(1)
     expect(rows()).toHaveLength(2)
 
-    // Two statement checkboxes, then the batch bar's Disable.
+    // Two statement checkboxes, then the heading's Disable button.
     click(checkbox(rows()[0]))
     click(checkbox(rows()[1]))
-    expect(host.querySelector('.sel-bar')?.textContent).toContain('2 selected')
-    click(buttonByText(host.querySelector('.sel-bar')!, 'Disable'))
+    expect(host.querySelector('.col[data-list="actions"] .sel-count')?.textContent).toBe('2 selected')
+    click(host.querySelector('.column-actions button[aria-label="Disable"]')!)
     expect(pendingBadge()).toBe('2')
     expect(rows()[0].classList.contains('pending-change')).toBe(true)
 
@@ -243,7 +243,7 @@ describe('the editing layer', () => {
     await settle()
     await openRule(1)
     click(checkbox(rows()[0]))
-    click(buttonByText(host.querySelector('.sel-bar')!, 'Delete'))
+    click(host.querySelector('.column-actions button[aria-label="Delete"]')!)
     expect(rows()[0].classList.contains('pending-delete')).toBe(true)
 
     click(pendingButton())
@@ -299,7 +299,7 @@ describe('the editing layer', () => {
     await settle()
     await openRule(1)
     click(checkbox(rows()[0]))
-    click(buttonByText(host.querySelector('.sel-bar')!, 'Disable'))
+    click(host.querySelector('.column-actions button[aria-label="Disable"]')!)
     click(pendingButton())
     await settle()
     click(buttonByText(dialog(), 'Submit'))
