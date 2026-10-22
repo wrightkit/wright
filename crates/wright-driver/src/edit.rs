@@ -140,6 +140,22 @@ impl EditTransaction {
     }
 }
 
+fn rebind_transaction_to_disk_input(
+    transaction: EditTransaction,
+    resolved: &ResolvedInput,
+) -> Result<EditTransaction, Diagnostic> {
+    EditTransaction::new(
+        transaction
+            .edits
+            .into_iter()
+            .map(|mut edit| {
+                edit.source = resolved.display.clone();
+                edit
+            })
+            .collect(),
+    )
+}
+
 fn is_zero_width(edit: &SourceEdit) -> bool {
     (edit.range.start_line, edit.range.start_col) == (edit.range.end_line, edit.range.end_col)
 }
@@ -208,29 +224,11 @@ pub fn validate_transaction(
             ),
         )]);
     }
-    // #472: an absent `sources` means the current text of the files the
-    // transaction names comes from disk. `input::resolve` already read the
-    // resolved input for this request, and after the check above every
-    // edit names that one input — so the defaulted source binds once under
-    // its display spelling and the edit spellings unify to it. Without the
-    // unification, `apply` would group by the literal spelling and split
-    // one file into divergent previews while overlap checks fell through
-    // across spellings. A supplied `sources` is untouched: it stays the
-    // caller-side precondition an embedder with unsaved buffers needs.
     let defaulted_sources;
     let (transaction, sources) = match sources {
         Some(sources) => (transaction, sources),
         None => {
-            let transaction = match EditTransaction::new(
-                transaction
-                    .edits
-                    .into_iter()
-                    .map(|mut edit| {
-                        edit.source = resolved.display.clone();
-                        edit
-                    })
-                    .collect(),
-            ) {
+            let transaction = match rebind_transaction_to_disk_input(transaction, &resolved) {
                 Ok(transaction) => transaction,
                 Err(diagnostic) => return refuse(vec![diagnostic]),
             };
@@ -565,146 +563,6 @@ fn apply_edit(source: &str, edit: &SourceEdit) -> Result<String, Diagnostic> {
     ))
 }
 
-/// Deprecated `wright-embedding/v1` compatibility surface (#514): the
-/// request consumed by [`rename_symbol`]. Kept source-compatible for v1
-/// callers; removal requires a breaking embedding-contract transition.
-#[deprecated = "v1 compatibility helper for `rename_symbol`; no supported rename path supersedes it"]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RenameRequest {
-    pub symbol_kind: String,
-    pub from: String,
-    pub to: String,
-    pub source: String,
-    pub source_identity: String,
-}
-
-/// Deprecated `wright-embedding/v1` compatibility helper (#514): builds a
-/// whole-file `rename` edit that rewrites every word-boundary occurrence of
-/// a name in `source` (#129). The replacement is textual only — it cannot
-/// distinguish semantic identity from strings, comments, or unrelated
-/// same-named symbols — so it carries no semantic-identity guarantee and no
-/// Wright product, CLI, LSP, agent, or embedding workflow may use it.
-/// Removal requires a breaking embedding-contract transition.
-#[deprecated = "textual whole-word proposal helper with no semantic-identity guarantee"]
-#[allow(deprecated)]
-pub fn rename_symbol(source: &str, request: &RenameRequest) -> Result<SourceEdit, Diagnostic> {
-    if request.from.is_empty() || request.to.is_empty() {
-        return Err(Diagnostic::error(
-            "edit-invalid-name",
-            Stage::Discovery,
-            "rename requires non-empty `from` and `to` names",
-        ));
-    }
-    let declared = source
-        .lines()
-        .any(|line| line_has_declaration(line, &request.symbol_kind, &request.from));
-    if !declared {
-        return Err(Diagnostic::error(
-            "unknown-symbol",
-            Stage::Discovery,
-            format!(
-                "no {} named '{}' is declared in the source",
-                request.symbol_kind, request.from
-            ),
-        ));
-    }
-    rename_occurrences(
-        source,
-        &request.from,
-        &request.to,
-        &request.source,
-        &request.source_identity,
-    )
-}
-
-// The textual rewrite behind the deprecated `rename_symbol` v1 helper
-// (#514): private implementation, not a supported public surface.
-fn rename_occurrences(
-    source: &str,
-    from: &str,
-    to: &str,
-    source_file: &str,
-    source_identity: &str,
-) -> Result<SourceEdit, Diagnostic> {
-    if from.is_empty() || to.is_empty() {
-        return Err(Diagnostic::error(
-            "edit-invalid-name",
-            Stage::Discovery,
-            "rename requires non-empty `from` and `to` names",
-        ));
-    }
-    let mut out = String::new();
-    for line in source.split('\n') {
-        out.push_str(&rename_in_line(line, from, to));
-        out.push('\n');
-    }
-    if out.ends_with('\n') {
-        out.pop();
-    }
-    let line_count = source.lines().count().max(1) as u32;
-    let last_line = source.lines().last().unwrap_or_default();
-    let end_col = last_line.chars().count() as u32 + 1;
-
-    Ok(SourceEdit {
-        edit_kind: "rename".to_string(),
-        source: source_file.to_string(),
-        source_identity: source_identity.to_string(),
-        range: EditRange {
-            start_line: 1,
-            start_col: 1,
-            end_line: line_count,
-            end_col,
-        },
-        new_text: out,
-    })
-}
-
-fn line_has_declaration(line: &str, kind: &str, name: &str) -> bool {
-    let trimmed = line.trim_start();
-    let keyword = match kind {
-        "globalVariable" => "globalvar",
-        "playerVariable" => "playervar",
-        "subroutine" => "subroutine",
-        _ => return false,
-    };
-    if !trimmed.starts_with(keyword) {
-        return false;
-    }
-    let rest = trimmed[keyword.len()..].trim_start();
-    rest.split(|c: char| c.is_whitespace() || c == '=')
-        .next()
-        .is_some_and(|c| c == name)
-}
-
-fn rename_in_line(line: &str, from: &str, to: &str) -> String {
-    let mut out = String::new();
-    let mut remaining = line;
-    while let Some(index) = remaining.find(from) {
-        let before = &remaining[..index];
-        let after = &remaining[index + from.len()..];
-        let boundary_before = index == 0
-            || !before
-                .chars()
-                .next_back()
-                .is_some_and(|c| c.is_alphanumeric() || c == '_');
-        let boundary_after = after.is_empty()
-            || !after
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_alphanumeric() || c == '_');
-        if boundary_before && boundary_after {
-            out.push_str(before);
-            out.push_str(to);
-            remaining = after;
-        } else {
-            out.push_str(&remaining[..index + from.len()]);
-            remaining = after;
-        }
-    }
-    out.push_str(remaining);
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -713,21 +571,6 @@ mod tests {
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
     const SOURCE: &str = "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    score += 1\n";
-
-    #[allow(deprecated)]
-    fn rename_edit(source: &str, from: &str, to: &str) -> SourceEdit {
-        rename_symbol(
-            source,
-            &RenameRequest {
-                symbol_kind: "globalVariable".to_string(),
-                from: from.to_string(),
-                to: to.to_string(),
-                source: "program.opy".to_string(),
-                source_identity: crate::input_identity(source),
-            },
-        )
-        .unwrap()
-    }
 
     fn catalog() -> &'static Catalog {
         workshop_rs::catalog::Catalog::builtin_ref().expect("builtin catalog")
@@ -766,46 +609,6 @@ mod tests {
         })
         .expect("session");
         (dir, session)
-    }
-
-    #[test]
-    fn rename_rewrites_declaration_and_references() {
-        let edit = rename_edit(SOURCE, "score", "total");
-        assert_eq!(edit.edit_kind, "rename");
-        assert_eq!(edit.source, "program.opy", "the edit names its source file");
-        assert!(
-            edit.new_text.contains("globalvar total = 0"),
-            "declaration renamed: {}",
-            edit.new_text
-        );
-        assert!(
-            edit.new_text.contains("total += 1"),
-            "reference renamed: {}",
-            edit.new_text
-        );
-    }
-
-    #[test]
-    fn rename_does_not_touch_longer_identifiers() {
-        let edit = rename_edit(SOURCE, "score", "total");
-        assert!(!edit.new_text.contains("totalboard"));
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn rename_unknown_symbol_fails_explicitly() {
-        let error = rename_symbol(
-            SOURCE,
-            &RenameRequest {
-                symbol_kind: "globalVariable".to_string(),
-                from: "missing".to_string(),
-                to: "x".to_string(),
-                source: "program.opy".to_string(),
-                source_identity: crate::input_identity(SOURCE),
-            },
-        )
-        .unwrap_err();
-        assert_eq!(error.code, "unknown-symbol");
     }
 
     #[test]
@@ -887,34 +690,6 @@ mod tests {
         };
         let error = EditTransaction::new(vec![edit(1, 10), edit(5, 20)]).unwrap_err();
         assert_eq!(error.code, "edit-overlap");
-    }
-
-    #[test]
-    fn rename_occurrences_works_without_a_declaration() {
-        let source = "rule \"r\":\n    @Event global\n    showStatus()\n";
-        let edit = rename_occurrences(
-            source,
-            "showStatus",
-            "refresh",
-            "program.opy",
-            &crate::input_identity(source),
-        )
-        .unwrap();
-        assert!(
-            edit.new_text.contains("refresh()"),
-            "reference renamed: {}",
-            edit.new_text
-        );
-        assert!(
-            !edit.new_text.contains("showStatus"),
-            "old name gone: {}",
-            edit.new_text
-        );
-        assert_eq!(
-            edit.source_identity,
-            crate::input_identity(source),
-            "the edit carries the source identity precondition"
-        );
     }
 
     #[test]

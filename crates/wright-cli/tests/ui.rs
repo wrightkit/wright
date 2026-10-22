@@ -123,6 +123,45 @@ impl Drop for UiSession {
 }
 
 #[cfg(feature = "ui")]
+#[test]
+fn idle_connections_do_not_block_pipelined_keep_alive_responses() {
+    let session = UiSession::start(&corpus_workshop("synthetic/basic-rule"));
+    let _idle = TcpStream::connect(&session.authority).unwrap();
+    let mut stream = TcpStream::connect(&session.authority).unwrap();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+        .unwrap();
+    let request = format!("GET / HTTP/1.1\r\nHost: {}\r\n\r\n", session.authority);
+    stream
+        .write_all(format!("{request}{request}").as_bytes())
+        .unwrap();
+    let mut reader = BufReader::new(stream);
+    for _ in 0..2 {
+        let mut status = String::new();
+        reader.read_line(&mut status).unwrap();
+        assert!(status.starts_with("HTTP/1.1 200"), "{status}");
+        let mut length = None;
+        loop {
+            let mut header = String::new();
+            reader.read_line(&mut header).unwrap();
+            if header == "\r\n" {
+                break;
+            }
+            let (name, value) = header.split_once(':').expect("HTTP header");
+            if name.eq_ignore_ascii_case("Content-Length") {
+                length = Some(value.trim().parse::<usize>().unwrap());
+            }
+            if name.eq_ignore_ascii_case("Connection") {
+                assert_ne!(value.trim().to_ascii_lowercase(), "close");
+            }
+        }
+        let mut body = vec![0; length.expect("response length")];
+        reader.read_exact(&mut body).unwrap();
+        assert!(!body.is_empty());
+    }
+}
+
+#[cfg(feature = "ui")]
 fn serve_stdio(input: &Path, lines: &[&str]) -> Vec<String> {
     let mut child = Command::new(wright())
         .args(["serve", "--transport", "stdio"])

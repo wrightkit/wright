@@ -402,13 +402,8 @@ mod server {
         content_type: &str,
         body: Vec<u8>,
     ) -> tiny_http::Response<Cursor<Vec<u8>>> {
-        // Keep-alive stays enabled on purpose: each connection's reader task
-        // parks on its own socket inside tiny_http's unbounded worker pool, so
-        // an idle or preconnected socket never stalls the serial dispatch
-        // loop. Answering `Connection: close` instead would drop requests the
-        // browser had already dispatched onto a socket it believed reusable.
-        tiny_http::Response::empty(status)
-            .with_data(Cursor::new(body.clone()), Some(body.len()))
+        tiny_http::Response::from_data(body)
+            .with_status_code(status)
             .with_header(
                 tiny_http::Header::from_bytes("Content-Type".as_bytes(), content_type.as_bytes())
                     .expect("content types are ASCII"),

@@ -1,13 +1,5 @@
 //! LPP integration through the driver session and tool service (#142).
 //!
-//! These tests prove the consumer seam: a session/tool holds an LPP provider
-//! client for an opaque language id and consumes negotiated capabilities
-//! through the transport-neutral `LanguageProvider` trait. They require the
-//! LPP conformance mock provider binary (see
-//! `crates/wright-lpp/tests/mock_provider.rs` for build instructions and the
-//! pinned `language-provider-protocol` commit); the `LPP_MOCK_PROVIDER`
-//! environment variable names it, and CI sets it. Without the variable the
-//! tests are skipped with a clear reason.
 
 #![allow(clippy::result_large_err)]
 
@@ -26,18 +18,11 @@ fn workshop_path() -> PathBuf {
     workspace_root().join("tests/fixtures/workshop/synthetic/control-flow.ws")
 }
 
-fn mock_provider_path() -> Option<PathBuf> {
-    match std::env::var("LPP_MOCK_PROVIDER") {
-        Ok(path) if !path.is_empty() => Some(PathBuf::from(path)),
-        _ => {
-            eprintln!(
-                "SKIPPED: LPP_MOCK_PROVIDER is not set; build the LPP mock provider from the \
-                 pinned language-provider-protocol commit and point LPP_MOCK_PROVIDER at it \
-                 (see crates/wright-lpp/tests/mock_provider.rs)"
-            );
-            None
-        }
-    }
+fn mock_provider_path() -> PathBuf {
+    let path = std::env::var("LPP_MOCK_PROVIDER")
+        .expect("set LPP_MOCK_PROVIDER to the pinned LPP mock-provider binary");
+    assert!(!path.is_empty(), "LPP_MOCK_PROVIDER must not be empty");
+    PathBuf::from(path)
 }
 
 fn demo_documents() -> DocumentSet {
@@ -56,10 +41,9 @@ fn demo_documents() -> DocumentSet {
 }
 
 #[test]
+#[ignore = "requires LPP_MOCK_PROVIDER pointing to the pinned LPP mock provider"]
 fn session_spawns_initializes_and_queries_a_provider() {
-    let Some(path) = mock_provider_path() else {
-        return;
-    };
+    let path = mock_provider_path();
     let mut registry = wright_lpp::ProviderRegistry::new();
     registry
         .register(wright_lpp::ProviderConfig::new(
@@ -134,10 +118,9 @@ fn missing_first_party_opy_provider_is_a_structured_local_failure() {
 }
 
 #[test]
+#[ignore = "requires LPP_MOCK_PROVIDER pointing to the pinned LPP mock provider"]
 fn tool_service_exposes_the_provider_seam() {
-    let Some(path) = mock_provider_path() else {
-        return;
-    };
+    let path = mock_provider_path();
     let mut registry = wright_lpp::ProviderRegistry::new();
     registry
         .register(wright_lpp::ProviderConfig::new(
