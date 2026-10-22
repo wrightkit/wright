@@ -1,3 +1,6 @@
 # Force LF in the working tree on every platform so scripts and fixtures that
 # compare exact bytes behave the same on Windows checkouts.
 * text=auto eol=lf
+
+# Preserve the byte-exact workshop-rs Bastion fixture, including its EOF blank line.
+tests/fixtures/workshop/real-world/bastion.ow whitespace=-blank-at-eof

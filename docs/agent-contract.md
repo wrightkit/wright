@@ -385,23 +385,24 @@ selection fields receive the previous shapes unchanged.
 
 ### Rule content (ADR-0024)
 
-`rules` with `"content": true` adds a `content` member to each returned rule:
-the owner's `workshop-rs/rule-content-v1` document. Every action, value, and
-operator is a `{"call": id, "args": [...]}` node named by its catalog id, and
-`args` lists every argument in catalog parameter order, so an argument is
-identified by its position (`lookup` names the parameter at each position).
-Literals, `{"enum", "member"}`, `{"variable"}`, `{"subroutine"}`, `{"string"}`,
-and `{"localizedString"}` are the other node forms. `actions` is flat: index
-`i` is the same action index `cfg`, `references`, and findings use. Wright adds
-`span` to each condition and action when the program has one. For a source
-language the content is the canonical program after lowering, so assertions are
-independent of spelling and locale.
+`rules` with `"content": true` adds the owner's
+`workshop-rs/rule-content-v1` document as each rule's `content`. Actions,
+values, and operators use `{"call": id, "args": [...]}` with catalog ids
+and arguments in catalog parameter order (`lookup` names each position).
+Other nodes are literals, `{"enum", "member"}`, `{"variable"}`,
+`{"subroutine"}`, `{"string"}`, and `{"localizedString"}`. The flat `actions`
+array shares its indices with `cfg`, `references`, and findings.
 
-A `content` request without `max` returns at most 20 rules, always in the
-selection-wrapped shape; `rule` selects exactly one. A selected rule's content
-is never truncated. The CLI form is `wright inspect rules --content`
-(`--rule`, `--file`, `--max`). OverPy spellings for the canonical ids
-(`names`) are not served yet: they wait on a provider capability.
+Wright adds available statement `span`s: a condition spans its whole expression
+(left-operand start through right-operand end, or the whole `Compare(...)`
+call); an action spans its call name through `)`, or its last token without
+parentheses. Both exclude the terminating `;`. Source-language content is the
+lowered canonical program, independent of spelling and locale.
+
+Without `max`, `content` returns at most 20 rules in the selection wrapper;
+`rule` selects one. Selected content is never truncated. CLI:
+`wright inspect rules --content` (`--rule`, `--file`, `--max`). OverPy canonical-id
+spellings (`names`) await a provider capability.
 
 ### Semantic query selection (#531)
 
