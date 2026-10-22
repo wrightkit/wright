@@ -168,16 +168,12 @@
       !el?.closest('input.sel, input.sel-all, input.col-filter')
     )
       return
-    // A column owns the gesture when the pointer is over it or the event's
-    // target sits inside it (the filter field keeps its own column's
-    // scope even when the pointer has moved off). The target must live in
-    // THIS rule's DOM — every open RuleView registers a window listener,
-    // so a `closest` hit in another instance would steal the gesture.
+    // Every open RuleView registers a window listener, so a column in a
+    // sibling rule's DOM leaves the gesture to that rule. The pointer
+    // column applies only when the event has no target column.
     const col = el?.closest('.col')
-    const list =
-      (col && root?.contains(col)
-        ? (col.getAttribute('data-list') as StatementList | null)
-        : null) ?? hoverCol
+    if (col && !root?.contains(col)) return
+    const list = (col?.getAttribute('data-list') as StatementList | null) ?? hoverCol
     if (!list) return
     const set = sel(list)
     const inFilter = el?.closest('input.col-filter') != null
@@ -196,6 +192,7 @@
       event.preventDefault()
       onedit.batch(list, [...set], 'delete')
     } else if (event.key === 'Escape') {
+      // Esc peels one layer at a time (docs/ui/selection.md § Keyboard).
       if (filters[list] !== '') {
         filters[list] = ''
         event.preventDefault()

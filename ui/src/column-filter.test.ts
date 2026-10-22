@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /// <reference types="node" />
 /**
- * The large-column filter (#916, docs/ui/selection.md § Large columns): a
+ * The large-column filter (docs/ui/selection.md § Large columns): a
  * column past thirty rendered rows gains a filter field under its
  * heading. Rows are filtered to those whose session-locale text contains
  * the query (case-insensitive) or whose call id takes it as a prefix;
@@ -140,6 +140,8 @@ const typeInFilter = (list: 'conditions' | 'actions', query: string) => {
 
 const escapeKey = (target: Element) =>
   target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+const keydown = (target: Element, key: string, init: KeyboardEventInit = {}) =>
+  target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, ...init }))
 
 /** Thirty `setGlobalVariableAtIndex` rows then five `wait` rows. */
 const bigActions = (): RuleContent['actions'] => [
@@ -153,7 +155,7 @@ const bigActions = (): RuleContent['actions'] => [
   ...Array.from({ length: 5 }, () => action('wait', [0.016])),
 ]
 
-describe('the column filter field (#916)', () => {
+describe('the column filter field', () => {
   it('stays absent at thirty rows and appears at thirty-one', async () => {
     api.handler = handlerFor([
       summaryFor(1, 'at the limit', contentFor([], Array.from({ length: 30 }, () => action('wait')))),
@@ -189,7 +191,7 @@ describe('the column filter field (#916)', () => {
   })
 })
 
-describe('filtering rows (#916)', () => {
+describe('filtering rows', () => {
   it('keeps rows whose session-locale text contains the query, case-insensitively', async () => {
     api.handler = handlerFor([summaryFor(1, 'init', contentFor([], bigActions()))])
 
@@ -237,7 +239,7 @@ describe('filtering rows (#916)', () => {
   })
 })
 
-describe('selection under a filter (#916)', () => {
+describe('selection under a filter', () => {
   it.each(['conditions', 'actions'] as const)('select-all preserves hidden selections when checked and unchecked in %s', async (list) => {
     const actions = bigActions()
     const content = list === 'actions'
@@ -393,14 +395,17 @@ describe('selection under a filter (#916)', () => {
     await openRule(1)
     await openRule(2)
 
+    const slotA = slot(1)!
     const slotB = slot(2)!
+    const rowA = slotA.querySelector<HTMLLIElement>('.statement')!
     const rowB = slotB.querySelector<HTMLLIElement>('.statement')!
+    click(checkbox(rowA))
     click(checkbox(rowB))
     expect(slotB.querySelector('.column-actions .sel-count')!.textContent).toContain('1 selected')
 
     // Esc inside rule A's filter field clears A's filter only — rule B's
     // selection must survive every open RuleView's window listener.
-    const inputA = slot(1)!.querySelector<HTMLInputElement>('input.col-filter')!
+    const inputA = slotA.querySelector<HTMLInputElement>('input.col-filter')!
     inputA.value = 'wait'
     inputA.dispatchEvent(new Event('input', { bubbles: true }))
     flushSync()
@@ -413,5 +418,51 @@ describe('selection under a filter (#916)', () => {
     escapeKey(rowB)
     flushSync()
     expect(slotB.querySelector('.column-actions .sel-count')).toBeNull()
+  })
+
+  it('leaves gestures to a sibling rule while the pointer is over this column', async () => {
+    api.handler = handlerFor([
+      summaryFor(1, 'rule a', contentFor([], bigActions())),
+      summaryFor(2, 'rule b', contentFor([], bigActions())),
+    ])
+
+    mountApp()
+    await settle()
+    await openRule(1)
+    await openRule(2)
+
+    const colA = slot(1)!.querySelector<HTMLElement>('.col[data-list="actions"]')!
+    const colB = slot(2)!.querySelector<HTMLElement>('.col[data-list="actions"]')!
+    const rowB = colB.querySelector<HTMLLIElement>('.statement')!
+    const boxB = checkbox(rowB)
+    click(checkbox(colA.querySelector<HTMLLIElement>('.statement')!))
+    click(boxB)
+
+    // The pointer rests over rule A's column while focus stays on rule
+    // B's checkbox: every keydown still resolves against the target's own
+    // rule, never the pointer column.
+    colA.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false }))
+    keydown(boxB, 'a', { ctrlKey: true })
+    flushSync()
+    const count = (col: HTMLElement) =>
+      col.querySelector('.column-actions .sel-count')!.textContent
+    expect(count(colA)).toContain('1 selected')
+    expect(count(colB)).toContain('35 selected')
+
+    keydown(boxB, 'Delete')
+    flushSync()
+    expect(colA.querySelectorAll('.pending-delete')).toHaveLength(0)
+    expect(colB.querySelectorAll('.pending-delete')).toHaveLength(35)
+
+    const filterA = colA.querySelector<HTMLInputElement>('input.col-filter')!
+    const filterB = colB.querySelector<HTMLInputElement>('input.col-filter')!
+    typeInFilter('actions', 'wait') // the open slot under the pointer: rule A
+    filterB.value = 'wait'
+    filterB.dispatchEvent(new Event('input', { bubbles: true }))
+    flushSync()
+    escapeKey(filterB)
+    flushSync()
+    expect(filterA.value).toBe('wait')
+    expect(filterB.value).toBe('')
   })
 })
