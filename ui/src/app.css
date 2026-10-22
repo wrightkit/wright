@@ -44,6 +44,50 @@
   --tok-operator: #ff9e64;
   --tok-literal: #6fe0e6;
   --tok-punctuation: #a9b0c2;
+
+  /* § Spacing and sizes — one custom property per value of the spec
+     table (docs/ui/visual-system.md), applied in px; no rem multiples
+     replace them (#914). */
+  --page-pad: 18px 28px 60px;
+  --title-size: 54px;
+  --title-track: 2px;
+  --file-name-size: 26px;
+  --toolbar-gap: 6px;
+  --toolbar-line: 2px;
+  --toolbar-pad-below: 10px;
+  --rule-list-gap: 6px;
+  --rule-list-below: 14px;
+  --rule-bar-height: 40px;
+  --rule-bar-pad: 0 14px;
+  --rule-bar-gap: 12px;
+  --chev-size: 40px;
+  --chev-gap: 6px;
+  --rule-body-indent: 70px;
+  --rule-body-pad: 14px;
+  --event-row-height: 38px;
+  --event-label-pad: 8px 14px;
+  --event-row-gap: 4px;
+  --event-rows-below: 16px;
+  --cols-gap: 40px;
+  --col-head-size: 24px;
+  --col-head-below: 6px;
+  --col-head-line: 2px;
+  --stmt-min-height: 40px;
+  --stmt-pad-block: 6px;
+  --stmt-pad-inline: 8px;
+  --stmt-gap: 4px;
+  --stmt-text: 14px;
+  --stmt-indent: 18px;
+  --dialog-body-pad: 26px 32px 22px;
+  --dialog-title-size: 28px;
+  --dialog-foot-pad: 14px;
+  --dialog-foot-gap: 12px;
+  --form-ctl-height: 36px;
+  --form-label-gap: 6px;
+  --form-row-gap: 5px;
+  --form-nest-indent: 14px;
+  --form-nest-below: 10px;
+  --form-nest-line: 2px;
 }
 
 body {
@@ -67,25 +111,28 @@ select {
 
 /* One column: title, toolbar, then the rule list at full width. */
 .page {
-  padding: 1.5rem clamp(1rem, 4vw, 3rem) 4rem;
+  padding: var(--page-pad);
 }
 
 .title-row {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 14px;
+  margin-bottom: 6px;
 }
 
 .title-row h1 {
   margin: 0;
-  font-size: 2.2rem;
+  font-size: var(--title-size);
   font-weight: 700;
   font-style: italic;
+  letter-spacing: var(--title-track);
   line-height: 1.1;
 }
 
 .file-name {
+  font-size: var(--file-name-size);
   font-style: italic;
   color: var(--muted);
 }
@@ -95,10 +142,9 @@ select {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.6rem;
-  margin-top: 0.75rem;
-  padding-bottom: 0.75rem;
-  border-bottom: 2px solid color-mix(in srgb, var(--text) 55%, transparent);
+  gap: var(--toolbar-gap);
+  padding-bottom: var(--toolbar-pad-below);
+  border-bottom: var(--toolbar-line) solid color-mix(in srgb, var(--text) 55%, transparent);
 }
 
 .toolbar .end {
@@ -106,7 +152,7 @@ select {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.6rem;
+  gap: var(--toolbar-gap);
 }
 
 .rule-count {
@@ -135,16 +181,16 @@ select {
 /* The spec's count badge (§ Main screen 2) sits on the button's corner. */
 .sq-badge {
   position: absolute;
-  top: -0.4rem;
-  right: -0.4rem;
-  min-width: 1.15rem;
-  padding: 0 0.3rem;
-  border-radius: 3px;
+  top: -6px;
+  right: -6px;
+  min-width: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
   background: var(--orange);
   color: var(--white);
-  font-size: 0.7rem;
+  font-size: 11px;
   font-weight: 700;
-  line-height: 1.15rem;
+  line-height: 18px;
   text-align: center;
 }
 
@@ -159,18 +205,20 @@ select {
 
 .sep {
   width: 1px;
-  height: 1.4rem;
+  height: 28px;
   background: color-mix(in srgb, var(--text) 40%, transparent);
 }
 
 .filter {
-  width: 16rem;
+  width: 256px;
   max-width: 100%;
+  height: 40px;
   border: 0;
   border-radius: 3px;
-  padding: 0.45rem 0.7rem;
+  padding: 0 12px;
   background: var(--white);
   color: var(--on-white);
+  box-sizing: border-box;
 }
 
 .filter::placeholder {
@@ -183,8 +231,8 @@ select {
 .rule-list {
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
-  padding: 0.75rem 0;
+  gap: var(--rule-list-gap);
+  padding: var(--rule-list-below) 0 0;
 }
 
 .rule-slot {
@@ -195,12 +243,13 @@ select {
 .rule-bar {
   display: flex;
   align-items: stretch;
-  gap: 0.5rem;
+  gap: var(--chev-gap);
 }
 
 /* The chevron points right when closed and rotates down when open. */
 .chev {
   display: inline-flex;
+  width: var(--chev-size);
 }
 
 .chev svg {
@@ -215,13 +264,15 @@ select {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: var(--rule-bar-gap);
+  min-height: var(--rule-bar-height);
+  box-sizing: border-box;
   border: 0;
   border-radius: 3px;
   background: var(--bar);
   color: var(--text);
   text-align: left;
-  padding: 0.55rem 0.85rem;
+  padding: var(--rule-bar-pad);
   cursor: pointer;
 }
 
@@ -239,7 +290,7 @@ select {
   margin-left: auto;
   display: flex;
   align-items: baseline;
-  gap: 0.75rem;
+  gap: 12px;
 }
 
 .bar-event {
@@ -252,9 +303,10 @@ select {
   color: var(--muted);
 }
 
-/* The open rule body is indented under its bar (§ Main screen item 4). */
+/* The open rule body is indented under its bar (§ Main screen item 4):
+   the spec's 70 px indent with 14 px above and below. */
 .rule-body {
-  margin-left: calc(40px + 0.5rem);
+  padding: var(--rule-body-pad) 0 var(--rule-body-pad) var(--rule-body-indent);
 }
 
 /* Event rows: a `--bar` label cell about three quarters of the width,
@@ -263,20 +315,22 @@ select {
 .event-rows {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
-  margin-bottom: 1.1rem;
+  gap: var(--event-row-gap);
+  margin-bottom: var(--event-rows-below);
 }
 
 .event-row {
   display: grid;
   grid-template-columns: 3fr 1fr;
-  gap: 0.15rem;
+  gap: var(--event-row-gap);
 }
 
 .event-label {
   display: flex;
   align-items: center;
-  padding: 0.45rem 0.85rem;
+  min-height: var(--event-row-height);
+  box-sizing: border-box;
+  padding: var(--event-label-pad);
   background: var(--bar);
   border-radius: 3px;
 }
@@ -285,8 +339,10 @@ select {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.4rem;
-  padding: 0.45rem 0.6rem 0.45rem 0.75rem;
+  gap: 4px;
+  min-height: var(--event-row-height);
+  box-sizing: border-box;
+  padding: var(--event-label-pad);
   background: var(--white);
   color: var(--on-white);
   border-radius: 3px;
@@ -302,27 +358,30 @@ select {
 .rule-cols {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 1.5rem 40px;
+  gap: var(--cols-gap);
 }
 
 @media (max-width: 900px) {
   .rule-cols {
     grid-template-columns: 1fr;
   }
+  .rule-body {
+    padding-left: 0;
+  }
 }
 
 .rule-view h3 {
   display: flex;
   align-items: center;
-  margin: 0 0 0.6rem;
-  padding-bottom: 0.45rem;
-  border-bottom: 2px solid color-mix(in srgb, var(--text) 55%, transparent);
-  font-size: 1.35rem;
-  font-weight: 300;
+  margin: 0 0 var(--col-head-below);
+  padding-bottom: var(--col-head-below);
+  border-bottom: var(--col-head-line) solid color-mix(in srgb, var(--text) 55%, transparent);
+  font-size: var(--col-head-size);
+  font-weight: 400;
 }
 
 .rule-view h3 .sel-all {
-  margin: 0 0.5rem 0 0;
+  margin: 0 4px 0 0;
   flex: none;
 }
 
@@ -336,24 +395,26 @@ select {
   padding: 0;
 }
 
-/* One `--bar` row per statement, at least 38 px high; control-flow bodies
+/* One `--bar` row per statement, at least 40 px high; control-flow bodies
    indent 18 px per level (`--depth`). */
 .statement {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  min-height: 38px;
+  gap: 8px;
+  min-height: var(--stmt-min-height);
   box-sizing: border-box;
-  padding: 0.15rem 0.6rem 0.15rem calc(0.6rem + var(--depth, 0) * 18px);
+  padding: var(--stmt-pad-block) var(--stmt-pad-inline) var(--stmt-pad-block)
+    calc(var(--stmt-pad-inline) + var(--depth, 0) * var(--stmt-indent));
   border-radius: 3px;
   background: var(--bar);
-  margin-bottom: 0.15rem;
+  margin-bottom: var(--stmt-gap);
   cursor: pointer;
 }
 
 .statement-text {
   flex: 1;
   min-width: 0;
+  font-size: var(--stmt-text);
   white-space: pre-wrap;
 }
 
@@ -461,7 +522,7 @@ details.debug pre {
   color: var(--text);
   border: 1px solid rgb(255 255 255 / 0.15);
   border-radius: 6px;
-  padding: 1rem 1.25rem;
+  padding: var(--dialog-body-pad);
   min-width: 24rem;
   max-width: 42rem;
   max-height: 80vh;
@@ -474,7 +535,7 @@ details.debug pre {
 
 .dialog h2 {
   margin-top: 0;
-  font-size: 1rem;
+  font-size: var(--dialog-title-size);
 }
 
 .dialog button {
@@ -513,22 +574,23 @@ dialog.view[open] {
 .dialog.view .dlg-title {
   flex: none;
   margin: 0;
-  padding: 1.1rem 1.25rem 0.9rem;
+  padding: 26px 32px 0;
   text-align: center;
-  font-size: 1.05rem;
+  font-size: var(--dialog-title-size);
 }
 
 .dialog.view .dlg-body {
   min-height: 0;
   overflow-y: auto;
-  padding: 0 1.25rem 1.25rem;
+  padding: var(--dialog-body-pad);
 }
 
 .dialog.view .dlg-foot {
   flex: none;
   display: flex;
   justify-content: center;
-  padding: 0.75rem;
+  gap: var(--dialog-foot-gap);
+  padding: var(--dialog-foot-pad);
   background: var(--dlg-foot);
   border-radius: 0 0 3px 3px;
 }
@@ -866,9 +928,9 @@ dialog.view[open] {
 .editor-foot {
   display: flex;
   justify-content: center;
-  gap: 0.6rem;
-  margin-top: 1rem;
-  padding-top: 0.8rem;
+  gap: var(--dialog-foot-gap);
+  margin-top: 14px;
+  padding-top: var(--dialog-foot-pad);
   border-top: 1px solid rgb(255 255 255 / 0.15);
 }
 
@@ -1160,17 +1222,22 @@ dialog.view[open] {
   margin-top: 0.7rem;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: var(--form-row-gap);
 }
 
 .editor-arg {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: var(--form-label-gap);
 }
 
 .editor-arg-label {
   flex: 0 0 9rem;
+  min-height: var(--form-ctl-height);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  box-sizing: border-box;
   color: var(--muted);
   font-size: 0.85rem;
   text-align: right;
@@ -1179,6 +1246,8 @@ dialog.view[open] {
 .editor-arg .picker-ctl {
   flex: 1;
   min-width: 0;
+  min-height: var(--form-ctl-height);
+  box-sizing: border-box;
   text-align: left;
 }
 
