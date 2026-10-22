@@ -46,6 +46,7 @@
     type StatementList,
     type StatementNode,
   } from './lib/edit'
+  import { allFor, findingsFor, placeFindings } from './lib/findings'
   import { Names } from './lib/names'
   import RuleView from './lib/RuleView.svelte'
   import SimulatePanel from './lib/SimulatePanel.svelte'
@@ -55,12 +56,14 @@
     ruleStateFromError,
     ruleStateFromResponse,
     ruleStateFromSummary,
+    type RuleContent,
     type RuleState,
     type RuleSummary,
   } from './lib/view'
   import type {
     CostEstimateResult,
     EditStatementsResult,
+    Finding,
     LookupEntry,
     ProjectResult,
     TargetMetadataResult,
@@ -105,7 +108,9 @@
   let filter = $state('')
   let fileName = $state<string | null>(null)
   let symbols = $state<unknown[] | null>(null)
-  let findings = $state<unknown[] | null>(null)
+  // `findings?all` serves both the in-place marks and the dialog (#921):
+  // the call lands with `load` so bar marks render with the rules list.
+  let findings = $state<Finding[] | null>(null)
   let dialog = $state<'variables' | 'diagnostics' | 'pending' | 'simulate' | null>(null)
   // The loaded project and the simulation panel's hero options (#836):
   // `project` holds `inputIdentity` and the read-only settings tree the
@@ -139,6 +144,18 @@
   let costEstimate = $state<ToolResponse | null>(null)
   let costRequest: Promise<void> | null = null
   let pageEl: HTMLDivElement | undefined = $state()
+
+  // In-place findings (docs/ui/diagnostics.md § In place): placement
+  // needs each rule's `content`, so it recomputes when `findings` lands
+  // or the program is re-read. A rule whose content never resolved keeps
+  // its findings on the bar — `placeFindings` falls back, never drops.
+  const placedFindings = $derived.by(() => {
+    const contents = new Map<number, RuleContent>()
+    for (const entry of rules ?? []) {
+      if (entry.state.phase === 'ready') contents.set(entry.summary.id, entry.state.content)
+    }
+    return placeFindings(findings ?? [], contents)
+  })
 
   const filtered = $derived(
     (rules ?? []).filter((entry) =>
@@ -244,6 +261,7 @@
     // content cannot be expressed the call refuses wholesale, so the page
     // falls back to per-rule reads and keeps each refusal in place.
     if (debug) void loadElementCounts()
+    void loadFindings()
     const bulk = await call({ op: 'rules', all: true, content: true })
     if ('result' in bulk) {
       const result = bulk.result
@@ -314,6 +332,28 @@
     if (event.startsWith('subroutine:')) return event.slice('subroutine:'.length)
     if (namesVersion === 0) return ''
     return names.peek(event, ['event'])?.name ?? event
+  }
+
+  /**
+   * `findings?all`, read once: the in-place marks and the Diagnostics
+   * dialog share it. A refusal or unreachable endpoint leaves the list
+   * null — marks simply never render, matching a program with no
+   * findings.
+   */
+  async function loadFindings() {
+    try {
+      const response = await call({ op: 'findings', all: true })
+      if ('result' in response) {
+        const result = response.result
+        findings = (
+          Array.isArray(result)
+            ? result
+            : ((result as { findings?: Finding[] }).findings ?? [])
+        ) as Finding[]
+      }
+    } catch {
+      // No findings surface: bars and rows render unmarked.
+    }
   }
 
   /**
@@ -429,16 +469,9 @@
   }
 
   function openDiagnostics() {
-    if (findings === null) {
-      void call({ op: 'findings', all: true }).then((response) => {
-        if ('result' in response) {
-          const result = response.result
-          findings = Array.isArray(result)
-            ? result
-            : ((result as { findings?: unknown[] }).findings ?? [])
-        }
-      })
-    }
+    // `findings` loads with the page; a failed load retries on open so a
+    // transient refusal does not leave the dialog empty for the session.
+    if (findings === null) void loadFindings()
     void ensureCostEstimate()
     dialog = 'diagnostics'
   }
@@ -621,6 +654,7 @@
     {:else}
       {#each filtered as entry (entry.summary.id)}
         {@const isOpen = openRules.has(entry.summary.id)}
+        {@const ruleSlots = findingsFor(placedFindings, entry.summary.id)}
         <div class="rule-slot" data-rule-id={entry.summary.id}>
           <RuleBar
             name={entry.summary.name}
@@ -628,6 +662,7 @@
             disabled={entry.state.phase === 'ready' && entry.state.content.disabled}
             open={isOpen}
             elements={debug ? (elementCounts?.[entry.summary.id]) : undefined}
+            findings={allFor(ruleSlots)}
             {t}
             ontoggle={() => toggle(entry.summary.id)}
           />
@@ -639,6 +674,7 @@
                 {names}
                 {debug}
                 {pending}
+                ruleFindings={ruleSlots}
                 {t}
                 onedit={oneditFor(entry.summary.id)}
               />

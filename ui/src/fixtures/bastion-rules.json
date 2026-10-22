@@ -1,0 +1,2610 @@
+[
+ {
+  "id": 18,
+  "name": "[Hero/D.Va] Sync remech charge",
+  "content": {
+   "conditions": [
+    {
+     "span": {
+      "end": {
+       "col": 51,
+       "line": 849
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 849
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 39,
+       "line": 850
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 850
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 40,
+       "line": 851
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 851
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 53,
+       "line": 852
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 852
+      }
+     }
+    }
+   ],
+   "actions": [
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 82,
+       "line": 855
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 855
+      }
+     }
+    },
+    {
+     "call": "while",
+     "span": {
+      "end": {
+       "col": 12,
+       "line": 859
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 856
+      }
+     }
+    },
+    {
+     "call": "setUltCharge",
+     "span": {
+      "end": {
+       "col": 163,
+       "line": 857
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 13,
+       "line": 857
+      }
+     }
+    },
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 40,
+       "line": 858
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 13,
+       "line": 858
+      }
+     }
+    },
+    {
+     "call": "end",
+     "span": null
+    }
+   ]
+  }
+ },
+ {
+  "id": 23,
+  "name": "[Hero/Ana] Display sleep HUD",
+  "content": {
+   "conditions": [
+    {
+     "span": {
+      "end": {
+       "col": 56,
+       "line": 943
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 943
+      }
+     }
+    }
+   ],
+   "actions": [
+    {
+     "call": "createHudText",
+     "span": {
+      "end": {
+       "col": 321,
+       "line": 946
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 946
+      }
+     }
+    },
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 38,
+       "line": 947
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 947
+      }
+     }
+    },
+    {
+     "call": "setGlobalVariableAtIndex",
+     "span": {
+      "end": {
+       "col": 63,
+       "line": 948
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 948
+      }
+     }
+    },
+    {
+     "call": "setGlobalVariableAtIndex",
+     "span": {
+      "end": {
+       "col": 90,
+       "line": 949
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 949
+      }
+     }
+    },
+    {
+     "call": "forGlobalVariable",
+     "span": {
+      "end": {
+       "col": 12,
+       "line": 953
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 950
+      }
+     }
+    },
+    {
+     "call": "createProgressBarInWorldText",
+     "span": {
+      "end": {
+       "col": 1017,
+       "line": 951
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 13,
+       "line": 951
+      }
+     }
+    },
+    {
+     "call": "setGlobalVariableAtIndex",
+     "span": {
+      "end": {
+       "col": 197,
+       "line": 952
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 13,
+       "line": 952
+      }
+     }
+    },
+    {
+     "call": "end",
+     "span": null
+    },
+    {
+     "call": "waitUntil",
+     "span": {
+      "end": {
+       "col": 79,
+       "line": 954
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 954
+      }
+     }
+    },
+    {
+     "call": "forGlobalVariable",
+     "span": {
+      "end": {
+       "col": 12,
+       "line": 957
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 955
+      }
+     }
+    },
+    {
+     "call": "destroyProgressBarInWorldText",
+     "span": {
+      "end": {
+       "col": 108,
+       "line": 956
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 13,
+       "line": 956
+      }
+     }
+    },
+    {
+     "call": "end",
+     "span": null
+    },
+    {
+     "call": "destroyHudText",
+     "span": {
+      "end": {
+       "col": 60,
+       "line": 958
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 958
+      }
+     }
+    }
+   ]
+  }
+ },
+ {
+  "id": 205,
+  "name": "[Bastion] Restart active match",
+  "content": {
+   "conditions": [
+    {
+     "span": {
+      "end": {
+       "col": 49,
+       "line": 5686
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5686
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 79,
+       "line": 5687
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5687
+      }
+     }
+    }
+   ],
+   "actions": [
+    {
+     "call": "disableBuiltinGameModeAnnouncer",
+     "span": {
+      "end": {
+       "col": 45,
+       "line": 5690
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5690
+      }
+     }
+    },
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 38,
+       "line": 5691
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5691
+      }
+     }
+    },
+    {
+     "call": "destroyAllDummies",
+     "span": {
+      "end": {
+       "col": 31,
+       "line": 5692
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5692
+      }
+     }
+    },
+    {
+     "call": "destroyAllEffects",
+     "span": {
+      "end": {
+       "col": 28,
+       "line": 5693
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5693
+      }
+     }
+    },
+    {
+     "call": "destroyAllHudText",
+     "span": {
+      "end": {
+       "col": 29,
+       "line": 5694
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5694
+      }
+     }
+    },
+    {
+     "call": "destroyAllIcons",
+     "span": {
+      "end": {
+       "col": 26,
+       "line": 5695
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5695
+      }
+     }
+    },
+    {
+     "call": "destroyAllInWorldText",
+     "span": {
+      "end": {
+       "col": 34,
+       "line": 5696
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5696
+      }
+     }
+    },
+    {
+     "call": "destroyAllProgressBarHudText",
+     "span": {
+      "end": {
+       "col": 42,
+       "line": 5697
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5697
+      }
+     }
+    },
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 38,
+       "line": 5698
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5698
+      }
+     }
+    },
+    {
+     "call": "disableMessages",
+     "span": {
+      "end": {
+       "col": 46,
+       "line": 5699
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5699
+      }
+     }
+    },
+    {
+     "call": "disableGameModeHud",
+     "span": {
+      "end": {
+       "col": 51,
+       "line": 5700
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5700
+      }
+     }
+    },
+    {
+     "call": "disableGameModeInworldUI",
+     "span": {
+      "end": {
+       "col": 59,
+       "line": 5701
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5701
+      }
+     }
+    },
+    {
+     "call": "disableRespawn",
+     "span": {
+      "end": {
+       "col": 67,
+       "line": 5702
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5702
+      }
+     }
+    },
+    {
+     "call": "unpauseMatchTime",
+     "span": {
+      "end": {
+       "col": 27,
+       "line": 5703
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5703
+      }
+     }
+    },
+    {
+     "call": "while",
+     "span": {
+      "end": {
+       "col": 12,
+       "line": 5707
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5704
+      }
+     }
+    },
+    {
+     "call": "setMatchTime",
+     "span": {
+      "end": {
+       "col": 34,
+       "line": 5705
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 13,
+       "line": 5705
+      }
+     }
+    },
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 42,
+       "line": 5706
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 13,
+       "line": 5706
+      }
+     }
+    },
+    {
+     "call": "end",
+     "span": null
+    },
+    {
+     "call": "createIcon",
+     "span": {
+      "end": {
+       "col": 196,
+       "line": 5708
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5708
+      }
+     }
+    },
+    {
+     "call": "createInWorldText",
+     "span": {
+      "end": {
+       "col": 286,
+       "line": 5709
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5709
+      }
+     }
+    },
+    {
+     "call": "forGlobalVariable",
+     "span": {
+      "end": {
+       "col": 12,
+       "line": 5715
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5710
+      }
+     }
+    },
+    {
+     "call": "createEffect",
+     "span": {
+      "end": {
+       "col": 182,
+       "line": 5711
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 13,
+       "line": 5711
+      }
+     }
+    },
+    {
+     "call": "createEffect",
+     "span": {
+      "end": {
+       "col": 133,
+       "line": 5712
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 13,
+       "line": 5712
+      }
+     }
+    },
+    {
+     "call": "createEffect",
+     "span": {
+      "end": {
+       "col": 185,
+       "line": 5713
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 13,
+       "line": 5713
+      }
+     }
+    },
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 42,
+       "line": 5714
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 13,
+       "line": 5714
+      }
+     }
+    },
+    {
+     "call": "end",
+     "span": null
+    },
+    {
+     "call": "startForcingHero",
+     "span": {
+      "end": {
+       "col": 75,
+       "line": 5716
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5716
+      }
+     }
+    },
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 38,
+       "line": 5717
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5717
+      }
+     }
+    },
+    {
+     "call": "kill",
+     "span": {
+      "end": {
+       "col": 47,
+       "line": 5718
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5718
+      }
+     }
+    },
+    {
+     "call": "disableHeroHud",
+     "span": {
+      "end": {
+       "col": 46,
+       "line": 5719
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5719
+      }
+     }
+    },
+    {
+     "call": "startCamera",
+     "span": {
+      "end": {
+       "col": 90,
+       "line": 5720
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5720
+      }
+     }
+    },
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 34,
+       "line": 5721
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5721
+      }
+     }
+    },
+    {
+     "call": "enableBuiltinGameModeMusic",
+     "span": {
+      "end": {
+       "col": 40,
+       "line": 5722
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5722
+      }
+     }
+    },
+    {
+     "call": "declareTeamVictory",
+     "span": {
+      "end": {
+       "col": 37,
+       "line": 5723
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5723
+      }
+     }
+    },
+    {
+     "call": "destroyAllInWorldText",
+     "span": {
+      "end": {
+       "col": 34,
+       "line": 5724
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5724
+      }
+     }
+    },
+    {
+     "call": "destroyAllIcons",
+     "span": {
+      "end": {
+       "col": 26,
+       "line": 5725
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5725
+      }
+     }
+    },
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 34,
+       "line": 5726
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5726
+      }
+     }
+    },
+    {
+     "call": "waitUntil",
+     "span": {
+      "end": {
+       "col": 59,
+       "line": 5727
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5727
+      }
+     }
+    },
+    {
+     "call": "restartMatch",
+     "span": {
+      "end": {
+       "col": 22,
+       "line": 5728
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 5728
+      }
+     }
+    }
+   ]
+  }
+ },
+ {
+  "id": 225,
+  "name": "[Bastion] Reset displaced bot",
+  "content": {
+   "conditions": [
+    {
+     "span": {
+      "end": {
+       "col": 119,
+       "line": 6119
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6119
+      }
+     }
+    }
+   ],
+   "actions": [
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 36,
+       "line": 6122
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6122
+      }
+     }
+    },
+    {
+     "call": "setPlayerVariable",
+     "span": {
+      "end": {
+       "col": 63,
+       "line": 6123
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6123
+      }
+     }
+    },
+    {
+     "call": "enableMovementCollisionWithEnvironment",
+     "span": {
+      "end": {
+       "col": 65,
+       "line": 6124
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6124
+      }
+     }
+    },
+    {
+     "call": "setStatusEffect",
+     "span": {
+      "end": {
+       "col": 54,
+       "line": 6125
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6125
+      }
+     }
+    },
+    {
+     "call": "teleport",
+     "span": {
+      "end": {
+       "col": 94,
+       "line": 6126
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6126
+      }
+     }
+    },
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 38,
+       "line": 6127
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6127
+      }
+     }
+    },
+    {
+     "call": "startForcingPosition",
+     "span": {
+      "end": {
+       "col": 122,
+       "line": 6128
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6128
+      }
+     }
+    },
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 38,
+       "line": 6129
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6129
+      }
+     }
+    },
+    {
+     "call": "waitUntil",
+     "span": {
+      "end": {
+       "col": 61,
+       "line": 6130
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6130
+      }
+     }
+    },
+    {
+     "call": "stopForcingPosition",
+     "span": {
+      "end": {
+       "col": 51,
+       "line": 6131
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6131
+      }
+     }
+    },
+    {
+     "call": "loopIfConditionIsTrue",
+     "span": {
+      "end": {
+       "col": 34,
+       "line": 6132
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6132
+      }
+     }
+    }
+   ]
+  }
+ },
+ {
+  "id": 227,
+  "name": "[Bastion] Lock elevated position",
+  "content": {
+   "conditions": [
+    {
+     "span": {
+      "end": {
+       "col": 45,
+       "line": 6164
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6164
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 42,
+       "line": 6165
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6165
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 39,
+       "line": 6166
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6166
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 319,
+       "line": 6167
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6167
+      }
+     }
+    }
+   ],
+   "actions": [
+    {
+     "call": "teleport",
+     "span": {
+      "end": {
+       "col": 94,
+       "line": 6170
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6170
+      }
+     }
+    },
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 38,
+       "line": 6171
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6171
+      }
+     }
+    },
+    {
+     "call": "startForcingPosition",
+     "span": {
+      "end": {
+       "col": 122,
+       "line": 6172
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6172
+      }
+     }
+    }
+   ]
+  }
+ },
+ {
+  "id": 231,
+  "name": "[Core] Reset to control respawn",
+  "content": {
+   "conditions": [
+    {
+     "span": {
+      "end": {
+       "col": 46,
+       "line": 6234
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6234
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 42,
+       "line": 6235
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6235
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 39,
+       "line": 6236
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6236
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 47,
+       "line": 6237
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6237
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 95,
+       "line": 6238
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6238
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 925,
+       "line": 6239
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6239
+      }
+     }
+    }
+   ],
+   "actions": [
+    {
+     "call": "teleport",
+     "span": {
+      "end": {
+       "col": 111,
+       "line": 6242
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6242
+      }
+     }
+    },
+    {
+     "call": "setFacing",
+     "span": {
+      "end": {
+       "col": 180,
+       "line": 6243
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6243
+      }
+     }
+    },
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 38,
+       "line": 6244
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6244
+      }
+     }
+    }
+   ]
+  }
+ },
+ {
+  "id": 233,
+  "name": "[Core] Resolve finish",
+  "content": {
+   "conditions": [
+    {
+     "span": {
+      "end": {
+       "col": 42,
+       "line": 6291
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6291
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 39,
+       "line": 6292
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6292
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 304,
+       "line": 6293
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6293
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 353,
+       "line": 6294
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6294
+      }
+     }
+    }
+   ],
+   "actions": [
+    {
+     "call": "if",
+     "span": {
+      "end": {
+       "col": 12,
+       "line": 6299
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6297
+      }
+     }
+    },
+    {
+     "call": "setPlayerVariable",
+     "span": {
+      "end": {
+       "col": 70,
+       "line": 6298
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 13,
+       "line": 6298
+      }
+     }
+    },
+    {
+     "call": "end",
+     "span": null
+    },
+    {
+     "call": "respawn",
+     "span": {
+      "end": {
+       "col": 30,
+       "line": 6300
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6300
+      }
+     }
+    },
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 38,
+       "line": 6301
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6301
+      }
+     }
+    },
+    {
+     "call": "skipIf",
+     "span": {
+      "end": {
+       "col": 69,
+       "line": 6302
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6302
+      }
+     }
+    },
+    {
+     "call": "setPlayerVariable",
+     "span": {
+      "end": {
+       "col": 66,
+       "line": 6303
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6303
+      }
+     }
+    },
+    {
+     "call": "teleport",
+     "span": {
+      "end": {
+       "col": 72,
+       "line": 6304
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6304
+      }
+     }
+    },
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 38,
+       "line": 6305
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6305
+      }
+     }
+    },
+    {
+     "call": "setFacing",
+     "span": {
+      "end": {
+       "col": 141,
+       "line": 6306
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6306
+      }
+     }
+    },
+    {
+     "call": "if",
+     "span": {
+      "end": {
+       "col": 45,
+       "line": 6319
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6308
+      }
+     }
+    },
+    {
+     "call": "callSubroutine",
+     "span": {
+      "end": {
+       "col": 42,
+       "line": 6309
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 13,
+       "line": 6309
+      }
+     }
+    },
+    {
+     "call": "elseIf",
+     "span": null
+    },
+    {
+     "call": "setPlayerVariable",
+     "span": {
+      "end": {
+       "col": 62,
+       "line": 6311
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 13,
+       "line": 6311
+      }
+     }
+    },
+    {
+     "call": "setPlayerVariable",
+     "span": {
+      "end": {
+       "col": 128,
+       "line": 6312
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 13,
+       "line": 6312
+      }
+     }
+    },
+    {
+     "call": "skipIf",
+     "span": {
+      "end": {
+       "col": 190,
+       "line": 6313
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 13,
+       "line": 6313
+      }
+     }
+    },
+    {
+     "call": "bigMessage",
+     "span": {
+      "end": {
+       "col": 873,
+       "line": 6314
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 13,
+       "line": 6314
+      }
+     }
+    },
+    {
+     "call": "if",
+     "span": {
+      "end": {
+       "col": 16,
+       "line": 6318
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 13,
+       "line": 6316
+      }
+     }
+    },
+    {
+     "call": "smallMessage",
+     "span": {
+      "end": {
+       "col": 117,
+       "line": 6317
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 17,
+       "line": 6317
+      }
+     }
+    },
+    {
+     "call": "end",
+     "span": null
+    },
+    {
+     "call": "callSubroutine",
+     "span": {
+      "end": {
+       "col": 44,
+       "line": 6319
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 13,
+       "line": 6319
+      }
+     }
+    },
+    {
+     "call": "end",
+     "span": null
+    }
+   ]
+  }
+ },
+ {
+  "id": 236,
+  "name": "3rd person",
+  "content": {
+   "conditions": [
+    {
+     "span": {
+      "end": {
+       "col": 39,
+       "line": 6432
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6432
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 59,
+       "line": 6433
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6433
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 134,
+       "line": 6434
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6434
+      }
+     }
+    }
+   ],
+   "actions": [
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 38,
+       "line": 6437
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6437
+      }
+     }
+    },
+    {
+     "call": "callSubroutine",
+     "span": {
+      "end": {
+       "col": 40,
+       "line": 6438
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6438
+      }
+     }
+    }
+   ]
+  }
+ },
+ {
+  "id": 237,
+  "name": "springboard",
+  "content": {
+   "conditions": [
+    {
+     "span": {
+      "end": {
+       "col": 43,
+       "line": 6449
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6449
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 39,
+       "line": 6450
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6450
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 59,
+       "line": 6451
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6451
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 96,
+       "line": 6452
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6452
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 134,
+       "line": 6453
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6453
+      }
+     }
+    }
+   ],
+   "actions": [
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 38,
+       "line": 6456
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6456
+      }
+     }
+    },
+    {
+     "call": "playEffect",
+     "span": {
+      "end": {
+       "col": 99,
+       "line": 6457
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6457
+      }
+     }
+    },
+    {
+     "call": "applyImpulse",
+     "span": {
+      "end": {
+       "col": 83,
+       "line": 6458
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6458
+      }
+     }
+    },
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 38,
+       "line": 6459
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6459
+      }
+     }
+    },
+    {
+     "call": "applyImpulse",
+     "span": {
+      "end": {
+       "col": 129,
+       "line": 6460
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6460
+      }
+     }
+    },
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 34,
+       "line": 6461
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6461
+      }
+     }
+    }
+   ]
+  }
+ },
+ {
+  "id": 238,
+  "name": "portalPosition",
+  "content": {
+   "conditions": [
+    {
+     "span": {
+      "end": {
+       "col": 38,
+       "line": 6472
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6472
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 39,
+       "line": 6473
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6473
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 59,
+       "line": 6474
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6474
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 101,
+       "line": 6475
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6475
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 139,
+       "line": 6476
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6476
+      }
+     }
+    }
+   ],
+   "actions": [
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 38,
+       "line": 6479
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6479
+      }
+     }
+    },
+    {
+     "call": "playEffect",
+     "span": {
+      "end": {
+       "col": 99,
+       "line": 6480
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6480
+      }
+     }
+    },
+    {
+     "call": "teleport",
+     "span": {
+      "end": {
+       "col": 90,
+       "line": 6481
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6481
+      }
+     }
+    },
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 34,
+       "line": 6482
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6482
+      }
+     }
+    }
+   ]
+  }
+ },
+ {
+  "id": 253,
+  "name": "[Player] Display reset hint",
+  "content": {
+   "conditions": [
+    {
+     "span": {
+      "end": {
+       "col": 112,
+       "line": 6782
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6782
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 107,
+       "line": 6783
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6783
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 141,
+       "line": 6784
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6784
+      }
+     }
+    }
+   ],
+   "actions": [
+    {
+     "call": "bigMessage",
+     "span": {
+      "end": {
+       "col": 60,
+       "line": 6787
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6787
+      }
+     }
+    }
+   ]
+  }
+ },
+ {
+  "id": 254,
+  "name": "[Player] Reset progress",
+  "content": {
+   "conditions": [
+    {
+     "span": {
+      "end": {
+       "col": 61,
+       "line": 6798
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6798
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 112,
+       "line": 6799
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6799
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 128,
+       "line": 6800
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6800
+      }
+     }
+    }
+   ],
+   "actions": [
+    {
+     "call": "preloadHero",
+     "span": {
+      "end": {
+       "col": 62,
+       "line": 6803
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6803
+      }
+     }
+    },
+    {
+     "call": "smallMessage",
+     "span": {
+      "end": {
+       "col": 66,
+       "line": 6804
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6804
+      }
+     }
+    },
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 34,
+       "line": 6805
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6805
+      }
+     }
+    },
+    {
+     "call": "playEffect",
+     "span": {
+      "end": {
+       "col": 93,
+       "line": 6806
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6806
+      }
+     }
+    },
+    {
+     "call": "callSubroutine",
+     "span": {
+      "end": {
+       "col": 47,
+       "line": 6807
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6807
+      }
+     }
+    },
+    {
+     "call": "callSubroutine",
+     "span": {
+      "end": {
+       "col": 50,
+       "line": 6808
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6808
+      }
+     }
+    },
+    {
+     "call": "callSubroutine",
+     "span": {
+      "end": {
+       "col": 47,
+       "line": 6809
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6809
+      }
+     }
+    },
+    {
+     "call": "smallMessage",
+     "span": {
+      "end": {
+       "col": 90,
+       "line": 6810
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6810
+      }
+     }
+    },
+    {
+     "call": "callSubroutine",
+     "span": {
+      "end": {
+       "col": 45,
+       "line": 6811
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 6811
+      }
+     }
+    }
+   ]
+  }
+ },
+ {
+  "id": 286,
+  "name": "[DevTool] Step noclip",
+  "content": {
+   "conditions": [
+    {
+     "span": {
+      "end": {
+       "col": 37,
+       "line": 7631
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 7631
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 36,
+       "line": 7632
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 7632
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 47,
+       "line": 7633
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 7633
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 39,
+       "line": 7634
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 7634
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 61,
+       "line": 7635
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 7635
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 58,
+       "line": 7636
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 7636
+      }
+     }
+    },
+    {
+     "span": {
+      "end": {
+       "col": 148,
+       "line": 7637
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 7637
+      }
+     }
+    }
+   ],
+   "actions": [
+    {
+     "call": "setGravity",
+     "span": {
+      "end": {
+       "col": 41,
+       "line": 7640
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 7640
+      }
+     }
+    },
+    {
+     "call": "skipIf",
+     "span": {
+      "end": {
+       "col": 71,
+       "line": 7641
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 7641
+      }
+     }
+    },
+    {
+     "call": "teleport",
+     "span": {
+      "end": {
+       "col": 111,
+       "line": 7642
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 7642
+      }
+     }
+    },
+    {
+     "call": "skip",
+     "span": {
+      "end": {
+       "col": 19,
+       "line": 7643
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 7643
+      }
+     }
+    },
+    {
+     "call": "teleport",
+     "span": {
+      "end": {
+       "col": 112,
+       "line": 7645
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 7645
+      }
+     }
+    },
+    {
+     "call": "wait",
+     "span": {
+      "end": {
+       "col": 37,
+       "line": 7647
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 7647
+      }
+     }
+    },
+    {
+     "call": "loopIfConditionIsTrue",
+     "span": {
+      "end": {
+       "col": 34,
+       "line": 7648
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 7648
+      }
+     }
+    },
+    {
+     "call": "abortIf",
+     "span": {
+      "end": {
+       "col": 69,
+       "line": 7649
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 7649
+      }
+     }
+    },
+    {
+     "call": "setGravity",
+     "span": {
+      "end": {
+       "col": 39,
+       "line": 7650
+      },
+      "file": 0,
+      "path": "bastion.ow",
+      "start": {
+       "col": 9,
+       "line": 7650
+      }
+     }
+    }
+   ]
+  }
+ }
+]

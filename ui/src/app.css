@@ -855,8 +855,22 @@ dialog.view[open] {
   opacity: 1;
 }
 
+/* A marked row's 3 px left severity bar (`--finding` is set inline per
+   row); the pending marks below are the user's active edit state and
+   take the slot over it. */
+.statement.has-findings {
+  box-shadow: inset 3px 0 0 var(--finding);
+}
+
 .statement.selected {
   box-shadow: inset 0 0 0 1px var(--gold);
+}
+
+/* Selection composes with the severity bar: the gold frame plus the bar. */
+.statement.has-findings.selected {
+  box-shadow:
+    inset 3px 0 0 var(--finding),
+    inset 0 0 0 1px var(--gold);
 }
 
 .statement.pending-change {
@@ -887,6 +901,114 @@ dialog.view[open] {
 .pending-tag.delete {
   color: var(--error);
   border: 1px solid var(--error);
+}
+
+/* Findings in place (docs/ui/diagnostics.md § Severity, § In place):
+   three marks — a filled circle for error, a filled triangle for
+   warning, an outlined circle for info — each in its severity colour,
+   and a 3 px left severity bar on a marked statement row. Hovering a
+   mark opens a dark card listing the findings there. */
+
+.finding-mark {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  cursor: default;
+}
+
+.finding-mark svg {
+  display: block;
+  fill: var(--muted);
+  stroke: var(--muted);
+}
+
+.finding-mark.severity-error svg {
+  fill: var(--error);
+  stroke: var(--error);
+}
+
+.finding-mark.severity-warning svg {
+  fill: var(--warn);
+  stroke: var(--warn);
+}
+
+.finding-count {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.finding-mark.severity-error .finding-count {
+  color: var(--error);
+}
+
+.finding-mark.severity-warning .finding-count {
+  color: var(--warn);
+}
+
+.finding-mark.severity-info .finding-count {
+  color: var(--muted);
+}
+
+/* The hover card: hidden until the mark is hovered or focused; a dark
+   `--dlg` panel listing severity, code, and message per finding. */
+.finding-card {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 5;
+  display: none;
+  min-width: 16rem;
+  max-width: 26rem;
+  padding: 0.4rem 0;
+  border-radius: 3px;
+  background: var(--dlg);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.45);
+  font-weight: 400;
+  text-align: left;
+  white-space: normal;
+}
+
+.finding-mark:hover .finding-card {
+  display: block;
+}
+
+.finding-card .card-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 0.1rem 0.6rem;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+}
+
+.finding-card .card-sev {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.finding-card .card-row.severity-error .card-sev {
+  color: var(--error);
+}
+
+.finding-card .card-row.severity-warning .card-sev {
+  color: var(--warn);
+}
+
+.finding-card .card-row.severity-info .card-sev {
+  color: var(--muted);
+}
+
+.finding-card .card-code {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  color: var(--dim);
+}
+
+.finding-card .card-msg {
+  grid-column: 1 / -1;
+  color: var(--text);
 }
 
 .column-actions {
