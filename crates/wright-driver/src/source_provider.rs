@@ -169,7 +169,7 @@ impl SourceProviderError {
             Self::NotConfigured { .. } => Stage::Internal,
             Self::Failed { code, .. } => failed_stage(code),
         };
-        Diagnostic::error(self.code(), stage, self.to_string())
+        Diagnostic::carried_error(self.code(), stage, self.to_string())
     }
 }
 
@@ -458,15 +458,14 @@ pub(crate) fn provider_document_set(
     for member in members {
         let (uri, path) = provider_member(member, base)?;
         let text = std::fs::read_to_string(&path).map_err(|error| {
-            wright_analyzer::service::ErrorInfo {
-                code: "provider-document-unreadable".to_string(),
-                message: format!(
+            wright_analyzer::service::ErrorInfo::new(
+                "provider-document-unreadable",
+                format!(
                     "cannot read loaded project member '{}' for the provider document set: {}",
                     path.display(),
                     error
                 ),
-                ..Default::default()
-            }
+            )
         })?;
         set.insert(
             uri.clone(),
@@ -506,17 +505,16 @@ pub(crate) fn provider_member(
         return Ok(pair);
     }
     if let Ok(url) = url::Url::parse(member) {
-        let path = url
-            .to_file_path()
-            .map_err(|()| wright_analyzer::service::ErrorInfo {
-                code: "provider-document-uri".to_string(),
-                message: format!(
+        let path = url.to_file_path().map_err(|()| {
+            wright_analyzer::service::ErrorInfo::new(
+                "provider-document-uri",
+                format!(
                     "loaded project member '{}' is not a disk file and cannot serve the \
-                     provider document set",
+                         provider document set",
                     member
                 ),
-                ..Default::default()
-            })?;
+            )
+        })?;
         return Ok((url.to_string(), path));
     }
     let path = {
@@ -529,13 +527,14 @@ pub(crate) fn provider_member(
     };
     url::Url::from_file_path(&path)
         .map(|url| (url.to_string(), path))
-        .map_err(|()| wright_analyzer::service::ErrorInfo {
-            code: "provider-document-uri".to_string(),
-            message: format!(
-                "loaded project member '{}' cannot be expressed as a file:// URI",
-                member
-            ),
-            ..Default::default()
+        .map_err(|()| {
+            wright_analyzer::service::ErrorInfo::new(
+                "provider-document-uri",
+                format!(
+                    "loaded project member '{}' cannot be expressed as a file:// URI",
+                    member
+                ),
+            )
         })
 }
 

@@ -49,7 +49,9 @@ pub use capabilities::{Capabilities, OPERATIONS};
 /// Compose a refusal's structured fields into the surface's own
 /// vocabulary (#888).
 pub use refusal::compose_fields;
-pub(crate) use refusal::{invalid_selection, invalid_selection_fields, resolve_candidates};
+pub(crate) use refusal::{
+    carried_refusal, invalid_selection, invalid_selection_fields, refusal, resolve_candidates,
+};
 
 pub use crate::request::{
     Address, StatementEditChange, StatementEditRequest, StatementList, ToolRequest,
@@ -172,15 +174,13 @@ impl<'a> ToolService<'a> {
     /// read (#617); a provider that declines its compile keeps the
     /// check-only path.
     ///
-    /// `handle` itself lives in [`refusal`] — it composes each refusal's
-    /// structured fields in this surface's operation vocabulary (#888).
+    /// `handle` lives in [`refusal`] — it composes refusal fields (#888).
     pub(crate) fn handle_full(&mut self, request: &ToolRequest) -> ToolResponse {
-        // ADR-0035: the `rules` `name` selection is removed vocabulary —
-        // its presence is a request-shape error, refused like a schema
-        // violation (`malformed-request`) before any project state is
-        // consulted, never silently ignored.
+        // ADR-0035: `rules` `name` is removed vocabulary — a request-shape
+        // error refused like a schema violation (`malformed-request`)
+        // before any project state is consulted, never silently ignored.
         if let ToolRequest::Rules { name: Some(_), .. } = request {
-            return crate::lookup::refusal(
+            return refusal::refusal(
                 "malformed-request",
                 "`rules` no longer takes `name`; address one rule with `rule` or list them all",
             );
@@ -329,11 +329,9 @@ impl<'a> ToolService<'a> {
     }
 
     fn loader_error(diagnostic: Diagnostic) -> ToolErrorInfo {
-        ToolErrorInfo {
-            code: diagnostic.code,
-            message: diagnostic.message,
-            fields: diagnostic.fields,
-        }
+        let mut error = ToolErrorInfo::carried(diagnostic.code, diagnostic.message);
+        error.fields = diagnostic.fields;
+        error
     }
 
     /// Adopt a successfully loaded program: every adoption is a new
@@ -798,11 +796,7 @@ impl<'a> ToolService<'a> {
     ) -> Result<(), ToolErrorInfo> {
         selection
             .validate(self.session.lint_registry())
-            .map_err(|message| ToolErrorInfo {
-                code: "invalid-selection".to_string(),
-                message,
-                ..Default::default()
-            })?;
+            .map_err(|message| ToolErrorInfo::new("invalid-selection", message))?;
         let loaded = &self.snapshot().loaded;
         if let Some(file) = selection.file.as_deref()
             && let Some((message, fields)) = crate::select::file_error(
@@ -812,9 +806,8 @@ impl<'a> ToolService<'a> {
             )
         {
             return Err(ToolErrorInfo {
-                code: "invalid-selection".to_string(),
-                message,
                 fields,
+                ..ToolErrorInfo::new("invalid-selection", message)
             });
         }
         Ok(())

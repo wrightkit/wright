@@ -41,12 +41,10 @@ impl<'a> ToolService<'a> {
         let loaded = &self.snapshot().loaded;
         if let Some(rule) = rule {
             if selection.is_active() {
-                return Err(ToolErrorInfo {
-                    code: "invalid-selection".to_string(),
-                    message: "the 'rule' selector reports one rule's element cost; finding selection fields do not apply"
-                        .to_string(),
-                    ..Default::default()
-                });
+                return Err(ToolErrorInfo::new(
+                    "invalid-selection",
+                    "the 'rule' selector reports one rule's element cost; finding selection fields do not apply",
+                ));
             }
             return self.cost_estimate_rule(loaded, rule).map(|mut result| {
                 result["snapshot"] = json!(self.generation);
@@ -194,28 +192,26 @@ impl<'a> ToolService<'a> {
         if let (Some(max), Some(total)) = (run.max_total, result["elementCount"]["total"].as_u64())
             && total as usize > max
         {
-            return Err(ToolErrorInfo {
-                code: "cost-over-budget".to_string(),
-                message: format!(
+            return Err(ToolErrorInfo::new(
+                "cost-over-budget",
+                format!(
                     "element total {total} exceeds --max-total {max} by {}",
                     total as usize - max
                 ),
-                ..Default::default()
-            });
+            ));
         }
         let cost_run = self.session.cost_run(loaded);
         if run.baseline.is_some()
             && !crate::cache::ci()
             && !crate::cache::baseline_exists(&cost_run)
         {
-            return Err(ToolErrorInfo {
-                code: "invalid-selection".to_string(),
-                message: format!(
+            return Err(ToolErrorInfo::new(
+                "invalid-selection",
+                format!(
                     "unknown baseline '{}': no record under .wright/ for this input kind/locale/profile",
                     run.baseline.as_deref().unwrap_or_default()
                 ),
-                ..Default::default()
-            });
+            ));
         }
         let Some(snapshot) = self.session.cost_snapshot(loaded) else {
             return Ok(None);
@@ -237,18 +233,13 @@ impl<'a> ToolService<'a> {
             .semantic()
             .resolve_rule(rule)
             .map_err(|error| ToolErrorInfo {
-                code: "invalid-selection".to_string(),
-                message: error.message,
                 fields: error.fields,
+                ..ToolErrorInfo::new("invalid-selection", error.message)
             })?;
         let report = loaded
             .program
             .element_count(self.session.catalog())
-            .map_err(|error| ToolErrorInfo {
-                code: "element-count-unavailable".to_string(),
-                message: error.to_string(),
-                ..Default::default()
-            })?;
+            .map_err(|error| ToolErrorInfo::new("element-count-unavailable", error.to_string()))?;
         let node = report
             .rules
             .get(rule_id)

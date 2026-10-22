@@ -34,11 +34,7 @@ pub(crate) fn matching_end(actions: &[Action], start: usize) -> Option<usize> {
 pub(super) fn cfg_response(program: &Program, rule: RuleId) -> Response {
     let Some(data) = program.rules.get(rule) else {
         return Response::Error {
-            error: ErrorInfo {
-                code: "invalid-id".into(),
-                message: format!("unknown rule {rule}"),
-                ..Default::default()
-            },
+            error: ErrorInfo::new("invalid-id", format!("unknown rule {rule}")),
         };
     };
     let mut builder = CanonicalCfgBuilder {

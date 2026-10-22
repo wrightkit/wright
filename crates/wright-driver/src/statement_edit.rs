@@ -121,7 +121,7 @@ pub(crate) fn owner_error(
             Stage::Discovery,
             format!("rule {rule} has no editable source"),
         ),
-        StatementEditError::Emission(error) => crate::session::workshop_diag(error, resolved),
+        StatementEditError::Emission(error) => crate::diag::workshop_diag(error, resolved),
         StatementEditError::Edit(error) => {
             Diagnostic::error("source-edit-error", Stage::Internal, error.to_string())
         }

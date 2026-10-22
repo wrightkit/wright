@@ -21,7 +21,7 @@ use crate::cache;
 use crate::config::{InputSpec, SessionConfig, SourceKind};
 use crate::diag::{
     Diagnostic, Origin, Position, Severity, SourceSpan, Stage, Status, source_provider_unavailable,
-    source_span,
+    source_span, workshop_diag,
 };
 use crate::input::{self, InputTarget, ResolvedInput};
 use crate::input_identity;
@@ -1367,57 +1367,6 @@ fn root_relative(path: Option<&Path>, root: &Path) -> Option<String> {
     }
 }
 
-pub(crate) fn workshop_diag(
-    error: workshop_rs::WorkshopError,
-    resolved: &ResolvedInput,
-) -> Diagnostic {
-    let to_span = |s: Option<workshop_rs::source::Span>| {
-        s.map(|span| crate::diag::source_span(span, resolved.display.clone()))
-    };
-    let (code, stage, span) = match &error {
-        workshop_rs::WorkshopError::Catalog(catalog) => {
-            return Diagnostic::error(
-                "catalog-error",
-                Stage::Internal,
-                format!("{}: {}", catalog.code, catalog.message),
-            );
-        }
-        workshop_rs::WorkshopError::Unknown { kind, span, .. }
-        | workshop_rs::WorkshopError::UnknownWithCandidates { kind, span, .. }
-        | workshop_rs::WorkshopError::NotDetected { kind, span, .. } => {
-            // Owner kinds are phrases (`"enum member"`); the emitted code is
-            // a single kebab-case token (`unknown-enum-member`, #789).
-            (
-                format!("unknown-{}", kind.replace(' ', "-")),
-                Stage::Frontend,
-                to_span(*span),
-            )
-        }
-        workshop_rs::WorkshopError::Malformed { span, .. } => {
-            ("parse-error".to_string(), Stage::Frontend, to_span(*span))
-        }
-        workshop_rs::WorkshopError::Unsupported { span, .. } => (
-            "unsupported-construct".to_string(),
-            Stage::Frontend,
-            to_span(*span),
-        ),
-        workshop_rs::WorkshopError::MissingMapping { .. } => {
-            ("missing-mapping".to_string(), Stage::Frontend, None)
-        }
-        _ => ("workshop-error".to_string(), Stage::Internal, None),
-    };
-    Diagnostic {
-        code,
-        stage,
-        severity: crate::diag::Severity::Error,
-        message: error.to_string(),
-        status: None,
-        span,
-        source: Some(resolved.origin.clone()),
-        fields: Default::default(),
-    }
-}
-
 fn provider_artifact_origin(resolved: &ResolvedInput) -> Origin {
     Origin {
         kind: "provider-artifact".to_string(),
@@ -1456,12 +1405,11 @@ fn workshop_diag_for_provider_artifact(
 }
 
 /// One provider failure on the `convert` reconstruction path (#569): the
-/// same classification the source-provider seam applies, with the failed
-/// operation named in the human message. The refusal code survives in the
-/// diagnostic code (`provider-refusal-<refusalCode>`) so consumers can
-/// classify it without parsing the message.
+/// same classification the source-provider seam applies, naming the failed
+/// operation. The refusal code survives in the diagnostic code
+/// (`provider-refusal-<refusalCode>`) so consumers can classify it.
 fn provider_error_diagnostic(error: wright_lpp::ProviderError, operation: &str) -> Diagnostic {
-    Diagnostic::error(
+    Diagnostic::carried_error(
         crate::source_provider::provider_failure_code(&error),
         crate::source_provider::provider_failure_stage(&error),
         format!(

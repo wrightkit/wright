@@ -116,11 +116,10 @@ impl<'a> ToolService<'a> {
                 Address::Id(id) if (*id as usize) < effective.program.rules.len() => *id as usize,
                 Address::Id(id) => {
                     return Err(ToolResponse::Error {
-                        error: ToolErrorInfo {
-                            code: "invalid-selection".to_string(),
-                            message: format!("unknown rule {id}"),
-                            ..Default::default()
-                        },
+                        error: ToolErrorInfo::new(
+                            "invalid-selection",
+                            format!("unknown rule {id}"),
+                        ),
                     });
                 }
                 Address::Name(name) => {
@@ -260,7 +259,8 @@ impl<'a> ToolService<'a> {
         // so the next program-reading request serves the edited program,
         // and surface a load failure here rather than on the next read.
         if let Err(error) = self.refresh() {
-            let mut diagnostic = Diagnostic::error(error.code, Stage::Discovery, error.message);
+            let mut diagnostic =
+                Diagnostic::carried_error(error.code, Stage::Discovery, error.message);
             diagnostic.fields = error.fields;
             return refuse(vec![diagnostic]);
         }

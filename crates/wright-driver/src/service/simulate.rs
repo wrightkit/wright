@@ -47,11 +47,7 @@ impl<'a> ToolService<'a> {
         seconds: Option<f64>,
         scenario: &Option<serde_json::Value>,
     ) -> Result<Envelope<SimulateResult>, ToolErrorInfo> {
-        let refuse = |code: &str, message: String| ToolErrorInfo {
-            code: code.to_string(),
-            message,
-            ..Default::default()
-        };
+        let refuse = |code: &str, message: String| ToolErrorInfo::new(code, message);
         // `seconds` is `athena`'s `Options.seconds` for a scenario-free run;
         // a scenario owns the simulated time, so both spellings at once are
         // two sources of truth — refused, not arbitrated — and neither is a

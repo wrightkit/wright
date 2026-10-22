@@ -142,8 +142,8 @@ fn rename_result(
     // post-edit check verdict is therefore scoped to the mutation the
     // provider actually produced — the edit sites plus the position
     // document — so an unrelated open document cannot block a valid
-    // rename. Diagnostics in member files that were never supplied still
-    // attribute to the entry document's check view and remain blocking.
+    // rename. Diagnostics in member files never supplied still attribute
+    // to the entry document's check view and remain blocking.
     let mut blocking_scope: BTreeSet<String> = transaction
         .edits
         .iter()
@@ -406,7 +406,7 @@ fn provider_diagnostic(error: &wright_lpp::ProviderError) -> Diagnostic {
         (true, None) => format!("the provider refused the edit request: {}", error),
         (false, _) => format!("the provider failed the edit request: {}", error),
     };
-    Diagnostic::error(code, stage, message)
+    Diagnostic::carried_error(code, stage, message)
 }
 
 #[cfg(test)]
