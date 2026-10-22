@@ -59,6 +59,37 @@ pub struct ErrorInfo {
     pub message: String,
 }
 
+/// Neutral markers an [`ErrorInfo`] message can carry where one shared
+/// fact must be spelled per surface (#888): the analyzer/driver emit the
+/// marker once, and each surface renders it — `wright serve` the
+/// operation name, the CLI its `wright inspect` command.
+pub mod marker {
+    /// `{file:N}` — the Nth source-file spelling, rendered against the
+    /// loaded program's file table (the analyzer knows only file ids,
+    /// never the spellings).
+    pub const FILE_PREFIX: &str = "file:";
+    /// `{list:OP}` — the operation/command that lists the declared names.
+    pub const LIST_PREFIX: &str = "list:";
+    /// `{list-all:OP}` — the same listing without its default bound.
+    pub const LIST_ALL_PREFIX: &str = "list-all:";
+
+    /// The `{file:N}` marker for a file-table index.
+    pub fn file(index: usize) -> String {
+        format!("{{file:{index}}}")
+    }
+
+    /// The `{list:OP}`/`{list-all:OP}` marker naming a name-listing
+    /// operation; `unbounded` selects the unbounded form.
+    pub fn list(operation: &str, unbounded: bool) -> String {
+        let prefix = if unbounded {
+            LIST_ALL_PREFIX
+        } else {
+            LIST_PREFIX
+        };
+        format!("{{{prefix}{operation}}}")
+    }
+}
+
 /// The origin of a compiled program, carried in tool responses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Origin {

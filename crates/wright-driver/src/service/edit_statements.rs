@@ -129,7 +129,20 @@ impl<'a> ToolService<'a> {
                     };
                     match resolved {
                         Ok(rule) => rule,
-                        Err(error) => return Err(ToolResponse::Error { error }),
+                        // `{file:N}` renders against the effective program
+                        // — the caller's `sources` file table, not the
+                        // served snapshot's (#888).
+                        Err(error) => {
+                            return Err(ToolResponse::Error {
+                                error: ToolErrorInfo {
+                                    message: crate::service::render_file_markers(
+                                        &error.message,
+                                        effective,
+                                    ),
+                                    ..error
+                                },
+                            });
+                        }
                     }
                 }
             };

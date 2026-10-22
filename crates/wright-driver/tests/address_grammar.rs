@@ -183,6 +183,100 @@ rule ("dup") {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
+// #888: the served refusal renders the neutral markers one shared result
+// carries — a candidate's `path:line:column` location from the file table
+// (never a bare file index) and the declared-name listing bounded with
+// its total, in the service's own operation spelling.
+#[test]
+fn refusals_render_locations_and_bounded_declared_names() {
+    let path = temp_workshop(
+        "dup.ws",
+        r#"rule ("tick") {
+    event {
+        Ongoing - Global;
+    }
+}
+rule ("tick") {
+    event {
+        Ongoing - Global;
+    }
+}
+"#,
+    );
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(path.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+
+    let ambiguous = service.handle(&ToolRequest::Cfg {
+        snapshot: None,
+        rule: "tick".into(),
+        kind: None,
+        max: None,
+        all: true,
+    });
+    let ToolResponse::Error { error } = ambiguous else {
+        panic!("the duplicated name must refuse: {ambiguous:?}")
+    };
+    for candidate in ["tick#1 at dup.ws:", "tick#2 at dup.ws:"] {
+        assert!(
+            error.message.contains(candidate),
+            "the candidate carries its path:line:column: {error:?}"
+        );
+    }
+    assert!(
+        !error.message.contains("{file:") && !error.message.contains(" at 0:"),
+        "no unrendered marker or bare file index: {error:?}"
+    );
+
+    // Beyond the listing bound the refusal truncates the names, keeps the
+    // total, and the service renders the unbounded operation spelling.
+    let many = temp_workshop(
+        "many.ws",
+        &(1..=25)
+            .map(|index| {
+                format!(
+                    "rule (\"rule{index:02}\") {{\n    event {{\n        Ongoing - Global;\n    }}\n}}\n"
+                )
+            })
+            .collect::<String>(),
+    );
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(many.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+    let ToolResponse::Error { error } = service.handle(&ToolRequest::Cfg {
+        snapshot: None,
+        rule: "nope".into(),
+        kind: None,
+        max: None,
+        all: true,
+    }) else {
+        panic!("the unknown rule must refuse")
+    };
+    assert!(
+        error.message.contains("declared rule names (25 total)"),
+        "{error:?}"
+    );
+    assert!(error.message.contains("'rule20'"), "{error:?}");
+    assert!(!error.message.contains("'rule21'"), "{error:?}");
+    assert!(
+        error
+            .message
+            .ends_with("the 'rules' operation lists them all"),
+        "the unbounded form is named in the surface's spelling: {error:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    let _ = std::fs::remove_dir_all(many.parent().unwrap());
+}
+
 // `editStatements` rule targets are rule addresses — the bare duplicate
 // name is `ambiguous-rule` (the subject's own code), `NAME#N` selects the
 // Nth declaration, and a name address needs no `snapshot`.

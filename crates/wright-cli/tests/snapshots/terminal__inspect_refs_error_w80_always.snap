@@ -7,5 +7,5 @@ exit: 1
 <ESC>[41;37m ERROR <ESC>[0m refs
   <ESC>[2m1 error<ESC>[0m
 --- stderr ---
-<ESC>[31merror<ESC>[0m[unknown-symbol]: unknown symbol 'Missing.symbol'; no declared symbol is near; the 'symbols' operation lists them
+<ESC>[31merror<ESC>[0m[unknown-symbol]: unknown symbol 'Missing.symbol'; no declared symbol is near; declared symbol names (1 total): 'index'; wright inspect symbols lists them
   <ESC>[2m= analysis<ESC>[0m

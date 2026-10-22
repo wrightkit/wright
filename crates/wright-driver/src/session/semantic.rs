@@ -653,7 +653,7 @@ impl CompilerSession {
         self.with_loaded(
             command,
             |session| session.load_with_operation(ProviderOperation::Compile),
-            |session, _loaded| {
+            |session, loaded| {
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
                 let mut service = match ToolService::new(session) {
                     Ok(service) => service,
@@ -665,10 +665,14 @@ impl CompilerSession {
                 match run(&mut service) {
                     Ok(result) => result,
                     Err(error) => {
+                        // The refusal keeps the shared marker form; the
+                        // file table here renders `{file:N}` spellings and
+                        // each surface renders the listing operation its
+                        // own way (#888).
                         session.diagnostics.push(Diagnostic::error(
                             error.code,
                             Stage::Analysis,
-                            error.message,
+                            crate::service::render_file_markers(&error.message, &loaded),
                         ));
                         T::default()
                     }

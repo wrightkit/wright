@@ -10,13 +10,15 @@ mod serve;
 mod tooldefs;
 mod ui;
 mod update;
+mod usage_hint;
 
 use std::io::Write;
 use std::io::{IsTerminal, Read};
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use clap::{CommandFactory, Parser};
+use clap::{CommandFactory, Parser, error::ErrorKind};
+
 use wright_driver::config::{InputSpec, OutputFormat, SessionConfig, SourceKind};
 use wright_driver::result::exit;
 use wright_driver::source_provider::SourceBackend;
@@ -32,21 +34,6 @@ fn version_banner() -> String {
         "{CLI_NAME} {CLI_VERSION} (wright-driver {})",
         wright_driver::result::DRIVER_VERSION
     )
-}
-
-/// The command a usage error names: the first argument that is a real
-/// subcommand, else the CLI name itself.
-fn usage_subject(args: &[std::ffi::OsString]) -> String {
-    let names: Vec<String> = Cli::command()
-        .get_subcommands()
-        .map(|command| command.get_name().to_string())
-        .collect();
-    args.iter()
-        .skip(1)
-        .filter_map(|arg| arg.to_str())
-        .find(|arg| names.iter().any(|name| name == arg))
-        .unwrap_or(CLI_NAME)
-        .to_string()
 }
 
 fn main() -> ExitCode {
@@ -69,10 +56,17 @@ fn main() -> ExitCode {
                 eprintln!(
                     "{} {}",
                     present::terminal::tag("USAGE", pres.color),
-                    usage_subject(&args)
+                    usage_hint::subject(&args)
                 );
             }
             let _ = error.print();
+            if matches!(
+                error.kind(),
+                ErrorKind::UnknownArgument | ErrorKind::TooManyValues
+            ) && let Some(hint) = usage_hint::narrowing(&args)
+            {
+                eprintln!("hint: {hint}");
+            }
             return ExitCode::from(code as u8);
         }
     };
@@ -346,7 +340,7 @@ fn run_workflow(command: Command) -> ExitCode {
                         present::Presentation::from_common(&query.common),
                         "USAGE",
                         "inspect cost",
-                        "'inspect cost --rule' reports one rule's element cost; finding selection (--severity/--rule-id/--max/--file) does not apply",
+                        "'inspect cost --rule <NAME>' reports one rule's element cost; the finding selection flags (--severity/--rule-id/--max/--file) apply to 'inspect cost' without --rule",
                     );
                     return ExitCode::from(exit::USAGE);
                 }
@@ -839,6 +833,10 @@ fn run_command<
     let mut envelope = run(session);
     let elapsed = started.elapsed();
     session.clear_progress_observer();
+    // Name-resolution refusals carry a neutral listing-operation marker
+    // (#888); the CLI renders it as its own `wright inspect` command —
+    // `wright serve` renders the operation name on the same result.
+    usage_hint::render_inspect_diagnostics(&mut envelope);
     // The transient activity line is fully cleared before the final result
     // renders, so progress text never competes with the verdict (#443).
     drop(activity);

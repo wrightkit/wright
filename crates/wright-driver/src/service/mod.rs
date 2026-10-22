@@ -33,6 +33,7 @@ mod callgraph;
 mod capabilities;
 mod cost;
 mod edit_statements;
+mod markers;
 mod simulate;
 
 /// The tool-service name and version.
@@ -44,6 +45,8 @@ pub const AGENT_CONTRACT: &str = "wright-agent/v1";
 const DEFAULT_CONTENT_RULES: usize = 20;
 
 pub use capabilities::{Capabilities, OPERATIONS};
+pub(crate) use markers::render_file_markers;
+pub use markers::render_list_markers;
 
 pub use crate::request::{
     Address, StatementEditChange, StatementEditRequest, StatementList, ToolRequest,
@@ -165,55 +168,9 @@ impl<'a> ToolService<'a> {
     /// for canonical validation and supplies the snapshot later queries
     /// read (#617); a provider that declines its compile keeps the
     /// check-only path.
-    pub fn handle(&mut self, request: &ToolRequest) -> ToolResponse {
-        let response = self.handle_full(request);
-        let ToolResponse::Ok { mut result } = response else {
-            return response;
-        };
-        match request {
-            ToolRequest::Check { all } => crate::essential::envelope(&mut result, *all),
-            ToolRequest::Analyze { all, .. } => {
-                result["result"] = crate::essential::analyze(&result["result"], *all);
-                crate::essential::envelope(&mut result, *all);
-            }
-            ToolRequest::Inspect { all } => {
-                result["result"] = crate::essential::inspect(&result["result"], *all);
-                crate::essential::envelope(&mut result, *all);
-            }
-            ToolRequest::Lint { all, .. } => result = crate::essential::lint(&result, *all),
-            ToolRequest::References { symbol, all, .. } => {
-                let id = match self.symbol_address(symbol) {
-                    Ok(id) => id,
-                    Err(error) => return ToolResponse::Error { error },
-                };
-                let usage = match self.semantic_query(Request::GetUsage { symbol: id }) {
-                    ToolResponse::Ok { result } => result,
-                    other => return other,
-                };
-                let mut payload = usage;
-                payload["snapshot"] = json!(self.generation);
-                if let Some(selected) = result.as_object_mut() {
-                    payload["references"] = selected.remove("references").unwrap_or_default();
-                    if let Some(selection) = selected.remove("selection") {
-                        payload["selection"] = selection;
-                    }
-                } else {
-                    payload["references"] = result;
-                }
-                result = crate::essential::query(&payload, *all);
-            }
-            ToolRequest::CostEstimate { all, .. } => result = crate::essential::cost(&result, *all),
-            ToolRequest::Rules { all, .. }
-            | ToolRequest::Symbols { all, .. }
-            | ToolRequest::Cfg { all, .. }
-            | ToolRequest::Findings { all, .. }
-            | ToolRequest::PersistentObjects { all }
-            | ToolRequest::CallGraph { all, .. } => result = crate::essential::query(&result, *all),
-            _ => {}
-        }
-        ToolResponse::Ok { result }
-    }
-
+    ///
+    /// `handle` itself lives in [`markers`] — it renders each refusal's
+    /// neutral markers in this surface's operation vocabulary (#888).
     pub(crate) fn handle_full(&mut self, request: &ToolRequest) -> ToolResponse {
         // ADR-0035: the `rules` `name` selection is removed vocabulary —
         // its presence is a request-shape error, refused like a schema

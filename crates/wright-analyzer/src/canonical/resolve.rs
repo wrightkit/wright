@@ -232,21 +232,26 @@ fn ordinal_form(address: &str) -> Option<(&str, usize)> {
     Some((name, ordinal))
 }
 
-/// A candidate's location as `file:line:col` — `file` is the canonical
-/// file index (the driver has the spellings) — or `<unknown>` without one.
+/// A candidate's location as `path:line:col` — the `{file:N}` marker
+/// carries the file-table index so each surface renders its own file
+/// spelling (#888) — or `<unknown>` without a span.
 fn location(span: Option<Span>) -> String {
     span.map_or_else(
         || "<unknown>".to_string(),
         |span| {
             format!(
                 "{}:{}:{}",
-                span.file.index(),
+                crate::service::marker::file(span.file.index()),
                 span.start.line,
                 span.start.col
             )
         },
     )
 }
+
+/// How many declared names an unknown-name error lists (#888); beyond the
+/// bound the error reports the total and names the unbounded listing.
+const NAME_LIST_LIMIT: usize = 20;
 
 fn unknown<'a>(
     code: &str,
@@ -255,9 +260,42 @@ fn unknown<'a>(
     declared: impl Iterator<Item = &'a Symbol>,
     operation: &str,
 ) -> ErrorInfo {
-    let candidates = nearest(name, declared.map(|symbol| symbol.name.as_str()));
+    let declared: Vec<&'a Symbol> = declared.collect();
+    let candidates = nearest(name, declared.iter().map(|symbol| symbol.name.as_str()));
     let hint = if candidates.is_empty() {
-        format!("no declared {noun} is near; the '{operation}' operation lists them")
+        // No near match: name the declared names — each once, in
+        // declaration order, bounded with the total (#888) — and the
+        // operation that lists them, as a marker each surface renders in
+        // its own spelling.
+        let mut seen = std::collections::HashSet::new();
+        let names: Vec<&str> = declared
+            .iter()
+            .filter(|symbol| seen.insert(symbol.name.as_str()))
+            .map(|symbol| symbol.name.as_str())
+            .collect();
+        if names.is_empty() {
+            format!(
+                "no declared {noun} is near; {} lists them",
+                crate::service::marker::list(operation, false)
+            )
+        } else {
+            let over = names.len() > NAME_LIST_LIMIT;
+            let mut listed: Vec<String> = names
+                .iter()
+                .take(NAME_LIST_LIMIT)
+                .map(|name| format!("'{name}'"))
+                .collect();
+            if over {
+                listed.push("…".to_string());
+            }
+            format!(
+                "no declared {noun} is near; declared {noun} names ({} total): {}; {} lists them{}",
+                names.len(),
+                listed.join(", "),
+                crate::service::marker::list(operation, over),
+                if over { " all" } else { "" },
+            )
+        }
     } else {
         format!(
             "nearest declared: {}",
