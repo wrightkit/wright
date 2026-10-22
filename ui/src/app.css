@@ -73,7 +73,8 @@
   --col-head-below: 6px;
   --col-head-line: 2px;
   --stmt-min-height: 40px;
-  --stmt-pad: 6px 8px;
+  --stmt-pad-block: 6px;
+  --stmt-pad-inline: 8px;
   --stmt-gap: 4px;
   --stmt-text: 14px;
   --stmt-indent: 18px;
@@ -248,6 +249,7 @@ select {
 /* The chevron points right when closed and rotates down when open. */
 .chev {
   display: inline-flex;
+  width: var(--chev-size);
 }
 
 .chev svg {
@@ -401,7 +403,8 @@ select {
   gap: 8px;
   min-height: var(--stmt-min-height);
   box-sizing: border-box;
-  padding: 6px 8px 6px calc(8px + var(--depth, 0) * var(--stmt-indent));
+  padding: var(--stmt-pad-block) var(--stmt-pad-inline) var(--stmt-pad-block)
+    calc(var(--stmt-pad-inline) + var(--depth, 0) * var(--stmt-indent));
   border-radius: 3px;
   background: var(--bar);
   margin-bottom: var(--stmt-gap);
