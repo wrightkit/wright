@@ -15,6 +15,7 @@
    * its editor. Staged edits mark their rows (change/delete) until the
    * pending list submits through `editStatements`.
    */
+  import { ChevronDown } from '@lucide/svelte'
   import { SvelteSet } from 'svelte/reactivity'
   import Expr from './Expr.svelte'
   import type { ChromeStrings } from './chrome'
@@ -251,17 +252,7 @@
         <div class="event-row">
           <span class="event-label">{row.label}</span>
           <span class="event-value"
-            >{row.value}<svg
-              viewBox="0 0 24 24"
-              width="14"
-              height="14"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg
-            ></span
+            >{row.value}<ChevronDown size={14} strokeWidth={2} aria-hidden="true" /></span
           >
         </div>
       {/each}

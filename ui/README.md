@@ -2,8 +2,8 @@
 
 The browser view for `wright ui` — the read-only structured Workshop rule
 view over the `wright-agent/v1` contract (ADR-0032); editing is a later
-layer. Svelte 5, TypeScript strict, Vite. The only runtime dependency is
-`svelte`; no component library, CSS framework, router, or state library.
+layer. Svelte 5, TypeScript strict, Vite. Runtime dependencies follow the
+[UI dependency registry](../docs/ui/dependencies.md); Lucide owns icons.
 
 The page comes alive only under `wright ui`: it reads `rules`
 (`content: true`), `lookup`, `symbols`, and `findings` through `POST /api`,
