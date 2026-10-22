@@ -615,8 +615,8 @@ fn dead_branch_fix(
         Action::End => {
             let chain = chain_if_index(&rule.actions, action_id)?;
             let anchor = program.action_span(rule_id, chain)?;
-            let anchor = scan.byte(anchor.end)?;
-            keyword_marker_start(&scan, "End", anchor)?
+            let (start, end) = word_back(&scan, scan.byte(anchor.end)?)?;
+            (&scan.document.text()[start..end] == "End").then_some(start)?
         }
         _ => return None,
     };
@@ -961,9 +961,6 @@ fn chain_marker_start(scan: &SourceScan, condition_end: usize, phrase: &str) -> 
     (&scan.document.text()[else_start..else_end] == "Else").then_some(else_start)
 }
 
-/// The start byte of the `keyword;` marker ending before `anchor` — an
-/// `Else` or `End` statement carries no span, so it is found by its `;`
-/// directly before the next authored position.
 fn keyword_marker_start(scan: &SourceScan, keyword: &str, anchor: usize) -> Option<usize> {
     let (semi, ';') = scan.prev(anchor)? else {
         return None;
