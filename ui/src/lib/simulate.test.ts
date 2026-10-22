@@ -95,16 +95,28 @@ describe('outcomeText', () => {
 })
 
 describe('variableRows and logRows', () => {
-  it('projects globals and player variables as rows', () => {
+  it('projects each `Val` variant as display text — `null` has no `value`', () => {
     const rows = variableRows({
       ...trace({ status: 'complete' }),
-      globals: { score: 3, flag: { value: true } },
-      players: { p1: { variables: { kills: 2 } } },
+      globals: {
+        score: { type: 'number', value: 3 },
+        flag: { type: 'bool', value: true },
+        name: { type: 'text', value: 'hi' },
+        unset: { type: 'null' },
+        seen: { type: 'array', value: [{ type: 'number', value: 1 }, { type: 'null' }] },
+        who: { type: 'player', value: 'p1' },
+      },
+      // Player state carries hero/team/world only at athena v0.2.0 — no
+      // variables are read from it.
+      players: { p1: { hero: 'Ana', team: 'team1', world: {} } },
     })
     expect(rows).toEqual([
-      { scope: 'global', name: 'score', value: '3' },
-      { scope: 'global', name: 'flag', value: 'true' },
-      { scope: 'p1', name: 'kills', value: '2' },
+      { name: 'score', value: '3' },
+      { name: 'flag', value: 'true' },
+      { name: 'name', value: 'hi' },
+      { name: 'unset', value: 'null' },
+      { name: 'seen', value: '[1, null]' },
+      { name: 'who', value: 'p1' },
     ])
   })
 

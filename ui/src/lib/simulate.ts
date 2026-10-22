@@ -65,27 +65,33 @@ export function outcomeText(trace: AthenaTrace): { status: string; detail: strin
   return { status: String(outcome.status), detail: null }
 }
 
-/** The trace's variable rows: each `globals` name and each player's
- * `variables` entry as `name → value` display text. */
-export function variableRows(trace: AthenaTrace): { scope: string; name: string; value: string }[] {
-  const rows: { scope: string; name: string; value: string }[] = []
-  for (const [name, entry] of Object.entries(trace.globals ?? {})) {
-    const value =
-      entry !== null && typeof entry === 'object'
-        ? ((entry as { value?: unknown }).value ?? entry)
-        : entry
-    rows.push({ scope: 'global', name, value: String(value) })
+/**
+ * One `athena` `Val` as display text. The wire shape is
+ * `{"type":"…","value":…}` (`serde(tag, content)`); `null` carries no
+ * `value` at all and `array`'s `value` is a list of `Val`s — neither
+ * tolerates a raw `String()` on the object.
+ */
+function valText(val: unknown): string {
+  if (val === null || typeof val !== 'object') return String(val)
+  const typed = val as { type?: string; value?: unknown }
+  switch (typed.type) {
+    case 'null':
+      return 'null'
+    case 'array':
+      return `[${(Array.isArray(typed.value) ? typed.value : []).map(valText).join(', ')}]`
+    default:
+      return String(typed.value ?? 'null')
   }
-  for (const [player, entry] of Object.entries(trace.players ?? {})) {
-    const variables =
-      entry !== null && typeof entry === 'object'
-        ? ((entry as { variables?: Record<string, unknown> }).variables ?? {})
-        : {}
-    for (const [name, value] of Object.entries(variables)) {
-      rows.push({ scope: player, name, value: String(value) })
-    }
-  }
-  return rows
+}
+
+/** The trace's variable rows: each `globals` name as `name → value`
+ * display text. Player variables are not in the trace at `athena`
+ * v0.2.0 — `players` carries hero/team/world only. */
+export function variableRows(trace: AthenaTrace): { name: string; value: string }[] {
+  return Object.entries(trace.globals ?? {}).map(([name, val]) => ({
+    name,
+    value: valText(val),
+  }))
 }
 
 /** The trace's log rows as `tick: text` display pairs. */

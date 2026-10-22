@@ -119,12 +119,12 @@
           {#each slots as slot, index (index)}
             {#if slot.team === team}
               <div class="slot" class:you={index === 0}>
-                <span class="slot-name">{index === 0 ? t.simYou : `${t.simSlot} ${index + 1}`}</span>
+                <span class="slot-name">{index === 0 ? t.simYou : `${t.simSlot} ${(index % 6) + 1}`}</span>
                 <Picker
                   options={heroOptions}
                   selected={slot.hero}
                   placeholder={t.simNoHero}
-                  ariaLabel={`${t.simSlot} ${index + 1}`}
+                  ariaLabel={`${t.simSlot} ${(index % 6) + 1}`}
                   onselect={(id) => (slot.hero = slot.hero === id ? null : id)}
                 />
               </div>
@@ -181,9 +181,9 @@
         </div>
         <h3>{t.simVariables}</h3>
         <div class="kv">
-          {#each variableRows(trace) as row (row.scope + row.name)}
+          {#each variableRows(trace) as row (row.name)}
             <div class="kv-row">
-              <span class="settings-name">{row.scope === 'global' ? row.name : `${row.scope}.${row.name}`}</span>
+              <span class="settings-name">{row.name}</span>
               <span class="settings-value">{row.value}</span>
             </div>
           {/each}

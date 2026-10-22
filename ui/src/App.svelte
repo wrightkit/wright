@@ -107,6 +107,9 @@
   // panel displays; `heroes` loads once, on the panel's first open.
   let project = $state<ProjectResult | null>(null)
   let heroes = $state<LookupEntry[] | null>(null)
+  // The locale `heroes` was listed in — a session-locale switch (#883)
+  // re-lists them so the panel's labels match every other on-screen name.
+  let heroesLocale = $state<string | null>(null)
 
   // The program's identity (`project`) and generation (the rules listing's
   // `snapshot`): the freshness pair an `editStatements` request carries.
@@ -380,12 +383,14 @@
   }
 
   /**
-   * The simulation panel (#836): its hero options load once on the first
-   * open — `listEntries` over the `Hero` domain in the session locale.
+   * The simulation panel (#836): its hero options are `listEntries` over
+   * the `Hero` domain in the session locale, re-listed when the locale
+   * changed since the last listing.
    */
   function openSimulate() {
     dialog = 'simulate'
-    if (heroes === null) {
+    if (heroes === null || heroesLocale !== sessionLocale) {
+      const locale = sessionLocale
       void (async () => {
         try {
           const response = await call({
@@ -393,16 +398,18 @@
             language: 'workshop',
             kind: 'enumMember',
             within: 'Hero',
-            locale: sessionLocale,
+            locale,
           })
+          // A locale switch during the fetch must not install stale labels.
+          if (locale !== sessionLocale) return
           if ('result' in response) {
-            heroes =
-              ((response.result as { entries?: LookupEntry[] }).entries ?? []).length > 0
-                ? (response.result as { entries: LookupEntry[] }).entries
-                : []
+            const entries = (response.result as { entries?: LookupEntry[] }).entries
+            heroes = entries ?? []
+            heroesLocale = locale
           }
         } catch {
           heroes = heroes ?? []
+          heroesLocale = locale
         }
       })()
     }
