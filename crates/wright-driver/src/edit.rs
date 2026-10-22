@@ -18,10 +18,10 @@ use serde::{Deserialize, Serialize};
 use workshop_rs::catalog::{Catalog, Locale};
 
 use crate::config::{SessionConfig, SourceKind};
+use crate::diag::workshop_diag;
 use crate::diag::{Diagnostic, Stage, source_provider_unavailable};
 use crate::input::{self, ResolvedInput};
 use crate::result::exit_code_from;
-use crate::session::workshop_diag;
 
 /// One proposed source edit.
 #[derive(Debug, Clone, Serialize, Deserialize)]

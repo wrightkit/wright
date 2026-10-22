@@ -329,11 +329,9 @@ impl<'a> ToolService<'a> {
     }
 
     fn loader_error(diagnostic: Diagnostic) -> ToolErrorInfo {
-        ToolErrorInfo {
-            code: diagnostic.code,
-            message: diagnostic.message,
-            fields: diagnostic.fields,
-        }
+        let mut error = ToolErrorInfo::new(diagnostic.code, diagnostic.message);
+        error.fields = diagnostic.fields;
+        error
     }
 
     /// Adopt a successfully loaded program: every adoption is a new
@@ -798,11 +796,7 @@ impl<'a> ToolService<'a> {
     ) -> Result<(), ToolErrorInfo> {
         selection
             .validate(self.session.lint_registry())
-            .map_err(|message| ToolErrorInfo {
-                code: "invalid-selection".to_string(),
-                message,
-                ..Default::default()
-            })?;
+            .map_err(|message| ToolErrorInfo::new("invalid-selection", message))?;
         let loaded = &self.snapshot().loaded;
         if let Some(file) = selection.file.as_deref()
             && let Some((message, fields)) = crate::select::file_error(
@@ -812,9 +806,8 @@ impl<'a> ToolService<'a> {
             )
         {
             return Err(ToolErrorInfo {
-                code: "invalid-selection".to_string(),
-                message,
                 fields,
+                ..ToolErrorInfo::new("invalid-selection", message)
             });
         }
         Ok(())

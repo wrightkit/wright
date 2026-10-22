@@ -134,9 +134,18 @@ pub(crate) fn source_span(span: workshop_rs::source::Span, path: String) -> Sour
 /// Convenience constructors for internal diagnostics.
 impl Diagnostic {
     /// An error diagnostic in the given stage.
+    ///
+    /// `code` must obey the diagnostic-code grammar
+    /// (`wright_analyzer::service::valid_code`); a violation is a bug, so it
+    /// fails a debug assertion.
     pub fn error(code: impl Into<String>, stage: Stage, message: impl Into<String>) -> Diagnostic {
+        let code = code.into();
+        debug_assert!(
+            wright_analyzer::service::valid_code(&code),
+            "diagnostic code {code:?} violates the code grammar"
+        );
         Diagnostic {
-            code: code.into(),
+            code,
             stage,
             severity: Severity::Error,
             message: message.into(),
@@ -159,10 +168,152 @@ impl Diagnostic {
     }
 }
 
+/// Map a `workshop-rs` error to a driver diagnostic.
+pub(crate) fn workshop_diag(
+    error: workshop_rs::WorkshopError,
+    resolved: &crate::input::ResolvedInput,
+) -> Diagnostic {
+    let to_span = |s: Option<workshop_rs::source::Span>| {
+        s.map(|span| source_span(span, resolved.display.clone()))
+    };
+    let (code, stage, span) = match &error {
+        workshop_rs::WorkshopError::Catalog(catalog) => {
+            return Diagnostic::error(
+                "catalog-error",
+                Stage::Internal,
+                format!("{}: {}", catalog.code, catalog.message),
+            );
+        }
+        workshop_rs::WorkshopError::Unknown { kind, span, .. }
+        | workshop_rs::WorkshopError::UnknownWithCandidates { kind, span, .. }
+        | workshop_rs::WorkshopError::NotDetected { kind, span, .. } => {
+            // Owner kinds are phrases (`"enum member"`); the emitted code is
+            // a single kebab-case token (`unknown-enum-member`, #789).
+            (
+                format!("unknown-{}", kind.replace(' ', "-")),
+                Stage::Frontend,
+                to_span(*span),
+            )
+        }
+        workshop_rs::WorkshopError::Malformed { span, .. } => {
+            ("parse-error".to_string(), Stage::Frontend, to_span(*span))
+        }
+        workshop_rs::WorkshopError::Unsupported { span, .. } => (
+            "unsupported-construct".to_string(),
+            Stage::Frontend,
+            to_span(*span),
+        ),
+        workshop_rs::WorkshopError::MissingMapping { .. } => {
+            ("missing-mapping".to_string(), Stage::Frontend, None)
+        }
+        _ => ("workshop-error".to_string(), Stage::Internal, None),
+    };
+    let mut diagnostic = Diagnostic::error(code, stage, error.to_string());
+    diagnostic.span = span;
+    diagnostic.source = Some(resolved.origin.clone());
+    diagnostic
+}
+
 pub(crate) fn source_provider_unavailable() -> Diagnostic {
     Diagnostic::error(
         "source-provider-unavailable",
         Stage::Internal,
         "the requested source-provider workflow is not currently shipped with Wright",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::SourceKind;
+    use crate::input::{InputTarget, ResolvedInput};
+    use std::path::PathBuf;
+
+    #[test]
+    fn error_accepts_a_kebab_case_code() {
+        let diagnostic = Diagnostic::error("unknown-enum-member", Stage::Frontend, "message");
+        assert_eq!(diagnostic.code, "unknown-enum-member");
+    }
+
+    #[test]
+    #[should_panic(expected = "violates the code grammar")]
+    fn error_rejects_a_spaced_code() {
+        let _ = Diagnostic::error("unknown-enum member", Stage::Frontend, "message");
+    }
+
+    #[test]
+    #[should_panic(expected = "violates the code grammar")]
+    fn error_rejects_an_uppercase_code() {
+        let _ = Diagnostic::error("Unknown-Value", Stage::Frontend, "message");
+    }
+
+    /// #871: `workshop_diag` builds `unknown-{kind}` codes from owner `kind`
+    /// phrases (`"enum member"` → `unknown-enum-member`), so every phrase
+    /// must stay grammar-valid after kebab-casing.
+    ///
+    /// `OWNER_KINDS` is the smallest test-side list because workshop-rs does
+    /// not expose one; keep it in sync with the `kind` first arguments at
+    /// `WorkshopError::unknown` / `unknown_at` / `not_detected` call sites in
+    /// workshop-rs (including the `frontend/parser.rs` helpers) and the
+    /// `variable_name` kinds in `rules/emitter.rs`.
+    #[test]
+    fn workshop_diag_codes_match_the_grammar_for_every_owner_kind() {
+        const OWNER_KINDS: &[&str] = &[
+            "action",
+            "enum domain",
+            "enum member",
+            "event",
+            "event player",
+            "event team",
+            "global variable",
+            "language",
+            "locale",
+            "localized string",
+            "lookup scope",
+            "modify operator",
+            "player variable",
+            "rule section",
+            "setting",
+            "setting boolean",
+            "settings enum",
+            "subroutine",
+            "top-level section",
+            "value",
+        ];
+        let resolved = ResolvedInput {
+            kind: SourceKind::Workshop,
+            text: String::new(),
+            path: None,
+            target: InputTarget::File,
+            root: PathBuf::new(),
+            cwd: PathBuf::new(),
+            display: "<test>".to_string(),
+            identity: String::new(),
+            origin: Origin {
+                kind: "workshop".to_string(),
+                locale: Some("en-US".to_string()),
+            },
+        };
+        let locale = workshop_rs::catalog::Locale::new("en-US");
+        for kind in OWNER_KINDS {
+            for error in [
+                workshop_rs::WorkshopError::unknown(kind, "spelling", locale.clone(), None),
+                workshop_rs::WorkshopError::not_detected(kind, "message", None),
+                workshop_rs::WorkshopError::unknown(kind, "spelling", locale.clone(), None)
+                    .with_candidates(vec!["candidate".to_string()]),
+            ] {
+                let diagnostic = workshop_diag(error, &resolved);
+                assert!(
+                    wright_analyzer::service::valid_code(&diagnostic.code),
+                    "kind {kind:?} produced code {:?}",
+                    diagnostic.code
+                );
+            }
+        }
+        let diagnostic = workshop_diag(
+            workshop_rs::WorkshopError::unknown("enum member", "x", locale, None),
+            &resolved,
+        );
+        assert_eq!(diagnostic.code, "unknown-enum-member");
+    }
 }

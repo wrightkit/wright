@@ -107,9 +107,8 @@ pub(crate) fn invalid_selection_fields(
 ) -> ToolResponse {
     ToolResponse::Error {
         error: ToolErrorInfo {
-            code: "invalid-selection".to_string(),
-            message,
             fields,
+            ..ToolErrorInfo::new("invalid-selection", message)
         },
     }
 }

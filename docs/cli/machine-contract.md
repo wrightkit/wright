@@ -66,6 +66,12 @@ Stable contract fields: `wright.contract`, `command`, `ok`, `exit`,
 `result` shape. Human-readable `message` wording is explicitly not part of the
 machine contract.
 
+A diagnostic `code` is a single kebab-case token — lowercase ASCII
+letters, digits, and hyphens, no spaces or other characters — and the
+constructors that emit codes assert that grammar (#871). The
+completeness-residual `workshop.<kind>.<name>` codes join kebab-case
+segments with dots.
+
 Diagnostic codes are stable per stage: `parse-error`, `unknown-*`,
 `unsupported-construct`, `settings-invalid`, `settings-placement` (frontend),
 `settings-unknown-key`, `settings-unknown-value` (validation), `convert-error`/

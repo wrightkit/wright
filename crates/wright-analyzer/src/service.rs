@@ -52,6 +52,16 @@ pub enum Response {
     Error { error: ErrorInfo },
 }
 
+/// Whether `code` obeys the diagnostic-code grammar: a single kebab-case
+/// token of lowercase ASCII letters, digits, and hyphens — no spaces or
+/// other characters (`docs/cli/machine-contract.md`).
+pub fn valid_code(code: &str) -> bool {
+    !code.is_empty()
+        && code
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
 /// A structured error payload.
 ///
 /// `fields` carries the refusal metadata surfaces reword or consume
@@ -68,6 +78,24 @@ pub struct ErrorInfo {
     pub fields: serde_json::Map<String, serde_json::Value>,
 }
 
+impl ErrorInfo {
+    /// An error payload carrying `code` and `message`. `code` must obey the
+    /// diagnostic-code grammar (`valid_code`); a violation is a bug, so it
+    /// fails a debug assertion.
+    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+        let code = code.into();
+        debug_assert!(
+            valid_code(&code),
+            "diagnostic code {code:?} violates the code grammar"
+        );
+        ErrorInfo {
+            code,
+            message: message.into(),
+            fields: Default::default(),
+        }
+    }
+}
+
 /// The origin of a compiled program, carried in tool responses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Origin {
@@ -77,4 +105,47 @@ pub struct Origin {
     /// The Workshop client locale, for Workshop-origin programs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub locale: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_code_accepts_kebab_tokens() {
+        for code in [
+            "parse-error",
+            "unknown-enum-member",
+            "invalid-selection",
+            "provider-refusal-x",
+            "w1",
+        ] {
+            assert!(valid_code(code), "{code}");
+        }
+    }
+
+    #[test]
+    fn valid_code_rejects_spaces_uppercase_empty_and_other_characters() {
+        for code in [
+            "unknown-enum member",
+            "Unknown-Value",
+            "",
+            "workshop.raw-setting.x",
+            "a_b",
+        ] {
+            assert!(!valid_code(code), "{code}");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "violates the code grammar")]
+    fn error_info_new_rejects_a_spaced_code() {
+        let _ = ErrorInfo::new("unknown-enum member", "message");
+    }
+
+    #[test]
+    #[should_panic(expected = "violates the code grammar")]
+    fn error_info_new_rejects_an_uppercase_code() {
+        let _ = ErrorInfo::new("Unknown-Value", "message");
+    }
 }

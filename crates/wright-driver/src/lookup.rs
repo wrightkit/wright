@@ -113,11 +113,7 @@ pub(crate) fn lookup(
 
 pub(crate) fn refusal(code: &str, message: impl Into<String>) -> ToolResponse {
     ToolResponse::Error {
-        error: ToolErrorInfo {
-            code: code.to_string(),
-            message: message.into(),
-            ..Default::default()
-        },
+        error: ToolErrorInfo::new(code, message),
     }
 }
 
@@ -766,5 +762,22 @@ fn lpp_default_text(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
         other => other.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic(expected = "violates the code grammar")]
+    fn refusal_rejects_a_spaced_code() {
+        let _ = refusal("invalid language", "message");
+    }
+
+    #[test]
+    #[should_panic(expected = "violates the code grammar")]
+    fn refusal_rejects_an_uppercase_code() {
+        let _ = refusal("Invalid-Language", "message");
     }
 }

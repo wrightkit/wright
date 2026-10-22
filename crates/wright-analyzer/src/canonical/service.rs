@@ -220,11 +220,10 @@ impl<'a> SemanticService<'a> {
             Ok(req) => req,
             Err(err) => {
                 return serde_json::to_string(&Response::Error {
-                    error: ErrorInfo {
-                        code: "invalid-json".to_string(),
-                        message: format!("could not parse request JSON: {err}"),
-                        ..Default::default()
-                    },
+                    error: ErrorInfo::new(
+                        "invalid-json",
+                        format!("could not parse request JSON: {err}"),
+                    ),
                 })
                 .expect("error response serializes");
             }
@@ -291,11 +290,7 @@ impl<'a> SemanticService<'a> {
     }
     fn error(&self, code: &str, message: String) -> Response {
         Response::Error {
-            error: ErrorInfo {
-                code: code.to_string(),
-                message,
-                ..Default::default()
-            },
+            error: ErrorInfo::new(code, message),
         }
     }
 }

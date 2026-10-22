@@ -21,7 +21,7 @@ use crate::cache;
 use crate::config::{InputSpec, SessionConfig, SourceKind};
 use crate::diag::{
     Diagnostic, Origin, Position, Severity, SourceSpan, Stage, Status, source_provider_unavailable,
-    source_span,
+    source_span, workshop_diag,
 };
 use crate::input::{self, InputTarget, ResolvedInput};
 use crate::input_identity;
@@ -1364,57 +1364,6 @@ fn root_relative(path: Option<&Path>, root: &Path) -> Option<String> {
     match abs_path.strip_prefix(&abs_root) {
         Ok(relative) if !relative.as_os_str().is_empty() => Some(relative.display().to_string()),
         _ => None,
-    }
-}
-
-pub(crate) fn workshop_diag(
-    error: workshop_rs::WorkshopError,
-    resolved: &ResolvedInput,
-) -> Diagnostic {
-    let to_span = |s: Option<workshop_rs::source::Span>| {
-        s.map(|span| crate::diag::source_span(span, resolved.display.clone()))
-    };
-    let (code, stage, span) = match &error {
-        workshop_rs::WorkshopError::Catalog(catalog) => {
-            return Diagnostic::error(
-                "catalog-error",
-                Stage::Internal,
-                format!("{}: {}", catalog.code, catalog.message),
-            );
-        }
-        workshop_rs::WorkshopError::Unknown { kind, span, .. }
-        | workshop_rs::WorkshopError::UnknownWithCandidates { kind, span, .. }
-        | workshop_rs::WorkshopError::NotDetected { kind, span, .. } => {
-            // Owner kinds are phrases (`"enum member"`); the emitted code is
-            // a single kebab-case token (`unknown-enum-member`, #789).
-            (
-                format!("unknown-{}", kind.replace(' ', "-")),
-                Stage::Frontend,
-                to_span(*span),
-            )
-        }
-        workshop_rs::WorkshopError::Malformed { span, .. } => {
-            ("parse-error".to_string(), Stage::Frontend, to_span(*span))
-        }
-        workshop_rs::WorkshopError::Unsupported { span, .. } => (
-            "unsupported-construct".to_string(),
-            Stage::Frontend,
-            to_span(*span),
-        ),
-        workshop_rs::WorkshopError::MissingMapping { .. } => {
-            ("missing-mapping".to_string(), Stage::Frontend, None)
-        }
-        _ => ("workshop-error".to_string(), Stage::Internal, None),
-    };
-    Diagnostic {
-        code,
-        stage,
-        severity: crate::diag::Severity::Error,
-        message: error.to_string(),
-        status: None,
-        span,
-        source: Some(resolved.origin.clone()),
-        fields: Default::default(),
     }
 }
 

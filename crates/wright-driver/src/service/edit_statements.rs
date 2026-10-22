@@ -116,11 +116,10 @@ impl<'a> ToolService<'a> {
                 Address::Id(id) if (*id as usize) < effective.program.rules.len() => *id as usize,
                 Address::Id(id) => {
                     return Err(ToolResponse::Error {
-                        error: ToolErrorInfo {
-                            code: "invalid-selection".to_string(),
-                            message: format!("unknown rule {id}"),
-                            ..Default::default()
-                        },
+                        error: ToolErrorInfo::new(
+                            "invalid-selection",
+                            format!("unknown rule {id}"),
+                        ),
                     });
                 }
                 Address::Name(name) => {

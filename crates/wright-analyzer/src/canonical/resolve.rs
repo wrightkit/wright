@@ -143,9 +143,8 @@ impl SemanticIndex {
             fields.insert("unaddressable".to_string(), true.into());
         }
         ErrorInfo {
-            code: "ambiguous-rule".to_string(),
-            message: format!("ambiguous rule '{address}'"),
             fields,
+            ..ErrorInfo::new("ambiguous-rule", format!("ambiguous rule '{address}'"))
         }
     }
 
@@ -198,9 +197,8 @@ impl SemanticIndex {
                         .collect(),
                 );
                 Err(ErrorInfo {
-                    code: "ambiguous-symbol".to_string(),
-                    message: format!("ambiguous symbol '{address}'"),
                     fields,
+                    ..ErrorInfo::new("ambiguous-symbol", format!("ambiguous symbol '{address}'"))
                 })
             }
         }
@@ -319,9 +317,8 @@ fn unknown<'a>(
         )
     };
     ErrorInfo {
-        code: code.to_string(),
-        message: format!("unknown {noun} '{name}'; {hint}"),
         fields,
+        ..ErrorInfo::new(code, format!("unknown {noun} '{name}'; {hint}"))
     }
 }
 
