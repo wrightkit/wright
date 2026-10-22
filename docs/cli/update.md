@@ -32,10 +32,14 @@ workflow, so it is text-only and produces no `wright-result/v1` envelope.
   update keeps an installation that is already at or newer than the
   resolved release, and an explicit `--version` is the only downgrade path.
 
-Supported self-update platforms mirror `install.sh`: Linux x86_64 and macOS
-(x86_64/arm64), mapped to the release target matrix in `docs/release.md`.
-On Windows, standalone self-update is unsupported with guidance to
-`winget upgrade WrightKit.Wright` / `scoop update wright`.
+Supported self-update platforms mirror the installers: Linux x86_64, macOS
+(x86_64/arm64), and Windows x86_64, mapped to the release target matrix in
+`docs/release.md`. Windows installs published as `.zip` archives holding
+`wright.exe` and `wright-lsp.exe`; the running `wright.exe` is replaced in
+place after it exits. If an editor holds `wright-lsp.exe` open, the update
+fails before changing anything; close it and run `wright update` again.
+Installations from Scoop or WinGet are package-manager-managed (below) and
+upgrade with `scoop update wright` / `winget upgrade WrightKit.Wright`.
 
 Package-manager-managed installations are detected from the executable's
 location (Homebrew/Cellar, Scoop, WinGet paths). Through `wright update` the

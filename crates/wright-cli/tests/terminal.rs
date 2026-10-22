@@ -258,7 +258,8 @@ fn update_pass() {
         &dir,
         &["update"],
         &[
-            ("WRIGHT_INSTALL_OS", "windows".to_string()),
+            ("WRIGHT_INSTALL_OS", "plan9".to_string()),
+            ("WRIGHT_INSTALL_ARCH", "x86_64".to_string()),
             (
                 "WRIGHT_PROVIDER_DATA_DIR",
                 dir.join("provider-data").to_string_lossy().into_owned(),
@@ -275,7 +276,10 @@ fn update_unsupported() {
         "update_unsupported",
         &dir,
         &["update", "self"],
-        &[("WRIGHT_INSTALL_OS", "windows".to_string())],
+        &[
+            ("WRIGHT_INSTALL_OS", "plan9".to_string()),
+            ("WRIGHT_INSTALL_ARCH", "x86_64".to_string()),
+        ],
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

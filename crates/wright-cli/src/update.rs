@@ -1,7 +1,6 @@
 use std::cmp::Ordering;
 use std::io::Read;
-use std::path::{Path, PathBuf};
-use std::process::Command as Process;
+use std::path::Path;
 use std::time::Duration;
 
 use clap::{Args, Subcommand, ValueEnum};
@@ -9,6 +8,8 @@ use wright_driver::{OpyProviderConfig, OpyProviderError, ResolvedOpyProvider, sh
 
 const DEFAULT_BASE_URL: &str = "https://releases.wrightkit.dev/wright";
 const USER_AGENT: &str = concat!("wright-update/", env!("CARGO_PKG_VERSION"));
+
+mod install;
 
 mod exit {
     pub(super) const SUCCESS: u8 = 0;
@@ -76,6 +77,32 @@ impl UpdateError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Platform {
     target: &'static str,
+    windows: bool,
+}
+
+impl Platform {
+    fn archive_name(self, version: &str) -> String {
+        let ext = if self.windows { "zip" } else { "tar.gz" };
+        format!("wright-{version}-{}.{ext}", self.target)
+    }
+
+    /// The installed file name of a release binary.
+    fn exe(self, name: &str) -> String {
+        if self.windows {
+            format!("{name}.exe")
+        } else {
+            name.to_string()
+        }
+    }
+
+    /// The official installer command, quoted in reinstall guidance.
+    fn installer(self) -> &'static str {
+        if self.windows {
+            "irm https://install.wrightkit.dev/wright/install.ps1 | iex"
+        } else {
+            "curl -fsSL https://install.wrightkit.dev/wright/install.sh | bash"
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -365,10 +392,11 @@ fn self_update(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateEr
             exe.display()
         ))
     })?;
-    if !install_dir.join("wright-lsp").is_file() {
+    if !install_dir.join(platform.exe("wright-lsp")).is_file() {
         return Err(UpdateError::failed(format!(
-            "wright-lsp was not found next to wright at {}; this installation was not created by the official installer — reinstall with `curl -fsSL https://install.wrightkit.dev/wright/install.sh | bash` to restore a matched pair",
-            install_dir.display()
+            "wright-lsp was not found next to wright at {}; this installation was not created by the official installer — reinstall with `{}` to restore a matched pair",
+            install_dir.display(),
+            platform.installer()
         )));
     }
 
@@ -426,7 +454,7 @@ fn self_update(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateEr
         Some(c) => c,
         None => update_client()?,
     };
-    install_version(
+    install::install_version(
         &client,
         &target_version,
         platform,
@@ -441,22 +469,21 @@ fn detect_platform() -> Result<Platform, UpdateError> {
 }
 
 fn detect_platform_for(os: &str, arch: &str) -> Result<Platform, UpdateError> {
-    if os == "windows" {
-        return Err(UpdateError::unsupported(
-            "standalone self-update is not supported on Windows; upgrade with `winget upgrade WrightKit.Wright` or `scoop update wright`",
-        ));
-    }
     let target = match (os, arch) {
         ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
         ("darwin", "x86_64") => "x86_64-apple-darwin",
         ("darwin", "aarch64") => "aarch64-apple-darwin",
+        ("windows", "x86_64") => "x86_64-pc-windows-msvc",
         _ => {
             return Err(UpdateError::unsupported(format!(
-                "unsupported platform {os}/{arch} (supported: linux/x86_64, darwin/x86_64, darwin/aarch64); use the official installer (curl -fsSL https://install.wrightkit.dev/wright/install.sh | bash) or a package manager"
+                "unsupported platform {os}/{arch} (supported: linux/x86_64, darwin/x86_64, darwin/aarch64, windows/x86_64); use the official installer (curl -fsSL https://install.wrightkit.dev/wright/install.sh | bash) or a package manager"
             )));
         }
     };
-    Ok(Platform { target })
+    Ok(Platform {
+        target,
+        windows: os == "windows",
+    })
 }
 
 fn env_os() -> String {
@@ -514,172 +541,6 @@ fn parse_latest_version(body: &str) -> Option<String> {
     let version = body.trim().trim_start_matches('v');
     parse_version(version).ok()?;
     Some(version.to_string())
-}
-
-fn install_version(
-    client: &reqwest::blocking::Client,
-    version: &str,
-    platform: Platform,
-    base_url: &str,
-    install_dir: &Path,
-) -> Result<(), UpdateError> {
-    let archive_name = format!("wright-{version}-{}.tar.gz", platform.target);
-    let archive_url = format!(
-        "{}/releases/{version}/{archive_name}",
-        base_url.trim_end_matches('/')
-    );
-    let checksum_url = format!("{archive_url}.sha256");
-
-    println!("==> downloading {archive_url}");
-    let archive = fetch(client, &archive_url)?;
-    let checksum = fetch_text(client, &checksum_url)?;
-    println!("==> verifying SHA-256 checksum");
-    verify_checksum(&archive, &checksum, &archive_name)?;
-
-    ensure_writable(install_dir)?;
-    let staging = staging_dir(install_dir)?;
-    let result = (|| -> Result<(), UpdateError> {
-        unpack(&archive, &staging, version, platform.target)?;
-        let payload = validated_payload(&staging, version, platform.target)?;
-        replace_binary(&payload.join("wright-lsp"), &install_dir.join("wright-lsp"))?;
-        replace_binary(&payload.join("wright"), &install_dir.join("wright"))?;
-        Ok(())
-    })();
-    let _ = std::fs::remove_dir_all(&staging);
-    result?;
-
-    smoke_check(install_dir, version)?;
-    println!(
-        "==> done: wright and wright-lsp {version} installed in {}",
-        install_dir.display()
-    );
-    let _ = crate::completion::refresh_installed_completions();
-    Ok(())
-}
-
-fn staging_dir(install_dir: &Path) -> Result<PathBuf, UpdateError> {
-    let staging = install_dir.join(format!(
-        ".wright-update-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or_default()
-    ));
-    std::fs::create_dir_all(&staging).map_err(|e| {
-        UpdateError::failed(format!(
-            "could not create a staging directory in {}: {e}",
-            install_dir.display()
-        ))
-    })?;
-    Ok(staging)
-}
-
-fn unpack(archive: &[u8], dest: &Path, version: &str, target: &str) -> Result<(), UpdateError> {
-    let decoder = flate2::read::GzDecoder::new(archive);
-    tar::Archive::new(decoder).unpack(dest).map_err(|e| {
-        UpdateError::failed(format!(
-            "failed to extract wright-{version}-{target}.tar.gz: {e}"
-        ))
-    })
-}
-
-fn validated_payload(staging: &Path, version: &str, target: &str) -> Result<PathBuf, UpdateError> {
-    let payload = staging.join(format!("wright-{version}-{target}"));
-    if !payload.join("wright").is_file() || !payload.join("wright-lsp").is_file() {
-        return Err(UpdateError::failed(format!(
-            "unexpected archive layout: expected 'wright' and 'wright-lsp' inside {}",
-            payload.display()
-        )));
-    }
-    Ok(payload)
-}
-
-fn verify_checksum(
-    archive: &[u8],
-    checksum_file: &str,
-    archive_name: &str,
-) -> Result<(), UpdateError> {
-    let published = checksum_file
-        .split_whitespace()
-        .next()
-        .ok_or_else(|| UpdateError::failed(format!("empty checksum file for {archive_name}")))?;
-    if published.len() != 64 || !published.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(UpdateError::failed(format!(
-            "invalid checksum file for {archive_name}: expected one SHA-256 hex digest (got '{}')",
-            truncate(published)
-        )));
-    }
-    let actual = sha256_hex(archive);
-    if !actual.eq_ignore_ascii_case(published) {
-        return Err(UpdateError::failed(format!(
-            "checksum verification failed for {archive_name} (published {published}, got {actual}); the download may be corrupted or tampered with — nothing was changed"
-        )));
-    }
-    Ok(())
-}
-
-fn ensure_writable(install_dir: &Path) -> Result<(), UpdateError> {
-    let probe = install_dir.join(format!(".wright-update-probe-{}", std::process::id()));
-    std::fs::write(&probe, b"").map_err(|e| {
-        UpdateError::failed(format!(
-            "installation directory {} is not writable ({e}); fix permissions or reinstall with the official installer (curl -fsSL https://install.wrightkit.dev/wright/install.sh | bash)",
-            install_dir.display()
-        ))
-    })?;
-    let _ = std::fs::remove_file(&probe);
-    Ok(())
-}
-
-fn replace_binary(source: &Path, destination: &Path) -> Result<(), UpdateError> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(source)
-            .map_err(|e| UpdateError::failed(format!("could not read {}: {e}", source.display())))?
-            .permissions()
-            .mode();
-        std::fs::set_permissions(source, std::fs::Permissions::from_mode(mode | 0o111)).map_err(
-            |e| {
-                UpdateError::failed(format!(
-                    "could not make {} executable: {e}",
-                    source.display()
-                ))
-            },
-        )?;
-    }
-    std::fs::rename(source, destination).map_err(|error| {
-        UpdateError::failed(format!(
-            "could not replace {}: {error}; reinstall with the official installer (curl -fsSL https://install.wrightkit.dev/wright/install.sh | bash)",
-            destination.display()
-        ))
-    })
-}
-
-fn smoke_check(install_dir: &Path, version: &str) -> Result<(), UpdateError> {
-    check_version(&install_dir.join("wright"), version)?;
-    check_version(&install_dir.join("wright-lsp"), version)
-}
-
-fn check_version(exe: &Path, version: &str) -> Result<(), UpdateError> {
-    let output = Process::new(exe)
-        .arg("--version")
-        .output()
-        .map_err(|error| {
-            UpdateError::failed(format!(
-                "smoke check failed: could not run {}: {error}",
-                exe.display()
-            ))
-        })?;
-    let reported = String::from_utf8_lossy(&output.stdout);
-    if !reported.contains(version) {
-        return Err(UpdateError::failed(format!(
-            "smoke check failed: `{} --version` did not report version {version} (got {:?}); reinstall with the official installer (curl -fsSL https://install.wrightkit.dev/wright/install.sh | bash)",
-            exe.display(),
-            reported.trim()
-        )));
-    }
-    Ok(())
 }
 
 fn update_client() -> Result<reqwest::blocking::Client, UpdateError> {
@@ -962,12 +823,27 @@ mod tests {
     }
 
     #[test]
-    fn windows_and_unknown_platforms_are_refused() {
-        let error = detect_platform_for("windows", "x86_64").unwrap_err();
-        assert_eq!(error.exit_code(), exit::UNSUPPORTED);
-        assert!(error.message().contains("winget"));
-        let error = detect_platform_for("linux", "arm64").unwrap_err();
-        assert_eq!(error.exit_code(), exit::UNSUPPORTED);
+    fn windows_maps_to_the_zip_release() {
+        let platform = detect_platform_for("windows", "x86_64").unwrap();
+        assert_eq!(platform.target, "x86_64-pc-windows-msvc");
+        assert_eq!(
+            platform.archive_name("9.9.9"),
+            "wright-9.9.9-x86_64-pc-windows-msvc.zip"
+        );
+        assert_eq!(platform.exe("wright-lsp"), "wright-lsp.exe");
+        assert!(platform.installer().contains("install.ps1"));
+    }
+
+    #[test]
+    fn unknown_platforms_are_refused() {
+        for (os, arch) in [
+            ("linux", "arm64"),
+            ("windows", "aarch64"),
+            ("freebsd", "x86_64"),
+        ] {
+            let error = detect_platform_for(os, arch).unwrap_err();
+            assert_eq!(error.exit_code(), exit::UNSUPPORTED);
+        }
     }
 
     #[test]
@@ -1012,71 +888,6 @@ mod tests {
             provenance_of("/Users/me/homebrewed/wright"),
             Provenance::Standalone
         );
-    }
-
-    #[test]
-    fn checksum_verification_accepts_good_and_rejects_bad() {
-        let bytes = b"the archive bytes";
-        let name = "wright-9.9.9-x86_64-unknown-linux-gnu.tar.gz";
-        let good = format!("{}  {name}\n", sha256_hex(bytes));
-        verify_checksum(bytes, &good, name).unwrap();
-
-        let bad = format!("{}  archive\n", sha256_hex(b"other bytes"));
-        let error = verify_checksum(bytes, &bad, "archive").unwrap_err();
-        assert!(error.message().contains("checksum verification failed"));
-
-        let malformed = "not-a-hash  archive\n";
-        let error = verify_checksum(bytes, malformed, "archive").unwrap_err();
-        assert!(error.message().contains("invalid checksum"));
-
-        let short = "deadbeef\n";
-        assert!(verify_checksum(bytes, short, "archive").is_err());
-    }
-
-    #[test]
-    fn archive_layout_is_validated_before_install() {
-        let staged =
-            std::env::temp_dir().join(format!("wright-update-layout-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&staged);
-        std::fs::create_dir_all(&staged).unwrap();
-        let bytes = build_archive("9.9.9", &[("wright", b"#!/bin/sh\n")]);
-        unpack(&bytes, &staged, "9.9.9", "x86_64-unknown-linux-gnu").unwrap();
-        let error = validated_payload(&staged, "9.9.9", "x86_64-unknown-linux-gnu").unwrap_err();
-        assert!(error.message().contains("unexpected archive layout"));
-        let _ = std::fs::remove_dir_all(&staged);
-
-        let staged =
-            std::env::temp_dir().join(format!("wright-update-layout-ok-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&staged);
-        std::fs::create_dir_all(&staged).unwrap();
-        let bytes = build_archive(
-            "9.9.9",
-            &[("wright", b"#!/bin/sh\n"), ("wright-lsp", b"#!/bin/sh\n")],
-        );
-        unpack(&bytes, &staged, "9.9.9", "x86_64-unknown-linux-gnu").unwrap();
-        let payload = validated_payload(&staged, "9.9.9", "x86_64-unknown-linux-gnu").unwrap();
-        assert!(payload.join("wright").is_file());
-        assert!(payload.join("wright-lsp").is_file());
-        let _ = std::fs::remove_dir_all(&staged);
-    }
-
-    /// Build a gzipped tar archive with `wright-<version>-<target>/` layout.
-    fn build_archive(version: &str, files: &[(&str, &[u8])]) -> Vec<u8> {
-        let dir = format!("wright-{version}-x86_64-unknown-linux-gnu");
-        let mut builder = tar::Builder::new(Vec::new());
-        for (name, content) in files {
-            let path = format!("{dir}/{name}");
-            let mut header = tar::Header::new_gnu();
-            header.set_size(content.len() as u64);
-            header.set_mode(0o755);
-            header.set_cksum();
-            builder
-                .append_data(&mut header, path, &content[..])
-                .unwrap();
-        }
-        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-        std::io::Write::write_all(&mut encoder, &builder.into_inner().unwrap()).unwrap();
-        encoder.finish().unwrap()
     }
 
     fn provenance_of(path: &str) -> Provenance {

@@ -33,6 +33,7 @@ reqwest.workspace = true
 wright-driver.workspace = true
 getrandom = { version = "0.4", optional = true }
 tiny_http = { version = "0.12", optional = true }
+zip = { version = "9.0.5", default-features = false, features = ["deflate-flate2"] }
 
 [dev-dependencies]
 insta = { version = "1", features = ["json"] }
@@ -40,3 +41,6 @@ jsonschema = { version = "0.58", default-features = false }
 sha2.workspace = true
 wright-analyzer.workspace = true
 workshop-rs.workspace = true
+
+[target."cfg(windows)".dependencies]
+self-replace = "1.5.0"

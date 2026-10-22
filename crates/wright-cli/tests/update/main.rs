@@ -1,121 +1,18 @@
 use std::collections::HashMap;
-use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
 
 use sha2::Digest;
+
+mod server;
+
+use server::MockServer;
 
 const RELEASE: &str = "9.9.9";
 const TRIPLE: &str = "x86_64-unknown-linux-gnu";
 const PROVIDER_OLD: &str = "1.0.0";
 const PROVIDER_RELEASE: &str = "1.4.0";
-
-struct MockServer {
-    addr: SocketAddr,
-    shutdown: Arc<AtomicBool>,
-    requests: Arc<Mutex<Vec<String>>>,
-    thread: Option<JoinHandle<()>>,
-}
-
-impl MockServer {
-    fn new(files: HashMap<String, Vec<u8>>) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("binds an ephemeral port");
-        let addr = listener.local_addr().expect("bound address");
-        let files = Arc::new(files);
-        let requests = Arc::new(Mutex::new(Vec::new()));
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let thread_shutdown = shutdown.clone();
-        let thread_requests = requests.clone();
-        let thread = std::thread::spawn(move || {
-            while !thread_shutdown.load(Ordering::Relaxed) {
-                match listener.accept() {
-                    Ok((stream, _)) => serve(stream, &files, &thread_requests),
-                    Err(_) => break,
-                }
-            }
-        });
-        MockServer {
-            addr,
-            shutdown,
-            requests,
-            thread: Some(thread),
-        }
-    }
-
-    fn base_url(&self) -> String {
-        format!("http://127.0.0.1:{}", self.addr.port())
-    }
-
-    fn requests(&self) -> Vec<String> {
-        self.requests.lock().unwrap().clone()
-    }
-
-    fn env(&self) -> Vec<(&'static str, String)> {
-        vec![
-            ("WRIGHT_INSTALL_BASE_URL", self.base_url()),
-            ("WRIGHT_INSTALL_OS", "linux".to_string()),
-            ("WRIGHT_INSTALL_ARCH", "x86_64".to_string()),
-        ]
-    }
-}
-
-impl Drop for MockServer {
-    fn drop(&mut self) {
-        self.shutdown.store(true, Ordering::Relaxed);
-        // A blocked accept() is not woken by closing the listener; connect
-        // once so the serving thread observes the flag and exits.
-        if let Ok(stream) = TcpStream::connect(self.addr) {
-            drop(stream);
-        }
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-    }
-}
-
-fn serve(mut stream: TcpStream, files: &HashMap<String, Vec<u8>>, requests: &Mutex<Vec<String>>) {
-    let mut request = Vec::new();
-    let mut buf = [0u8; 1024];
-    loop {
-        match stream.read(&mut buf) {
-            Ok(0) | Err(_) => return,
-            Ok(n) => {
-                request.extend_from_slice(&buf[..n]);
-                if request.windows(4).any(|window| window == b"\r\n\r\n") {
-                    break;
-                }
-            }
-        }
-    }
-    let request_line = String::from_utf8_lossy(&request);
-    let path = request_line
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .unwrap_or("/");
-    let path = path.split('?').next().unwrap_or(path);
-    requests.lock().unwrap().push(path.to_string());
-    match files.get(path) {
-        Some(body) => {
-            let header = format!(
-                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                body.len()
-            );
-            let _ = stream.write_all(header.as_bytes());
-            let _ = stream.write_all(body);
-        }
-        None => {
-            let _ = stream.write_all(
-                b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-            );
-        }
-    }
-    let _ = stream.flush();
-}
 
 /// A release mock in the R2 distribution shape: the plain-text latest pointer
 /// plus the immutable versioned archive and checksum.
@@ -1064,7 +961,7 @@ fn terminal_update_reports_failures_under_the_tag() {
 
 #[test]
 fn terminal_update_reports_unsupported_platforms() {
-    // `update self` on Windows is UNSUPPORTED (exit 3) and reports under
+    // `update self` on an unknown platform is UNSUPPORTED (exit 3) and reports under
     // the tag (#795).
     let dir = install_dir("terminal-unsupported");
     let output = run_update(
@@ -1077,7 +974,7 @@ fn terminal_update_reports_unsupported_platforms() {
             "--color",
             "never",
         ],
-        &[("WRIGHT_INSTALL_OS", "windows".to_string())],
+        &[("WRIGHT_INSTALL_OS", "freebsd".to_string())],
     );
     assert_eq!(output.status.code(), Some(3));
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1085,6 +982,68 @@ fn terminal_update_reports_unsupported_platforms() {
         stderr.starts_with(" UNSUPPORTED  update\n"),
         "the unsupported tag leads: {stderr}"
     );
-    assert!(stderr.contains("not supported on Windows"), "{stderr}");
+    assert!(stderr.contains("unsupported platform freebsd"), "{stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn windows_zip_release_replaces_both_exe_binaries() {
+    const WINDOWS_TRIPLE: &str = "x86_64-pc-windows-msvc";
+    let name = format!("wright-{RELEASE}-{WINDOWS_TRIPLE}.zip");
+    let dir_in_zip = format!("wright-{RELEASE}-{WINDOWS_TRIPLE}");
+    let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    for exe in ["wright", "wright-lsp"] {
+        let options = zip::write::SimpleFileOptions::default().unix_permissions(0o755);
+        writer
+            .start_file(format!("{dir_in_zip}/{exe}.exe"), options)
+            .unwrap();
+        writer
+            .write_all(format!("#!/bin/sh\necho \"fake {exe} {RELEASE}\"\n").as_bytes())
+            .unwrap();
+    }
+    let archive = writer.finish().unwrap().into_inner();
+    let mut files = HashMap::new();
+    files.insert(
+        "/latest/version".to_string(),
+        format!("{RELEASE}\n").into_bytes(),
+    );
+    files.insert(format!("/releases/{RELEASE}/{name}"), archive.clone());
+    files.insert(
+        format!("/releases/{RELEASE}/{name}.sha256"),
+        format!("{}  {name}\n", sha256_hex(&archive)).into_bytes(),
+    );
+    let server = MockServer::new(files);
+
+    let dir = install_dir("windows-zip");
+    std::fs::rename(dir.join("wright"), dir.join("wright.exe")).unwrap();
+    std::fs::rename(dir.join("wright-lsp"), dir.join("wright-lsp.exe")).unwrap();
+    let mut command = Command::new(dir.join("wright.exe"));
+    command
+        .args(["update", "self"])
+        .env("WRIGHT_INSTALL_OS", "windows")
+        .env("WRIGHT_INSTALL_ARCH", "x86_64")
+        .stdin(Stdio::null());
+    command.env("WRIGHT_INSTALL_BASE_URL", server.base_url());
+    let output = command.output().unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for exe in ["wright", "wright-lsp"] {
+        assert_eq!(
+            String::from_utf8_lossy(&read(&dir.join(format!("{exe}.exe")))),
+            format!("#!/bin/sh\necho \"fake {exe} {RELEASE}\"\n")
+        );
+    }
+    assert_eq!(
+        server.requests(),
+        vec![
+            "/latest/version".to_string(),
+            format!("/releases/{RELEASE}/{name}"),
+            format!("/releases/{RELEASE}/{name}.sha256"),
+        ]
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
