@@ -1,9 +1,4 @@
-/**
- * ADR-0036 decision 6: every runtime dependency in `package.json` appears
- * in `docs/ui/dependencies.md`. CI enforces the same invariant through
- * `scripts/check-deps.mjs`; this keeps it inside `npm test` so a missing
- * row fails before push.
- */
+// Runtime dependency registry check (ADR-0036 decision 6).
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import process from 'node:process'

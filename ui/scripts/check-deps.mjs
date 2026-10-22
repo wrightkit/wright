@@ -1,9 +1,4 @@
-// Runtime dependency registry check (ADR-0036 decision 6): every entry in
-// `dependencies` must appear in docs/ui/dependencies.md — the registry keeps
-// one library per concern, so a dependency lands in the same change as its
-// row. Run in CI:
-//
-//   node scripts/check-deps.mjs
+// Runtime dependency registry check (ADR-0036 decision 6).
 
 import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'

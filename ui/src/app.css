@@ -1094,6 +1094,7 @@ details.debug pre {
 .picker-option {
   display: block;
   width: 100%;
+  box-sizing: border-box;
   padding: 0.3rem 0.5rem;
   border: 0;
   background: transparent;

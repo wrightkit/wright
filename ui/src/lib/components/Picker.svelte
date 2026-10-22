@@ -1,14 +1,4 @@
 <script lang="ts">
-  /**
-   * The design.md § Pickers dropdown on Bits UI's Combobox: the trigger
-   * shows the current option, and the top-layer popover anchors to it —
-   * a white filter input above a scrolling option list with a
-   * highlighted active option. Floating UI opens it below, flips it
-   * above when the space below is short, and repositions on scroll and
-   * resize; the escape layer closes the picker only, never the dialog
-   * under it. Usage-first ordering is the caller's job: `options`
-   * arrive already ordered.
-   */
   import { tick, untrack } from 'svelte'
   import { Combobox } from 'bits-ui'
 
@@ -33,20 +23,16 @@
 
   let open = $state(false)
   let filter = $state('')
-  // Bits' value mirrors `selected` — captured once, kept in sync by the
-  // effect below so the prop stays authoritative. A click on the
-  // selected option is a '' deselect inside the combobox.
   let sel = $state(untrack(() => selected ?? ''))
   let triggerEl: HTMLElement | null = $state(null)
   let inputEl: HTMLInputElement | null = $state(null)
+  let contentEl: HTMLElement | null = $state(null)
 
   $effect(() => {
     const want = selected ?? ''
     if (sel !== want) sel = want
   })
 
-  // Each open resets the filter and moves focus to it — the combobox's
-  // content suppresses autofocus because the input normally keeps it.
   $effect(() => {
     if (!open) return
     filter = ''
@@ -63,9 +49,6 @@
   })
 
   function onValueChange(value: string) {
-    // A choose closes the popover — including a click on the selected
-    // option, which bits reports as a '' deselect. The wrapper reports
-    // the clicked option; the caller decides what clearing it means.
     open = false
     if (value !== '') {
       onselect(value)
@@ -73,6 +56,13 @@
     }
     sel = selected ?? ''
     if (selected !== null) onselect(selected)
+  }
+
+  function restoreFocus() {
+    const active = document.activeElement
+    if (active === document.body || active === null || contentEl?.contains(active)) {
+      triggerEl?.focus()
+    }
   }
 </script>
 
@@ -82,6 +72,9 @@
   bind:value={sel}
   inputValue={filter}
   {onValueChange}
+  onOpenChange={(next) => {
+    if (!next) void tick().then(restoreFocus)
+  }}
 >
   <Combobox.Trigger bind:ref={triggerEl} class="picker-ctl" aria-label={ariaLabel}>
     <span class="picker-value" class:placeholder={selected === null}>
@@ -92,6 +85,7 @@
   </Combobox.Trigger>
   <Combobox.Portal>
     <Combobox.Content
+      bind:ref={contentEl}
       class="picker-pop"
       customAnchor={triggerEl}
       align="start"
@@ -103,7 +97,7 @@
         class="picker-filter"
         oninput={(event) => (filter = event.currentTarget.value)}
       />
-      <div class="picker-list">
+      <Combobox.Viewport class="picker-list">
         {#each filtered as option (option.id)}
           <Combobox.Item class="picker-option" value={option.id} label={option.label}>
             {option.label}
@@ -111,7 +105,7 @@
         {:else}
           <div class="picker-empty">—</div>
         {/each}
-      </div>
+      </Combobox.Viewport>
     </Combobox.Content>
   </Combobox.Portal>
 </Combobox.Root>

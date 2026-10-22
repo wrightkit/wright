@@ -1,10 +1,4 @@
 // @vitest-environment jsdom
-/**
- * The ADR-0036 wrappers in `ui/src/lib/components`: `Dialog` owns the
- * shared chrome on Bits UI's focus/escape/dismissal layers; `Picker` owns
- * the popover's filtering, selection, and Esc layering on Bits UI's
- * Combobox. Both portal into `document.body`.
- */
 import { createRawSnippet, flushSync, mount, unmount } from 'svelte'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Dialog from './lib/components/Dialog.svelte'
@@ -38,7 +32,6 @@ const click = (el: Element) => {
   flushSync()
 }
 
-// The combobox trigger opens on `pointerdown`, ahead of the click.
 const pointerDown = (el: Element) => {
   el.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
   flushSync()
@@ -168,7 +161,6 @@ describe('the Picker wrapper', () => {
     const options = [...popover()!.querySelectorAll('.picker-option')]
     expect(options.map((option) => option.textContent)).toEqual(['Beta'])
 
-    // Items select on pointerup, matching the bits pointer contract.
     options[0].dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
     options[0].dispatchEvent(new MouseEvent('pointerup', { bubbles: true }))
     await settle()
@@ -205,6 +197,19 @@ describe('the Picker wrapper', () => {
     expect(popover()!.querySelectorAll('.picker-option')).toHaveLength(0)
     expect(popover()!.querySelector('.picker-empty')).not.toBeNull()
   })
+
+  it('returns focus to its control when Esc closes the popover', async () => {
+    mountPicker('a')
+    const trigger = host.querySelector<HTMLButtonElement>('.picker-ctl')!
+    pointerDown(trigger)
+    await settle()
+    expect(popover()).not.toBeNull()
+
+    escape()
+    await settle()
+    expect(popover(), 'Esc closed the popover').toBeNull()
+    expect(document.activeElement, 'focus returned to the control').toBe(trigger)
+  })
 })
 
 describe('nested Esc layering', () => {
@@ -220,7 +225,6 @@ describe('nested Esc layering', () => {
       },
     })
     flushSync()
-    // The dialog mounted first: the picker popover's layer sits on top.
     const pickerApp = mount(Picker, {
       target: host,
       props: {

@@ -1,14 +1,4 @@
 <script lang="ts">
-  /**
-   * The shared modal dialog chrome (docs/ui/dialogs.md) on Bits UI's
-   * Dialog: focus trap, the dimmed overlay, and the layered dismissal
-   * rules — Esc closes the topmost layer only, so a picker open above a
-   * dialog keeps Esc for itself. `view` gives the spec's chrome (a
-   * centred title over the scrolling `--dlg` body and a `--dlg-foot`
-   * button band); the flat form keeps the editing-layer dialogs' padded
-   * body. Callers own `open` and receive `onclose` when the dialog asks
-   * to close; they never import `bits-ui` (ADR-0036).
-   */
   import { Dialog as BitsDialog } from 'bits-ui'
   import type { Snippet } from 'svelte'
 
@@ -25,14 +15,10 @@
     footer,
   }: {
     open: boolean
-    /** Called when the dialog wants to close — Esc, an outside click, or a caller's button. */
     onclose: () => void
-    /** The view chrome: centred `.dlg-title`, scrolling `.dlg-body`, `.dlg-foot` band. */
     view?: boolean
-    /** Whether a click on the overlay closes the dialog — the view dialogs' backdrop click. */
     closeOnOutside?: boolean
     title?: string
-    /** The title's class in the flat form; `view` always uses `.dlg-title`. */
     titleClass?: string
     id?: string
     class?: string
