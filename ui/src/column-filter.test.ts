@@ -304,4 +304,37 @@ describe('selection under a filter (#916)', () => {
     flushSync()
     expect(selBar('actions')).toBeNull()
   })
+
+  it('scopes keyboard gestures to the rule whose DOM owns the target', async () => {
+    api.handler = handlerFor([
+      summaryFor(1, 'rule a', contentFor([], bigActions())),
+      summaryFor(2, 'rule b', contentFor([], [action('wait', [1])])),
+    ])
+
+    mountApp()
+    await settle()
+    await openRule(1)
+    await openRule(2)
+
+    const slotB = slot(2)!
+    const rowB = slotB.querySelector<HTMLLIElement>('.statement')!
+    click(checkbox(rowB))
+    expect(slotB.querySelector('.sel-bar')!.textContent).toContain('1 selected')
+
+    // Esc inside rule A's filter field clears A's filter only — rule B's
+    // selection must survive every open RuleView's window listener.
+    const inputA = slot(1)!.querySelector<HTMLInputElement>('input.col-filter')!
+    inputA.value = 'wait'
+    inputA.dispatchEvent(new Event('input', { bubbles: true }))
+    flushSync()
+    escapeKey(inputA)
+    flushSync()
+    expect(inputA.value).toBe('')
+    expect(slotB.querySelector('.sel-bar')!.textContent).toContain('1 selected')
+
+    // Esc targeting rule B's column clears only B's selection.
+    escapeKey(rowB)
+    flushSync()
+    expect(slotB.querySelector('.sel-bar')).toBeNull()
+  })
 })

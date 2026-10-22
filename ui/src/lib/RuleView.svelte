@@ -89,6 +89,7 @@
   })
   let anchor = $state<{ list: StatementList; index: number } | null>(null)
   let hoverCol = $state<StatementList | null>(null)
+  let root: HTMLElement | undefined = $state()
   let filters = $state<Record<StatementList, string>>({ conditions: '', actions: '' })
   $effect(() => {
     void summary.id
@@ -170,9 +171,14 @@
       return
     // A column owns the gesture when the pointer is over it or the event's
     // target sits inside it (the filter field keeps its own column's
-    // scope even when the pointer has moved off).
+    // scope even when the pointer has moved off). The target must live in
+    // THIS rule's DOM — every open RuleView registers a window listener,
+    // so a `closest` hit in another instance would steal the gesture.
+    const col = el?.closest('.col')
     const list =
-      (el?.closest('.col')?.getAttribute('data-list') as StatementList | null) ?? hoverCol
+      (col && root?.contains(col)
+        ? (col.getAttribute('data-list') as StatementList | null)
+        : null) ?? hoverCol
     if (!list) return
     const set = sel(list)
     const inFilter = el?.closest('input.col-filter') != null
@@ -184,12 +190,16 @@
       onedit.batch(list, [...set], 'delete')
     } else if (event.key === 'Escape') {
       // Esc peels one layer at a time: the filter first, then the
-      // selection (docs/ui/selection.md § Keyboard).
+      // selection (docs/ui/selection.md § Keyboard). preventDefault
+      // claims the key for this rule so sibling listeners and the
+      // search input's native Esc restore don't race it.
       if (filters[list] !== '') {
         filters[list] = ''
+        event.preventDefault()
       } else if (set.size > 0) {
         set.clear()
         anchor = null
+        event.preventDefault()
       }
     }
   }
@@ -279,7 +289,7 @@
   </li>
 {/snippet}
 
-<section class="rule-view">
+<section class="rule-view" bind:this={root}>
   {#if ruleState.phase === 'loading' || (ruleState.phase === 'ready' && !namesReady)}
     <p class="muted">{t.loadingRule}</p>
   {:else if ruleState.phase === 'refused'}
@@ -353,6 +363,7 @@
             class="col-filter"
             type="search"
             placeholder={t.filterColumn(t.conditionNoun)}
+            aria-label={t.filterColumn(t.conditionNoun)}
             bind:value={filters.conditions}
           />
         {/if}
@@ -420,6 +431,7 @@
             class="col-filter"
             type="search"
             placeholder={t.filterColumn(t.actionNoun)}
+            aria-label={t.filterColumn(t.actionNoun)}
             bind:value={filters.actions}
           />
         {/if}
