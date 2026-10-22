@@ -357,7 +357,8 @@ select {
    a 2 px light line. */
 .rule-cols {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  align-items: start;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--cols-gap);
 }
 
@@ -371,7 +372,13 @@ select {
 }
 
 .rule-view h3 {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--dlg);
   display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
   align-items: center;
   margin: 0 0 var(--col-head-below);
   padding-bottom: var(--col-head-below);
@@ -882,24 +889,19 @@ dialog.view[open] {
   border: 1px solid var(--error);
 }
 
-.sel-bar {
+.column-actions {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin: 0.35rem 0 0.6rem;
-  padding: 0.35rem 0.6rem;
-  background: var(--card);
-  border: 1px solid rgb(255 255 255 / 0.15);
-  border-radius: 4px;
+  gap: 4px;
+  margin-left: auto;
   font-size: 0.85rem;
 }
 
-.sel-bar .sel-count {
-  color: var(--muted);
-  margin-right: 0.25rem;
+.column-actions .sel-count {
+  color: var(--text);
+  margin-right: 4px;
 }
 
-.sel-bar button,
 .editor-foot button {
   background: var(--dlg);
   border: 1px solid rgb(255 255 255 / 0.15);
@@ -909,12 +911,10 @@ dialog.view[open] {
   cursor: pointer;
 }
 
-.sel-bar button:hover,
 .editor-foot button:hover {
   border-color: var(--gold);
 }
 
-.sel-bar button:disabled,
 .editor-foot button:disabled {
   opacity: 0.5;
   cursor: default;

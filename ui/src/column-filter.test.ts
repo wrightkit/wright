@@ -125,7 +125,7 @@ const rowsIn = (list: 'conditions' | 'actions') =>
 const filterInput = (list: 'conditions' | 'actions') =>
   col(list).querySelector<HTMLInputElement>('input.col-filter')
 const selBar = (list: 'conditions' | 'actions') =>
-  col(list).querySelector<HTMLElement>('.sel-bar')
+  col(list).querySelector<HTMLElement>('.column-actions:has(.sel-count)')
 const selAll = (list: 'conditions' | 'actions') =>
   col(list).querySelector<HTMLInputElement>('input.sel-all')!
 const checkbox = (row: Element) => row.querySelector<HTMLInputElement>('.sel')!
@@ -238,6 +238,83 @@ describe('filtering rows (#916)', () => {
 })
 
 describe('selection under a filter (#916)', () => {
+  it.each(['conditions', 'actions'] as const)('select-all preserves hidden selections when checked and unchecked in %s', async (list) => {
+    const actions = bigActions()
+    const content = list === 'actions'
+      ? contentFor([], actions)
+      : contentFor(actions.map((value) => ({ value })) as RuleContent['conditions'])
+    api.handler = handlerFor([summaryFor(1, 'init', content)])
+
+    mountApp()
+    await settle()
+    await openRule(1)
+
+    click(checkbox(rowsIn(list)[0]))
+    typeInFilter(list, 'wait')
+    click(selAll(list))
+    expect(selBar(list)!.textContent).toContain('6 selected (1 hidden)')
+    click(selAll(list))
+    expect(selBar(list)!.textContent).toContain('1 selected (1 hidden)')
+    expect(rowsIn(list).some((row) => checkbox(row).checked)).toBe(false)
+
+    for (const modifier of ['ctrlKey', 'metaKey']) {
+      checkbox(rowsIn(list)[0]).dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'a', [modifier]: true, bubbles: true,
+      }))
+      flushSync()
+      expect(selBar(list)!.textContent).toContain('6 selected (1 hidden)')
+      click(selAll(list))
+    }
+    typeInFilter(list, '')
+    expect(rowsIn(list).filter((row) => checkbox(row).checked)).toEqual([rowsIn(list)[0]])
+  })
+
+  it.each(['conditions', 'actions'] as const)('extends click and keyboard ranges only over filtered rows in %s', async (list) => {
+    const actions = [
+      action('wait', [1]),
+      action('if', [true]),
+      action('wait', [2]),
+      action('end'),
+      action('kill'),
+      action('wait', [3]),
+      ...Array.from({ length: 30 }, () => action('kill')),
+    ]
+    const content = list === 'actions'
+      ? contentFor([], actions)
+      : contentFor(actions.map((value) => ({ value })) as RuleContent['conditions'])
+    api.handler = handlerFor([summaryFor(1, 'init', content)])
+
+    mountApp()
+    await settle()
+    await openRule(1)
+    typeInFilter(list, 'wait')
+    click(checkbox(rowsIn(list)[0]))
+    const key = (key: string) => {
+      checkbox(rowsIn(list)[0]).dispatchEvent(new KeyboardEvent('keydown', {
+        key, shiftKey: true, bubbles: true,
+      }))
+      flushSync()
+    }
+    key('ArrowDown')
+    expect(rowsIn(list).map((row) => checkbox(row).checked)).toEqual([true, true, false])
+    key('ArrowDown')
+    expect(selBar(list)!.textContent).toContain('3 selected')
+    expect(selBar(list)!.textContent).not.toContain('hidden')
+    key('Escape')
+    expect(selBar(list)!.textContent).toContain('3 selected')
+    expect(rowsIn(list).filter((row) => checkbox(row).checked)).toHaveLength(3)
+    key('Escape')
+
+    typeInFilter(list, 'wait')
+    click(checkbox(rowsIn(list)[0]))
+    checkbox(rowsIn(list)[2]).dispatchEvent(new MouseEvent('click', {
+      shiftKey: true, bubbles: true,
+    }))
+    flushSync()
+    expect(selBar(list)!.textContent).toContain('3 selected')
+    typeInFilter(list, '')
+    expect(rowsIn(list).filter((row) => checkbox(row).checked)).toHaveLength(3)
+  })
   it('select-all selects the visible matches only', async () => {
     api.handler = handlerFor([summaryFor(1, 'init', contentFor([], bigActions()))])
 
@@ -319,7 +396,7 @@ describe('selection under a filter (#916)', () => {
     const slotB = slot(2)!
     const rowB = slotB.querySelector<HTMLLIElement>('.statement')!
     click(checkbox(rowB))
-    expect(slotB.querySelector('.sel-bar')!.textContent).toContain('1 selected')
+    expect(slotB.querySelector('.column-actions .sel-count')!.textContent).toContain('1 selected')
 
     // Esc inside rule A's filter field clears A's filter only — rule B's
     // selection must survive every open RuleView's window listener.
@@ -330,11 +407,11 @@ describe('selection under a filter (#916)', () => {
     escapeKey(inputA)
     flushSync()
     expect(inputA.value).toBe('')
-    expect(slotB.querySelector('.sel-bar')!.textContent).toContain('1 selected')
+    expect(slotB.querySelector('.column-actions .sel-count')!.textContent).toContain('1 selected')
 
     // Esc targeting rule B's column clears only B's selection.
     escapeKey(rowB)
     flushSync()
-    expect(slotB.querySelector('.sel-bar')).toBeNull()
+    expect(slotB.querySelector('.column-actions .sel-count')).toBeNull()
   })
 })

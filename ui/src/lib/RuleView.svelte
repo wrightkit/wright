@@ -1,27 +1,7 @@
 <script lang="ts">
-  /**
-   * One rule's body, indented under its bar (docs/ui/design.md § Main
-   * screen item 4): the event rows — Event, then Team, Player, or
-   * Subroutine as the event carries them — then the Conditions/Actions
-   * columns, whose statement rows indent 18 px per control-flow level and
-   * never show `End`. A rule whose content `rules` cannot express renders
-   * the service refusal in the error style while other rules still open.
-   * `?debug` adds line numbers at the row start and the node JSON; they
-   * are absent from the DOM otherwise.
-   *
-   * Editing layer (ADR-0032): statement rows carry hover-revealed
-   * checkboxes, shift-click ranges, a select-all per column, and a
-   * selection bar with Disable/Enable/Delete/Clear. Clicking a row opens
-   * its editor. Staged edits mark their rows (change/delete) until the
-   * pending list submits through `editStatements`.
-   *
-   * Large columns (docs/ui/selection.md): past thirty rendered rows a
-   * column gains a filter field under its heading; rows the query hides
-   * keep their selection, select-all covers only the visible matches,
-   * and Esc clears the filter before the selection.
-   */
-  import { ChevronDown } from '@lucide/svelte'
+  import { ChevronDown, Plus, Square, Play, Trash2, X } from '@lucide/svelte'
   import { SvelteSet } from 'svelte/reactivity'
+  import SqButton from './SqButton.svelte'
   import Expr from './Expr.svelte'
   import type { ChromeStrings } from './chrome'
   import type { Names } from './names'
@@ -88,7 +68,7 @@
     conditions: new SvelteSet(),
     actions: new SvelteSet(),
   })
-  let anchor = $state<{ list: StatementList; index: number } | null>(null)
+  let anchor = $state<{ list: StatementList; index: number; extent: number } | null>(null)
   let hoverCol = $state<StatementList | null>(null)
   let root: HTMLElement | undefined = $state()
   let filters = $state<Record<StatementList, string>>({ conditions: '', actions: '' })
@@ -113,16 +93,29 @@
   function selectRow(list: StatementList, index: number, event: MouseEvent) {
     const set = sel(list)
     if (event.shiftKey && anchor?.list === list) {
-      const [lo, hi] =
-        anchor.index <= index ? [anchor.index, index] : [index, anchor.index]
-      for (let i = lo; i <= hi; i++) set.add(i)
+      extendRange(list, index)
       return
     }
     // `click` is delegated, so `currentTarget` is the delegation root here;
     // the target is the checkbox itself (an input has no children).
     if ((event.target as HTMLInputElement).checked) set.add(index)
     else set.delete(index)
-    anchor = { list, index }
+    anchor = { list, index, extent: index }
+  }
+
+  function extendRange(list: StatementList, index: number) {
+    if (anchor?.list !== list) return
+    const lo = Math.min(anchor.index, index)
+    const hi = Math.max(anchor.index, index)
+    for (const i of shownIndices(list, visibleIndices(list))) {
+      if (i >= lo && i <= hi) sel(list).add(i)
+    }
+    anchor.extent = index
+  }
+
+  function clearSelection(list: StatementList) {
+    sel(list).clear()
+    if (anchor?.list === list) anchor = null
   }
 
   /**
@@ -186,20 +179,23 @@
     if (!inFilter && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
       event.preventDefault()
       selectAll(list, shownIndices(list, visibleIndices(list)), true)
+    } else if (!inFilter && event.shiftKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+      if (anchor?.list !== list) return
+      const shown = shownIndices(list, visibleIndices(list))
+      const current = shown.indexOf(anchor.extent)
+      if (current < 0) return
+      const next = current + (event.key === 'ArrowDown' ? 1 : -1)
+      event.preventDefault()
+      if (next >= 0 && next < shown.length) extendRange(list, shown[next]!)
     } else if (!inFilter && event.key === 'Delete' && set.size > 0) {
       event.preventDefault()
       onedit.batch(list, [...set], 'delete')
     } else if (event.key === 'Escape') {
-      // Esc peels one layer at a time: the filter first, then the
-      // selection (docs/ui/selection.md § Keyboard). preventDefault
-      // claims the key for this rule so sibling listeners and the
-      // search input's native Esc restore don't race it.
       if (filters[list] !== '') {
         filters[list] = ''
         event.preventDefault()
       } else if (set.size > 0) {
-        set.clear()
-        anchor = null
+        clearSelection(list)
         event.preventDefault()
       }
     }
@@ -290,6 +286,23 @@
   </li>
 {/snippet}
 
+{#snippet columnActions(list: StatementList, hidden: number)}
+  {@const set = sel(list)}
+  <span class="column-actions">
+    {#if set.size > 0}
+      <span class="sel-count">{hidden > 0
+        ? t.selectedHiddenCount(set.size, hidden)
+        : t.selectedCount(set.size)}</span>
+      <SqButton icon={Square} title={t.disable} onclick={() => onedit.batch(list, [...set], 'disable')} />
+      <SqButton icon={Play} title={t.enable} onclick={() => onedit.batch(list, [...set], 'enable')} />
+      <SqButton icon={Trash2} title={t.delete} onclick={() => onedit.batch(list, [...set], 'delete')} />
+      <SqButton icon={X} title={t.clear} onclick={() => clearSelection(list)} />
+    {:else}
+      <SqButton icon={Plus} title={t.addStatementTitle(noun(list))} label={t.addStatement(noun(list))} disabled />
+    {/if}
+  </span>
+{/snippet}
+
 <section class="rule-view" bind:this={root}>
   {#if ruleState.phase === 'loading' || (ruleState.phase === 'ready' && !namesReady)}
     <p class="muted">{t.loadingRule}</p>
@@ -348,6 +361,7 @@
               selectAll('conditions', condShown, event.currentTarget.checked)}
           />
           {t.conditions} <span class="col-count">({content.conditions.length})</span>
+          {@render columnActions('conditions', condHiddenSel)}
         </h3>
         {#if condVisible.length > FILTER_THRESHOLD}
           <input
@@ -375,25 +389,6 @@
             <li class="none">{t.none}</li>
           {/if}
         </ol>
-        {#if condSel.size > 0}
-          <div class="sel-bar" data-list="conditions">
-            <span class="sel-count"
-              >{condHiddenSel > 0
-                ? t.selectedHiddenCount(condSel.size, condHiddenSel)
-                : t.selectedCount(condSel.size)}</span
-            >
-            <button type="button" onclick={() => onedit.batch('conditions', [...condSel], 'disable')}
-              >{t.disable}</button
-            >
-            <button type="button" onclick={() => onedit.batch('conditions', [...condSel], 'enable')}
-              >{t.enable}</button
-            >
-            <button type="button" onclick={() => onedit.batch('conditions', [...condSel], 'delete')}
-              >{t.delete}</button
-            >
-            <button type="button" onclick={() => selection.conditions.clear()}>{t.clear}</button>
-          </div>
-        {/if}
       </div>
 
       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -416,6 +411,7 @@
             onchange={(event) => selectAll('actions', actShown, event.currentTarget.checked)}
           />
           {t.actions} <span class="col-count">({actVisible.length})</span>
+          {@render columnActions('actions', actHiddenSel)}
         </h3>
         {#if actVisible.length > FILTER_THRESHOLD}
           <input
@@ -443,25 +439,6 @@
             <li class="none">{t.none}</li>
           {/if}
         </ol>
-        {#if actSel.size > 0}
-          <div class="sel-bar" data-list="actions">
-            <span class="sel-count"
-              >{actHiddenSel > 0
-                ? t.selectedHiddenCount(actSel.size, actHiddenSel)
-                : t.selectedCount(actSel.size)}</span
-            >
-            <button type="button" onclick={() => onedit.batch('actions', [...actSel], 'disable')}
-              >{t.disable}</button
-            >
-            <button type="button" onclick={() => onedit.batch('actions', [...actSel], 'enable')}
-              >{t.enable}</button
-            >
-            <button type="button" onclick={() => onedit.batch('actions', [...actSel], 'delete')}
-              >{t.delete}</button
-            >
-            <button type="button" onclick={() => selection.actions.clear()}>{t.clear}</button>
-          </div>
-        {/if}
       </div>
     </div>
   {/if}
