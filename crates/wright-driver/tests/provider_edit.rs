@@ -25,8 +25,6 @@ fn workshop_path() -> PathBuf {
     workspace_root().join("tests/fixtures/workshop/synthetic/control-flow.ws")
 }
 
-/// The `#[ignore]` reason gates each provider test — see
-/// `crates/wright-lpp/tests/mock_provider.rs` for the contract.
 fn mock_provider_path() -> PathBuf {
     match std::env::var("LPP_MOCK_PROVIDER") {
         Ok(path) if !path.is_empty() => PathBuf::from(path),

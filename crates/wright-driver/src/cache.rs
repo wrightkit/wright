@@ -87,21 +87,13 @@ fn key_id(input_path: Option<&Path>, kind: &str, locale: &str, profile: &str) ->
     sha256_hex(material.as_bytes())[..16].to_string()
 }
 
-/// The run environment the cache reads once — the `CI` truthiness and the
-/// raw `WRIGHT_NO_CACHE` value — so call sites never read the process
-/// environment at the point of use. Tests inject both fields without
-/// mutating process env (mutating env is not sound in a shared test
-/// process).
 #[derive(Debug, Clone)]
 pub struct CacheEnv {
-    /// A truthy `CI` (ADR-0027 decision 9).
     pub ci: bool,
-    /// The raw `WRIGHT_NO_CACHE` value; `None` when unset.
     pub no_cache_env: Option<String>,
 }
 
 impl CacheEnv {
-    /// The live process environment, read once at the caller's entry.
     pub fn read() -> CacheEnv {
         CacheEnv {
             ci: std::env::var("CI").is_ok_and(|v| truthy(&v)),
@@ -109,9 +101,6 @@ impl CacheEnv {
         }
     }
 
-    /// Whether every cache read and write is off: `--no-cache` or a
-    /// non-empty `WRIGHT_NO_CACHE` (ADR-0027 decision 9). A truthy `CI` no
-    /// longer disables the explicit baseline flags (ADR-0030 decision 14).
     fn disabled(&self, no_cache_flag: bool) -> bool {
         no_cache_flag || wright_no_cache(self.no_cache_env.as_deref())
     }
@@ -300,18 +289,7 @@ impl CostSnapshot {
 
 /// Compare the current run against the stored reference and then record it
 /// as the new previous run (and the named baseline when `--save-baseline`
-/// is given). Returns the comparison when one was available.
-///
-/// `env` carries the run environment resolved once by the caller — see
-/// [`CacheEnv`]; the point of use never reads the process environment.
-///
-/// Under CI only the explicit flags act (ADR-0030 decision 14): a run
-/// naming neither `--baseline` nor `--save-baseline` touches nothing, the
-/// implicit previous-run record is neither read nor written, and an
-/// unusable `--baseline` record yields no comparison silently.
-///
-/// Every filesystem failure is swallowed: the comparison and the write are
-/// conveniences that never touch the verdict or exit code (decision 10).
+/// is given).
 pub(crate) fn compare_and_record_in(
     run: &CostRun,
     snapshot: &CostSnapshot,
@@ -320,9 +298,6 @@ pub(crate) fn compare_and_record_in(
     if env.disabled(run.no_cache) {
         return None;
     }
-    // Under CI the implicit previous-run record stays off entirely — a
-    // run that names no explicit baseline flag touches nothing (ADR-0030
-    // decision 14).
     if env.ci && run.baseline.is_none() && run.save_baseline.is_none() {
         return None;
     }
@@ -390,8 +365,7 @@ pub(crate) fn compare_and_record_in(
 /// `.wright/` for this run's key — present, readable, a known
 /// version/kind, and keyed to this input, kind, locale and profile. The
 /// caller decides what an unusable one means: a usage error outside CI,
-/// silence under it (ADR-0030 decision 14). `env` is the caller-resolved
-/// run environment — see [`CacheEnv`].
+/// silence under it (ADR-0030 decision 14).
 pub(crate) fn baseline_exists_in(run: &CostRun, env: &CacheEnv) -> bool {
     if env.disabled(run.no_cache) {
         return false;

@@ -8,12 +8,8 @@
 //! by the provider through the normal `invalidLanguage` error path.
 //!
 //! The provider binary is located through the `LPP_MOCK_PROVIDER`
-//! environment variable; every test is `#[ignore]`d on it. CI sets the
-//! variable (see `.github/workflows/ci.yml`) and runs the suite with
-//! `--ignored`, which fails when no test ran — a missing variable can
-//! never produce a green run that executed nothing. Build the provider
-//! from the pinned
-//! `language-provider-protocol` commit with:
+//! environment variable; every test is `#[ignore]`d on it. Build the
+//! provider from the pinned `language-provider-protocol` commit with:
 //!
 //! ```text
 //! git clone https://github.com/wrightkit/language-provider-protocol
@@ -49,10 +45,6 @@ const CLEAN_PUZZLE: &str = "puzzle clean {\n  target = 40\n  start = 10\n  ops {
 
 const BROKEN_PUZZLE: &str = "puzzle broken {\n  target = 40\n  start = 10\n  ops {\n    double: x => x * 2\n  }\n  solution = [ triple ]\n}";
 
-/// The `#[ignore]` reason on every test below is the gate: an unset
-/// `LPP_MOCK_PROVIDER` keeps the test out of default `cargo test` runs, and
-/// CI's `--ignored` invocation fails when no test ran — a missing variable
-/// can never produce a green run that executed nothing.
 fn mock_provider_path() -> PathBuf {
     match std::env::var("LPP_MOCK_PROVIDER") {
         Ok(path) if !path.is_empty() => PathBuf::from(path),

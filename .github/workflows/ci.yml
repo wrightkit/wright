@@ -314,15 +314,25 @@ jobs:
         run: cargo build --locked -p lpp-mock-provider
         working-directory: language-provider-protocol
 
-      # The LPP suites are `#[ignore]`d pending LPP_MOCK_PROVIDER, so this
-      # runs them explicitly; `--ignored` fails when no test matches, so an
-      # unset variable can never produce a green run that executed nothing.
+      # The LPP suites are `#[ignore]`d pending LPP_MOCK_PROVIDER, so CI runs
+      # them explicitly and then asserts a nonzero executed count: `--ignored`
+      # exits 0 on an empty selection, so an unset variable could otherwise
+      # produce a green run that executed nothing (#874).
       - name: Run LPP tests
         env:
           LPP_MOCK_PROVIDER: ${{ github.workspace }}/language-provider-protocol/target/debug/lpp-mock-provider
-        run: >-
-          cargo test --locked -p wright-lpp -p wright-driver
-          --test mock_provider --test lpp --test provider_edit -- --ignored
+        run: |
+          set -o pipefail
+          cargo test --locked -p wright-lpp -p wright-driver \
+            --test mock_provider --test lpp --test provider_edit -- --ignored \
+            2>&1 | tee target/lpp-tests.log
+          ran=$(grep -oE '[0-9]+ passed' target/lpp-tests.log \
+            | grep -oE '^[0-9]+' | awk '{s+=$1} END {print s+0}')
+          echo "executed LPP tests: $ran"
+          [ "$ran" -gt 0 ] || {
+            echo "::error::no LPP mock-provider tests ran; check LPP_MOCK_PROVIDER and the #[ignore] gates"
+            exit 1
+          }
 
   cli-behavior:
     name: CLI behavior
@@ -659,16 +669,6 @@ jobs:
         working-directory: ui
         run: npm run check:size
 
-  # Fails when any gating job failed or was cancelled, and when a job whose
-  # path condition selected it did not finish successfully — a skipped
-  # required job must never read as a pass.
-  # `benchmark` (Benchmarks) and `metrics-latency` (Metrics latency (trend))
-  # are deliberately NOT in `needs`: they are non-blocking evidence jobs.
-  # Every other job above must be listed here — the marker below is generated
-  # by `scripts/ci-required-jobs.sh sync` from `scripts/lib/required-jobs.jq`,
-  # the same source the step's required-when conditions are evaluated from,
-  # so the two cannot drift.
-  # needs: agent-guide cli-behavior dist-cli-build dist-validation lpp-integration metrics-drift metrics-shard opy-integration rust-quality ui workshop-integration wright-cli-build
   ci-result:
     name: CI result
     if: always()
@@ -689,8 +689,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # CI result reads `required-jobs.jq` and `ci-required-jobs.sh` — the
-      # single source for the needs list and required-when matrix.
       - name: Checkout
         uses: actions/checkout@v7
 
@@ -699,9 +697,6 @@ jobs:
           NEEDS: ${{ toJSON(needs) }}
           PATHS: ${{ toJSON(needs.paths.outputs) }}
         run: |
-          # The needs list above and the required-when matrix come from the
-          # same source — `required-jobs.jq` evaluated here and the `# needs:`
-          # marker `ci-required-jobs.sh` syncs into ci.yml.
           chmod +x scripts/ci-required-jobs.sh
           scripts/ci-required-jobs.sh check
           echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'

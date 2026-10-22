@@ -6,9 +6,7 @@
 //! LPP conformance mock provider binary (see
 //! `crates/wright-lpp/tests/mock_provider.rs` for build instructions and the
 //! pinned `language-provider-protocol` commit); the `LPP_MOCK_PROVIDER`
-//! environment variable names it, CI sets it, and every test is
-//! `#[ignore]`d on it so a missing variable can never produce a green run
-//! that executed nothing.
+//! environment variable names it and every test is `#[ignore]`d on it.
 
 #![allow(clippy::result_large_err)]
 
@@ -27,8 +25,6 @@ fn workshop_path() -> PathBuf {
     workspace_root().join("tests/fixtures/workshop/synthetic/control-flow.ws")
 }
 
-/// The `#[ignore]` reason gates each provider test — see
-/// `crates/wright-lpp/tests/mock_provider.rs` for the contract.
 fn mock_provider_path() -> PathBuf {
     match std::env::var("LPP_MOCK_PROVIDER") {
         Ok(path) if !path.is_empty() => PathBuf::from(path),

@@ -42,11 +42,6 @@ impl<'a> ToolService<'a> {
         }
     }
 
-    /// `references` reports the symbol's usage payload with the reference
-    /// list and selection moved onto it: a bare-array listing (no selection
-    /// fields) becomes `references`; a `{"references":…, "selection":…}`
-    /// result keeps both. `snapshot` stamps the generation onto the usage
-    /// payload — the bare-array listing shape has nowhere for it.
     fn merge_references_into_usage(
         &self,
         references_result: serde_json::Value,

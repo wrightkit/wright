@@ -237,18 +237,10 @@ pub(crate) fn workshop_diag(
     diagnostic
 }
 
-/// The `unknown-<kind>` diagnostic code for an owner kind: `workshop-rs`
-/// `kind`s are phrases (`"enum member"`) and diagnostic codes are single
-/// kebab-case tokens, so the emitted code kebab-cases the phrase
-/// (`unknown-enum-member`, #789).
 fn unknown_kind_code(kind: &str) -> String {
     format!("unknown-{}", kind.replace(' ', "-"))
 }
 
-/// `root` as an absolute path; a single-component relative input
-/// (`loop.opy`) resolves its root to the empty path, which names the
-/// invocation cwd — canonicalization cannot recover it from an empty
-/// string, so the cwd answers directly.
 pub(crate) fn canonical_root_or_cwd(root: &std::path::Path) -> Option<std::path::PathBuf> {
     match root.canonicalize() {
         Ok(root) => Some(root),

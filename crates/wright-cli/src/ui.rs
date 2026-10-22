@@ -399,11 +399,6 @@ mod server {
             .map(|header| header.value.as_str())
     }
 
-    /// The response every route answers, keep-alive enabled: each
-    /// connection's reader parks on its own socket in tiny_http's worker
-    /// pool, so an idle preconnected socket never stalls the serial
-    /// dispatch loop — and `Connection: close` would drop requests a
-    /// browser already dispatched onto a socket it believed reusable.
     fn keep_alive_response(
         status: u16,
         content_type: &str,

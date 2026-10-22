@@ -859,7 +859,6 @@ impl CompilerSession {
     }
 
     #[allow(unsafe_code)] // hotpath 0.28 emits `#[unsafe(export_name)]` statics
-    #[allow(unsafe_code)] // hotpath 0.28 emits `#[unsafe(export_name)]` statics
     fn load_workshop(&mut self, resolved: &ResolvedInput) -> Result<(Program, String), Diagnostic> {
         let override_locale = self
             .config

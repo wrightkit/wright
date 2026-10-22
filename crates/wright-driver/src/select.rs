@@ -388,9 +388,6 @@ impl FileMatch {
         path == self.spelled || self.unifies_with(path)
     }
 
-    /// Whether `path`'s spelling and the selector's spelling resolve to the
-    /// same file: both canonicalize under the session's bases and one shared
-    /// canonical form is an identity match.
     fn unifies_with(&self, path: &str) -> bool {
         canonical_forms(Path::new(path), &self.bases)
             .iter()

@@ -140,11 +140,6 @@ impl EditTransaction {
     }
 }
 
-/// The absent-`sources` rebinding (#472): every edit in `transaction`
-/// targets the one resolved input, so its `source` spelling is rewritten to
-/// the resolved display spelling — one file cannot split into divergent
-/// previews under different spellings of itself, and overlap checks cannot
-/// fall through across spellings.
 fn rebind_edits_to_resolved_input(
     transaction: EditTransaction,
     resolved: &ResolvedInput,

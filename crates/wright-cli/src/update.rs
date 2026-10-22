@@ -286,7 +286,8 @@ fn provider_report(previous: Option<&str>, resolved: &ResolvedOpyProvider) {
     }
 }
 
-/// `--check` for the provider target: report availability without changes.
+/// `--check` resolution for the provider target: report availability without
+/// downloading or modifying anything.
 fn provider_check(
     installed: Option<&ResolvedOpyProvider>,
     requested: Option<&str>,
@@ -412,12 +413,12 @@ fn self_update(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateEr
         }
     };
 
-    match compare_versions(&current, &target_version) {
-        Some(Ordering::Equal) => {
+    match parse_version(&current)?.cmp(&parse_version(&target_version)?) {
+        Ordering::Equal => {
             println!("wright {current} is already at version {target_version}");
             return Ok(exit::SUCCESS);
         }
-        Some(Ordering::Greater) => {
+        Ordering::Greater => {
             if check_only {
                 println!(
                     "installed wright {current} is newer than requested {target_version}; no update is needed"
@@ -428,8 +429,7 @@ fn self_update(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateEr
                 "requested version {target_version} is older than the installed version {current}; refusing to downgrade"
             )));
         }
-        Some(Ordering::Less) => {}
-        None => return unreachable_version_pair(&current, &target_version),
+        Ordering::Less => {}
     }
 
     if check_only {
@@ -630,14 +630,6 @@ fn parse_version(version: &str) -> Result<Version, UpdateError> {
             "invalid version '{version}' (expected semver like 0.1.0)"
         ))
     })
-}
-
-/// `self_update` reaches `None` only if the release-grammar construction
-/// stopped holding; a failure, never a panic (#641).
-fn unreachable_version_pair(current: &str, target: &str) -> Result<u8, UpdateError> {
-    Err(UpdateError::failed(format!(
-        "could not compare installed version '{current}' with '{target}'"
-    )))
 }
 
 fn parse_version_str(version: &str) -> Option<Version> {
