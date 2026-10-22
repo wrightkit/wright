@@ -56,6 +56,10 @@ export interface ChromeStrings {
   selectRow: (noun: string, index: number) => string
   /** The selection bar's count. */
   selectedCount: (count: number) => string
+  /** The selection bar's count when the filter hides selected rows. */
+  selectedHiddenCount: (count: number, hidden: number) => string
+  /** A large column's filter field placeholder. */
+  filterColumn: (noun: string) => string
   /** The selection bar's batch actions. */
   disable: string
   enable: string
@@ -144,6 +148,8 @@ const enUS: ChromeStrings = {
   selectAll: (noun) => `select all ${noun}s`,
   selectRow: (noun, index) => `select ${noun} ${index}`,
   selectedCount: (count) => `${count} selected`,
+  selectedHiddenCount: (count, hidden) => `${count} selected (${hidden} hidden)`,
+  filterColumn: (noun) => `Filter ${noun}s…`,
   disable: 'Disable',
   enable: 'Enable',
   delete: 'Delete',
@@ -209,6 +215,8 @@ const zhCN: ChromeStrings = {
   selectAll: (noun) => `选择所有${noun}`,
   selectRow: (noun, index) => `选择${noun} ${index}`,
   selectedCount: (count) => `已选择 ${count} 项`,
+  selectedHiddenCount: (count, hidden) => `已选择 ${count} 项（${hidden} 项已隐藏）`,
+  filterColumn: (noun) => `筛选${noun}…`,
   disable: '禁用',
   enable: '启用',
   delete: '删除',
