@@ -833,7 +833,7 @@ fn run_command<
     let mut envelope = run(session);
     let elapsed = started.elapsed();
     session.clear_progress_observer();
-    // Name-resolution refusals carry a neutral listing-operation marker
+    // Name-resolution refusals carry a neutral listing-operation field
     // (#888); the CLI renders it as its own `wright inspect` command —
     // `wright serve` renders the operation name on the same result.
     usage_hint::render_inspect_diagnostics(&mut envelope);
