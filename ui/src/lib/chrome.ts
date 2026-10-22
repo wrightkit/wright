@@ -90,6 +90,30 @@ export interface ChromeStrings {
   disabled: string
   /** The statement editor's confirm button. */
   ok: string
+  /** The simulation button's tooltip and the panel's title (#836). */
+  simulation: string
+  /** The two room column headings. */
+  simTeam1: string
+  simTeam2: string
+  /** The user's slot label; other slots use `simSlot` with a number. */
+  simYou: string
+  simSlot: string
+  /** An empty hero dropdown's placeholder. */
+  simNoHero: string
+  /** The lobby settings section's heading. */
+  simLobbySettings: string
+  /** The run-length field's label. */
+  simSeconds: string
+  /** The Start button's labels, running and idle. */
+  simStart: string
+  simRunning: string
+  /** A refusal's fallback message when the service sends none. */
+  simRefused: string
+  /** The wording `not_modeled` and `missing_input` outcomes carry. */
+  simNotVerified: string
+  /** The result section's headings. */
+  simVariables: string
+  simLogs: string
 }
 
 const enUS: ChromeStrings = {
@@ -141,6 +165,20 @@ const enUS: ChromeStrings = {
   conditionTitle: 'Condition',
   disabled: 'Disabled',
   ok: 'OK',
+  simulation: 'Simulation',
+  simTeam1: 'Team 1',
+  simTeam2: 'Team 2',
+  simYou: 'You',
+  simSlot: 'Slot',
+  simNoHero: 'No hero',
+  simLobbySettings: 'Lobby settings',
+  simSeconds: 'Simulated seconds',
+  simStart: 'Start',
+  simRunning: 'Running…',
+  simRefused: 'The service could not run the simulation.',
+  simNotVerified: 'not verified',
+  simVariables: 'Variables',
+  simLogs: 'Log',
 }
 
 const zhCN: ChromeStrings = {
@@ -192,6 +230,20 @@ const zhCN: ChromeStrings = {
   conditionTitle: '条件',
   disabled: '禁用',
   ok: '确定',
+  simulation: '模拟',
+  simTeam1: '队伍 1',
+  simTeam2: '队伍 2',
+  simYou: '你',
+  simSlot: '位置',
+  simNoHero: '无英雄',
+  simLobbySettings: '大厅设置',
+  simSeconds: '模拟秒数',
+  simStart: '开始',
+  simRunning: '正在运行…',
+  simRefused: '服务无法运行模拟。',
+  simNotVerified: '未验证',
+  simVariables: '变量',
+  simLogs: '日志',
 }
 
 // Keys are lowercase: the service spells locales `zh-cn`/`en-us`.

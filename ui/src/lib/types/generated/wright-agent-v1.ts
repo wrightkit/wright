@@ -868,7 +868,25 @@ export interface ProjectResult {
   rules: number
   symbols: number
   findings: number
+  /**
+   * The program's settings block projected read-only (#836): section and member names with scalar values — `null` when the program declares no settings block.
+   */
+  settings?: SettingsNode[] | null
   [k: string]: unknown
+}
+export interface SettingsNode {
+  /**
+   * The section or member name — canonical for catalogued settings, authored otherwise.
+   */
+  name: string
+  /**
+   * The member's scalar value as emitted text (`On`/`Off` for booleans). Absent on section nodes.
+   */
+  value?: string
+  /**
+   * A section's members. Absent on leaf nodes.
+   */
+  children?: SettingsNode[]
 }
 /**
  * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
