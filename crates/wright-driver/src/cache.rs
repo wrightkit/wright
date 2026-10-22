@@ -103,22 +103,33 @@ fn truthy(value: &str) -> bool {
 /// `--save-baseline` flags still read and write `.wright/` so a CI cache
 /// can restore and save it (ADR-0030 decision 14).
 pub fn ci() -> bool {
-    std::env::var("CI").is_ok_and(|v| truthy(&v))
+    CacheEnvironment::from_env().ci
 }
 
-/// Whether every cache read and write is off: `--no-cache` or a
-/// non-empty `WRIGHT_NO_CACHE` (ADR-0027 decision 9). A truthy `CI` no
-/// longer disables the explicit baseline flags (ADR-0030 decision 14).
-/// `no_cache_env` carries the raw `WRIGHT_NO_CACHE` value so tests can
-/// exercise both paths without mutating process env.
-fn disabled(no_cache_flag: bool, no_cache_env: Option<&str>) -> bool {
-    no_cache_flag || wright_no_cache(no_cache_env)
+#[derive(Clone, Copy)]
+pub(crate) struct CacheEnvironment {
+    pub(crate) ci: bool,
+    no_cache: bool,
 }
 
-/// Issue #723 specifies a *non-empty* `WRIGHT_NO_CACHE`: an
-/// exported-but-empty value leaves the cache on.
-fn wright_no_cache(value: Option<&str>) -> bool {
-    value.is_some_and(|v| !v.is_empty())
+impl CacheEnvironment {
+    pub(crate) fn from_env() -> Self {
+        Self::from_values(
+            std::env::var("CI").ok().as_deref(),
+            std::env::var("WRIGHT_NO_CACHE").ok().as_deref(),
+        )
+    }
+
+    fn from_values(ci: Option<&str>, no_cache: Option<&str>) -> Self {
+        Self {
+            ci: ci.is_some_and(truthy),
+            no_cache: no_cache.is_some_and(|value| !value.is_empty()),
+        }
+    }
+
+    fn disabled(self, no_cache_flag: bool) -> bool {
+        no_cache_flag || self.no_cache
+    }
 }
 
 /// Read the previous `cost` record for `key`, or a named baseline.
@@ -299,31 +310,21 @@ impl CostSnapshot {
 /// Every filesystem failure is swallowed: the comparison and the write are
 /// conveniences that never touch the verdict or exit code (decision 10).
 pub fn compare_and_record(run: &CostRun, snapshot: &CostSnapshot) -> Option<Comparison> {
-    compare_and_record_in(
-        run,
-        snapshot,
-        ci(),
-        std::env::var("WRIGHT_NO_CACHE").ok().as_deref(),
-    )
+    compare_and_record_in(run, snapshot, CacheEnvironment::from_env())
 }
 
-/// The `ci` and `no_cache_env` parameters carry the process environment so
-/// tests exercise both paths without mutating it (mutating env is not
-/// sound in a shared test process); `no_cache_env` is the raw
-/// `WRIGHT_NO_CACHE` value.
-fn compare_and_record_in(
+pub(crate) fn compare_and_record_in(
     run: &CostRun,
     snapshot: &CostSnapshot,
-    ci: bool,
-    no_cache_env: Option<&str>,
+    environment: CacheEnvironment,
 ) -> Option<Comparison> {
-    if disabled(run.no_cache, no_cache_env) {
+    if environment.disabled(run.no_cache) {
         return None;
     }
     // Under CI the implicit previous-run record stays off entirely — a
     // run that names no explicit baseline flag touches nothing (ADR-0030
     // decision 14).
-    if ci && run.baseline.is_none() && run.save_baseline.is_none() {
+    if environment.ci && run.baseline.is_none() && run.save_baseline.is_none() {
         return None;
     }
     let dir = cache_dir(Some(&run.root), &run.root);
@@ -349,7 +350,7 @@ fn compare_and_record_in(
                 format!("baseline:{baseline}"),
             )
         })
-    } else if ci {
+    } else if environment.ci {
         None
     } else {
         read_record(&dir, &file).map(|record| {
@@ -374,7 +375,7 @@ fn compare_and_record_in(
         baseline: None,
         payload: serde_json::to_value(snapshot.payload()).unwrap_or_default(),
     };
-    if !ci {
+    if !environment.ci {
         write_record(&dir, &file, &record);
     }
     if let Some(name) = &run.save_baseline {
@@ -392,13 +393,11 @@ fn compare_and_record_in(
 /// caller decides what an unusable one means: a usage error outside CI,
 /// silence under it (ADR-0030 decision 14).
 pub fn baseline_exists(run: &CostRun) -> bool {
-    baseline_exists_in(run, std::env::var("WRIGHT_NO_CACHE").ok().as_deref())
+    baseline_exists_in(run, CacheEnvironment::from_env())
 }
 
-/// `baseline_exists` with the `WRIGHT_NO_CACHE` value passed in — see
-/// [`compare_and_record_in`] for why tests inject the environment.
-fn baseline_exists_in(run: &CostRun, no_cache_env: Option<&str>) -> bool {
-    if disabled(run.no_cache, no_cache_env) {
+pub(crate) fn baseline_exists_in(run: &CostRun, environment: CacheEnvironment) -> bool {
+    if environment.disabled(run.no_cache) {
         return false;
     }
     let Some(name) = &run.baseline else {
@@ -418,6 +417,15 @@ fn baseline_exists_in(run: &CostRun, no_cache_env: Option<&str>) -> bool {
 mod tests {
     use super::*;
 
+    const LOCAL_CACHE: CacheEnvironment = CacheEnvironment {
+        ci: false,
+        no_cache: false,
+    };
+    const CI_CACHE: CacheEnvironment = CacheEnvironment {
+        ci: true,
+        no_cache: false,
+    };
+
     #[test]
     fn only_truthy_ci_marks_ci_and_only_non_empty_no_cache_disables() {
         assert!(!truthy(""));
@@ -426,11 +434,16 @@ mod tests {
         assert!(!truthy(" no "));
         assert!(truthy("true"));
         assert!(truthy("1"));
-        // Issue #723 specifies a *non-empty* `WRIGHT_NO_CACHE`: an
-        // exported-but-empty value leaves the cache on.
-        assert!(!wright_no_cache(None));
-        assert!(!wright_no_cache(Some("")));
-        assert!(wright_no_cache(Some("1")));
+        for ci in [None, Some(""), Some("0"), Some("false"), Some(" no ")] {
+            assert!(!CacheEnvironment::from_values(ci, None).ci);
+        }
+        for value in [None, Some("")] {
+            assert!(!CacheEnvironment::from_values(None, value).disabled(false));
+        }
+        for value in ["1", "0", "false", " "] {
+            assert!(CacheEnvironment::from_values(None, Some(value)).disabled(false));
+        }
+        assert!(LOCAL_CACHE.disabled(true));
     }
 
     fn snap(total: usize, rules: &[(&str, usize)]) -> CostSnapshot {
@@ -459,8 +472,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("wright-cache-{}", std::process::id()));
         let run = cost_run(&dir);
         let snapshot = snap(100, &[("a", 60), ("b", 40)]);
-        assert!(compare_and_record_in(&run, &snapshot, false, None).is_none());
-        let cmp = compare_and_record_in(&run, &snapshot, false, None).expect("second run compares");
+        assert!(compare_and_record_in(&run, &snapshot, LOCAL_CACHE).is_none());
+        let cmp = compare_and_record_in(&run, &snapshot, LOCAL_CACHE).expect("second run compares");
         assert_eq!(cmp.total_delta, 0);
         assert!(cmp.changed.is_empty() && cmp.added.is_empty() && cmp.removed.is_empty());
         let _ = fs::remove_dir_all(&dir);
@@ -470,12 +483,11 @@ mod tests {
     fn added_and_grown_rules_are_named() {
         let dir = std::env::temp_dir().join(format!("wright-cache2-{}", std::process::id()));
         let run = cost_run(&dir);
-        compare_and_record_in(&run, &snap(100, &[("a", 60), ("b", 40)]), false, None);
+        compare_and_record_in(&run, &snap(100, &[("a", 60), ("b", 40)]), LOCAL_CACHE);
         let cmp = compare_and_record_in(
             &run,
             &snap(120, &[("a", 60), ("b", 50), ("c", 10)]),
-            false,
-            None,
+            LOCAL_CACHE,
         )
         .expect("comparison");
         assert_eq!(cmp.total_delta, 20);
@@ -495,7 +507,7 @@ mod tests {
                 profile: profile.to_string(),
                 ..cost_run(&dir)
             };
-            compare_and_record_in(&run, &snap(100, &[("a", 100)]), false, None);
+            compare_and_record_in(&run, &snap(100, &[("a", 100)]), LOCAL_CACHE);
         }
         // Each key saw only its own first run, so no comparison exists.
         for (locale, profile) in [("en-US", "off"), ("zh-CN", "off"), ("en-US", "compat")] {
@@ -504,7 +516,7 @@ mod tests {
                 profile: profile.to_string(),
                 ..cost_run(&dir)
             };
-            let cmp = compare_and_record_in(&run, &snap(100, &[("a", 100)]), false, None);
+            let cmp = compare_and_record_in(&run, &snap(100, &[("a", 100)]), LOCAL_CACHE);
             assert_eq!(cmp.map(|c| c.total_delta), Some(0), "{locale}/{profile}");
         }
         let _ = fs::remove_dir_all(&dir);
@@ -522,7 +534,7 @@ mod tests {
             "not json",
         )
         .unwrap();
-        assert!(compare_and_record_in(&run, &snap(100, &[("a", 100)]), false, None).is_none());
+        assert!(compare_and_record_in(&run, &snap(100, &[("a", 100)]), LOCAL_CACHE).is_none());
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -534,10 +546,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("wright-cache-ci1-{}", std::process::id()));
         let run = cost_run(&dir);
         // A record left by a local run is not even read under CI.
-        compare_and_record_in(&run, &snap(100, &[("a", 100)]), false, None);
+        compare_and_record_in(&run, &snap(100, &[("a", 100)]), LOCAL_CACHE);
         assert!(dir.join(".wright").is_dir());
         assert!(
-            compare_and_record_in(&run, &snap(120, &[("a", 100)]), true, None).is_none(),
+            compare_and_record_in(&run, &snap(120, &[("a", 100)]), CI_CACHE).is_none(),
             "no implicit previous-run comparison under CI"
         );
         let _ = fs::remove_dir_all(&dir);
@@ -550,7 +562,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("wright-cache-ci2-{}", std::process::id()));
         let mut run = cost_run(&dir);
         run.save_baseline = Some("v1".to_string());
-        assert!(compare_and_record_in(&run, &snap(100, &[("a", 100)]), true, None).is_none());
+        assert!(compare_and_record_in(&run, &snap(100, &[("a", 100)]), CI_CACHE).is_none());
         let entries: Vec<_> = fs::read_dir(dir.join(".wright"))
             .unwrap()
             .map(|entry| entry.unwrap().file_name())
@@ -563,33 +575,33 @@ mod tests {
 
         let mut compare = cost_run(&dir);
         compare.baseline = Some("v1".to_string());
-        let cmp = compare_and_record_in(&compare, &snap(120, &[("a", 80), ("b", 40)]), true, None)
+        let cmp = compare_and_record_in(&compare, &snap(120, &[("a", 80), ("b", 40)]), CI_CACHE)
             .expect("a usable baseline compares under CI");
         assert_eq!(cmp.reference, "baseline:v1");
         assert_eq!(cmp.total_delta, 20);
-        assert!(baseline_exists_in(&compare, None));
+        assert!(baseline_exists_in(&compare, CI_CACHE));
 
         // Missing, corrupt, and differently keyed records all degrade
         // silently (decision 14 amends ADR-0027 decision 7 for CI).
         let mut unknown = cost_run(&dir);
         unknown.baseline = Some("nope".to_string());
-        assert!(compare_and_record_in(&unknown, &snap(120, &[]), true, None).is_none());
-        assert!(!baseline_exists_in(&unknown, None));
+        assert!(compare_and_record_in(&unknown, &snap(120, &[]), CI_CACHE).is_none());
+        assert!(!baseline_exists_in(&unknown, CI_CACHE));
 
         fs::write(dir.join(".wright/baseline-bad.json"), "not json").unwrap();
         let mut bad = cost_run(&dir);
         bad.baseline = Some("bad".to_string());
-        assert!(compare_and_record_in(&bad, &snap(120, &[]), true, None).is_none());
-        assert!(!baseline_exists_in(&bad, None));
+        assert!(compare_and_record_in(&bad, &snap(120, &[]), CI_CACHE).is_none());
+        assert!(!baseline_exists_in(&bad, CI_CACHE));
 
         let mut other_key = cost_run(&dir);
         other_key.input_path = Some(dir.join("other.ws"));
         other_key.baseline = Some("v1".to_string());
         assert!(
-            compare_and_record_in(&other_key, &snap(120, &[]), true, None).is_none(),
+            compare_and_record_in(&other_key, &snap(120, &[]), CI_CACHE).is_none(),
             "a baseline keyed to a different input is unusable"
         );
-        assert!(!baseline_exists_in(&other_key, None));
+        assert!(!baseline_exists_in(&other_key, CI_CACHE));
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -601,16 +613,16 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("wright-cache-ci3-{}", std::process::id()));
         let mut save = cost_run(&dir);
         save.save_baseline = Some("v1".to_string());
-        compare_and_record_in(&save, &snap(100, &[("a", 100)]), false, None);
+        compare_and_record_in(&save, &snap(100, &[("a", 100)]), LOCAL_CACHE);
 
         let mut other_key = cost_run(&dir);
         other_key.input_path = Some(dir.join("other.ws"));
         other_key.baseline = Some("v1".to_string());
         assert!(
-            compare_and_record_in(&other_key, &snap(120, &[]), false, None).is_none(),
+            compare_and_record_in(&other_key, &snap(120, &[]), LOCAL_CACHE).is_none(),
             "decision 12: differently keyed entries never compare"
         );
-        assert!(!baseline_exists_in(&other_key, None));
+        assert!(!baseline_exists_in(&other_key, LOCAL_CACHE));
         let _ = fs::remove_dir_all(&dir);
     }
 }

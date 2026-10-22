@@ -216,13 +216,8 @@ pub(crate) fn workshop_diag(
         workshop_rs::WorkshopError::Unknown { kind, span, .. }
         | workshop_rs::WorkshopError::UnknownWithCandidates { kind, span, .. }
         | workshop_rs::WorkshopError::NotDetected { kind, span, .. } => {
-            // Owner kinds are phrases (`"enum member"`); the emitted code is
-            // a single kebab-case token (`unknown-enum-member`, #789).
-            (
-                format!("unknown-{}", kind.replace(' ', "-")),
-                Stage::Frontend,
-                to_span(*span),
-            )
+            let code = unknown_owner_phrase_code(kind);
+            (code, Stage::Frontend, to_span(*span))
         }
         workshop_rs::WorkshopError::Malformed { span, .. } => {
             ("parse-error".to_string(), Stage::Frontend, to_span(*span))
@@ -241,6 +236,10 @@ pub(crate) fn workshop_diag(
     diagnostic.span = span;
     diagnostic.source = Some(resolved.origin.clone());
     diagnostic
+}
+
+fn unknown_owner_phrase_code(kind: &str) -> String {
+    format!("unknown-{}", kind.replace(' ', "-"))
 }
 
 pub(crate) fn source_provider_unavailable() -> Diagnostic {

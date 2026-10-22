@@ -305,33 +305,72 @@ pub fn query(result: &Value, all: bool) -> Value {
     output
 }
 
-/// `elementCount.rules` is already ranked largest-first by the service, so the
-/// default view keeps the five largest like analyze hotspots; the generic cap
-/// would otherwise keep twenty.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+enum CostPayload {
+    Rule {
+        rule: serde_json::Map<String, Value>,
+        statements: Vec<Value>,
+        #[serde(rename = "byNode")]
+        by_node: Vec<Value>,
+        #[serde(flatten)]
+        rest: serde_json::Map<String, Value>,
+    },
+    Program {
+        #[serde(rename = "elementCount")]
+        element_count: ElementCountPayload,
+        #[serde(flatten)]
+        rest: serde_json::Map<String, Value>,
+    },
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+enum ElementCountPayload {
+    Counted {
+        total: u64,
+        budget: u64,
+        rules: Vec<Value>,
+        #[serde(flatten)]
+        rest: serde_json::Map<String, Value>,
+    },
+    BudgetOnly {
+        budget: u64,
+        #[serde(flatten)]
+        rest: serde_json::Map<String, Value>,
+    },
+}
+
 pub fn cost(result: &Value, all: bool) -> Value {
-    let mut output = result.clone();
-    // The `--rule` drill-down (#724) carries no `elementCount`/`findings`;
-    // bound its two lists and leave the rest of the payload as-is so the
-    // CLI/agent comparison sees exactly the same items.
-    if output.get("rule").is_some_and(|rule| rule.is_object()) {
-        cap(&mut output, "statements", 5, all);
-        cap(&mut output, "byNode", 5, all);
-        return output;
-    }
-    // A failed count reports `{"budget": N}` plus `elementCountUnavailable`
-    // (ADR-0030 decision 3) — only cap the per-rule shares when they exist;
-    // indexing `["rules"]` on the bare-budget shape would fabricate a null
-    // member.
-    if output["elementCount"]["rules"].is_array() {
-        cap(&mut output["elementCount"], "rules", 5, all);
+    let Ok(payload) = serde_json::from_value::<CostPayload>(result.clone()) else {
+        return result.clone();
+    };
+    let mut output = serde_json::to_value(&payload).expect("cost payload serializes");
+    match payload {
+        CostPayload::Rule { .. } => {
+            cap(&mut output, "statements", 5, all);
+            cap(&mut output, "byNode", 5, all);
+            return output;
+        }
+        CostPayload::Program {
+            element_count: ElementCountPayload::Counted { .. },
+            ..
+        } => {
+            cap(
+                output.get_mut("elementCount").expect("counted payload"),
+                "rules",
+                5,
+                all,
+            );
+        }
+        CostPayload::Program {
+            element_count: ElementCountPayload::BudgetOnly { .. },
+            ..
+        } => {}
     }
     let mut output = query(&output, all);
-    // Findings carry resolved span objects (#722), which cost roughly four
-    // times the lint `location` string — on a large project the default
-    // payload would exceed the same ~1.5k-token budget `lint` fits, so the
-    // findings list is bounded by serialized bytes exactly like `lint`'s.
-    if !all && output["findings"].is_array() {
-        let total = output["findings"].as_array().map_or(0, Vec::len);
+    if !all && let Some(findings) = output.get("findings").and_then(Value::as_array) {
+        let total = findings.len();
         fit_finding_bytes(&mut output, total);
     }
     output
@@ -460,6 +499,41 @@ mod tests {
         assert_eq!(note["shown"], 5);
         assert_eq!(cost(&input, true), input);
     }
+    #[test]
+    fn unavailable_cost_preserves_the_bare_budget_without_fabricating_rules() {
+        let input = json!({
+            "elementCount": {"budget": 32768},
+            "elementCountUnavailable": "unsupported element",
+            "findings": [],
+            "snapshot": 3,
+        });
+        assert_eq!(cost(&input, false), input);
+        assert_eq!(cost(&input, true), input);
+        assert!(cost(&input, false)["elementCount"].get("rules").is_none());
+    }
+
+    #[test]
+    fn rule_cost_caps_each_breakdown_and_preserves_extension_fields() {
+        let items = (0..7)
+            .map(|index| json!({"count": index}))
+            .collect::<Vec<_>>();
+        let input = json!({
+            "rule": {"name": "r", "index": 0},
+            "statements": items,
+            "byNode": items,
+            "snapshot": 4,
+            "extension": {"data": [1, 2, 3]},
+        });
+        let bounded = cost(&input, false);
+        for key in ["statements", "byNode"] {
+            assert_eq!(bounded[key].as_array().unwrap().len(), 5);
+            assert_eq!(bounded["truncation"][key]["total"], 7);
+        }
+        assert_eq!(bounded["extension"], input["extension"]);
+        assert_eq!(bounded["snapshot"], 4);
+        assert_eq!(cost(&input, true), input);
+    }
+
     #[test]
     fn long_findings_fit_the_default_budget_without_changing_the_verdict() {
         let input = json!({"ok":false,"exit":1,"findings":(0..4).map(|id|json!({"code":format!("risk-{id}"),"severity":"error","message":"long actionable evidence ".repeat(120)})).collect::<Vec<_>>()});

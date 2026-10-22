@@ -67,16 +67,7 @@ impl<'a> ToolService<'a> {
                     ToolResponse::Ok { result } => result,
                     other => return other,
                 };
-                let mut payload = usage;
-                payload["snapshot"] = json!(self.generation);
-                if let Some(selected) = result.as_object_mut() {
-                    payload["references"] = selected.remove("references").unwrap_or_default();
-                    if let Some(selection) = selected.remove("selection") {
-                        payload["selection"] = selection;
-                    }
-                } else {
-                    payload["references"] = result;
-                }
+                let payload = merge_selected_references_with_usage(result, usage, self.generation);
                 result = crate::essential::query(&payload, *all);
             }
             ToolRequest::CostEstimate { all, .. } => result = crate::essential::cost(&result, *all),
@@ -90,6 +81,23 @@ impl<'a> ToolService<'a> {
         }
         ToolResponse::Ok { result }
     }
+}
+
+fn merge_selected_references_with_usage(
+    mut references: serde_json::Value,
+    mut usage: serde_json::Value,
+    generation: u64,
+) -> serde_json::Value {
+    usage["snapshot"] = json!(generation);
+    if let Some(selected) = references.as_object_mut() {
+        usage["references"] = selected.remove("references").unwrap_or_default();
+        if let Some(selection) = selected.remove("selection") {
+            usage["selection"] = selection;
+        }
+    } else {
+        usage["references"] = references;
+    }
+    usage
 }
 
 /// A refusal with a Wright-coined `code` — the strict kebab grammar is
