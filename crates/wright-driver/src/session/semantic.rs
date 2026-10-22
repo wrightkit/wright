@@ -664,16 +664,19 @@ impl CompilerSession {
                 };
                 match run(&mut service) {
                     Ok(result) => result,
-                    Err(error) => {
-                        // The refusal keeps the shared marker form; the
-                        // file table here renders `{file:N}` spellings and
-                        // each surface renders the listing operation its
-                        // own way (#888).
-                        session.diagnostics.push(Diagnostic::error(
-                            error.code,
-                            Stage::Analysis,
-                            crate::service::render_file_markers(&error.message, &loaded),
-                        ));
+                    Err(mut error) => {
+                        // Candidates resolve against this loaded program's
+                        // file table; the listing-operation clause waits
+                        // for the surface's own spelling (#888).
+                        crate::service::resolve_candidates(
+                            &mut error.message,
+                            &mut error.fields,
+                            Some(&loaded),
+                        );
+                        let mut diagnostic =
+                            Diagnostic::error(error.code, Stage::Analysis, error.message);
+                        diagnostic.fields = error.fields;
+                        session.diagnostics.push(diagnostic);
                         T::default()
                     }
                 }

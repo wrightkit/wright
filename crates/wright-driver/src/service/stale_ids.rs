@@ -52,6 +52,7 @@ impl ToolService<'_> {
                     "numeric symbol ids and rule indexes are scoped to the program generation that issued them: the served program is snapshot {} but this request's addresses were issued under snapshot {issued} — re-issue the ids from a current `symbols`/`rules` (or other id-reporting) response, or address by name",
                     self.generation
                 ),
+                ..Default::default()
             }),
             None => Some(ToolErrorInfo {
                 code: "stale-id".to_string(),
@@ -59,6 +60,7 @@ impl ToolService<'_> {
                     "a numeric `symbol`/`rule` address is scoped to the program generation that issued it: send the `snapshot` value an id-reporting response (`symbols`, `rules`, `inspect`, `project`, …) returned — the current generation is {}",
                     self.generation
                 ),
+                ..Default::default()
             }),
         }
     }

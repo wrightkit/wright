@@ -6,7 +6,6 @@
 
 use serde_json::{Value, json};
 use workshop_rs::catalog::{Catalog, Kind, Locale};
-use wright_analyzer::service::marker;
 
 use crate::CompilerSession;
 use crate::input::sha256_hex;
@@ -53,10 +52,7 @@ pub(crate) fn list_entries(
         other => {
             return refusal(
                 "invalid-language",
-                format!(
-                    "listEntries serves 'workshop' and 'opy'; got '{}'",
-                    marker::escape(other)
-                ),
+                format!("listEntries serves 'workshop' and 'opy'; got '{other}'"),
             );
         }
     }
@@ -70,13 +66,12 @@ pub(crate) fn list_entries(
             return refusal(
                 "invalid-kind",
                 format!(
-                    "kind must be one of {}; got '{}'",
+                    "kind must be one of {}; got '{kind}'",
                     LISTABLE_KINDS
                         .iter()
                         .map(|kind| format!("'{kind}'"))
                         .collect::<Vec<_>>()
-                        .join(", "),
-                    marker::escape(kind)
+                        .join(", ")
                 ),
             );
         }
@@ -88,10 +83,7 @@ pub(crate) fn list_entries(
         (false, Some(_)) => {
             return refusal(
                 "malformed-request",
-                format!(
-                    "'within' is only valid with kind 'enumMember'; got kind '{}'",
-                    marker::escape(kind)
-                ),
+                format!("'within' is only valid with kind 'enumMember'; got kind '{kind}'"),
             );
         }
         _ => {}
@@ -109,7 +101,7 @@ pub(crate) fn list_entries(
             "unsupported-locale",
             format!(
                 "locale '{}' is not declared by the Workshop catalog",
-                marker::escape(locale.unwrap_or_default())
+                locale.unwrap_or_default()
             ),
         );
     };
@@ -119,9 +111,7 @@ pub(crate) fn list_entries(
                 .into_iter()
                 .filter_map(|found| workshop_entry(catalog, &locale, found))
                 .collect(),
-            Err(error) => {
-                return refusal("lookup-failed", marker::escape(&error.to_string()));
-            }
+            Err(error) => return refusal("lookup-failed", error.to_string()),
         },
         None => {
             let within = within.unwrap_or_default();
@@ -130,10 +120,7 @@ pub(crate) fn list_entries(
                 Ok(_) => {
                     return refusal(
                         UNKNOWN_WITHIN,
-                        format!(
-                            "'{}' is not an enum domain with members",
-                            marker::escape(within)
-                        ),
+                        format!("'{within}' is not an enum domain with members"),
                     );
                 }
                 Err(error) => return error,

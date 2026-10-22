@@ -4,7 +4,6 @@ use crate::config::{InputSpec, SessionConfig, SourceKind};
 use crate::diag::{Diagnostic, Origin, Stage};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
-use wright_analyzer::service::marker;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputTarget {
@@ -151,10 +150,7 @@ fn resolve_path(path: &Path, config: &SessionConfig) -> Result<ResolvedInput, Di
         Diagnostic::error(
             "cwd-io",
             Stage::Discovery,
-            format!(
-                "cannot determine the invocation working directory: {}",
-                marker::escape(&e.to_string())
-            ),
+            format!("cannot determine the invocation working directory: {e}"),
         )
     })?;
     let path = absolute_from(&cwd, path);
@@ -162,11 +158,7 @@ fn resolve_path(path: &Path, config: &SessionConfig) -> Result<ResolvedInput, Di
         Diagnostic::error(
             "input-io",
             Stage::Discovery,
-            format!(
-                "cannot read input '{}': {}",
-                marker::escape(&path.display().to_string()),
-                marker::escape(&e.to_string())
-            ),
+            format!("cannot read input '{}': {e}", path.display()),
         )
     })?;
     if metadata.is_dir() {
@@ -185,11 +177,7 @@ fn resolve_file(
         Diagnostic::error(
             "input-io",
             Stage::Discovery,
-            format!(
-                "cannot read input '{}': {}",
-                marker::escape(&path.display().to_string()),
-                marker::escape(&e.to_string())
-            ),
+            format!("cannot read input '{}': {e}", path.display()),
         )
     })?;
     let text = decode_source_text(&bytes);
@@ -234,7 +222,7 @@ fn resolve_directory(
                 Stage::Discovery,
                 format!(
                     "protocol input '{}' must name a file, not a directory",
-                    marker::escape(&path.display().to_string())
+                    path.display()
                 ),
             ));
         }
@@ -304,7 +292,7 @@ fn detect_directory_kind(path: &Path) -> Result<SourceKind, Diagnostic> {
             Stage::Discovery,
             format!(
                 "cannot detect a source owner in directory '{}'; pass `--kind opy|ostw|workshop` or target a file",
-                marker::escape(&path.display().to_string())
+                path.display()
             ),
         )),
         _ => Err(Diagnostic::error(
@@ -312,7 +300,7 @@ fn detect_directory_kind(path: &Path) -> Result<SourceKind, Diagnostic> {
             Stage::Discovery,
             format!(
                 "directory '{}' contains multiple source kinds ({}); pass `--kind opy|ostw|workshop` or target a file",
-                marker::escape(&path.display().to_string()),
+                path.display(),
                 kinds
                     .iter()
                     .map(|k| k.as_str())
@@ -369,7 +357,7 @@ fn directory_source_count_error(path: &Path, kind: SourceKind, files: &[PathBuf]
             "multiple matching source files were found: {}",
             files
                 .iter()
-                .map(|file| marker::escape(&file.display().to_string()))
+                .map(|file| file.display().to_string())
                 .collect::<Vec<_>>()
                 .join(", ")
         )
@@ -380,7 +368,7 @@ fn directory_source_count_error(path: &Path, kind: SourceKind, files: &[PathBuf]
         format!(
             "{} directory '{}' must contain exactly one source file; {detail}; pass an explicit file path",
             kind.as_str(),
-            marker::escape(&path.display().to_string()),
+            path.display(),
         ),
     )
 }
@@ -392,7 +380,7 @@ fn kind_from_extension(path: &Path) -> Result<SourceKind, Diagnostic> {
             Stage::Discovery,
             format!(
                 "cannot detect the input kind of '{}' (no extension); pass `--kind opy|ostw|workshop|protocol` to override",
-                marker::escape(&path.display().to_string())
+                path.display()
             ),
         ));
     };
@@ -405,9 +393,8 @@ fn kind_from_extension(path: &Path) -> Result<SourceKind, Diagnostic> {
             "input-kind-unknown",
             Stage::Discovery,
             format!(
-                "cannot detect the input kind of '{}' (unknown extension '.{}'); pass `--kind opy|ostw|workshop|protocol` to override",
-                marker::escape(&path.display().to_string()),
-                marker::escape(other)
+                "cannot detect the input kind of '{}' (unknown extension '.{other}'); pass `--kind opy|ostw|workshop|protocol` to override",
+                path.display()
             ),
         )),
     }
@@ -426,10 +413,7 @@ fn resolve_text(
         Diagnostic::error(
             "cwd-io",
             Stage::Discovery,
-            format!(
-                "cannot determine the invocation working directory: {}",
-                marker::escape(&e.to_string())
-            ),
+            format!("cannot determine the invocation working directory: {e}"),
         )
     })?;
     let path = path.map(|path| absolute_from(&cwd, path));
@@ -480,10 +464,7 @@ fn resolve_stdin(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
         Diagnostic::error(
             "stdin-io",
             Stage::Discovery,
-            format!(
-                "cannot read standard input: {}",
-                marker::escape(&e.to_string())
-            ),
+            format!("cannot read standard input: {e}"),
         )
     })?;
     let text = decode_source_text(&bytes);

@@ -8,11 +8,9 @@
 //! [`SelectionOutcome`] keeps the true total, the truncation count, and the
 //! full set's highest severity so no surface can understate the result.
 
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use wright_analyzer::service::marker;
-
-use serde::{Deserialize, Serialize};
 use wright_analyzer::registry::LintRegistry;
 
 use crate::config::{InputSpec, SessionConfig};
@@ -96,7 +94,7 @@ impl FindingSelection {
         if let Some(rule) = &self.rule
             && !registry.contains(rule)
         {
-            return Err(format!("unknown rule id '{}'", marker::escape(rule)));
+            return Err(format!("unknown rule id '{rule}'"));
         }
         Ok(())
     }
@@ -141,12 +139,11 @@ impl FindingSelection {
             .zip(source_files)
             .and_then(|(file, files)| file_error(file, files, file_bases))
         {
-            Some(message) => {
-                diagnostics.push(Diagnostic::error(
-                    "invalid-selection",
-                    crate::diag::Stage::Discovery,
-                    message,
-                ));
+            Some((message, fields)) => {
+                let mut diagnostic =
+                    Diagnostic::error("invalid-selection", crate::diag::Stage::Discovery, message);
+                diagnostic.fields = fields;
+                diagnostics.push(diagnostic);
                 (diagnostics, exit.max(crate::result::exit::SOURCE_ERROR))
             }
             None => (diagnostics, exit),
@@ -330,13 +327,14 @@ fn finish_bases(config: &SessionConfig, loaded: Option<&Loaded>) -> Vec<PathBuf>
 /// under the same bases `span.path` matching uses, so the value as passed,
 /// root-relative, or absolute all select the same file — no suffix
 /// matching. `Some` carries the `invalid-selection` message listing the
-/// program's source files (bounded, with the total); a `file` that matches
-/// a program file but selects nothing stays a valid empty result.
+/// program's source files (bounded, with the total) plus the queried
+/// `file` in its fields (#888); a `file` that matches a program file but
+/// selects nothing stays a valid empty result.
 pub(crate) fn file_error(
     file: &str,
     source_files: &[String],
     file_bases: &[PathBuf],
-) -> Option<String> {
+) -> Option<(String, serde_json::Map<String, serde_json::Value>)> {
     let matcher = FileMatch::new(file, file_bases);
     if source_files
         .iter()
@@ -348,15 +346,19 @@ pub(crate) fn file_error(
     let mut listed: Vec<String> = source_files
         .iter()
         .take(FILE_LIST_LIMIT)
-        .map(|source| format!("'{}'", marker::escape(source)))
+        .map(|source| format!("'{source}'"))
         .collect();
     if total > FILE_LIST_LIMIT {
         listed.push("…".to_string());
     }
-    Some(format!(
-        "unknown file '{}'; the loaded program's source files ({total} total): {}",
-        marker::escape(file),
-        listed.join(", ")
+    let mut fields = serde_json::Map::new();
+    fields.insert("file".to_string(), file.into());
+    Some((
+        format!(
+            "unknown file '{file}'; the loaded program's source files ({total} total): {}",
+            listed.join(", ")
+        ),
+        fields,
     ))
 }
 

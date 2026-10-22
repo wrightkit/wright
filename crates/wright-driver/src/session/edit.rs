@@ -7,7 +7,6 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use wright_analyzer::service::marker;
 
 use super::{CompilerSession, Loaded, Provenance};
 use crate::config::InputSpec;
@@ -232,7 +231,11 @@ impl CompilerSession {
                 project_root: crate::source_provider::provider_project_root(&loaded.input.root),
                 documents,
             })
-            .map_err(|info| Diagnostic::error(info.code, Stage::Discovery, info.message))
+            .map_err(|info| {
+                let mut diagnostic = Diagnostic::error(info.code, Stage::Discovery, info.message);
+                diagnostic.fields = info.fields;
+                diagnostic
+            })
         })
     }
 
@@ -295,10 +298,7 @@ impl CompilerSession {
                             vec![Diagnostic::error(
                                 "edit-invalid-transaction",
                                 Stage::Discovery,
-                                format!(
-                                    "the finding's fix transaction is malformed: {}",
-                                    marker::escape(&error.to_string())
-                                ),
+                                format!("the finding's fix transaction is malformed: {error}"),
                             )],
                         ),
                         None,

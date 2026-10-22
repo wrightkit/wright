@@ -66,9 +66,9 @@ pub(crate) fn narrowing(args: &[std::ffi::OsString]) -> Option<&'static str> {
     })
 }
 
-/// The CLI's rendering of the `{list:OP}`/`{list-all:OP}` marker: the
-/// `wright inspect` command that lists the declared names — `wright
-/// serve` renders the operation name on the same result (#888).
+/// The CLI's `listOp` spelling (#888): the `wright inspect` command that
+/// lists the declared names — `wright serve` renders `the 'rules'
+/// operation` on the same fields.
 fn list_command(operation: &str, unbounded: bool) -> String {
     format!(
         "wright inspect {operation}{}",
@@ -76,15 +76,19 @@ fn list_command(operation: &str, unbounded: bool) -> String {
     )
 }
 
-/// Render the listing markers every envelope diagnostic carries — the
-/// CLI's own `wright inspect` command spelling (#888) — then collapse
-/// the `{{` escapes user content carries.
+/// Compose the refusal fields an envelope diagnostic carries — the
+/// CLI's own `wright inspect` command spelling (#888). `message` text
+/// is never scanned or rewritten: the fields alone carry the candidate
+/// locations and the listing operation.
 pub(crate) fn render_inspect_diagnostics<T: serde::Serialize>(
     envelope: &mut wright_driver::Envelope<T>,
 ) {
     for diagnostic in &mut envelope.diagnostics {
-        diagnostic.message = wright_driver::service::unescape(
-            &wright_driver::service::render_list_markers(&diagnostic.message, list_command),
+        wright_driver::service::compose_fields(
+            &mut diagnostic.message,
+            &mut diagnostic.fields,
+            None,
+            list_command,
         );
     }
 }

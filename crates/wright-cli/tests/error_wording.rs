@@ -315,7 +315,7 @@ fn ambiguous_rule_lists_candidates_with_locations() {
     }
     assert!(
         !message.contains("{file:") && !message.contains(" at 0:"),
-        "no unrendered marker or bare file index: {message}"
+        "no placeholder or bare file index: {message}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -426,12 +426,12 @@ fn inapplicable_combination_names_the_applicable_form() {
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
 
-// A `{` in caller input is escaped before interpolation (#888): the
-// neutral markers are emitted only by the analyzer, so a `--file` value
-// or rule name literally spelling `{file:N}`/`{list:OP}` stays text —
-// never a substitution, never a rendered command.
+// Caller input reaches `message` verbatim (#888): diagnostics carry no
+// executable placeholders, so a `--file` value literally spelling
+// `{file:N}`/`{list:OP}` stays text — never a substitution, never a
+// rendered command.
 #[test]
-fn marker_spelling_file_argument_stays_literal() {
+fn placeholder_spelling_file_argument_stays_literal() {
     let path = temp_file("main.ws", DUP_RULES);
     for argument in ["{file:0}", "{list:rules}"] {
         let output = run(&[
@@ -453,7 +453,7 @@ fn marker_spelling_file_argument_stays_literal() {
         );
         assert!(
             !message.contains("wright inspect rules"),
-            "the marker spelling did not render a command: {message}"
+            "the placeholder spelling did not render a command: {message}"
         );
     }
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -461,7 +461,7 @@ fn marker_spelling_file_argument_stays_literal() {
 
 // The print-and-pass-back contract (ADR-0035, #888): a rule literally
 // named `a{list:rules}b` prints its `NAME#N` addresses verbatim — the
-// `{list:rules}` inside the name never renders — and feeding a printed
+// brace string inside the name never renders — and feeding a printed
 // address back selects that rule.
 #[test]
 fn brace_named_rule_round_trips_through_its_address() {
@@ -501,7 +501,7 @@ rule ("a{list:rules}b") {
     }
     assert!(
         !message.contains("wright inspect rules"),
-        "the marker spelling inside the name did not render: {message}"
+        "the placeholder spelling inside the name did not render: {message}"
     );
 
     let output = run(&[
@@ -517,6 +517,158 @@ rule ("a{list:rules}b") {
         output.status.success(),
         "the printed address selects the rule: {}",
         command_result(&output)
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+// The refusal metadata is structured (#888): `message` is fully
+// rendered text and the candidates/listing operation live in sibling
+// fields a client can consume programmatically.
+#[test]
+fn refusal_fields_are_structured_metadata() {
+    let path = temp_file("dup.ws", DUP_RULES);
+
+    let output = run(&[
+        "inspect",
+        "cost",
+        path.to_str().unwrap(),
+        "--rule",
+        "tick",
+        "-f",
+        "json",
+    ]);
+    let envelope = parse_json(&output.stdout);
+    let diagnostic = &envelope["diagnostics"][0];
+    assert_eq!(diagnostic["code"], "invalid-selection");
+    let candidates = diagnostic["candidates"].as_array().unwrap();
+    for (index, candidate) in candidates.iter().enumerate() {
+        assert_eq!(
+            candidate["address"].as_str().unwrap(),
+            format!("tick#{}", index + 1)
+        );
+        assert_eq!(candidate["path"].as_str().unwrap(), "dup.ws");
+        assert!(candidate["line"].is_u64() && candidate["column"].is_u64());
+    }
+
+    let output = run(&[
+        "inspect",
+        "cost",
+        path.to_str().unwrap(),
+        "--rule",
+        "zzz-no-such-rule",
+        "-f",
+        "json",
+    ]);
+    let envelope = parse_json(&output.stdout);
+    let diagnostic = &envelope["diagnostics"][0];
+    assert_eq!(diagnostic["listOp"], "rules");
+    assert_eq!(diagnostic["name"], "zzz-no-such-rule");
+    assert_eq!(diagnostic["declaredTotal"], 1);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+// `check --rule-id` reaches `report_error` rather than the envelope
+// pass (#888): caller text spelling a placeholder still prints
+// verbatim — no doubled braces, no rendered command.
+#[test]
+fn check_rule_id_placeholder_spelling_stays_literal() {
+    let path = temp_file("tick.ws", DUP_RULES);
+    let output = run(&["check", path.to_str().unwrap(), "--rule-id", "{list:x}"]);
+    assert_eq!(output.status.code(), Some(2), "{}", command_result(&output));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("{list:x}"),
+        "the literal text prints verbatim: {stderr}"
+    );
+    assert!(
+        !stderr.contains("{{list:x}}") && !stderr.contains("wright inspect"),
+        "no doubled braces or rendered command: {stderr}"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+// File identities spell like anything (#888): a source file literally
+// named `{list:rules}x.ws` or `w{{i}}d.ws` selects verbatim and lists
+// verbatim — the name never renders and never collapses.
+#[test]
+fn brace_spelling_source_files_stay_literal() {
+    for name in ["{list:rules}x.ws", "w{{i}}d.ws"] {
+        let path = temp_file(name, DUP_RULES);
+        let output = run(&[
+            "inspect",
+            "symbols",
+            path.to_str().unwrap(),
+            "--file",
+            "nope.ws",
+            "-f",
+            "json",
+        ]);
+        assert_eq!(output.status.code(), Some(1), "{}", command_result(&output));
+        let message = parse_json(&output.stdout)["diagnostics"][0]["message"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(
+            message.contains(name),
+            "the file spelling lists verbatim: {message}"
+        );
+        assert!(
+            !message.contains("wright inspect"),
+            "the file spelling did not render a command: {message}"
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+}
+
+// `editStatements` resolves its rule addresses against the caller's
+// `sources` program, not the served snapshot (#888): a rule literally
+// named `a{file:0}b` prints its `NAME#N` candidates verbatim — the
+// placeholder spelling is text, never a file substitution.
+#[test]
+fn edit_statements_resolves_candidates_against_supplied_sources() {
+    let path = temp_file("main.ws", DUP_RULES);
+    let supplied = r#"rule ("a{file:0}b") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        Wait(0.016, Abort When False);
+    }
+}
+rule ("a{file:0}b") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        Wait(0.032, Abort When False);
+    }
+}
+"#;
+    // `inputIdentity` is the freshness precondition on the program the
+    // addresses name — the supplied `sources` text's own identity here.
+    let identity = wright_driver::input_identity(supplied);
+    let responses = serve(
+        &path,
+        &[json!({
+            "op": "editStatements",
+            "inputIdentity": identity,
+            "sources": {path.to_str().unwrap(): supplied},
+            "edits": [{"rule": "a{file:0}b", "list": "actions", "index": 0, "change": "delete"}]
+        })
+        .to_string()],
+    );
+    let error = &responses[0]["error"];
+    assert_eq!(error["code"], "ambiguous-rule", "{responses:?}");
+    let message = error["message"].as_str().unwrap();
+    for candidate in ["a{file:0}b#1", "a{file:0}b#2"] {
+        assert!(
+            message.contains(candidate),
+            "the candidate prints verbatim: {message}"
+        );
+    }
+    assert!(
+        !message.contains("{{") && !message.contains("wright inspect"),
+        "no doubled braces or rendered command: {message}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

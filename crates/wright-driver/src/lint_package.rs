@@ -27,7 +27,6 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use wright_analyzer::service::marker;
 
 use remote::ResolutionCache;
 pub use source::LintPackageSource;
@@ -310,9 +309,8 @@ impl LintPackageStore {
                     .collect()),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
                 Err(e) => Err(LintPackageError::install(format!(
-                    "cannot read the lint package store '{}': {}",
-                    marker::escape(&dir.display().to_string()),
-                    marker::escape(&e.to_string())
+                    "cannot read the lint package store '{}': {e}",
+                    dir.display()
                 ))),
             }
         };
@@ -375,26 +373,23 @@ impl LintPackageStore {
         let dir = self.package_dir(source, sha);
         if !dir.is_dir() {
             return Err(LintPackageError::NotFound(format!(
-                "lint package '{}' has no store entry at commit {sha}",
-                marker::escape(&source.to_string())
+                "lint package '{source}' has no store entry at commit {sha}"
             )));
         }
         let rules_dir = dir.join("rules");
         if rules_dir.is_dir() {
             std::fs::remove_dir_all(&rules_dir).map_err(|e| {
                 LintPackageError::install(format!(
-                    "cannot remove managed lint rules '{}': {}",
-                    marker::escape(&rules_dir.display().to_string()),
-                    marker::escape(&e.to_string())
+                    "cannot remove managed lint rules '{}': {e}",
+                    rules_dir.display()
                 ))
             })?;
         }
         let remaining = std::fs::read_dir(&dir)
             .map_err(|e| {
                 LintPackageError::install(format!(
-                    "cannot inspect lint package entry '{}': {}",
-                    marker::escape(&dir.display().to_string()),
-                    marker::escape(&e.to_string())
+                    "cannot inspect lint package entry '{}': {e}",
+                    dir.display()
                 ))
             })?
             .next();
@@ -402,9 +397,8 @@ impl LintPackageStore {
         if dir_removed {
             std::fs::remove_dir(&dir).map_err(|e| {
                 LintPackageError::install(format!(
-                    "cannot remove lint package entry '{}': {}",
-                    marker::escape(&dir.display().to_string()),
-                    marker::escape(&e.to_string())
+                    "cannot remove lint package entry '{}': {e}",
+                    dir.display()
                 ))
             })?;
             // Prune the `<owner>/<repo>` parents once they are empty.
@@ -491,9 +485,8 @@ impl LintPackageStore {
     fn staging_dir(&self, sha: &str) -> Result<PathBuf, LintPackageError> {
         std::fs::create_dir_all(&self.root).map_err(|e| {
             LintPackageError::install(format!(
-                "cannot create the lint package store '{}': {}",
-                marker::escape(&self.root.display().to_string()),
-                marker::escape(&e.to_string())
+                "cannot create the lint package store '{}': {e}",
+                self.root.display()
             ))
         })?;
         for attempt in 0..1024 {
@@ -510,16 +503,15 @@ impl LintPackageStore {
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
                 Err(e) => {
                     return Err(LintPackageError::install(format!(
-                        "cannot create lint package staging directory '{}': {}",
-                        marker::escape(&staging.display().to_string()),
-                        marker::escape(&e.to_string())
+                        "cannot create lint package staging directory '{}': {e}",
+                        staging.display()
                     )));
                 }
             }
         }
         Err(LintPackageError::install(format!(
             "cannot reserve a lint package staging directory in '{}'",
-            marker::escape(&self.root.display().to_string())
+            self.root.display()
         )))
     }
 
@@ -530,9 +522,8 @@ impl LintPackageStore {
         std::fs::create_dir_all(final_dir.parent().expect("sha dir has a parent")).map_err(
             |e| {
                 LintPackageError::install(format!(
-                    "cannot create lint package directory '{}': {}",
-                    marker::escape(&final_dir.display().to_string()),
-                    marker::escape(&e.to_string())
+                    "cannot create lint package directory '{}': {e}",
+                    final_dir.display()
                 ))
             },
         )?;
@@ -540,9 +531,8 @@ impl LintPackageStore {
             Ok(()) => Ok(()),
             Err(_) if rules::intact_package(final_dir) => Ok(()),
             Err(e) => Err(LintPackageError::install(format!(
-                "cannot promote lint package directory '{}': {}",
-                marker::escape(&final_dir.display().to_string()),
-                marker::escape(&e.to_string())
+                "cannot promote lint package directory '{}': {e}",
+                final_dir.display()
             ))),
         }
     }
@@ -574,21 +564,19 @@ pub(crate) fn activate_pinned(
             Diagnostic::error(
                 error.code(),
                 Stage::Discovery,
-                format!("lint package pin '{}': {error}", marker::escape(&pin.repo)),
+                format!("lint package pin '{}': {error}", pin.repo),
             )
         })?;
         if let Some(reference) = reference {
             return Err(pin_error(format!(
-                "lint package pin '{}' carries the ref '{}'; pin the commit in `sha`",
-                marker::escape(&pin.repo),
-                marker::escape(&reference)
+                "lint package pin '{}' carries the ref '{reference}'; pin the commit in `sha`",
+                pin.repo
             )));
         }
         if !is_full_sha(&pin.sha) {
             return Err(pin_error(format!(
-                "lint package '{}' must be pinned by a full 40-hex commit SHA, got '{}'",
-                marker::escape(&source.to_string()),
-                marker::escape(&pin.sha)
+                "lint package '{source}' must be pinned by a full 40-hex commit SHA, got '{}'",
+                pin.sha
             )));
         }
         let installed = store.install(&source, Some(&pin.sha)).map_err(|error| {
@@ -600,11 +588,7 @@ pub(crate) fn activate_pinned(
             Diagnostic::error(
                 error.code(),
                 stage,
-                format!(
-                    "lint package '{}' at {}: {error}",
-                    marker::escape(&source.to_string()),
-                    marker::escape(&pin.sha)
-                ),
+                format!("lint package '{source}' at {}: {error}", pin.sha),
             )
         })?;
         let rules_dir = installed.rules_dir();
@@ -617,12 +601,7 @@ pub(crate) fn activate_pinned(
             Diagnostic::error(
                 "lint-rule-error",
                 Stage::Analysis,
-                format!(
-                    "lint package '{}' at {}: {}",
-                    marker::escape(&source.to_string()),
-                    marker::escape(&pin.sha),
-                    marker::escape(&error.to_string())
-                ),
+                format!("lint package '{source}' at {}: {error}", pin.sha),
             )
         })?;
     }
@@ -703,7 +682,7 @@ impl LintPackageError {
     fn invalid(path: impl Into<PathBuf>, message: impl fmt::Display) -> Self {
         Self::Invalid {
             path: path.into(),
-            message: marker::escape(&message.to_string()),
+            message: message.to_string(),
         }
     }
 
@@ -738,11 +717,7 @@ impl fmt::Display for LintPackageError {
             | Self::RateLimited(m)
             | Self::Remote(m)
             | Self::Install(m) => write!(f, "{m}"),
-            Self::Invalid { path, message } => write!(
-                f,
-                "{}: {message}",
-                marker::escape(&path.display().to_string())
-            ),
+            Self::Invalid { path, message } => write!(f, "{}: {message}", path.display()),
         }
     }
 }

@@ -1,7 +1,6 @@
 //! Where `compile` delivers the program (ADR-0025): a file, never the result.
 
 use std::path::{Path, PathBuf};
-use wright_analyzer::service::marker;
 
 use crate::diag::{Diagnostic, Stage};
 use crate::input::display_path;
@@ -57,7 +56,7 @@ pub(crate) fn write_program(
                 Stage::Discovery,
                 format!(
                     "refusing to overwrite the input '{}'; choose another path with -o",
-                    marker::escape(&display_path(&path))
+                    display_path(&path)
                 ),
             ));
         }
@@ -69,7 +68,7 @@ pub(crate) fn write_program(
                     Stage::Discovery,
                     format!(
                         "'{}' already exists; pass --force (agent request: force) to overwrite it, or choose another path with -o",
-                        marker::escape(&display_path(&path))
+                        display_path(&path)
                     ),
                 ));
             }
@@ -79,10 +78,7 @@ pub(crate) fn write_program(
             return Err(Diagnostic::error(
                 "output-declined",
                 Stage::Discovery,
-                format!(
-                    "'{}' was not overwritten",
-                    marker::escape(&display_path(&path))
-                ),
+                format!("'{}' was not overwritten", display_path(&path)),
             ));
         }
     }
@@ -90,11 +86,7 @@ pub(crate) fn write_program(
         Diagnostic::error(
             "output-io",
             Stage::Emission,
-            format!(
-                "cannot write output '{}': {}",
-                marker::escape(&path.display().to_string()),
-                marker::escape(&error.to_string())
-            ),
+            format!("cannot write output '{}': {error}", path.display()),
         )
     })?;
     Ok(display_path(&path))

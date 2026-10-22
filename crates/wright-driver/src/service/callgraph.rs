@@ -1,9 +1,8 @@
 //! The `callGraph` operation: caller rules → callee subroutines.
 
 use serde_json::json;
-use wright_analyzer::service::marker;
 
-use super::{ToolResponse, ToolService, invalid_selection};
+use super::{ToolResponse, ToolService, invalid_selection, invalid_selection_fields};
 
 impl<'a> ToolService<'a> {
     /// `callGraph`: caller rules → callee subroutines. The selection fields
@@ -21,7 +20,7 @@ impl<'a> ToolService<'a> {
         let caller_address = match caller {
             Some(caller) => match self.semantic().resolve_rule(caller) {
                 Ok(rule) => Some(self.semantic().canonical_rule_address(rule)),
-                Err(error) => return invalid_selection(error.message),
+                Err(error) => return invalid_selection_fields(error.message, error.fields),
             },
             None => None,
         };
@@ -31,10 +30,7 @@ impl<'a> ToolService<'a> {
                 .iter()
                 .any(|subroutine| subroutine.name == callee)
         {
-            return invalid_selection(format!(
-                "unknown callee subroutine '{}'",
-                marker::escape(callee)
-            ));
+            return invalid_selection(format!("unknown callee subroutine '{callee}'"));
         }
         let edges = program
             .rules

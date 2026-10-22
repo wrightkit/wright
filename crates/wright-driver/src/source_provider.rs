@@ -1,6 +1,5 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
-use wright_analyzer::service::marker;
 
 use workshop_rs::program::{MAPPED_TEXT_V1, TEXT_V1};
 mod columns;
@@ -134,11 +133,6 @@ pub enum SourceProviderError {
 /// parsing `message`.
 const PROVIDER_REFUSAL_CODE_PREFIX: &str = "provider-refusal-";
 
-/// Escape caller-supplied text before it enters a marker-carrying diagnostic (#888).
-fn esc(text: impl std::fmt::Display) -> String {
-    marker::escape(&text.to_string())
-}
-
 fn wright_refusal_code(code: &str) -> bool {
     code == "session-config-changed"
 }
@@ -221,7 +215,7 @@ impl LppSourceProvider {
                 code: "provider-invalid-entry".to_string(),
                 message: format!(
                     "cannot convert OPY entry '{}' to an absolute file URI",
-                    esc(target.entry_path().display().to_string())
+                    target.entry_path().display()
                 ),
             })?
             .to_string();
@@ -311,7 +305,7 @@ impl SourceProvider for LppSourceProvider {
                         code: "provider-artifact-format".to_string(),
                         message: format!(
                             "the source provider returned an invalid '{MAPPED_TEXT_V1}' artifact: {}",
-                            esc(error)
+                            error
                         ),
                     }
                 })?;
@@ -322,7 +316,7 @@ impl SourceProvider for LppSourceProvider {
                     code: "provider-artifact-format".to_string(),
                     message: format!(
                         "the source provider returned unsupported artifact format '{}', expected '{TEXT_V1}'",
-                        esc(&a.format)
+                        a.format
                     ),
                 });
             }
@@ -341,7 +335,7 @@ impl SourceProvider for LppSourceProvider {
 fn request_context(operation: &str, target: &SourceTarget) -> String {
     format!(
         "the source provider {operation} request for '{}' failed",
-        esc(target.entry_path().display().to_string())
+        target.entry_path().display()
     )
 }
 
@@ -372,7 +366,7 @@ pub(crate) fn provider_error(
 ) -> SourceProviderError {
     SourceProviderError::Failed {
         code: provider_failure_code(&error),
-        message: format!("{context}: {}", esc(error)),
+        message: format!("{context}: {}", error),
     }
 }
 
@@ -412,7 +406,7 @@ fn provider_diagnostics(
                     code: d.code.unwrap_or_else(|| "provider-diagnostic".to_string()),
                     stage: Stage::Frontend,
                     severity,
-                    message: esc(&d.message),
+                    message: d.message.clone(),
                     status: None,
                     span: Some(SourceSpan {
                         file,
@@ -424,6 +418,7 @@ fn provider_diagnostics(
                         kind: SourceLanguage::Opy.as_str().to_string(),
                         locale: locale.map(str::to_owned),
                     }),
+                    fields: Default::default(),
                 }
             })
         })
@@ -467,9 +462,10 @@ pub(crate) fn provider_document_set(
                 code: "provider-document-unreadable".to_string(),
                 message: format!(
                     "cannot read loaded project member '{}' for the provider document set: {}",
-                    esc(path.display()),
-                    esc(error)
+                    path.display(),
+                    error
                 ),
+                ..Default::default()
             }
         })?;
         set.insert(
@@ -517,8 +513,9 @@ pub(crate) fn provider_member(
                 message: format!(
                     "loaded project member '{}' is not a disk file and cannot serve the \
                      provider document set",
-                    esc(member)
+                    member
                 ),
+                ..Default::default()
             })?;
         return Ok((url.to_string(), path));
     }
@@ -536,8 +533,9 @@ pub(crate) fn provider_member(
             code: "provider-document-uri".to_string(),
             message: format!(
                 "loaded project member '{}' cannot be expressed as a file:// URI",
-                esc(member)
+                member
             ),
+            ..Default::default()
         })
 }
 

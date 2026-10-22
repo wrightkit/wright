@@ -3,7 +3,6 @@
 //! live in [`crate::statement_edit`].
 
 use wright_analyzer::canonical::SemanticIndex;
-use wright_analyzer::service::marker;
 
 use super::{Address, StatementEditRequest, ToolErrorInfo, ToolResponse, ToolService};
 use crate::CompilerSession;
@@ -77,7 +76,7 @@ impl<'a> ToolService<'a> {
                         Stage::Discovery,
                         format!(
                             "the request's 'sources' carries no text for the loaded input '{}'",
-                            marker::escape(&loaded.input.display)
+                            loaded.input.display
                         ),
                     )]);
                 };
@@ -120,6 +119,7 @@ impl<'a> ToolService<'a> {
                         error: ToolErrorInfo {
                             code: "invalid-selection".to_string(),
                             message: format!("unknown rule {id}"),
+                            ..Default::default()
                         },
                     });
                 }
@@ -130,19 +130,16 @@ impl<'a> ToolService<'a> {
                     };
                     match resolved {
                         Ok(rule) => rule,
-                        // `{file:N}` renders against the effective program
+                        // Candidates resolve against the effective program
                         // — the caller's `sources` file table, not the
                         // served snapshot's (#888).
-                        Err(error) => {
-                            return Err(ToolResponse::Error {
-                                error: ToolErrorInfo {
-                                    message: crate::service::render_file_markers(
-                                        &error.message,
-                                        effective,
-                                    ),
-                                    ..error
-                                },
-                            });
+                        Err(mut error) => {
+                            crate::service::resolve_candidates(
+                                &mut error.message,
+                                &mut error.fields,
+                                Some(effective),
+                            );
+                            return Err(ToolResponse::Error { error });
                         }
                     }
                 }
@@ -263,11 +260,9 @@ impl<'a> ToolService<'a> {
         // so the next program-reading request serves the edited program,
         // and surface a load failure here rather than on the next read.
         if let Err(error) = self.refresh() {
-            return refuse(vec![Diagnostic::error(
-                error.code,
-                Stage::Discovery,
-                error.message,
-            )]);
+            let mut diagnostic = Diagnostic::error(error.code, Stage::Discovery, error.message);
+            diagnostic.fields = error.fields;
+            return refuse(vec![diagnostic]);
         }
         validation
     }

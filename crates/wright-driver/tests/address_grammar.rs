@@ -183,10 +183,10 @@ rule ("dup") {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// #888: the served refusal renders the neutral markers one shared result
-// carries — a candidate's `path:line:column` location from the file table
-// (never a bare file index) and the declared-name listing bounded with
-// its total, in the service's own operation spelling.
+// #888: the served refusal composes the structured fields one shared
+// result carries — a candidate's `path:line:column` location from the
+// file table (never a bare file index) and the declared-name listing
+// bounded with its total, in the service's own operation spelling.
 #[test]
 fn refusals_render_locations_and_bounded_declared_names() {
     let path = temp_workshop(
@@ -229,8 +229,21 @@ rule ("tick") {
     }
     assert!(
         !error.message.contains("{file:") && !error.message.contains(" at 0:"),
-        "no unrendered marker or bare file index: {error:?}"
+        "no placeholder or bare file index: {error:?}"
     );
+    // The candidate metadata rides along as structured fields (#888):
+    // resolved `path` beside the selectable `address`, never an index.
+    let candidates = error.fields["candidates"].as_array().unwrap();
+    assert_eq!(candidates.len(), 2);
+    for (index, candidate) in candidates.iter().enumerate() {
+        assert_eq!(
+            candidate["address"].as_str().unwrap(),
+            format!("tick#{}", index + 1)
+        );
+        assert_eq!(candidate["path"].as_str().unwrap(), "dup.ws");
+        assert!(candidate["file"].is_null(), "the index is resolved away");
+        assert!(candidate["line"].is_u64() && candidate["column"].is_u64());
+    }
 
     // Beyond the listing bound the refusal truncates the names, keeps the
     // total, and the service renders the unbounded operation spelling.
@@ -272,6 +285,9 @@ rule ("tick") {
             .ends_with("the 'rules' operation lists them all"),
         "the unbounded form is named in the surface's spelling: {error:?}"
     );
+    assert_eq!(error.fields["listOp"], "rules");
+    assert_eq!(error.fields["listAll"], true);
+    assert_eq!(error.fields["declaredTotal"], 25);
 
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
     let _ = std::fs::remove_dir_all(many.parent().unwrap());
@@ -356,13 +372,13 @@ rule ("tick") {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// Neutral markers are emitted only by the analyzer (#888): a `{` inside
-// user content is escaped at composition, so a rule name or file
-// selector literally spelling `{file:N}`/`{list:OP}` stays literal
-// through the same rendering — including the `NAME#N` address that
-// prints and feeds back to select the rule (ADR-0035).
+// Diagnostics carry no executable placeholders (#888): a `{` inside
+// user content is text, so a rule name or file selector literally
+// spelling `{file:N}`/`{list:OP}` stays literal through the same
+// composition — including the `NAME#N` address that prints and feeds
+// back to select the rule (ADR-0035).
 #[test]
-fn marker_spellings_inside_user_content_stay_literal() {
+fn placeholder_spellings_inside_user_content_stay_literal() {
     let path = temp_workshop(
         "brace.ws",
         r#"rule ("a{list:rules}b") {
@@ -386,7 +402,7 @@ rule ("a{list:rules}b") {
     let mut service = ToolService::new(&mut session).unwrap();
 
     // The ambiguous refusal prints both canonical addresses verbatim —
-    // `{list:rules}` inside the name is text, not a listing marker.
+    // `{list:rules}` inside the name is text, not a listing field.
     let ToolResponse::Error { error } = service.handle(&ToolRequest::Cfg {
         snapshot: None,
         rule: "a{list:rules}b".into(),
@@ -405,7 +421,7 @@ rule ("a{list:rules}b") {
     }
     assert!(
         !error.message.contains("the 'rules' operation"),
-        "the marker spelling inside the name did not render: {error:?}"
+        "the placeholder spelling inside the name did not render: {error:?}"
     );
 
     // Print-and-pass-back: the printed address selects the rule.
@@ -420,7 +436,7 @@ rule ("a{list:rules}b") {
         },
     );
 
-    // A `file` selector literally spelling a marker stays literal in
+    // A `file` selector literally spelling a placeholder stays literal in
     // the refusal — `{file:0}` never substitutes a path and
     // `{list:rules}` never renders the operation.
     for argument in ["{file:0}", "{list:rules}"] {
@@ -439,7 +455,7 @@ rule ("a{list:rules}b") {
         );
         assert!(
             !error.message.contains("the 'rules' operation"),
-            "the marker spelling inside the selector did not render: {error:?}"
+            "the placeholder spelling inside the selector did not render: {error:?}"
         );
     }
 

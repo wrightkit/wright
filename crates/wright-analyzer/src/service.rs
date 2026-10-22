@@ -53,66 +53,19 @@ pub enum Response {
 }
 
 /// A structured error payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// `fields` carries the refusal metadata surfaces reword or consume
+/// programmatically (#888): a `listOp`/`listAll` name-listing operation,
+/// `candidates` entries (`address`, `file`/`path`, `line`, `column`),
+/// `declared`/`declaredTotal` bounded name lists, and the queried
+/// `name`/`file`/`kind`. The keys serialize as siblings of `code` and
+/// `message`, which the wire schema already permits.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ErrorInfo {
     pub code: String,
     pub message: String,
-}
-
-/// Neutral markers an [`ErrorInfo`] message can carry where one shared
-/// fact must be spelled per surface (#888): the analyzer/driver emit the
-/// marker once, and each surface renders it — `wright serve` the
-/// operation name, the CLI its `wright inspect` command.
-pub mod marker {
-    /// `{file:N}` — the Nth source-file spelling, rendered against the
-    /// loaded program's file table (the analyzer knows only file ids,
-    /// never the spellings).
-    pub const FILE_PREFIX: &str = "file:";
-    /// `{list:OP}` — the operation/command that lists the declared names.
-    pub const LIST_PREFIX: &str = "list:";
-    /// `{list-all:OP}` — the same listing without its default bound.
-    pub const LIST_ALL_PREFIX: &str = "list-all:";
-
-    /// The `{file:N}` marker for a file-table index.
-    pub fn file(index: usize) -> String {
-        format!("{{file:{index}}}")
-    }
-
-    /// The `{list:OP}`/`{list-all:OP}` marker naming a name-listing
-    /// operation; `unbounded` selects the unbounded form.
-    pub fn list(operation: &str, unbounded: bool) -> String {
-        let prefix = if unbounded {
-            LIST_ALL_PREFIX
-        } else {
-            LIST_PREFIX
-        };
-        format!("{{{prefix}{operation}}}")
-    }
-
-    /// Escape a user-controlled substring before it is interpolated into
-    /// a message markers can appear in (#888): `{` becomes `{{`, which
-    /// every expansion pass copies through untouched and the surface's
-    /// final [`unescape`] collapses back to a literal `{`. Without it a
-    /// value like `{file:0}` or `{list:rules}` would render as a marker.
-    pub fn escape(text: &str) -> String {
-        text.replace('{', "{{")
-    }
-
-    /// The matching final rendering step: each `{{` collapses to a
-    /// literal `{`. It runs once per message, after every expansion
-    /// pass — never inside one, or an escaped `{list:…}` would surface
-    /// unescaped and re-expand on the next pass.
-    pub fn unescape(text: &str) -> String {
-        let mut out = String::with_capacity(text.len());
-        let mut chars = text.chars().peekable();
-        while let Some(character) = chars.next() {
-            if character == '{' && chars.peek() == Some(&'{') {
-                chars.next();
-            }
-            out.push(character);
-        }
-        out
-    }
+    #[serde(default, flatten)]
+    pub fields: serde_json::Map<String, serde_json::Value>,
 }
 
 /// The origin of a compiled program, carried in tool responses.

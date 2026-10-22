@@ -12,7 +12,6 @@ use protocol::mutual_protocol_version;
 pub(crate) use semantic::*;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use wright_analyzer::service::marker;
 
 use workshop_rs::Program;
 use wright_analyzer::canonical::SemanticService;
@@ -90,12 +89,6 @@ enum ProviderOperation {
 /// (workshop-rs ADR-0010).
 pub const WORKSHOP_CLIENT_ELEMENT_LIMIT: usize = 32768;
 
-/// Escape caller-supplied text before it enters a marker-carrying
-/// diagnostic (#888).
-fn esc(text: impl std::fmt::Display) -> String {
-    marker::escape(&text.to_string())
-}
-
 fn loaded_origin(loaded: &Loaded) -> Origin {
     Origin {
         kind: if loaded.provenance == Provenance::Unmapped {
@@ -150,7 +143,7 @@ impl CompilerSession {
             Diagnostic::error(
                 "catalog-error",
                 Stage::Internal,
-                format!("cannot load the built-in Workshop catalog: {}", esc(error)),
+                format!("cannot load the built-in Workshop catalog: {}", error),
             )
         })?;
         let lint_registry = registry::compose(&config)?;
@@ -657,8 +650,8 @@ impl CompilerSession {
                             }
                             Err(error) => unreadable.push(format!(
                                 "{} ({})",
-                                esc(member),
-                                esc(error)
+                                member,
+                                error
                             )),
                         }
                     }
@@ -679,7 +672,7 @@ impl CompilerSession {
                     Stage::Frontend,
                     format!(
                         "the provider source map does not match its Workshop artifact ({}); findings are reported as unmapped",
-                        esc(error)
+                        error
                     ),
                 )),
             }
@@ -998,7 +991,7 @@ impl CompilerSession {
             envelope.diagnostics.push(Diagnostic::error(
                 "invalid-selection",
                 Stage::Emission,
-                format!("unknown baseline '{}': no record under .wright/ for this input kind/locale/profile", esc(&name)),
+                format!("unknown baseline '{}': no record under .wright/ for this input kind/locale/profile", name),
             ));
             envelope.ok = false;
             envelope.exit = crate::result::exit::SOURCE_ERROR;
@@ -1023,7 +1016,7 @@ impl CompilerSession {
                         Stage::Discovery,
                         format!(
                             "unknown output locale '{}': declared locales are {}",
-                            esc(name),
+                            name,
                             self.catalog
                                 .locales()
                                 .iter()
@@ -1225,11 +1218,12 @@ impl CompilerSession {
                     severity: Severity::Info,
                     message: format!(
                         "the canonical element count is unavailable ({}); the {WORKSHOP_CLIENT_ELEMENT_LIMIT}-element client import limit was not evaluated",
-                        esc(error)
+                        error
                     ),
                     status: None,
                     span: None,
                     source: Some(loaded_origin(loaded)),
+                    fields: Default::default(),
                 });
                 return;
             }
@@ -1248,12 +1242,12 @@ impl CompilerSession {
             status: None,
             span: None,
             source: Some(loaded_origin(loaded)),
+            fields: Default::default(),
         };
         if let Some(top) = report.rules.iter().max_by_key(|rule| rule.count) {
             diagnostic.message.push_str(&format!(
                 "; largest contributor: rule \"{}\" ({} elements)",
-                esc(&top.name),
-                top.count
+                top.name, top.count
             ));
             diagnostic.span = top.span.map(|span| {
                 source_span(
@@ -1349,7 +1343,7 @@ fn apply_profile(
             Diagnostic::error(
                 "transform-error",
                 Stage::Internal,
-                format!("Workshop transformation failed: {}", esc(error)),
+                format!("Workshop transformation failed: {}", error),
             )
         })?;
     }
@@ -1420,6 +1414,7 @@ pub(crate) fn workshop_diag(
         status: None,
         span,
         source: Some(resolved.origin.clone()),
+        fields: Default::default(),
     }
 }
 
@@ -1471,8 +1466,7 @@ fn provider_error_diagnostic(error: wright_lpp::ProviderError, operation: &str) 
         crate::source_provider::provider_failure_stage(&error),
         format!(
             "the provider could not {} the artifact: {}",
-            esc(operation),
-            esc(error)
+            operation, error
         ),
     )
 }
@@ -1496,12 +1490,12 @@ fn map_issue(
     let status = status_for_classification(issue.classification);
     let mut message = format!(
         "Workshop construct '{}' is {} ({})",
-        esc(&issue.name),
+        issue.name,
         status_name(status),
         issue.classification.as_str()
     );
     if let Some(spelling) = &issue.suggestion {
-        message.push_str(&format!(" (did you mean '{}'?)", esc(spelling)));
+        message.push_str(&format!(" (did you mean '{}'?)", spelling));
     }
     Diagnostic {
         code: diagnostic_code(kind_code, &issue.name),
@@ -1511,6 +1505,7 @@ fn map_issue(
         status: Some(status),
         span: Some(issue_span(issue.span, path)),
         source: Some(origin.clone()),
+        fields: Default::default(),
     }
 }
 

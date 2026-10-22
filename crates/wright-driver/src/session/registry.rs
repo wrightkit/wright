@@ -3,7 +3,6 @@
 //! validation. Unknown effective-policy IDs are usage errors (#640).
 
 use wright_analyzer::registry::LintRegistry;
-use wright_analyzer::service::marker;
 
 use crate::config::SessionConfig;
 use crate::diag::{Diagnostic, Stage};
@@ -16,11 +15,7 @@ pub(super) fn compose(config: &SessionConfig) -> Result<LintRegistry, Diagnostic
     crate::lint_package::activate_pinned(&config.lint, &config.lint_package, &mut registry)?;
     for path in &config.lint_rule_paths {
         registry.load_path(path).map_err(|error| {
-            Diagnostic::error(
-                "lint-rule-error",
-                Stage::Analysis,
-                marker::escape(&error.to_string()),
-            )
+            Diagnostic::error("lint-rule-error", Stage::Analysis, error.to_string())
         })?;
     }
     if let Err(message) = config.selection.validate(&registry) {
@@ -43,7 +38,7 @@ pub(super) fn compose(config: &SessionConfig) -> Result<LintRegistry, Diagnostic
         return Err(Diagnostic::error(
             "invalid-selection",
             Stage::Discovery,
-            format!("unknown rule id '{}'", marker::escape(rule_id)),
+            format!("unknown rule id '{rule_id}'"),
         ));
     }
     Ok(registry)

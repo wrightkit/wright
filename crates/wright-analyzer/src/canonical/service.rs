@@ -222,10 +222,8 @@ impl<'a> SemanticService<'a> {
                 return serde_json::to_string(&Response::Error {
                     error: ErrorInfo {
                         code: "invalid-json".to_string(),
-                        message: format!(
-                            "could not parse request JSON: {}",
-                            crate::service::marker::escape(&err.to_string())
-                        ),
+                        message: format!("could not parse request JSON: {err}"),
+                        ..Default::default()
                     },
                 })
                 .expect("error response serializes");
@@ -296,6 +294,7 @@ impl<'a> SemanticService<'a> {
             error: ErrorInfo {
                 code: code.to_string(),
                 message,
+                ..Default::default()
             },
         }
     }

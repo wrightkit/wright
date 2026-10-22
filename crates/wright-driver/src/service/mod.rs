@@ -27,14 +27,13 @@ use wright_analyzer::canonical::{
 pub use wright_analyzer::service::ErrorInfo as ToolErrorInfo;
 /// A tool response: a structured owned result or a structured error.
 pub use wright_analyzer::service::Response as ToolResponse;
-use wright_analyzer::service::marker;
 use wright_analyzer::service::{Request, Response};
 
 mod callgraph;
 mod capabilities;
 mod cost;
 mod edit_statements;
-mod markers;
+mod refusal;
 mod simulate;
 mod stale_ids;
 
@@ -47,10 +46,10 @@ pub const AGENT_CONTRACT: &str = "wright-agent/v1";
 const DEFAULT_CONTENT_RULES: usize = 20;
 
 pub use capabilities::{Capabilities, OPERATIONS};
-pub(crate) use markers::render_file_markers;
-pub use markers::render_list_markers;
-/// The escape collapse every marker-rendering surface runs last (#888).
-pub use wright_analyzer::service::marker::unescape;
+/// Compose a refusal's structured fields into the surface's own
+/// vocabulary (#888).
+pub use refusal::compose_fields;
+pub(crate) use refusal::{invalid_selection, invalid_selection_fields, resolve_candidates};
 
 pub use crate::request::{
     Address, StatementEditChange, StatementEditRequest, StatementList, ToolRequest,
@@ -173,8 +172,8 @@ impl<'a> ToolService<'a> {
     /// read (#617); a provider that declines its compile keeps the
     /// check-only path.
     ///
-    /// `handle` itself lives in [`markers`] — it renders each refusal's
-    /// neutral markers in this surface's operation vocabulary (#888).
+    /// `handle` itself lives in [`refusal`] — it composes each refusal's
+    /// structured fields in this surface's operation vocabulary (#888).
     pub(crate) fn handle_full(&mut self, request: &ToolRequest) -> ToolResponse {
         // ADR-0035: the `rules` `name` selection is removed vocabulary —
         // its presence is a request-shape error, refused like a schema
@@ -333,6 +332,7 @@ impl<'a> ToolService<'a> {
         ToolErrorInfo {
             code: diagnostic.code,
             message: diagnostic.message,
+            fields: diagnostic.fields,
         }
     }
 
@@ -801,10 +801,11 @@ impl<'a> ToolService<'a> {
             .map_err(|message| ToolErrorInfo {
                 code: "invalid-selection".to_string(),
                 message,
+                ..Default::default()
             })?;
         let loaded = &self.snapshot().loaded;
         if let Some(file) = selection.file.as_deref()
-            && let Some(message) = crate::select::file_error(
+            && let Some((message, fields)) = crate::select::file_error(
                 file,
                 &loaded.source_files,
                 &crate::select::file_bases(&loaded.input),
@@ -813,6 +814,7 @@ impl<'a> ToolService<'a> {
             return Err(ToolErrorInfo {
                 code: "invalid-selection".to_string(),
                 message,
+                fields,
             });
         }
         Ok(())
@@ -836,10 +838,10 @@ impl<'a> ToolService<'a> {
         // ADR-0035: a `file` value matching no source file of the loaded
         // program is `invalid-selection`, never a silently empty result.
         if let Some(file) = file
-            && let Some(message) =
+            && let Some((message, fields)) =
                 crate::select::file_error(file, &loaded.source_files, &file_bases)
         {
-            return invalid_selection(message);
+            return invalid_selection_fields(message, fields);
         }
         let items = match result {
             serde_json::Value::Array(items) => items,
@@ -938,7 +940,7 @@ impl<'a> ToolService<'a> {
         {
             return invalid_selection(format!(
                 "unknown symbol kind '{}' (expected one of: {})",
-                esc(kind),
+                kind,
                 SymbolKind::ALL
                     .iter()
                     .map(|known| known.as_str())
@@ -977,7 +979,7 @@ impl<'a> ToolService<'a> {
         {
             return invalid_selection(format!(
                 "unknown reference kind '{}' (expected one of: {})",
-                esc(kind),
+                kind,
                 ReferenceKind::ALL
                     .iter()
                     .map(|known| known.as_str())
@@ -989,7 +991,9 @@ impl<'a> ToolService<'a> {
             Some(address) => match self.rule_address(address) {
                 Ok(id) if (id as usize) < self.snapshot().loaded.program.rules.len() => Some(id),
                 Ok(id) => return invalid_selection(format!("unknown rule {id}")),
-                Err(error) => return invalid_selection(error.message),
+                Err(error) => {
+                    return invalid_selection_fields(error.message, error.fields);
+                }
             },
             None => None,
         };
@@ -1029,7 +1033,7 @@ impl<'a> ToolService<'a> {
         {
             return invalid_selection(format!(
                 "unknown cfg block kind '{}' (expected one of: {})",
-                esc(kind),
+                kind,
                 BLOCK_KINDS.join(", ")
             ));
         }
@@ -1134,23 +1138,6 @@ impl<'a> ToolService<'a> {
                 "members": domain.members.iter().map(|m| m.member.clone()).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
         })
-    }
-}
-
-/// An unknown selection/filter value is a structured usage error, never a
-/// silent empty result (#430, #531).
-/// Escape caller-supplied text before it enters a marker-carrying
-/// diagnostic (#888).
-fn esc(text: impl std::fmt::Display) -> String {
-    marker::escape(&text.to_string())
-}
-
-pub(crate) fn invalid_selection(message: String) -> ToolResponse {
-    ToolResponse::Error {
-        error: ToolErrorInfo {
-            code: "invalid-selection".to_string(),
-            message,
-        },
     }
 }
 

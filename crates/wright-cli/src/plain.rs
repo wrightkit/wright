@@ -1677,15 +1677,11 @@ mod tests {
     fn query_commands_show_their_name_on_success() {
         let mut envelope = envelope("symbols", 0, SymbolsResult::default());
         assert_eq!(verdict_word(&envelope), "SYMBOLS");
-        envelope.diagnostics.push(Diagnostic {
-            code: "w".to_string(),
-            stage: wright_driver::Stage::Analysis,
-            severity: wright_driver::Severity::Warning,
-            message: "w".to_string(),
-            status: None,
-            span: None,
-            source: None,
-        });
+        envelope.diagnostics.push(Diagnostic::warning(
+            "w",
+            wright_driver::Stage::Analysis,
+            "w",
+        ));
         assert_eq!(verdict_word(&envelope), "WARN");
     }
 

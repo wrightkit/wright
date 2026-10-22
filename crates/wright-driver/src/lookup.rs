@@ -18,7 +18,6 @@
 //! languages.
 
 use std::collections::HashSet;
-use wright_analyzer::service::marker;
 
 use serde_json::{Value, json};
 use workshop_rs::catalog::{Catalog, Kind, Locale};
@@ -93,8 +92,7 @@ pub(crate) fn lookup(
         return refusal(
             "invalid-kind",
             format!(
-                "kind must be one of {}; got '{}'",
-                marker::escape(kind),
+                "kind must be one of {}; got '{kind}'",
                 KINDS
                     .iter()
                     .map(|kind| format!("'{kind}'"))
@@ -108,10 +106,7 @@ pub(crate) fn lookup(
         "opy" => opy_lookup(session, query, kind, within, locale, limit),
         other => refusal(
             "invalid-language",
-            format!(
-                "lookup serves 'workshop' and 'opy'; got '{}'",
-                marker::escape(other)
-            ),
+            format!("lookup serves 'workshop' and 'opy'; got '{other}'"),
         ),
     }
 }
@@ -121,6 +116,7 @@ pub(crate) fn refusal(code: &str, message: impl Into<String>) -> ToolResponse {
         error: ToolErrorInfo {
             code: code.to_string(),
             message: message.into(),
+            ..Default::default()
         },
     }
 }
@@ -166,7 +162,7 @@ fn workshop_lookup(
             "unsupported-locale",
             format!(
                 "locale '{}' is not declared by the Workshop catalog",
-                marker::escape(locale.unwrap_or_default())
+                locale.unwrap_or_default()
             ),
         );
     };

@@ -9,7 +9,6 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use wright_analyzer::service::marker;
 
 mod columns;
 use columns::{char_count, position_byte};
@@ -81,7 +80,7 @@ impl EditTransaction {
                     Stage::Discovery,
                     format!(
                         "the transaction carries overlapping edits in '{}' at {}:{}-{} and {}:{}-{}",
-                        esc(&a.source),
+                        a.source,
                         a.range.start_line,
                         a.range.start_col,
                         a.range.end_line,
@@ -99,9 +98,7 @@ impl EditTransaction {
                     Stage::Discovery,
                     format!(
                         "the transaction carries order-dependent zero-width edits in '{}' at {}:{}; refusing rather than defining an arbitrary insertion order",
-                        esc(&a.source),
-                        a.range.start_line,
-                        a.range.start_col
+                        a.source, a.range.start_line, a.range.start_col
                     ),
                 ));
             }
@@ -141,12 +138,6 @@ impl EditTransaction {
         }
         Ok(previews)
     }
-}
-
-/// Escape caller-supplied text before it enters a marker-carrying
-/// diagnostic (#888).
-fn esc(text: impl std::fmt::Display) -> String {
-    marker::escape(&text.to_string())
 }
 
 fn is_zero_width(edit: &SourceEdit) -> bool {
@@ -213,8 +204,7 @@ pub fn validate_transaction(
             Stage::Discovery,
             format!(
                 "the edit targets '{}' which is not the loaded input '{}'",
-                esc(&edit.source),
-                esc(&resolved.display)
+                edit.source, resolved.display
             ),
         )]);
     }
@@ -319,7 +309,7 @@ pub(crate) fn edit_kind_gate(kind: SourceKind, provider_operation: &str) -> Opti
             Stage::Discovery,
             format!(
                 "raw edit operations cover Workshop input; for OPY sources route through '{}' instead",
-                esc(provider_operation)
+                provider_operation
             ),
         )),
         SourceKind::Ostw => Some(source_provider_unavailable()),
@@ -404,7 +394,7 @@ pub fn write_previews(
             Diagnostic::error(
                 "input-io",
                 Stage::Discovery,
-                format!("cannot read '{}': {}", esc(&preview.source), esc(error)),
+                format!("cannot read '{}': {}", preview.source, error),
             )
         })?;
         let current = crate::input::decode_source_text(&bytes);
@@ -417,7 +407,7 @@ pub fn write_previews(
                 Stage::Discovery,
                 format!(
                     "'{}' changed since the transaction was validated; re-validate and retry",
-                    esc(&preview.source)
+                    preview.source
                 ),
             ));
         }
@@ -435,11 +425,7 @@ pub fn write_previews(
             return Err(Diagnostic::error(
                 "output-io",
                 Stage::Emission,
-                format!(
-                    "cannot write '{}': {}",
-                    esc(write.temporary.display()),
-                    esc(error)
-                ),
+                format!("cannot write '{}': {}", write.temporary.display(), error),
             ));
         }
     }
@@ -483,13 +469,12 @@ fn rollback_write(writes: &[PlannedWrite], failed: usize, error: std::io::Error)
     let mut diverged = Vec::new();
     for write in &writes[..failed] {
         if std::fs::write(&write.path, &write.original).is_err() {
-            diverged.push(format!("'{}'", esc(&write.preview.source)));
+            diverged.push(format!("'{}'", write.preview.source));
         }
     }
     let mut message = format!(
         "cannot replace '{}': {}",
-        esc(&writes[failed].preview.source),
-        esc(error)
+        writes[failed].preview.source, error
     );
     if failed > 0 && diverged.is_empty() {
         message.push_str("; the files already written were restored to their validated content");
@@ -523,7 +508,7 @@ fn source_precondition(
             Stage::Discovery,
             format!(
                 "the edit targets '{}' but no current text was provided for it; supply the current source so the version precondition can be verified",
-                esc(&edit.source)
+                edit.source
             ),
         ));
     };
@@ -531,7 +516,7 @@ fn source_precondition(
         Diagnostic::error(
             "edit-stale-source",
             Stage::Discovery,
-            format!("the edit for '{}' targets a different source version (identity mismatch); re-fetch the source and retry", esc(&edit.source)),
+            format!("the edit for '{}' targets a different source version (identity mismatch); re-fetch the source and retry", edit.source),
         )
     })
 }
@@ -619,8 +604,7 @@ pub fn rename_symbol(source: &str, request: &RenameRequest) -> Result<SourceEdit
             Stage::Discovery,
             format!(
                 "no {} named '{}' is declared in the source",
-                request.symbol_kind,
-                esc(&request.from)
+                request.symbol_kind, request.from
             ),
         ));
     }

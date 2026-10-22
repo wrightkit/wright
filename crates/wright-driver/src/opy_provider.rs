@@ -2,7 +2,6 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use wright_analyzer::service::marker;
 
 mod download;
 use download::{extract_provider, fetch, fetch_text, provider_client, verify_checksum};
@@ -148,7 +147,7 @@ impl OpyProviderResolver {
         } else {
             Err(OpyProviderError::unsupported(format!(
                 "unsupported OPY provider target '{}'",
-                esc(&target)
+                target
             )))
         }
     }
@@ -161,8 +160,8 @@ impl OpyProviderResolver {
             Err(err) => {
                 return Err(OpyProviderError::install(format!(
                     "cannot read active OPY provider pointer '{}': {}",
-                    esc(active.display()),
-                    esc(err)
+                    active.display(),
+                    err
                 )));
             }
         };
@@ -240,8 +239,8 @@ impl OpyProviderResolver {
         std::fs::create_dir_all(&self.store_dir).map_err(|e| {
             OpyProviderError::install(format!(
                 "cannot create the OPY provider store '{}': {}",
-                esc(self.store_dir.display()),
-                esc(e)
+                self.store_dir.display(),
+                e
             ))
         })?;
 
@@ -251,7 +250,7 @@ impl OpyProviderResolver {
             if !is_executable(&final_executable) {
                 return Err(OpyProviderError::install(format!(
                     "installed OPY provider '{}' is not executable",
-                    esc(final_executable.display())
+                    final_executable.display()
                 )));
             }
             return self.activate(version, target);
@@ -259,7 +258,7 @@ impl OpyProviderResolver {
         if final_dir.exists() {
             return Err(OpyProviderError::install(format!(
                 "cannot install OPY provider: target directory '{}' already exists without a valid executable",
-                esc(final_dir.display())
+                final_dir.display()
             )));
         }
 
@@ -283,8 +282,8 @@ impl OpyProviderResolver {
         std::fs::create_dir_all(final_dir.parent().expect("parent exists")).map_err(|e| {
             OpyProviderError::install(format!(
                 "cannot create OPY provider version directory '{}': {}",
-                esc(final_dir.display()),
-                esc(e)
+                final_dir.display(),
+                e
             ))
         })?;
         match std::fs::rename(staging, &final_dir) {
@@ -292,8 +291,8 @@ impl OpyProviderResolver {
             Err(_) if is_executable(&final_executable) => self.activate(version, target),
             Err(e) => Err(OpyProviderError::install(format!(
                 "cannot activate staged OPY provider '{}': {}",
-                esc(final_dir.display()),
-                esc(e)
+                final_dir.display(),
+                e
             ))),
         }
     }
@@ -314,15 +313,15 @@ impl OpyProviderResolver {
                 Err(e) => {
                     return Err(OpyProviderError::install(format!(
                         "cannot create OPY provider staging directory '{}': {}",
-                        esc(staging.display()),
-                        esc(e)
+                        staging.display(),
+                        e
                     )));
                 }
             }
         }
         Err(OpyProviderError::install(format!(
             "cannot reserve an OPY provider staging directory in '{}'",
-            esc(self.store_dir.display())
+            self.store_dir.display()
         )))
     }
 
@@ -339,22 +338,22 @@ impl OpyProviderResolver {
             let mut file = std::fs::File::create(&temporary).map_err(|e| {
                 OpyProviderError::install(format!(
                     "cannot write temporary OPY provider pointer '{}': {}",
-                    esc(temporary.display()),
-                    esc(e)
+                    temporary.display(),
+                    e
                 ))
             })?;
             write!(file, "{version}").map_err(|e| {
                 OpyProviderError::install(format!(
                     "cannot write temporary OPY provider pointer '{}': {}",
-                    esc(temporary.display()),
-                    esc(e)
+                    temporary.display(),
+                    e
                 ))
             })?;
             file.sync_all().map_err(|e| {
                 OpyProviderError::install(format!(
                     "cannot persist temporary OPY provider pointer '{}': {}",
-                    esc(temporary.display()),
-                    esc(e)
+                    temporary.display(),
+                    e
                 ))
             })?;
             let active = self.store_dir.join("active");
@@ -365,8 +364,7 @@ impl OpyProviderResolver {
                 }
                 Err(error) => Err(OpyProviderError::install(format!(
                     "cannot atomically activate OPY provider {}: {}",
-                    esc(version),
-                    esc(error)
+                    version, error
                 ))),
             }
         })();
@@ -375,17 +373,11 @@ impl OpyProviderResolver {
     }
 }
 
-/// Escape caller-supplied text before it enters a marker-carrying
-/// diagnostic (#888).
-fn esc(text: impl std::fmt::Display) -> String {
-    marker::escape(&text.to_string())
-}
-
 fn validate_explicit(path: &Path) -> Result<ResolvedOpyProvider, OpyProviderError> {
     if !is_executable(path) {
         return Err(OpyProviderError::missing(format!(
             "explicit OPY provider '{}' does not exist or is not executable",
-            esc(path.display())
+            path.display()
         )));
     }
     Ok(ResolvedOpyProvider {
@@ -406,8 +398,7 @@ fn target_for(os: &str, arch: &str) -> Result<String, OpyProviderError> {
         ("windows", "x86_64") => Ok("x86_64-pc-windows-msvc".to_string()),
         _ => Err(OpyProviderError::unsupported(format!(
             "unsupported OPY provider target {}/{}; supported targets are linux/x86_64, darwin x86_64/aarch64, and windows x86_64",
-            esc(os),
-            esc(arch)
+            os, arch
         ))),
     }
 }
@@ -439,7 +430,7 @@ fn normalize_version(version: &str) -> Result<String, OpyProviderError> {
     else {
         return Err(OpyProviderError::download(format!(
             "invalid OPY provider release version '{}' (expected X.Y.Z)",
-            esc(core)
+            core
         )));
     };
     if [major, minor, patch]
@@ -450,7 +441,7 @@ fn normalize_version(version: &str) -> Result<String, OpyProviderError> {
     } else {
         Err(OpyProviderError::download(format!(
             "invalid OPY provider release version '{}' (expected X.Y.Z)",
-            esc(core)
+            core
         )))
     }
 }

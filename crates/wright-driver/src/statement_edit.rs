@@ -11,7 +11,6 @@
 //! `validateEditTransaction`.
 
 use std::collections::BTreeMap;
-use wright_analyzer::service::marker;
 
 use serde::Serialize;
 use workshop_rs::rules::statement_edit::{StatementEditError, StatementList as OwnerStatementList};
@@ -89,7 +88,7 @@ pub(crate) fn owner_error(
             Stage::Discovery,
             format!(
                 "{} at rule {rule} {} index {}",
-                marker::escape(&error.to_string()),
+                error,
                 edit.list.as_str(),
                 edit.index
             ),

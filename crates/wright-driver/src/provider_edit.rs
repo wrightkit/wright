@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
-use wright_analyzer::service::marker;
 
 use crate::diag::{Diagnostic, Stage};
 
@@ -44,12 +43,6 @@ pub struct ProviderValidateRequest {
     pub sources: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_root: Option<String>,
-}
-
-/// Escape caller-supplied text before it enters a marker-carrying
-/// diagnostic (#888).
-fn esc(text: impl std::fmt::Display) -> String {
-    marker::escape(&text.to_string())
 }
 
 pub fn semantic_rename(
@@ -107,7 +100,7 @@ fn rename_result(
                 Stage::Discovery,
                 format!(
                     "the provider returned edits for '{}', which is not in the request document set",
-                    esc(&doc_edits.document_uri)
+                    doc_edits.document_uri
                 ),
             )]);
         };
@@ -117,9 +110,7 @@ fn rename_result(
                 Stage::Discovery,
                 format!(
                     "the provider computed edits for '{}' against version {}, but the current version is {}; re-fetch the source and retry",
-                    esc(&doc_edits.document_uri),
-                    doc_edits.version,
-                    document.version
+                    doc_edits.document_uri, doc_edits.version, document.version
                 ),
             )]);
         }
@@ -241,7 +232,7 @@ fn validate_pipeline(
                 Stage::Discovery,
                 format!(
                     "the transaction targets '{}' but the request document set has no current text for it",
-                    esc(source)
+                    source
                 ),
             )]));
         };
@@ -263,9 +254,7 @@ fn validate_pipeline(
                 Stage::Discovery,
                 format!(
                     "the provider validated edits for '{}' against version {}, but the current version is {}; re-fetch the source and retry",
-                    esc(source),
-                    res.version,
-                    document.version
+                    source, res.version, document.version
                 ),
             )]));
         }
@@ -273,8 +262,7 @@ fn validate_pipeline(
             let reason = res.reason.as_deref().unwrap_or("invalid");
             let mut msg = format!(
                 "the provider refused the edits for '{}': the edited source is {}",
-                esc(source),
-                esc(reason)
+                source, reason
             );
             if let Some(idx) = res.failing_edit_index {
                 msg.push_str(&format!(" (failing edit {idx})"));
@@ -324,8 +312,7 @@ fn validate_pipeline(
                     Stage::Discovery,
                     format!(
                         "the edited project is semantically invalid in '{}': {}",
-                        esc(&doc.uri),
-                        esc(&diag.message)
+                        doc.uri, diag.message
                     ),
                 )]));
             }
@@ -413,12 +400,11 @@ fn provider_diagnostic(error: &wright_lpp::ProviderError) -> Diagnostic {
         (true, Some(refusal)) => {
             format!(
                 "the provider refused the edit request ({}): {}",
-                esc(refusal),
-                esc(error)
+                refusal, error
             )
         }
-        (true, None) => format!("the provider refused the edit request: {}", esc(error)),
-        (false, _) => format!("the provider failed the edit request: {}", esc(error)),
+        (true, None) => format!("the provider refused the edit request: {}", error),
+        (false, _) => format!("the provider failed the edit request: {}", error),
     };
     Diagnostic::error(code, stage, message)
 }

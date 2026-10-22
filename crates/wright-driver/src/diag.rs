@@ -92,6 +92,14 @@ pub struct Diagnostic {
     pub span: Option<SourceSpan>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<Origin>,
+    /// Refusal metadata surfaces reword or consume programmatically
+    /// (#888): a `listOp`/`listAll` name-listing operation, `candidates`
+    /// entries (`address`, `file`/`path`, `line`, `column`),
+    /// `declared`/`declaredTotal` bounded name lists, and the queried
+    /// `name`/`file`/`kind`. Serializes as sibling keys, which the
+    /// diagnostic schema already permits.
+    #[serde(default, flatten)]
+    pub fields: serde_json::Map<String, serde_json::Value>,
 }
 
 /// Build a source span from the IR source model, resolving the file path.
@@ -135,6 +143,7 @@ impl Diagnostic {
             status: None,
             span: None,
             source: None,
+            fields: Default::default(),
         }
     }
 

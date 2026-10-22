@@ -73,9 +73,18 @@ fn rule_addresses_resolve_names_ordinals_and_literals() {
     let service = rules_service(&["a", "a", "a#2"]);
     let error = service.resolve_rule("a#2").unwrap_err();
     assert_eq!(error.code, "ambiguous-rule");
-    for candidate in ["a#2", "a#2#1"] {
-        assert!(error.message.contains(candidate), "{error:?}");
-    }
+    // Candidate addresses ride as structured fields (#888), not message
+    // text — surfaces render `address at path:line:column` themselves.
+    let addresses: Vec<&str> = error.fields["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|candidate| candidate["address"].as_str().unwrap())
+        .collect();
+    assert!(
+        addresses.contains(&"a#2") && addresses.contains(&"a#2#1"),
+        "{error:?}"
+    );
     assert_eq!(service.resolve_rule("a#2#1").unwrap(), 2);
     assert_eq!(service.resolve_rule("a#1").unwrap(), 0);
 
@@ -191,9 +200,13 @@ rule ("uses x") {
     );
     let error = service.resolve_symbol("x").unwrap_err();
     assert_eq!(error.code, "ambiguous-symbol");
-    for candidate in ["globalVariable:x", "subroutine:x"] {
-        assert!(error.message.contains(candidate), "{error:?}");
-    }
+    let addresses: Vec<&str> = error.fields["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|candidate| candidate["address"].as_str().unwrap())
+        .collect();
+    assert_eq!(addresses, ["globalVariable:x", "subroutine:x"], "{error:?}");
     assert_eq!(
         service.resolve_symbol("globalVariable:x").unwrap().name,
         "x"
