@@ -11,7 +11,7 @@
    * verified.
    */
   import type { ChromeStrings } from './chrome'
-  import { closeDialog, showModal } from './dialog'
+  import Dialog from './components/Dialog.svelte'
   import type {
     AthenaTrace,
     LookupEntry,
@@ -20,7 +20,7 @@
     ToolErrorInfo,
     ToolResponse,
   } from './types/generated/wright-agent-v1'
-  import Picker from './Picker.svelte'
+  import Picker from './components/Picker.svelte'
   import { call } from './api'
   import { buildScenario, logRows, matchTimeLimit, outcomeText, variableRows } from './simulate'
 
@@ -52,7 +52,6 @@
   let running = $state(false)
   let trace = $state<AthenaTrace | null>(null)
   let refusal = $state<string | null>(null)
-  let dialogEl: HTMLDialogElement | undefined = $state()
 
   const settings = $derived<SettingsNode[] | null>(project?.settings ?? null)
   // The room's run length (#836): the field wins once touched; otherwise
@@ -72,12 +71,6 @@
       label: entry.displayName ?? entry.identity,
     })),
   )
-
-  $effect(() => {
-    if (!dialogEl) return
-    if (open && !dialogEl.open) showModal(dialogEl)
-    if (!open && dialogEl.open) closeDialog(dialogEl)
-  })
 
   async function start() {
     const value = Number(effectiveSeconds)
@@ -104,15 +97,16 @@
   }
 </script>
 
-<dialog
-  bind:this={dialogEl}
-  class="dialog view sim"
+<Dialog
+  view
+  closeOnOutside
+  {open}
+  {onclose}
   id="dialog-simulate"
-  onclose={onclose}
-  onclick={(event) => event.target === dialogEl && onclose()}
+  class="sim"
+  title={t.simulation}
 >
-  <h2 class="dlg-title">{t.simulation}</h2>
-  <div class="dlg-body sim-body">
+  <div class="sim-body">
     <div class="room">
       {#each ['team1', 'team2'] as team (team)}
         <div class="team-col">
@@ -201,7 +195,7 @@
       </section>
     {/if}
   </div>
-  <div class="dlg-foot">
+  {#snippet footer()}
     <button type="button" class="primary" onclick={onclose}>{t.close}</button>
-  </div>
-</dialog>
+  {/snippet}
+</Dialog>

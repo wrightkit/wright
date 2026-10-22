@@ -18,6 +18,7 @@
     "check:size": "node scripts/check-bundle-size.mjs"
   },
   "dependencies": {
+    "bits-ui": "^2.19.5",
     "svelte": "^5.57.2"
   },
   "devDependencies": {

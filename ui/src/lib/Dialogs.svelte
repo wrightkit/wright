@@ -23,7 +23,7 @@
     ToolResponse,
   } from './types/generated/wright-agent-v1'
   import type { ChromeStrings } from './chrome'
-  import { closeDialog, showModal } from './dialog'
+  import Dialog from './components/Dialog.svelte'
   import type { Names } from './names'
 
   let {
@@ -48,14 +48,6 @@
     t: ChromeStrings
     onclose: () => void
   } = $props()
-
-  let dialogEl: HTMLDialogElement | undefined = $state()
-
-  $effect(() => {
-    if (!dialogEl) return
-    if (which !== null && !dialogEl.open) showModal(dialogEl)
-    if (which === null && dialogEl.open) closeDialog(dialogEl)
-  })
 
   const VARIABLE_HEADINGS = ['global', 'player', 'subroutines']
 
@@ -166,137 +158,127 @@
   {#if locationOf(finding)}<span class="loc">{locationOf(finding)}</span>{/if}
 {/snippet}
 
-<!-- A click landing on the dialog element itself is a backdrop click; it closes the dialog. -->
-<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-<dialog
-  bind:this={dialogEl}
-  onclose={onclose}
-  class="dialog view"
-  onclick={(event) => {
-    if (event.target === dialogEl && dialogEl) closeDialog(dialogEl)
-  }}
+<Dialog
+  view
+  closeOnOutside
+  open={which !== null}
+  title={which === 'variables' ? t.variables : t.diagnostics}
+  {onclose}
 >
-  <h2 class="dlg-title">{which === 'variables' ? t.variables : t.diagnostics}</h2>
-  <div class="dlg-body">
-    {#if which === 'variables'}
-      {#if symbols === null}
-        <p class="muted">{t.loading}</p>
-      {:else if noSymbols}
-        <p class="muted">{t.noVariables}</p>
-      {:else}
-        <div class="var-columns">
-          <section>
-            <h3>{heading('global', 'Global')}</h3>
-            <ul class="var-list">
-              {#each variableGroups.globalVariable as symbol (symbol.id)}
-                <li>{symbol.name}</li>
-              {/each}
-            </ul>
-          </section>
-          <section>
-            <h3>{heading('player', 'Player')}</h3>
-            <ul class="var-list">
-              {#each variableGroups.playerVariable as symbol (symbol.id)}
-                <li>{symbol.name}</li>
-              {/each}
-            </ul>
-          </section>
-        </div>
-        <section class="var-subs">
-          <h3>{heading('subroutines', 'Subroutines')}</h3>
+  {#if which === 'variables'}
+    {#if symbols === null}
+      <p class="muted">{t.loading}</p>
+    {:else if noSymbols}
+      <p class="muted">{t.noVariables}</p>
+    {:else}
+      <div class="var-columns">
+        <section>
+          <h3>{heading('global', 'Global')}</h3>
           <ul class="var-list">
-            {#each variableGroups.subroutine as symbol (symbol.id)}
+            {#each variableGroups.globalVariable as symbol (symbol.id)}
               <li>{symbol.name}</li>
             {/each}
           </ul>
         </section>
-      {/if}
-    {:else if which === 'diagnostics'}
-      {#if findings === null && costEstimate === null}
-        <p class="muted">{t.loading}</p>
-      {:else}
-        {#if costError}
-          <div class="cards">
-            <section class="stat-card">
-              <h3>Cost estimate</h3>
-              <p class="desc"><code>{costError.code}</code> {costError.message}</p>
-            </section>
-          </div>
-        {:else if costResult}
-          <div class="cards">
-            <section class="stat-card">
-              <h3>Total elements</h3>
-              <p class="figure">{elementCount?.total ?? '—'}</p>
-              <div class="meter">
-                <span class:over={elementPercent >= 100} style="width: {elementPercent}%"
-                ></span>
-              </div>
-              <p class="desc">
-                Budget {elementCount?.budget}{#if costResult.elementCountUnavailable}
-                  — {costResult.elementCountUnavailable}{/if}
-              </p>
-            </section>
-            <section class="stat-card">
-              <h3>Output size</h3>
-              <p class="figure">{emittedKb ?? '—'}</p>
-              <p class="desc">
-                {#if emittedKb === null && exact?.emittedBytesUnavailable}
-                  {exact.emittedBytesUnavailable}.{/if}
-                {exact?.programRules ?? 0} rules, {exact?.programActions ?? 0} actions,
-                {exact?.waitActions ?? 0} waits
-              </p>
-            </section>
-            <section class="stat-card">
-              <h3>Rule length</h3>
-              <p class="desc">Wright reports only the whole-program output size.</p>
-            </section>
-          </div>
-          {#if topRules.length > 0}
-            <h3 class="section-title">Rules with the most elements</h3>
-            <ul class="top-rules">
-              {#each topRules as rule (rule.index)}
-                <li>
-                  <button type="button" onclick={() => onreveal(rule.index)}>
-                    <span class="name">{rule.name}</span>
-                    <span class="count">{rule.count}</span>
-                  </button>
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        {/if}
-        {#if findingList.length > 0}
-          <ul class="finding-list">
-            {#each findingList as finding, i (i)}
-              {@const rule = finding.rule}
+        <section>
+          <h3>{heading('player', 'Player')}</h3>
+          <ul class="var-list">
+            {#each variableGroups.playerVariable as symbol (symbol.id)}
+              <li>{symbol.name}</li>
+            {/each}
+          </ul>
+        </section>
+      </div>
+      <section class="var-subs">
+        <h3>{heading('subroutines', 'Subroutines')}</h3>
+        <ul class="var-list">
+          {#each variableGroups.subroutine as symbol (symbol.id)}
+            <li>{symbol.name}</li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
+  {:else if which === 'diagnostics'}
+    {#if findings === null && costEstimate === null}
+      <p class="muted">{t.loading}</p>
+    {:else}
+      {#if costError}
+        <div class="cards">
+          <section class="stat-card">
+            <h3>Cost estimate</h3>
+            <p class="desc"><code>{costError.code}</code> {costError.message}</p>
+          </section>
+        </div>
+      {:else if costResult}
+        <div class="cards">
+          <section class="stat-card">
+            <h3>Total elements</h3>
+            <p class="figure">{elementCount?.total ?? '—'}</p>
+            <div class="meter">
+              <span class:over={elementPercent >= 100} style="width: {elementPercent}%"
+              ></span>
+            </div>
+            <p class="desc">
+              Budget {elementCount?.budget}{#if costResult.elementCountUnavailable}
+                — {costResult.elementCountUnavailable}{/if}
+            </p>
+          </section>
+          <section class="stat-card">
+            <h3>Output size</h3>
+            <p class="figure">{emittedKb ?? '—'}</p>
+            <p class="desc">
+              {#if emittedKb === null && exact?.emittedBytesUnavailable}
+                {exact.emittedBytesUnavailable}.{/if}
+              {exact?.programRules ?? 0} rules, {exact?.programActions ?? 0} actions,
+              {exact?.waitActions ?? 0} waits
+            </p>
+          </section>
+          <section class="stat-card">
+            <h3>Rule length</h3>
+            <p class="desc">Wright reports only the whole-program output size.</p>
+          </section>
+        </div>
+        {#if topRules.length > 0}
+          <h3 class="section-title">Rules with the most elements</h3>
+          <ul class="top-rules">
+            {#each topRules as rule (rule.index)}
               <li>
-                {#if rule !== null}
-                  <button
-                    type="button"
-                    class="finding severity-{finding.severity}"
-                    onclick={() => onreveal(rule)}
-                  >
-                    {@render findingRow(finding)}
-                  </button>
-                {:else}
-                  <div class="finding severity-{finding.severity}">
-                    {@render findingRow(finding)}
-                  </div>
-                {/if}
+                <button type="button" onclick={() => onreveal(rule.index)}>
+                  <span class="name">{rule.name}</span>
+                  <span class="count">{rule.count}</span>
+                </button>
               </li>
             {/each}
           </ul>
-        {:else if findings !== null}
-          <p class="muted">{t.noDiagnostics}</p>
         {/if}
       {/if}
+      {#if findingList.length > 0}
+        <ul class="finding-list">
+          {#each findingList as finding, i (i)}
+            {@const rule = finding.rule}
+            <li>
+              {#if rule !== null}
+                <button
+                  type="button"
+                  class="finding severity-{finding.severity}"
+                  onclick={() => onreveal(rule)}
+                >
+                  {@render findingRow(finding)}
+                </button>
+              {:else}
+                <div class="finding severity-{finding.severity}">
+                  {@render findingRow(finding)}
+                </div>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {:else if findings !== null}
+        <p class="muted">{t.noDiagnostics}</p>
+      {/if}
     {/if}
-  </div>
-  <div class="dlg-foot">
-    <button
-      type="button"
-      class="primary"
-      onclick={() => dialogEl && closeDialog(dialogEl)}>{t.confirm}</button
-    >
-  </div>
-</dialog>
+  {/if}
+  {#snippet footer()}
+    <button type="button" class="primary" onclick={onclose}>{t.confirm}</button>
+  {/snippet}
+</Dialog>

@@ -19,12 +19,12 @@
     variableNode,
     withArg,
   } from './args'
-  import { closeDialog, showModal } from './dialog'
+  import Dialog from './components/Dialog.svelte'
   import Expr from './Expr.svelte'
   import type { ChromeStrings } from './chrome'
   import type { Names } from './names'
   import { STATEMENT_KINDS } from './nodes'
-  import Picker from './Picker.svelte'
+  import Picker from './components/Picker.svelte'
   import type { StatementNode } from './edit'
   import type { Action, Node } from './types/generated/rule-content-v1'
   import type {
@@ -59,7 +59,6 @@
     onclose: () => void
   } = $props()
 
-  let dialogEl: HTMLDialogElement | undefined = $state()
   let checked = $state(false)
   let shownFor: unknown = null
   /** The callable's `lookup` entry, fetched when an action opens. */
@@ -87,35 +86,31 @@
   )
 
   $effect(() => {
-    if (!dialogEl) return
-    if (target !== null) {
-      if (shownFor !== target) {
-        checked = disabled
-        shownFor = target
-        callableEntry = null
-        // A staged `change` seeds the form, so reopening shows it.
-        editedArgs = Array.isArray(staged?.args) ? (staged.args as Node[]) : null
-        enumOptions = {}
-        variableSymbols = null
-        enumLoading.clear()
-        symbolsLoading = false
-        optionsLocale = locale
-        const callId = target.list === 'actions' ? (target.node as SpannedAction).call : null
-        if (callId !== null) {
-          void names.entries(callId).then((entries) => {
-            if (shownFor === target) {
-              callableEntry =
-                entries.find((entry) => STATEMENT_KINDS.includes(entry.kind)) ??
-                entries[0] ??
-                null
-            }
-          })
-        }
-      }
-      if (!dialogEl.open) showModal(dialogEl)
-    } else {
+    if (target === null) {
       shownFor = null
-      if (dialogEl.open) closeDialog(dialogEl)
+      return
+    }
+    if (shownFor === target) return
+    checked = disabled
+    shownFor = target
+    callableEntry = null
+    // A staged `change` seeds the form, so reopening shows it.
+    editedArgs = Array.isArray(staged?.args) ? (staged.args as Node[]) : null
+    enumOptions = {}
+    variableSymbols = null
+    enumLoading.clear()
+    symbolsLoading = false
+    optionsLocale = locale
+    const callId = target.list === 'actions' ? (target.node as SpannedAction).call : null
+    if (callId !== null) {
+      void names.entries(callId).then((entries) => {
+        if (shownFor === target) {
+          callableEntry =
+            entries.find((entry) => STATEMENT_KINDS.includes(entry.kind)) ??
+            entries[0] ??
+            null
+        }
+      })
     }
   })
 
@@ -232,9 +227,8 @@
   }
 </script>
 
-<dialog bind:this={dialogEl} onclose={onclose} class="dialog editor">
+<Dialog open={target !== null} {onclose} class="editor" {title} titleClass="editor-title">
   {#if target}
-    <h2 class="editor-title">{title}</h2>
     <label class="editor-disable">
       <input type="checkbox" bind:checked={checked} data-testid="editor-disable" />
       {t.disabled}
@@ -274,17 +268,15 @@
       </div>
     {/if}
     <div class="editor-foot">
-      <button type="button" class="cancel" onclick={() => dialogEl && closeDialog(dialogEl)}
-        >{t.cancel}</button
-      >
+      <button type="button" class="cancel" onclick={onclose}>{t.cancel}</button>
       <button
         type="button"
         class="ok"
         onclick={() => {
           onsave(checked, editedArgs ?? undefined)
-          if (dialogEl) closeDialog(dialogEl)
+          onclose()
         }}>{t.ok}</button
       >
     </div>
   {/if}
-</dialog>
+</Dialog>

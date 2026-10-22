@@ -518,6 +518,11 @@ details.debug pre {
 
 .dialog {
   color-scheme: dark;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 50;
   background: var(--dlg);
   color: var(--text);
   border: 1px solid rgb(255 255 255 / 0.15);
@@ -529,7 +534,11 @@ details.debug pre {
   overflow-y: auto;
 }
 
-.dialog::backdrop {
+/* The Bits UI overlay replaces the native `::backdrop` (#927). */
+.dlg-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
   background: rgb(0 0 0 / 0.5);
 }
 
@@ -558,17 +567,12 @@ details.debug pre {
    the pending-changes and editor dialogs on their own chrome. */
 
 .dialog.view {
+  display: flex;
+  flex-direction: column;
   width: min(44rem, calc(100vw - 4rem));
   max-width: 44rem;
   padding: 0;
   border-radius: 3px;
-}
-
-/* Flex only while open: the UA `dialog:not([open])` rule must keep the
-   closed dialog out of the page. */
-dialog.view[open] {
-  display: flex;
-  flex-direction: column;
 }
 
 .dialog.view .dlg-title {
@@ -1035,9 +1039,10 @@ dialog.view[open] {
   color: var(--muted);
 }
 
+/* Bits UI's floating wrapper positions the popover and copies this
+   z-index, which must sit above the `.dialog`/`dlg-overlay` layer. */
 .picker-pop {
-  position: fixed;
-  z-index: 10;
+  z-index: 60;
   min-width: 14rem;
   max-width: 22rem;
   padding: 0.4rem;
@@ -1080,7 +1085,8 @@ dialog.view[open] {
 }
 
 .picker-option:hover,
-.picker-option.active {
+.picker-option[data-highlighted],
+.picker-option[data-selected] {
   background: color-mix(in srgb, var(--orange) 22%, var(--white));
 }
 
