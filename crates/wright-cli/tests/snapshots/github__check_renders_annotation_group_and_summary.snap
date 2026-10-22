@@ -1,5 +1,6 @@
 ---
 source: crates/wright-cli/tests/github.rs
+assertion_line: 104
 expression: transcript(&output)
 ---
 exit 1
@@ -10,9 +11,9 @@ exit 1
 ::group::wright check — ERROR
 ERROR check root=. kind=workshop locale=en-us
 summary: errors=1 warnings=0 notes=0 affected=1
+diagnostic: error workshop.unknown-value.futurevaluething at=mixed.ws:11:26 stage=analysis status=unsupported message="Workshop construct 'FutureValueThing' is unsupported (truly-unresolved-identifier)"
 next: wright lint
 next: wright analyze
 next: wright inspect
 next: wright lookup
-diagnostic: error workshop.unknown-value.futurevaluething at=mixed.ws:11:26 stage=analysis status=unsupported message="Workshop construct 'FutureValueThing' is unsupported (truly-unresolved-identifier)"
 ::endgroup::

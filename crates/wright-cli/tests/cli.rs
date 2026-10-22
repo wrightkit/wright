@@ -434,11 +434,11 @@ fn compile_to_rejects_unknown_and_unmapped_target_locales() {
         "{}",
         command_result(&missing)
     );
-    let stderr = String::from_utf8_lossy(&missing.stderr);
-    assert!(stderr.contains("missing-mapping"), "{stderr}");
+    let stdout = String::from_utf8_lossy(&missing.stdout);
+    assert!(stdout.contains("missing-mapping"), "{stdout}");
     assert!(
-        stderr.contains("tr-tr"),
-        "the target locale is named: {stderr}"
+        stdout.contains("tr-tr"),
+        "the target locale is named: {stdout}"
     );
     assert!(
         !dir.join("teams.ow").exists(),
@@ -601,64 +601,6 @@ rule ("x") {
 "#;
 
 #[test]
-fn check_text_leads_with_verdict_and_blocking_count() {
-    let path = temp_file("mixed.txt", MIXED_CHECK_SOURCE);
-    let output = run(&[
-        "check",
-        path.to_str().unwrap(),
-        "--renderer",
-        "plain",
-        "--color",
-        "never",
-    ]);
-    assert_eq!(output.status.code(), Some(1));
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut lines = stdout.lines();
-    let verdict = lines.next().unwrap_or_default().to_string();
-    assert!(verdict.starts_with("ERROR check root="), "{stdout}");
-    let counts = lines.next().unwrap_or_default().to_string();
-    assert_eq!(
-        counts, "summary: errors=1 warnings=2 notes=0 affected=1",
-        "{stdout}"
-    );
-    // The shared follow-ups (#792) then the lookup the rejected name needs.
-    for expected in [
-        "next: wright lint",
-        "next: wright analyze",
-        "next: wright inspect",
-    ] {
-        assert_eq!(lines.next(), Some(expected), "{stdout}");
-    }
-    assert_eq!(lines.next(), Some("next: wright lookup"), "{stdout}");
-    assert!(lines.next().is_none(), "the report stays compact: {stdout}");
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let error_at = stderr
-        .find("diagnostic: error ")
-        .expect("an error diagnostic");
-    let warning_at = stderr
-        .find("diagnostic: warning ")
-        .expect("a warning diagnostic");
-    assert!(
-        error_at < warning_at,
-        "blocking errors precede warnings: {stderr}"
-    );
-    assert!(
-        stderr.contains("at=") && stderr.contains("mixed.txt:"),
-        "a mapped location is one path:line:col token: {stderr}"
-    );
-    assert!(
-        stderr.contains("unknown-value.futurevaluething"),
-        "the rejected name's code rides the record: {stderr}"
-    );
-    assert!(
-        stderr.contains("stage=analysis"),
-        "the stage is a field, not a sentence: {stderr}"
-    );
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-#[test]
 fn terminal_renderer_marks_independent_diagnostics() {
     // The terminal layout leads with the verdict tag, then indents each
     // diagnostic under it; the reported set, order, and content are
@@ -673,24 +615,25 @@ fn terminal_renderer_marks_independent_diagnostics() {
         "never",
     ]);
     assert_eq!(output.status.code(), Some(1));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("error["), "{stderr}");
-    assert!(stderr.contains("warning["), "{stderr}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("error["), "{stdout}");
+    assert!(stdout.contains("warning["), "{stdout}");
     assert!(
-        stderr.contains(" --> ") && stderr.contains(" = "),
-        "locations and secondary metadata stay under the diagnostic: {stderr}"
+        stdout.contains(" --> ") && stdout.contains(" = "),
+        "locations and secondary metadata stay under the diagnostic: {stdout}"
     );
-    let error_at = stderr.find("error[").expect("an error diagnostic");
-    let warning_at = stderr.find("warning[").expect("a warning diagnostic");
+    let error_at = stdout.find("error[").expect("an error diagnostic");
+    let warning_at = stdout.find("warning[").expect("a warning diagnostic");
     assert!(
         error_at < warning_at,
-        "blocking errors precede warnings: {stderr}"
+        "blocking errors precede warnings: {stdout}"
     );
     assert!(
-        stderr.contains("Set Global Variable(B, FutureValueThing(2));"),
-        "the source context stays with the diagnostic: {stderr}"
+        stdout.contains("Set Global Variable(B, FutureValueThing(2));"),
+        "the source context stays with the diagnostic: {stdout}"
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.stderr.is_empty(), "{}", command_result(&output));
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stdout.starts_with(" ERROR  check\n"),
         "the verdict tag leads: {stdout}"
@@ -720,16 +663,17 @@ fn plain_renderer_keeps_the_undecorated_diagnostic_layout() {
         "never",
     ]);
     assert_eq!(output.status.code(), Some(1));
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        !stderr.contains('├') && !stderr.contains('╰') && !stderr.contains(" --> "),
-        "plain stays undecorated: {stderr}"
+        !stdout.contains('├') && !stdout.contains('╰') && !stdout.contains(" --> "),
+        "plain stays undecorated: {stdout}"
     );
-    assert!(stderr.contains("diagnostic: error "), "{stderr}");
+    assert!(stdout.contains("diagnostic: error "), "{stdout}");
     assert!(
-        stderr.contains("at=") && stderr.contains("mixed.txt:"),
-        "{stderr}"
+        stdout.contains("at=") && stdout.contains("mixed.txt:"),
+        "{stdout}"
     );
+    assert!(output.stderr.is_empty(), "{}", command_result(&output));
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -921,12 +865,12 @@ fn check_unmapped_locations_are_not_fabricated() {
         "rule (\"x\") { event { Ongoing - Global; } actions { If(True); }",
     );
     assert_eq!(output.status.code(), Some(1));
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stderr.contains("at=<stdin>:1:63"),
-        "the unmapped position is one verbatim token: {stderr}"
+        stdout.contains("at=<stdin>:1:63"),
+        "the unmapped position is one verbatim token: {stdout}"
     );
-    assert!(!stderr.contains("-->"), "{stderr}");
+    assert!(!stdout.contains("-->"), "{stdout}");
 }
 
 #[test]
@@ -2349,7 +2293,11 @@ fn stdin_workshop_works_and_legacy_protocol_is_refused() {
         "stdin protocol: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(String::from_utf8_lossy(&output.stderr).contains("input-kind-unsupported"));
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("input-kind-unsupported"),
+        "{}",
+        command_result(&output)
+    );
 }
 
 #[test]
@@ -2377,9 +2325,9 @@ fn bom_prefixed_workshop_behaves_like_the_plain_file() {
     let output = run_with_stdin(&["check", "-"], "\u{FEFF}{\"protocol\":{}}");
     assert_eq!(output.status.code(), Some(1));
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("input-kind-unsupported"),
+        String::from_utf8_lossy(&output.stdout).contains("input-kind-unsupported"),
         "{}",
-        String::from_utf8_lossy(&output.stderr)
+        command_result(&output)
     );
 
     let _ = std::fs::remove_dir_all(bommed.parent().unwrap());
@@ -3039,8 +2987,10 @@ fn explicit_renderer_and_color_overrides_are_respected() {
         &[("GITHUB_ACTIONS", "true")],
     );
     assert_eq!(plain.status.code(), Some(1));
-    assert!(!String::from_utf8_lossy(&plain.stderr).contains("::error"));
-    assert!(!String::from_utf8_lossy(&plain.stderr).contains("\x1b["));
+    // #891: the failed result's diagnostics joined stdout.
+    assert!(!String::from_utf8_lossy(&plain.stdout).contains("::error"));
+    assert!(!String::from_utf8_lossy(&plain.stdout).contains("\x1b["));
+    assert!(plain.stderr.is_empty());
 
     let color = run_with_env(
         &[
@@ -3054,7 +3004,7 @@ fn explicit_renderer_and_color_overrides_are_respected() {
         &[("GITHUB_ACTIONS", "true"), ("NO_COLOR", "1")],
     );
     assert_eq!(color.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&color.stderr).contains("\x1b["));
+    assert!(String::from_utf8_lossy(&color.stdout).contains("\x1b["));
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -4020,7 +3970,8 @@ fn cost_baseline_degrades_silently_under_ci() {
     names.sort();
     assert_eq!(names, ["baseline-bad.json", "baseline-v1.json"]);
 
-    // Outside CI the same unknown name stays a usage error.
+    // Outside CI the same unknown name is still refused; the failed
+    // result carries the diagnostic on stdout (#891).
     let outside = run(&["inspect", "cost", a, "--baseline", "nope"]);
     assert_eq!(
         outside.status.code(),
@@ -4029,7 +3980,7 @@ fn cost_baseline_degrades_silently_under_ci() {
         command_result(&outside)
     );
     assert!(
-        String::from_utf8_lossy(&outside.stderr).contains("unknown baseline 'nope'"),
+        String::from_utf8_lossy(&outside.stdout).contains("unknown baseline 'nope'"),
         "{}",
         command_result(&outside)
     );
@@ -4912,14 +4863,15 @@ fn check_unknown_kind_code_is_kebab_case_on_every_surface() {
 
     let text = run(&["check", file, "--renderer", "plain", "--color", "never"]);
     assert_eq!(text.status.code(), Some(1));
-    let stderr = String::from_utf8_lossy(&text.stderr);
+    // #891: the failed result's diagnostics joined stdout.
+    let stdout = String::from_utf8_lossy(&text.stdout);
     assert!(
-        stderr.contains("diagnostic: error unknown-enum-member "),
-        "the record carries one kebab-case token: {stderr}"
+        stdout.contains("diagnostic: error unknown-enum-member "),
+        "the record carries one kebab-case token: {stdout}"
     );
     assert!(
-        !stderr.contains("unknown-enum member"),
-        "no code carries a space: {stderr}"
+        !stdout.contains("unknown-enum member"),
+        "no code carries a space: {stdout}"
     );
 
     let json = run(&["check", file, "--format", "json"]);
@@ -4969,12 +4921,12 @@ fn check_text_locates_unknown_setting_value_and_names_the_locale() {
         "never",
     ]);
     assert_eq!(output.status.code(), Some(1));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("at=") && stderr.contains("lookup-hint-zh.ow:9:"),
-        "the rejected value carries its file and line: {stderr}"
-    );
+    // #891: the failed result's diagnostics joined stdout.
     let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("at=") && stdout.contains("lookup-hint-zh.ow:9:"),
+        "the rejected value carries its file and line: {stdout}"
+    );
     assert!(
         stdout.contains("next: wright lookup --locale zh-CN"),
         "the follow-up names the locale of the rejected name: {stdout}"
@@ -5059,12 +5011,12 @@ fn check_text_skips_the_lookup_hint_when_no_name_was_rejected() {
         "never",
     ]);
     assert_eq!(output.status.code(), Some(1));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("unknown-language"),
-        "the detection diagnostic still reports: {stderr}"
-    );
+    // #891: the failed result's diagnostics joined stdout.
     let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("unknown-language"),
+        "the detection diagnostic still reports: {stdout}"
+    );
     assert!(
         !stdout.contains("next: wright lookup"),
         "no rejected name means no lookup pointer: {stdout}"

@@ -27,8 +27,7 @@ pub(crate) use addresses::{edge_caller, rule_address, rule_name, tree_rule};
 
 use crate::plain;
 
-/// The report's layout width ceiling: a terminal wider than this still gets
-/// the 100-column layout (ADR-0030 decision 4).
+/// The report's layout width ceiling (ADR-0030 decision 4).
 const MAX_WIDTH: u16 = 100;
 /// Below this width the terminal report switches to its compact layout:
 /// children of a section item align at the item's column.
@@ -222,8 +221,8 @@ impl RuntimeEnvironment {
 
 /// The terminal's actual column count via `TIOCGWINSZ` (rustix's safe
 /// `tcgetwinsize`); `None` when stdout is not a terminal or the platform
-/// cannot answer. `COLUMNS` is checked separately — it doubles as the
-/// test override.
+/// cannot answer. `COLUMNS` is checked separately — it doubles as the test
+/// override.
 #[cfg(unix)]
 fn terminal_columns() -> Option<u16> {
     rustix::termios::tcgetwinsize(std::io::stdout())
@@ -298,8 +297,7 @@ impl Presentation {
                     && (!env.term_dumb || env.force_color)
             }
         };
-        // The explicit `COLUMNS` override beats the detected width; absent
-        // both, the report assumes the widest allowed layout.
+        // `COLUMNS` beats the detected width; else the widest layout.
         let columns = env.columns.or_else(|| {
             if env.stdout_terminal {
                 terminal_columns()
@@ -384,14 +382,20 @@ pub(crate) fn render<
 
 /// Inputs a result body or footer may need beyond the envelope: display
 /// policy, the base that root-relative `span.path` spellings resolve
-/// against, and the query target the CLI was asked for (such as the rule
-/// name in `inspect cfg`) when the result payload does not carry it (#446).
-/// The base is absent when the input never loaded.
+/// against (absent when the input never loaded), and the query target the
+/// CLI was asked for when the payload does not carry it (#446).
 pub(crate) struct RenderContext<'a> {
     pub(crate) presentation: Presentation,
     pub(crate) elapsed: Duration,
     pub(crate) source_base: Option<&'a Path>,
     pub(crate) subject: Option<&'a str>,
+}
+
+/// A failed analysis result puts its diagnostics with the report on
+/// stdout — stderr keeps usage errors and internal failures only (#891).
+/// Gated results and artifact streams keep diagnostics on stderr.
+pub(crate) fn diagnostics_on_stdout<T: serde::Serialize>(envelope: &Envelope<T>) -> bool {
+    !envelope.ok && !envelope.gated && envelope.exit != 2 && envelope.exit != 4
 }
 
 /// Diagnostics render in action order — errors first — without changing the
@@ -561,9 +565,8 @@ fn render_github<T: serde::Serialize + ResultPresentation + plain::PlainReport>(
     emit_summary(envelope, ctx, &annotations);
 }
 
-/// The GitHub Actions render path never reaches `render_body` for commands
-/// that consume the context, so a bare placeholder is enough for the
-/// compile/convert artifact bodies it does emit.
+/// The GitHub Actions render path never reaches `render_body` for
+/// context-consuming commands — a bare placeholder suffices.
 fn github_context(subject: Option<&str>) -> RenderContext<'_> {
     RenderContext {
         presentation: Presentation {
@@ -719,9 +722,8 @@ impl From<Severity> for SummaryStatus {
     }
 }
 
-/// Severity as a gating rank: `info < warning < error`. The driver's
-/// `Severity` carries no `Ord`; the verdict/`--fail-on` threshold compares
-/// levels, never display order.
+/// Severity as a gating rank: `info < warning < error`. `Severity` carries
+/// no `Ord`; the verdict/`--fail-on` threshold compares levels.
 fn severity_level(severity: Severity) -> u8 {
     match severity {
         Severity::Info => 0,
@@ -731,9 +733,8 @@ fn severity_level(severity: Severity) -> u8 {
 }
 
 /// A serialized finding's severity as [`Severity`], keeping `info` distinct.
-/// The conservative fallback matches selection's `parse_severity`: a missing
-/// or unknown severity reads as `Warning` so malformed findings never
-/// understate the result's true maximum.
+/// The fallback matches selection's `parse_severity`: a missing or unknown
+/// severity reads as `Warning`, never understating the result's maximum.
 fn finding_severity(finding: &serde_json::Value) -> Severity {
     match finding.get("severity").and_then(serde_json::Value::as_str) {
         Some("error") => Severity::Error,
@@ -743,9 +744,8 @@ fn finding_severity(finding: &serde_json::Value) -> Severity {
 }
 
 /// The finding set's highest severity, selection-aware (#430): under a
-/// selection the outcome's recorded full-set maximum governs — the reported
-/// remainder can never understate the result; otherwise the reported
-/// findings' severities do.
+/// selection the outcome's recorded full-set maximum governs; otherwise the
+/// reported findings' severities do.
 fn max_finding_severity(
     findings: &serde_json::Value,
     selection: &Option<wright_driver::SelectionOutcome>,

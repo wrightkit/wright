@@ -19,6 +19,10 @@ infer them from process state alone.
 ## stdout / stderr ownership
 
 * Text mode: the command result goes to stdout; diagnostics go to stderr.
+  A failed analysis result is the exception: its stdout carries the verdict,
+  the summary, and every diagnostic, and stderr carries only usage errors
+  (exit 2) and internal failures (exit 4). A caller that reads stdout alone
+  still sees the failure's reason (#891, amending ADR-0030's stream split).
 * JSON mode: exactly one envelope goes to stdout; stderr stays empty on
   success. Usage errors are the only case that writes to stderr without an
   envelope (exit 2).
@@ -167,7 +171,14 @@ the `wright-agent/v1` responses the CLI surfaces mirror.
 ## Determinism
 
 For identical inputs and configuration, JSON output is byte-deterministic
-(no timestamps, no environment-dependent ordering). Input identity is the
+(no timestamps, no environment-dependent ordering). The text report is
+deterministic too, with one recorded exception: `compile` and `inspect
+cost` compare against the previous run stored in `.wright/` (ADR-0027), so
+the `comparison:`/`change:` records depend on that state. Identical output
+requires identical `.wright/` state, or disabling the cache with
+`--no-cache`, a non-empty `WRIGHT_NO_CACHE`, or a truthy `CI`; under `CI`
+the implicit comparison stays off and only the explicit `--baseline` flags
+read `.wright/` (ADR-0030 decision 14). Input identity is the
 SHA-256 of the input bytes (`result.output.input_identity`); for provider-backed
 directory targets, the owner supplies the identity of its selected primary
 source text. Emitted artifacts carry their own SHA-256
