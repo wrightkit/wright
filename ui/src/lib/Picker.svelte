@@ -30,6 +30,9 @@
 
   let open = $state(false)
   let filter = $state('')
+  // The highlighted option while the list is open — arrow keys move it,
+  // Enter picks it, typing resets it to the first match.
+  let activeIndex = $state(0)
   let above = $state(false)
   let x = $state(0)
   let y = $state(0)
@@ -61,6 +64,7 @@
       return
     }
     filter = ''
+    activeIndex = 0
     open = true
     await tick()
     position()
@@ -82,6 +86,24 @@
       event.stopPropagation()
       close()
       controlEl?.focus()
+      return
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      const step = event.key === 'ArrowDown' ? 1 : -1
+      activeIndex = Math.min(
+        Math.max(activeIndex + step, 0),
+        Math.max(filtered.length - 1, 0),
+      )
+      popoverEl
+        ?.querySelectorAll<HTMLButtonElement>('.picker-option')
+        [activeIndex]?.scrollIntoView({ block: 'nearest' })
+      return
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      const option = filtered[activeIndex]
+      if (option) choose(option.id)
     }
   }
 
@@ -140,17 +162,18 @@
     <input
       bind:this={filterEl}
       bind:value={filter}
+      oninput={() => (activeIndex = 0)}
       class="picker-filter"
       type="text"
       onkeydown={onKeydown}
     />
     <ul class="picker-list">
-      {#each filtered as option (option.id)}
+      {#each filtered as option, index (option.id)}
         <li>
           <button
             type="button"
             class="picker-option"
-            class:active={option.id === selected}
+            class:active={option.id === selected || index === activeIndex}
             role="option"
             aria-selected={option.id === selected}
             onclick={() => choose(option.id)}

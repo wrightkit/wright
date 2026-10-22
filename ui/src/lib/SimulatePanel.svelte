@@ -11,6 +11,7 @@
    * verified.
    */
   import type { ChromeStrings } from './chrome'
+  import { closeDialog, showModal } from './dialog'
   import type {
     AthenaTrace,
     LookupEntry,
@@ -74,8 +75,8 @@
 
   $effect(() => {
     if (!dialogEl) return
-    if (open && !dialogEl.open) dialogEl.showModal()
-    if (!open && dialogEl.open) dialogEl.close()
+    if (open && !dialogEl.open) showModal(dialogEl)
+    if (!open && dialogEl.open) closeDialog(dialogEl)
   })
 
   async function start() {
