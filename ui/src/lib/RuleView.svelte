@@ -3,8 +3,10 @@
   import { SvelteSet } from 'svelte/reactivity'
   import SqButton from './SqButton.svelte'
   import Expr from './Expr.svelte'
+  import FindingMark from './FindingMark.svelte'
   import type { ChromeStrings } from './chrome'
   import type { Names } from './names'
+  import { mostSevere, SEVERITY_TOKEN, type RuleFindings } from './findings'
   import {
     keyFor,
     type BatchAction,
@@ -28,6 +30,7 @@
     names,
     debug,
     pending,
+    ruleFindings,
     t,
     onedit,
   }: {
@@ -36,6 +39,8 @@
     names: Names
     debug: boolean
     pending: ReadonlyMap<string, PendingChange>
+    /** This rule's placed findings (`docs/ui/diagnostics.md § In place`). */
+    ruleFindings: RuleFindings
     /** The session locale's chrome strings. */
     t: ChromeStrings
     onedit: {
@@ -241,8 +246,8 @@
 <svelte:window onkeydown={onkeydown} />
 
 <!-- The statement-row shell the two columns share: the checkbox, the
-     debug line number, the statement text, the pending tag, and the debug
-     node JSON. `depth` is the row's control-flow nesting level. -->
+     debug line number, the statement text, the pending tag, the findings
+     mark, and the debug node JSON. -->
 {#snippet stmtRow(
   list: StatementList,
   index: number,
@@ -254,6 +259,8 @@
 )}
   {@const set = sel(list)}
   {@const tag = tagFor(list, index)}
+  {@const rowFindings = ruleFindings[list].get(index) ?? []}
+  {@const rowSeverity = rowFindings.length > 0 ? mostSevere(rowFindings) : null}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
   <li
     class="statement"
@@ -261,7 +268,8 @@
     class:selected={set.has(index)}
     class:pending-change={tag === 'change'}
     class:pending-delete={tag === 'delete'}
-    style="--depth: {depth}"
+    class:has-findings={rowSeverity !== null}
+    style="--depth: {depth};{rowSeverity !== null ? ` --finding: var(--${SEVERITY_TOKEN[rowSeverity]})` : ''}"
     onclick={() => onedit.open(list, index)}
   >
     <input
@@ -277,6 +285,9 @@
     {#if debug}<span class="line-no" data-debug>{line}</span>{/if}
     <span class="statement-text"><Expr {node} {kinds} {names} /></span>
     {#if tag}<span class="pending-tag {tag}">{tag}</span>{/if}
+    {#if rowFindings.length > 0}
+      <FindingMark findings={rowFindings} {t} />
+    {/if}
     {#if debug}
       <details class="debug" data-debug>
         <summary>node</summary>

@@ -70,8 +70,12 @@ export interface ChromeStrings {
   /** The rule-bar chevron aria labels. */
   expandRuleLabel: (name: string) => string
   collapseRuleLabel: (name: string) => string
+  /** A severity mark's aria label: the severity and the finding count. */
+  findingMarkLabel: (severity: string, count: number) => string
   /** The dialogs' loading state. */
   loading: string
+  /** The findings surfaces' unavailable state (a refusal or transport error). */
+  findingsUnavailable: string
   /** The Variables dialog's empty state. */
   noVariables: string
   /** The Diagnostics dialog's empty state. */
@@ -159,7 +163,10 @@ const enUS: ChromeStrings = {
   collapseRule: 'Collapse rule',
   expandRuleLabel: (name) => `Expand ${name}`,
   collapseRuleLabel: (name) => `Collapse ${name}`,
+  findingMarkLabel: (severity, count) =>
+    `${severity}: ${count} ${count === 1 ? 'finding' : 'findings'}`,
   loading: 'Loading…',
+  findingsUnavailable: 'Diagnostics are unavailable:',
   noVariables: 'No variables or subroutines declared.',
   noDiagnostics: 'No diagnostics.',
   noPending: 'No pending changes.',
@@ -228,7 +235,9 @@ const zhCN: ChromeStrings = {
   collapseRule: '折叠规则',
   expandRuleLabel: (name) => `展开 ${name}`,
   collapseRuleLabel: (name) => `折叠 ${name}`,
+  findingMarkLabel: (severity, count) => `${severity}：${count} 项发现`,
   loading: '正在加载…',
+  findingsUnavailable: '诊断不可用：',
   noVariables: '没有声明变量或子程序。',
   noDiagnostics: '没有诊断。',
   noPending: '没有待定更改。',

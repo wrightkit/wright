@@ -9,10 +9,16 @@
    * struck through — there is no separate `disabled` badge. In `?debug`
    * mode the bar also carries the rule's element count in monospace;
    * without debug the count is absent from the DOM.
+   *
+   * A rule carrying findings (docs/ui/diagnostics.md § In place · Rule
+   * bar) shows the mark and count of its most severe level right of the
+   * event; hovering the mark lists the rule's findings by severity.
    */
   import { ChevronRight } from '@lucide/svelte'
+  import FindingMark from './FindingMark.svelte'
   import SqButton from './SqButton.svelte'
   import type { ChromeStrings } from './chrome'
+  import type { Finding } from './types/generated/wright-agent-v1'
 
   let {
     name,
@@ -20,6 +26,7 @@
     disabled = false,
     open = false,
     elements,
+    findings = [],
     t,
     ontoggle,
   }: {
@@ -33,6 +40,8 @@
     open?: boolean
     /** `?debug` only: the rule's element count; absent otherwise. */
     elements?: number
+    /** The rule's findings, bar- and row-placed together; empty renders nothing. */
+    findings?: Finding[]
     /** The session locale's chrome strings. */
     t: ChromeStrings
     ontoggle: () => void
@@ -52,6 +61,9 @@
     <span class="bar-name">{name}</span>
     <span class="bar-side">
       <span class="bar-event">{event}</span>
+      {#if findings.length > 0}
+        <FindingMark {findings} count {t} />
+      {/if}
       {#if elements !== undefined}
         <span class="bar-count" data-debug>{elements}</span>
       {/if}

@@ -30,6 +30,7 @@
     which,
     symbols,
     findings,
+    findingsError = null,
     costEstimate,
     names,
     onreveal,
@@ -39,6 +40,8 @@
     which: 'variables' | 'diagnostics' | null
     symbols: unknown[] | null
     findings: unknown[] | null
+    /** The `findings` refusal or transport error; the list stays null while it shows. */
+    findingsError?: ToolErrorInfo | null
     /** The `costEstimate?all` response; null until it lands. */
     costEstimate: ToolResponse | null
     names: Names
@@ -286,6 +289,8 @@
               </li>
             {/each}
           </ul>
+        {:else if findingsError !== null}
+          <p class="refusal findings-refusal"><code>{findingsError.code}</code> {findingsError.message}</p>
         {:else if findings !== null}
           <p class="muted">{t.noDiagnostics}</p>
         {/if}

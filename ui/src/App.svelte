@@ -46,6 +46,7 @@
     type StatementList,
     type StatementNode,
   } from './lib/edit'
+  import { allFor, findingsFor, placeFindings } from './lib/findings'
   import { Names } from './lib/names'
   import RuleView from './lib/RuleView.svelte'
   import SimulatePanel from './lib/SimulatePanel.svelte'
@@ -55,12 +56,14 @@
     ruleStateFromError,
     ruleStateFromResponse,
     ruleStateFromSummary,
+    type RuleContent,
     type RuleState,
     type RuleSummary,
   } from './lib/view'
   import type {
     CostEstimateResult,
     EditStatementsResult,
+    Finding,
     LookupEntry,
     ProjectResult,
     TargetMetadataResult,
@@ -105,7 +108,8 @@
   let filter = $state('')
   let fileName = $state<string | null>(null)
   let symbols = $state<unknown[] | null>(null)
-  let findings = $state<unknown[] | null>(null)
+  let findings = $state<Finding[] | null>(null)
+  let findingsError = $state<ToolErrorInfo | null>(null)
   let dialog = $state<'variables' | 'diagnostics' | 'pending' | 'simulate' | null>(null)
   // The loaded project and the simulation panel's hero options (#836):
   // `project` holds `inputIdentity` and the read-only settings tree the
@@ -139,6 +143,14 @@
   let costEstimate = $state<ToolResponse | null>(null)
   let costRequest: Promise<void> | null = null
   let pageEl: HTMLDivElement | undefined = $state()
+
+  const placedFindings = $derived.by(() => {
+    const contents = new Map<number, RuleContent>()
+    for (const entry of rules ?? []) {
+      if (entry.state.phase === 'ready') contents.set(entry.summary.id, entry.state.content)
+    }
+    return placeFindings(findings ?? [], contents)
+  })
 
   const filtered = $derived(
     (rules ?? []).filter((entry) =>
@@ -244,6 +256,7 @@
     // content cannot be expressed the call refuses wholesale, so the page
     // falls back to per-rule reads and keeps each refusal in place.
     if (debug) void loadElementCounts()
+    void loadFindings()
     const bulk = await call({ op: 'rules', all: true, content: true })
     if ('result' in bulk) {
       const result = bulk.result
@@ -314,6 +327,30 @@
     if (event.startsWith('subroutine:')) return event.slice('subroutine:'.length)
     if (namesVersion === 0) return ''
     return names.peek(event, ['event'])?.name ?? event
+  }
+
+  async function loadFindings() {
+    try {
+      const response = await call({ op: 'findings', all: true })
+      if ('result' in response) {
+        const result = response.result
+        findings = (
+          Array.isArray(result)
+            ? result
+            : ((result as { findings?: Finding[] }).findings ?? [])
+        ) as Finding[]
+        findingsError = null
+      } else {
+        findings = null
+        findingsError = response.error as ToolErrorInfo
+      }
+    } catch (error) {
+      findings = null
+      findingsError = {
+        code: 'endpoint-unreachable',
+        message: error instanceof Error ? error.message : String(error),
+      }
+    }
   }
 
   /**
@@ -429,16 +466,7 @@
   }
 
   function openDiagnostics() {
-    if (findings === null) {
-      void call({ op: 'findings', all: true }).then((response) => {
-        if ('result' in response) {
-          const result = response.result
-          findings = Array.isArray(result)
-            ? result
-            : ((result as { findings?: unknown[] }).findings ?? [])
-        }
-      })
-    }
+    if (findings === null) void loadFindings()
     void ensureCostEstimate()
     dialog = 'diagnostics'
   }
@@ -611,6 +639,12 @@
     </div>
   </div>
 
+  {#if findingsError}
+    <p class="refusal findings-refusal" role="alert">
+      {t.findingsUnavailable} <code>{findingsError.code}</code> {findingsError.message}
+    </p>
+  {/if}
+
   <section class="rule-list" aria-label={t.rulesRegion}>
     {#if loadError}
       <p class="refusal">{loadError}</p>
@@ -621,6 +655,7 @@
     {:else}
       {#each filtered as entry (entry.summary.id)}
         {@const isOpen = openRules.has(entry.summary.id)}
+        {@const ruleSlots = findingsFor(placedFindings, entry.summary.id)}
         <div class="rule-slot" data-rule-id={entry.summary.id}>
           <RuleBar
             name={entry.summary.name}
@@ -628,6 +663,7 @@
             disabled={entry.state.phase === 'ready' && entry.state.content.disabled}
             open={isOpen}
             elements={debug ? (elementCounts?.[entry.summary.id]) : undefined}
+            findings={allFor(ruleSlots)}
             {t}
             ontoggle={() => toggle(entry.summary.id)}
           />
@@ -639,6 +675,7 @@
                 {names}
                 {debug}
                 {pending}
+                ruleFindings={ruleSlots}
                 {t}
                 onedit={oneditFor(entry.summary.id)}
               />
@@ -653,6 +690,7 @@
     which={dialog === 'pending' || dialog === 'simulate' ? null : dialog}
     {symbols}
     {findings}
+    {findingsError}
     {costEstimate}
     {names}
     {t}
