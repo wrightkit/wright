@@ -6,7 +6,7 @@ exit 1
 == stdout
 ERROR check
 summary: errors=1 warnings=0 notes=0 affected=1
+diagnostic: error unknown-action at=many.ws:6:9 stage=frontend message="unknown action spelling 'FutureValueThing0' for locale 'en-us'"
 next: wright lookup
 
 == stderr
-diagnostic: error unknown-action at=many.ws:6:9 stage=frontend message="unknown action spelling 'FutureValueThing0' for locale 'en-us'"
