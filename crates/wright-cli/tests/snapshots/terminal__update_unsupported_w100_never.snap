@@ -6,4 +6,4 @@ exit: 3
 --- stdout ---
 --- stderr ---
  UNSUPPORTED  update
-  standalone self-update is not supported on Windows; upgrade with `winget upgrade WrightKit.Wright` or `scoop update wright`
+  unsupported platform plan9/x86_64 (supported: linux/x86_64, darwin/x86_64, darwin/aarch64, windows/x86_64); use the official installer (curl -fsSL https://install.wrightkit.dev/wright/install.sh | bash) or a package manager

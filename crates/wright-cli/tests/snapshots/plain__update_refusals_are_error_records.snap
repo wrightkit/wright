@@ -6,4 +6,4 @@ exit 3
 == stdout
 
 == stderr
-error: unsupported message="unsupported platform plan9/m68k (supported: linux/x86_64, darwin/x86_64, darwin/aarch64); use the official installer (curl -fsSL https://install.wrightkit.dev/wright/install.sh | bash) or a package manager"
+error: unsupported message="unsupported platform plan9/m68k (supported: linux/x86_64, darwin/x86_64, darwin/aarch64, windows/x86_64); use the official installer (curl -fsSL https://install.wrightkit.dev/wright/install.sh | bash) or a package manager"
