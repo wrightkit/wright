@@ -62,19 +62,22 @@ beforeEach(() => {
 afterEach(() => {
   if (app) unmount(app)
   host.remove()
+  document.body.innerHTML = ''
   api.handler = null
 })
 
+// Bits UI portals the dialog into `document.body`.
 function panel() {
   app = mount(SimulatePanel, {
     target: host,
     props: { open: true, project, heroes: [], t, onclose: () => {} },
   })
-  return host.querySelector<HTMLDialogElement>('dialog')!
+  flushSync()
+  return document.body.querySelector<HTMLElement>('.dialog')!
 }
 
 function start() {
-  host.querySelector<HTMLButtonElement>('.sim-run .primary')!.click()
+  document.body.querySelector<HTMLButtonElement>('.sim-run .primary')!.click()
 }
 
 describe('the simulation panel run path (#836)', () => {
