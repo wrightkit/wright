@@ -156,13 +156,6 @@ export function statementText(node: Node, names: PeekNames, kinds: string[]): st
   return `${name}(${node.args.map(text).join(', ')})`
 }
 
-/**
- * Whether a statement row survives the column filter (docs/ui/
- * selection.md § Large columns): its session-locale text contains the
- * query case-insensitively, or the query is a prefix of the call id —
- * `setglobal` finds `setGlobalVariableAtIndex` rows, whose rendered text
- * spells the localized name with spaces.
- */
 export function statementMatches(
   node: Node,
   names: PeekNames,
