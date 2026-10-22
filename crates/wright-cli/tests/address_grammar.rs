@@ -693,15 +693,19 @@ rule ("dup") {
         command_result(&output)
     );
 
-    // Text mode reports the same structured diagnostic on stderr, and a
-    // failed query shows no fabricated default result (#446).
+    // Text mode carries the failed query's diagnostic on stdout (#891),
+    // and shows no fabricated default result (#446).
     let output = run(&["inspect", "refs", "nope", path]);
     assert_eq!(output.status.code(), Some(1));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("unknown-symbol"), "{stderr}");
-    assert!(stderr.contains("unknown symbol 'nope'"), "{stderr}");
+    assert!(
+        output.stderr.is_empty(),
+        "a failed result leaves stderr clean: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("ERROR refs"), "{stdout}");
+    assert!(stdout.contains("unknown-symbol"), "{stdout}");
+    assert!(stdout.contains("unknown symbol 'nope'"), "{stdout}");
     assert!(
         !stdout.contains("<unknown>") && !stdout.contains("read(s)"),
         "a failed query prints no default result metadata: {stdout}"

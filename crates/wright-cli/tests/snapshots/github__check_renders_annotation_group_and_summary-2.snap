@@ -1,5 +1,6 @@
 ---
 source: crates/wright-cli/tests/github.rs
+assertion_line: 105
 expression: "std::fs::read_to_string(&summary).unwrap()"
 ---
 ## Wright `check .` — **ERROR** (exit 1)
@@ -11,11 +12,11 @@ expression: "std::fs::read_to_string(&summary).unwrap()"
 ```text
 ERROR check root=. kind=workshop locale=en-us
 summary: errors=1 warnings=0 notes=0 affected=1
+diagnostic: error workshop.unknown-value.futurevaluething at=mixed.ws:11:26 stage=analysis status=unsupported message="Workshop construct 'FutureValueThing' is unsupported (truly-unresolved-identifier)"
 next: wright lint
 next: wright analyze
 next: wright inspect
 next: wright lookup
-diagnostic: error workshop.unknown-value.futurevaluething at=mixed.ws:11:26 stage=analysis status=unsupported message="Workshop construct 'FutureValueThing' is unsupported (truly-unresolved-identifier)"
 ```
 
 </details>

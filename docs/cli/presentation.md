@@ -122,7 +122,11 @@ plus `sha256=`), `fix:`/`patch:`/`refusal:` for `lint --fix`,
 `description=` as the row carries them), and `entry:`
 records for `lookup`. `diagnostic:` records render envelope diagnostics on
 stderr; result records stay on stdout, and artifacts keep byte-exact
-stdout ownership. A `diagnostic:` carries `<severity> <code>` then
+stdout ownership. A failed analysis result is the exception: its verdict,
+summary, and `diagnostic:` records all go to stdout, and stderr carries
+only usage errors (exit 2) and internal failures (exit 4) (#891) —
+non-envelope surfaces such as `lookup` keep their own split. A
+`diagnostic:` carries `<severity> <code>` then
 `at=<path:line:col>`, `stage=`, `status=`, `source=`, `locale=`, and
 `message=`; a `finding:` carries the same shape plus `count=`/`spanKind=`/
 `expression=` when the `repeated` member is present and `evidence=` when
@@ -138,7 +142,10 @@ computations report `unavailable` plus the payload's own reason member
 Truncation is explicit: `truncated: <list>=<shown>/<total>
 [byCode=<code>:<n>,…] expand="<command>"`, and a selection closes with
 `selected: <noun>=<shown>/<total> [byCode=…] [withheld=<n> expand=…]`.
-Run-cache and baseline comparisons render `comparison:`/`change:` records,
+Run-cache and baseline comparisons render `comparison:`/`change:` records —
+their values depend on `.wright/` state and are the one output that varies
+between runs on identical input (ADR-0027; off with `--no-cache`,
+`WRIGHT_NO_CACHE`, or `CI`),
 and `next:` records name follow-up commands — the shared list the result
 carries (#792) first, then the `wright lookup` pointer a rejected-name
 diagnostic implies. Non-envelope command errors use `error:`/`unavailable:` records
@@ -201,7 +208,8 @@ provenance path is readable. The driver exposes typed progress events through
 `ProgressObserver`; no terminal strings, spinner frames, ANSI sequence, or
 source context enters the driver envelope or JSON. Plain output,
 redirected/piped output, `TERM=dumb`, CI, GitHub Actions, and explicit JSON
-rendering remain static and deterministic.
+rendering remain static and deterministic — `comparison:`/`change:`
+records excepted, which follow `.wright/` state (ADR-0027).
 
 On the terminal renderer only, a report leads with one filled element —
 the verdict tag (#795, ADR-0030 decision 4). The tag word maps to the exit

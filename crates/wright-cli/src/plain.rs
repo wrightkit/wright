@@ -12,6 +12,8 @@
 //! Envelope diagnostics keep the text-mode stream contract — `diagnostic:`
 //! records go to stderr while the result records stay on stdout — so a
 //! `diagnostic:` line is never interleaved with the report it belongs to.
+//! A failed analysis result is the exception: verdict, summary, and
+//! diagnostics all go to stdout (#891).
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -24,12 +26,11 @@ use wright_driver::result::{
 use wright_driver::{Diagnostic, SelectionOutcome, Status};
 
 use crate::present::{
-    RenderContext, ResultPresentation, count, display_location_path, edge_caller,
-    finding_severity_rank, inline_location, is_real_source_path, query_items, render_node,
-    rule_address, rule_name, severity_rank, summary_status, tree_rule,
+    RenderContext, ResultPresentation, count, diagnostics_on_stdout, display_location_path,
+    edge_caller, finding_severity_rank, inline_location, is_real_source_path, query_items,
+    render_node, rule_address, rule_name, severity_rank, summary_status, tree_rule,
 };
-/// One buffered output line tagged with its stream, so diagnostics ride
-/// stderr while the report body stays on stdout.
+/// One buffered output line tagged with its stream.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Stream {
     Out,
@@ -44,8 +45,7 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation + PlainReport>(
     ctx: &RenderContext<'_>,
 ) {
     if envelope.result.is_artifact_stream() {
-        // An artifact stream is the payload itself: it prints to stdout
-        // unchanged while its diagnostics still become `diagnostic:` records.
+        // An artifact stream is the payload itself; diagnostics stay records.
         let mut err: Vec<Line> = Vec::new();
         diagnostic_records(envelope, ctx, &mut err);
         emit(&mut err);
@@ -61,9 +61,8 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation + PlainReport>(
     }
 }
 
-/// The plain report as ordered `(stdout, stderr)` record strings before
-/// printing — the GitHub Actions log group renders the same lines (#794).
-/// Artifact streams are excluded: they own stdout byte-for-byte.
+/// The plain report as ordered `(stdout, stderr)` record strings — the
+/// GitHub Actions log group renders the same lines (#794).
 pub(crate) fn render_lines<T: serde::Serialize + ResultPresentation + PlainReport>(
     envelope: &Envelope<T>,
     ctx: &RenderContext<'_>,
@@ -71,16 +70,15 @@ pub(crate) fn render_lines<T: serde::Serialize + ResultPresentation + PlainRepor
     let mut out: Vec<Line> = Vec::new();
     let mut err: Vec<Line> = Vec::new();
     out.push((Stream::Out, verdict_line(envelope, ctx)));
-    diagnostic_records(envelope, ctx, &mut err);
-    // A gated result is a raised verdict, not a failed command: its real
-    // result body still renders — the findings are the reason it failed
-    // (ADR-0030 decision 13, matching render_report).
+    // A failed analysis result's diagnostics join the report on stdout (#891).
+    let failed_to_stdout = diagnostics_on_stdout(envelope);
+    // A gated result is a raised verdict: its real result body still
+    // renders — the findings are why it failed (ADR-0030 decision 13).
     if !envelope.ok && !envelope.gated {
-        // A failed command reports its diagnostics, not the default
-        // result's headline — a default payload would masquerade as a real
-        // answer (#446). The headline is the diagnostic severity counts.
+        // A failed command reports severity counts, not the default
+        // result's headline — a default payload would masquerade (#446).
         if envelope.diagnostics.is_empty() {
-            err.push((
+            (if failed_to_stdout { &mut out } else { &mut err }).push((
                 Stream::Err,
                 format!(
                     "error: {}",
@@ -93,8 +91,7 @@ pub(crate) fn render_lines<T: serde::Serialize + ResultPresentation + PlainRepor
                 counts[severity_rank(diagnostic.severity) as usize] += 1;
             }
             let mut fields = severity_fields(counts[0], counts[1], counts[2]);
-            // The affected-file count is envelope data, not result data —
-            // a failure reports it exactly like a clean `check` does.
+            // The affected-file count is envelope data, not result data.
             let affected: BTreeSet<String> = envelope
                 .diagnostics
                 .iter()
@@ -111,6 +108,11 @@ pub(crate) fn render_lines<T: serde::Serialize + ResultPresentation + PlainRepor
         envelope.result.plain_report(envelope, ctx, &mut out);
         comparison_records(envelope.comparison.as_ref(), &mut out);
     }
+    diagnostic_records(
+        envelope,
+        ctx,
+        if failed_to_stdout { &mut out } else { &mut err },
+    );
     for next in next_commands(envelope) {
         out.push((Stream::Out, format!("next: {next}")));
     }
@@ -122,11 +124,9 @@ pub(crate) fn render_lines<T: serde::Serialize + ResultPresentation + PlainRepor
 }
 
 /// The verdict word shares the renderers' tag set (ADR-0030 decision 4):
-/// FAIL is the `--fail-on` gate's raised verdict, ERROR a genuine failure,
-/// USAGE a flag error (exit 2), UNSUPPORTED a recognized-but-unsupported
-/// operation (exit 3). A clean query command (`rules`, `symbols`, `refs`,
-/// `cfg`, `callgraph`, `cost`, `inspect`, `lookup`) shows its own name
-/// instead of a vacuous PASS.
+/// FAIL the raised gate verdict, ERROR a genuine failure, USAGE exit 2,
+/// UNSUPPORTED exit 3. A clean query command (`rules`, `symbols`, `refs`,
+/// `cfg`, `callgraph`, `cost`, `inspect`, `lookup`) shows its own name.
 fn verdict_word<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) -> String {
     if envelope.exit != 0 || !envelope.ok {
         if envelope.gated {
