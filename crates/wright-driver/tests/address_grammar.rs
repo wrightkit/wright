@@ -183,6 +183,116 @@ rule ("dup") {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
+// #888: the served refusal composes the structured fields one shared
+// result carries — a candidate's `path:line:column` location from the
+// file table (never a bare file index) and the declared-name listing
+// bounded with its total, in the service's own operation spelling.
+#[test]
+fn refusals_render_locations_and_bounded_declared_names() {
+    let path = temp_workshop(
+        "dup.ws",
+        r#"rule ("tick") {
+    event {
+        Ongoing - Global;
+    }
+}
+rule ("tick") {
+    event {
+        Ongoing - Global;
+    }
+}
+"#,
+    );
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(path.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+
+    let ambiguous = service.handle(&ToolRequest::Cfg {
+        snapshot: None,
+        rule: "tick".into(),
+        kind: None,
+        max: None,
+        all: true,
+    });
+    let ToolResponse::Error { error } = ambiguous else {
+        panic!("the duplicated name must refuse: {ambiguous:?}")
+    };
+    for candidate in ["tick#1 at dup.ws:", "tick#2 at dup.ws:"] {
+        assert!(
+            error.message.contains(candidate),
+            "the candidate carries its path:line:column: {error:?}"
+        );
+    }
+    assert!(
+        !error.message.contains("{file:") && !error.message.contains(" at 0:"),
+        "no placeholder or bare file index: {error:?}"
+    );
+    // The candidate metadata rides along as structured fields (#888):
+    // resolved `path` beside the selectable `address`, never an index.
+    let candidates = error.fields["candidates"].as_array().unwrap();
+    assert_eq!(candidates.len(), 2);
+    for (index, candidate) in candidates.iter().enumerate() {
+        assert_eq!(
+            candidate["address"].as_str().unwrap(),
+            format!("tick#{}", index + 1)
+        );
+        assert_eq!(candidate["path"].as_str().unwrap(), "dup.ws");
+        assert!(candidate["file"].is_null(), "the index is resolved away");
+        assert!(candidate["line"].is_u64() && candidate["column"].is_u64());
+    }
+
+    // Beyond the listing bound the refusal truncates the names, keeps the
+    // total, and the service renders the unbounded operation spelling.
+    let many = temp_workshop(
+        "many.ws",
+        &(1..=25)
+            .map(|index| {
+                format!(
+                    "rule (\"rule{index:02}\") {{\n    event {{\n        Ongoing - Global;\n    }}\n}}\n"
+                )
+            })
+            .collect::<String>(),
+    );
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(many.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+    let ToolResponse::Error { error } = service.handle(&ToolRequest::Cfg {
+        snapshot: None,
+        rule: "nope".into(),
+        kind: None,
+        max: None,
+        all: true,
+    }) else {
+        panic!("the unknown rule must refuse")
+    };
+    assert!(
+        error.message.contains("declared rule names (25 total)"),
+        "{error:?}"
+    );
+    assert!(error.message.contains("'rule20'"), "{error:?}");
+    assert!(!error.message.contains("'rule21'"), "{error:?}");
+    assert!(
+        error
+            .message
+            .ends_with("the 'rules' operation lists them all"),
+        "the unbounded form is named in the surface's spelling: {error:?}"
+    );
+    assert_eq!(error.fields["listOp"], "rules");
+    assert_eq!(error.fields["listAll"], true);
+    assert_eq!(error.fields["declaredTotal"], 25);
+
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    let _ = std::fs::remove_dir_all(many.parent().unwrap());
+}
+
 // `editStatements` rule targets are rule addresses — the bare duplicate
 // name is `ambiguous-rule` (the subject's own code), `NAME#N` selects the
 // Nth declaration, and a name address needs no `snapshot`.
@@ -258,6 +368,96 @@ rule ("tick") {
         !new_text.contains("Set Global Variable(index, 3)"),
         "{new_text}"
     );
+
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+// Diagnostics carry no executable placeholders (#888): a `{` inside
+// user content is text, so a rule name or file selector literally
+// spelling `{file:N}`/`{list:OP}` stays literal through the same
+// composition — including the `NAME#N` address that prints and feeds
+// back to select the rule (ADR-0035).
+#[test]
+fn placeholder_spellings_inside_user_content_stay_literal() {
+    let path = temp_workshop(
+        "brace.ws",
+        r#"rule ("a{list:rules}b") {
+    event {
+        Ongoing - Global;
+    }
+}
+rule ("a{list:rules}b") {
+    event {
+        Ongoing - Global;
+    }
+}
+"#,
+    );
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(path.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+
+    // The ambiguous refusal prints both canonical addresses verbatim —
+    // `{list:rules}` inside the name is text, not a listing field.
+    let ToolResponse::Error { error } = service.handle(&ToolRequest::Cfg {
+        snapshot: None,
+        rule: "a{list:rules}b".into(),
+        kind: None,
+        max: None,
+        all: true,
+    }) else {
+        panic!("the duplicated name must refuse")
+    };
+    assert_eq!(error.code, "ambiguous-rule");
+    for candidate in ["a{list:rules}b#1", "a{list:rules}b#2"] {
+        assert!(
+            error.message.contains(candidate),
+            "the name prints verbatim with its ordinal: {error:?}"
+        );
+    }
+    assert!(
+        !error.message.contains("the 'rules' operation"),
+        "the placeholder spelling inside the name did not render: {error:?}"
+    );
+
+    // Print-and-pass-back: the printed address selects the rule.
+    result_of(
+        &mut service,
+        &ToolRequest::Cfg {
+            snapshot: None,
+            rule: "a{list:rules}b#1".into(),
+            kind: None,
+            max: None,
+            all: true,
+        },
+    );
+
+    // A `file` selector literally spelling a placeholder stays literal in
+    // the refusal — `{file:0}` never substitutes a path and
+    // `{list:rules}` never renders the operation.
+    for argument in ["{file:0}", "{list:rules}"] {
+        let ToolResponse::Error { error } = service.handle(&ToolRequest::Symbols {
+            kind: None,
+            file: Some(argument.into()),
+            max: None,
+            all: true,
+        }) else {
+            panic!("an unmatched file selector must refuse")
+        };
+        assert_eq!(error.code, "invalid-selection");
+        assert!(
+            error.message.contains(&format!("'{argument}'")),
+            "the selector argument prints verbatim: {error:?}"
+        );
+        assert!(
+            !error.message.contains("the 'rules' operation"),
+            "the placeholder spelling inside the selector did not render: {error:?}"
+        );
+    }
 
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

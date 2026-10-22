@@ -3,10 +3,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::diag::{Diagnostic, Stage};
-use crate::edit::{
-    EditRange, EditTransaction, SourceEdit, SourcePreview, char_offset_to_utf16,
-    utf16_offset_to_char,
-};
+
+mod ranges;
+use crate::edit::{EditRange, EditTransaction, SourceEdit, SourcePreview};
+pub(crate) use ranges::utf16_to_char_column;
+use ranges::{column_to_position, position_to_column};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderMutation {
@@ -260,7 +261,8 @@ fn validate_pipeline(
         if !res.valid {
             let reason = res.reason.as_deref().unwrap_or("invalid");
             let mut msg = format!(
-                "the provider refused the edits for '{source}': the edited source is {reason}"
+                "the provider refused the edits for '{}': the edited source is {}",
+                source, reason
             );
             if let Some(idx) = res.failing_edit_index {
                 msg.push_str(&format!(" (failing edit {idx})"));
@@ -379,72 +381,6 @@ fn to_text_edit(text: &str, edit: &SourceEdit) -> Result<wright_lpp::TextEdit, D
     })
 }
 
-fn position_to_column(
-    lines: &[&str],
-    pos: wright_lpp::Position,
-    what: &str,
-) -> Result<(u32, u32), Diagnostic> {
-    let line_idx = pos.line as usize;
-    let Some(line_text) = lines.get(line_idx) else {
-        return Err(Diagnostic::error(
-            "edit-invalid-range",
-            Stage::Discovery,
-            format!(
-                "the {what} names line {}, but the document has {} lines",
-                pos.line,
-                lines.len()
-            ),
-        ));
-    };
-    let col = utf16_to_char_column(line_text, pos.character).ok_or_else(|| {
-        Diagnostic::error(
-            "edit-invalid-range",
-            Stage::Discovery,
-            format!("the {what} names UTF-16 offset {} in line {}, which is not a character boundary of that line", pos.character, pos.line),
-        )
-    })?;
-    Ok(((line_idx as u32) + 1, col))
-}
-
-fn column_to_position(
-    lines: &[&str],
-    line: u32,
-    column: u32,
-) -> Result<wright_lpp::Position, Diagnostic> {
-    let line_idx = line.saturating_sub(1) as usize;
-    let Some(line_text) = lines.get(line_idx) else {
-        return Err(Diagnostic::error(
-            "edit-invalid-range",
-            Stage::Discovery,
-            format!(
-                "the edit names line {line}, but the document has {} lines",
-                lines.len()
-            ),
-        ));
-    };
-    let character = char_column_to_utf16(line_text, column).ok_or_else(|| {
-        Diagnostic::error(
-            "edit-invalid-range",
-            Stage::Discovery,
-            format!("the edit names column {column} in line {line}, which is outside that line (line {line} has {} characters)", line_text.chars().count()),
-        )
-    })?;
-    Ok(wright_lpp::Position {
-        line: line_idx as u32,
-        character,
-    })
-}
-
-pub(crate) fn utf16_to_char_column(line: &str, units: u32) -> Option<u32> {
-    let offset = utf16_offset_to_char(line, units as usize);
-    (char_offset_to_utf16(line, offset) == units as usize).then_some(offset as u32 + 1)
-}
-
-fn char_column_to_utf16(line: &str, column: u32) -> Option<u32> {
-    let offset = column.checked_sub(1)? as usize;
-    (offset <= line.chars().count()).then(|| char_offset_to_utf16(line, offset) as u32)
-}
-
 fn edit_invalid_range(range: wright_lpp::Range) -> Diagnostic {
     Diagnostic::error(
         "edit-invalid-range",
@@ -462,10 +398,13 @@ fn provider_diagnostic(error: &wright_lpp::ProviderError) -> Diagnostic {
     let refused = is_refusal(error);
     let message = match (refused, error.refusal_code()) {
         (true, Some(refusal)) => {
-            format!("the provider refused the edit request ({refusal}): {error}")
+            format!(
+                "the provider refused the edit request ({}): {}",
+                refusal, error
+            )
         }
-        (true, None) => format!("the provider refused the edit request: {error}"),
-        (false, _) => format!("the provider failed the edit request: {error}"),
+        (true, None) => format!("the provider refused the edit request: {}", error),
+        (false, _) => format!("the provider failed the edit request: {}", error),
     };
     Diagnostic::error(code, stage, message)
 }

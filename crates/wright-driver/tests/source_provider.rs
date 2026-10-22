@@ -297,16 +297,11 @@ fn provider_backend_lint_and_analyze_use_the_canonical_artifact_without_opy_span
             locale: None,
             provenance: wright_driver::SourceProvenance::Unmapped,
             diagnostics: vec![Diagnostic {
-                code: "owner-warning".to_string(),
-                stage: Stage::Frontend,
-                severity: wright_driver::Severity::Warning,
-                message: "owner-side warning".to_string(),
-                status: None,
-                span: None,
                 source: Some(Origin {
                     kind: "opy".to_string(),
                     locale: None,
                 }),
+                ..Diagnostic::warning("owner-warning", Stage::Frontend, "owner-side warning")
             }],
             source_identity: None,
         }),
@@ -975,20 +970,17 @@ impl SourceProvider for ReloadableProvider {
 fn check_reports_the_catalog_validation_errors_compile_reports() {
     let (dir, entry) = temp_entry();
     let catalog_error = Diagnostic {
-        code: "catalog-validation".to_string(),
-        stage: Stage::Frontend,
-        severity: wright_driver::Severity::Error,
-        message:
-            "action 'playEffect' argument 4 must have semantic type 'Vector|Player', got Array"
-                .to_string(),
-        status: None,
         span: Some(wright_driver::SourceSpan {
             file: 0,
             path: entry.display().to_string(),
             start: wright_driver::Position { line: 10, col: 85 },
             end: wright_driver::Position { line: 10, col: 128 },
         }),
-        source: None,
+        ..Diagnostic::error(
+            "catalog-validation",
+            Stage::Frontend,
+            "action 'playEffect' argument 4 must have semantic type 'Vector|Player', got Array",
+        )
     };
     let provider = RecordingProvider {
         target: Arc::new(Mutex::new(None)),
@@ -1004,7 +996,7 @@ fn check_reports_the_catalog_validation_errors_compile_reports() {
             workshop_text: Some(workshop_fixture("synthetic/basic-rule")),
             locale: Some("en-US".to_string()),
             provenance: wright_driver::SourceProvenance::Unmapped,
-            diagnostics: vec![catalog_error],
+            diagnostics: vec![catalog_error.clone()],
             source_identity: None,
         }),
         check_failure: None,
@@ -1045,21 +1037,7 @@ fn check_reports_the_catalog_validation_errors_compile_reports() {
             workshop_text: Some(workshop_fixture("synthetic/basic-rule")),
             locale: Some("en-US".to_string()),
             provenance: wright_driver::SourceProvenance::Unmapped,
-            diagnostics: vec![Diagnostic {
-                code: "catalog-validation".to_string(),
-                stage: Stage::Frontend,
-                severity: wright_driver::Severity::Error,
-                message: "action 'playEffect' argument 4 must have semantic type 'Vector|Player', got Array"
-                    .to_string(),
-                status: None,
-                span: Some(wright_driver::SourceSpan {
-                    file: 0,
-                    path: entry.display().to_string(),
-                    start: wright_driver::Position { line: 10, col: 85 },
-                    end: wright_driver::Position { line: 10, col: 128 },
-                }),
-                source: None,
-            }],
+            diagnostics: vec![catalog_error.clone()],
             source_identity: None,
         }),
         check_failure: None,
@@ -2063,15 +2041,8 @@ fn opy_rules_content_reports_names_unavailable() {
 fn a_repeated_check_reports_the_same_provider_diagnostics() {
     let (dir, entry) = temp_entry();
     let operations = Arc::new(Mutex::new(Vec::new()));
-    let provider_diagnostic = |code: &str| Diagnostic {
-        code: code.to_string(),
-        stage: Stage::Frontend,
-        severity: wright_driver::Severity::Warning,
-        message: format!("{code} message"),
-        status: None,
-        span: None,
-        source: None,
-    };
+    let provider_diagnostic =
+        |code: &str| Diagnostic::warning(code, Stage::Frontend, format!("{code} message"));
     let provider = RecordingProvider {
         target: Arc::new(Mutex::new(None)),
         operations: Arc::clone(&operations),

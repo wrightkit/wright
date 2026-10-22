@@ -45,6 +45,7 @@ impl<'a> ToolService<'a> {
                     code: "invalid-selection".to_string(),
                     message: "the 'rule' selector reports one rule's element cost; finding selection fields do not apply"
                         .to_string(),
+                    ..Default::default()
                 });
             }
             return self.cost_estimate_rule(loaded, rule).map(|mut result| {
@@ -199,6 +200,7 @@ impl<'a> ToolService<'a> {
                     "element total {total} exceeds --max-total {max} by {}",
                     total as usize - max
                 ),
+                ..Default::default()
             });
         }
         let cost_run = self.session.cost_run(loaded);
@@ -212,6 +214,7 @@ impl<'a> ToolService<'a> {
                     "unknown baseline '{}': no record under .wright/ for this input kind/locale/profile",
                     run.baseline.as_deref().unwrap_or_default()
                 ),
+                ..Default::default()
             });
         }
         let Some(snapshot) = self.session.cost_snapshot(loaded) else {
@@ -236,6 +239,7 @@ impl<'a> ToolService<'a> {
             .map_err(|error| ToolErrorInfo {
                 code: "invalid-selection".to_string(),
                 message: error.message,
+                fields: error.fields,
             })?;
         let report = loaded
             .program
@@ -243,6 +247,7 @@ impl<'a> ToolService<'a> {
             .map_err(|error| ToolErrorInfo {
                 code: "element-count-unavailable".to_string(),
                 message: error.to_string(),
+                ..Default::default()
             })?;
         let node = report
             .rules

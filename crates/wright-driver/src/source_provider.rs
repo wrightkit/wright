@@ -2,9 +2,10 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use workshop_rs::program::{MAPPED_TEXT_V1, TEXT_V1};
+mod columns;
 use workshop_rs::{MappedText, SourceMap};
 
-use crate::diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage};
+use crate::diag::{Diagnostic, Origin, Severity, SourceSpan, Stage};
 use crate::input::InputTarget;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -303,7 +304,8 @@ impl SourceProvider for LppSourceProvider {
                     SourceProviderError::Failed {
                         code: "provider-artifact-format".to_string(),
                         message: format!(
-                            "the source provider returned an invalid '{MAPPED_TEXT_V1}' artifact: {error}"
+                            "the source provider returned an invalid '{MAPPED_TEXT_V1}' artifact: {}",
+                            error
                         ),
                     }
                 })?;
@@ -364,7 +366,7 @@ pub(crate) fn provider_error(
 ) -> SourceProviderError {
     SourceProviderError::Failed {
         code: provider_failure_code(&error),
-        message: format!("{context}: {error}"),
+        message: format!("{context}: {}", error),
     }
 }
 
@@ -404,18 +406,19 @@ fn provider_diagnostics(
                     code: d.code.unwrap_or_else(|| "provider-diagnostic".to_string()),
                     stage: Stage::Frontend,
                     severity,
-                    message: d.message,
+                    message: d.message.clone(),
                     status: None,
                     span: Some(SourceSpan {
                         file,
                         path: path.clone(),
-                        start: provider_position(d.range.start, &lines),
-                        end: provider_position(d.range.end, &lines),
+                        start: columns::provider_position(d.range.start, &lines),
+                        end: columns::provider_position(d.range.end, &lines),
                     }),
                     source: Some(Origin {
                         kind: SourceLanguage::Opy.as_str().to_string(),
                         locale: locale.map(str::to_owned),
                     }),
+                    fields: Default::default(),
                 }
             })
         })
@@ -458,9 +461,11 @@ pub(crate) fn provider_document_set(
             wright_analyzer::service::ErrorInfo {
                 code: "provider-document-unreadable".to_string(),
                 message: format!(
-                    "cannot read loaded project member '{}' for the provider document set: {error}",
-                    path.display()
+                    "cannot read loaded project member '{}' for the provider document set: {}",
+                    path.display(),
+                    error
                 ),
+                ..Default::default()
             }
         })?;
         set.insert(
@@ -506,9 +511,11 @@ pub(crate) fn provider_member(
             .map_err(|()| wright_analyzer::service::ErrorInfo {
                 code: "provider-document-uri".to_string(),
                 message: format!(
-                    "loaded project member '{member}' is not a disk file and cannot serve the \
-                     provider document set"
+                    "loaded project member '{}' is not a disk file and cannot serve the \
+                     provider document set",
+                    member
                 ),
+                ..Default::default()
             })?;
         return Ok((url.to_string(), path));
     }
@@ -525,8 +532,10 @@ pub(crate) fn provider_member(
         .map_err(|()| wright_analyzer::service::ErrorInfo {
             code: "provider-document-uri".to_string(),
             message: format!(
-                "loaded project member '{member}' cannot be expressed as a file:// URI"
+                "loaded project member '{}' cannot be expressed as a file:// URI",
+                member
             ),
+            ..Default::default()
         })
 }
 
@@ -561,17 +570,6 @@ fn windows_drive_member(member: &str) -> Option<(String, std::path::PathBuf)> {
     let encoded = percent_encoding::utf8_percent_encode(&normalized, PATH_ENCODE);
     let url = url::Url::parse(&format!("file:///{encoded}")).ok()?;
     Some((url.to_string(), path))
-}
-
-fn provider_position(pos: wright_lpp::Position, lines: &[String]) -> Position {
-    let col = lines
-        .get(pos.line as usize)
-        .and_then(|line| crate::provider_edit::utf16_to_char_column(line, pos.character))
-        .unwrap_or_else(|| pos.character.saturating_add(1));
-    Position {
-        line: pos.line.saturating_add(1),
-        col,
-    }
 }
 
 #[cfg(test)]

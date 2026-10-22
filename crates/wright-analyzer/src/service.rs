@@ -53,10 +53,19 @@ pub enum Response {
 }
 
 /// A structured error payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// `fields` carries the refusal metadata surfaces reword or consume
+/// programmatically (#888): a `listOp`/`listAll` name-listing operation,
+/// `candidates` entries (`address`, `file`/`path`, `line`, `column`),
+/// `declared`/`declaredTotal` bounded name lists, and the queried
+/// `name`/`file`/`kind`. The keys serialize as siblings of `code` and
+/// `message`, which the wire schema already permits.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ErrorInfo {
     pub code: String,
     pub message: String,
+    #[serde(default, flatten)]
+    pub fields: serde_json::Map<String, serde_json::Value>,
 }
 
 /// The origin of a compiled program, carried in tool responses.

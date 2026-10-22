@@ -116,6 +116,7 @@ pub(crate) fn refusal(code: &str, message: impl Into<String>) -> ToolResponse {
         error: ToolErrorInfo {
             code: code.to_string(),
             message: message.into(),
+            ..Default::default()
         },
     }
 }

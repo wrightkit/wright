@@ -2,7 +2,7 @@
 
 use serde_json::json;
 
-use super::{ToolResponse, ToolService, invalid_selection};
+use super::{ToolResponse, ToolService, invalid_selection, invalid_selection_fields};
 
 impl<'a> ToolService<'a> {
     /// `callGraph`: caller rules → callee subroutines. The selection fields
@@ -20,7 +20,7 @@ impl<'a> ToolService<'a> {
         let caller_address = match caller {
             Some(caller) => match self.semantic().resolve_rule(caller) {
                 Ok(rule) => Some(self.semantic().canonical_rule_address(rule)),
-                Err(error) => return invalid_selection(error.message),
+                Err(error) => return invalid_selection_fields(error.message, error.fields),
             },
             None => None,
         };

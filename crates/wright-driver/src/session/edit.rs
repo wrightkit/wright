@@ -231,7 +231,11 @@ impl CompilerSession {
                 project_root: crate::source_provider::provider_project_root(&loaded.input.root),
                 documents,
             })
-            .map_err(|info| Diagnostic::error(info.code, Stage::Discovery, info.message))
+            .map_err(|info| {
+                let mut diagnostic = Diagnostic::error(info.code, Stage::Discovery, info.message);
+                diagnostic.fields = info.fields;
+                diagnostic
+            })
         })
     }
 

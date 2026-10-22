@@ -653,7 +653,7 @@ impl CompilerSession {
         self.with_loaded(
             command,
             |session| session.load_with_operation(ProviderOperation::Compile),
-            |session, _loaded| {
+            |session, loaded| {
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
                 let mut service = match ToolService::new(session) {
                     Ok(service) => service,
@@ -664,12 +664,19 @@ impl CompilerSession {
                 };
                 match run(&mut service) {
                     Ok(result) => result,
-                    Err(error) => {
-                        session.diagnostics.push(Diagnostic::error(
-                            error.code,
-                            Stage::Analysis,
-                            error.message,
-                        ));
+                    Err(mut error) => {
+                        // Candidates resolve against this loaded program's
+                        // file table; the listing-operation clause waits
+                        // for the surface's own spelling (#888).
+                        crate::service::resolve_candidates(
+                            &mut error.message,
+                            &mut error.fields,
+                            Some(&loaded),
+                        );
+                        let mut diagnostic =
+                            Diagnostic::error(error.code, Stage::Analysis, error.message);
+                        diagnostic.fields = error.fields;
+                        session.diagnostics.push(diagnostic);
                         T::default()
                     }
                 }

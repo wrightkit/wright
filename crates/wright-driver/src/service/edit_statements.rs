@@ -119,6 +119,7 @@ impl<'a> ToolService<'a> {
                         error: ToolErrorInfo {
                             code: "invalid-selection".to_string(),
                             message: format!("unknown rule {id}"),
+                            ..Default::default()
                         },
                     });
                 }
@@ -129,7 +130,17 @@ impl<'a> ToolService<'a> {
                     };
                     match resolved {
                         Ok(rule) => rule,
-                        Err(error) => return Err(ToolResponse::Error { error }),
+                        // Candidates resolve against the effective program
+                        // — the caller's `sources` file table, not the
+                        // served snapshot's (#888).
+                        Err(mut error) => {
+                            crate::service::resolve_candidates(
+                                &mut error.message,
+                                &mut error.fields,
+                                Some(effective),
+                            );
+                            return Err(ToolResponse::Error { error });
+                        }
                     }
                 }
             };
@@ -249,11 +260,9 @@ impl<'a> ToolService<'a> {
         // so the next program-reading request serves the edited program,
         // and surface a load failure here rather than on the next read.
         if let Err(error) = self.refresh() {
-            return refuse(vec![Diagnostic::error(
-                error.code,
-                Stage::Discovery,
-                error.message,
-            )]);
+            let mut diagnostic = Diagnostic::error(error.code, Stage::Discovery, error.message);
+            diagnostic.fields = error.fields;
+            return refuse(vec![diagnostic]);
         }
         validation
     }

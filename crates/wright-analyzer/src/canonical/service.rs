@@ -223,6 +223,7 @@ impl<'a> SemanticService<'a> {
                     error: ErrorInfo {
                         code: "invalid-json".to_string(),
                         message: format!("could not parse request JSON: {err}"),
+                        ..Default::default()
                     },
                 })
                 .expect("error response serializes");
@@ -293,6 +294,7 @@ impl<'a> SemanticService<'a> {
             error: ErrorInfo {
                 code: code.to_string(),
                 message,
+                ..Default::default()
             },
         }
     }

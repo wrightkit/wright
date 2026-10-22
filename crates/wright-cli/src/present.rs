@@ -2691,15 +2691,10 @@ mod tests {
     }
 
     fn diagnostic(severity: Severity) -> wright_driver::Diagnostic {
-        wright_driver::Diagnostic {
-            code: "test".to_string(),
-            stage: wright_driver::Stage::Analysis,
-            severity,
-            message: "test".to_string(),
-            status: None,
-            span: None,
-            source: None,
-        }
+        let mut diagnostic =
+            wright_driver::Diagnostic::error("test", wright_driver::Stage::Analysis, "test");
+        diagnostic.severity = severity;
+        diagnostic
     }
 
     #[test]

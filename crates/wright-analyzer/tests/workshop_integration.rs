@@ -1554,7 +1554,5 @@ fn name_resolution_rejects_unknown_and_ambiguous_names() {
     assert_eq!(service.resolve_symbol("dup").unwrap().name, "dup");
     let error = service.resolve_rule("dup").unwrap_err();
     assert_eq!(error.code, "ambiguous-rule");
-    for candidate in ["dup#1", "dup#2"] {
-        assert!(error.message.contains(candidate), "{error:?}");
-    }
+    assert_eq!(error.fields["candidates"][0]["address"], "dup#1");
 }

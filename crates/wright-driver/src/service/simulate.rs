@@ -50,6 +50,7 @@ impl<'a> ToolService<'a> {
         let refuse = |code: &str, message: String| ToolErrorInfo {
             code: code.to_string(),
             message,
+            ..Default::default()
         };
         // `seconds` is `athena`'s `Options.seconds` for a scenario-free run;
         // a scenario owns the simulated time, so both spellings at once are

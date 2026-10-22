@@ -1,10 +1,11 @@
 use std::cmp::Ordering;
 use std::fmt;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
-use flate2::read::GzDecoder;
+mod download;
+use download::{extract_provider, fetch, fetch_text, provider_client, verify_checksum};
+
 #[cfg(test)]
 use sha2::{Digest, Sha256};
 
@@ -145,7 +146,8 @@ impl OpyProviderResolver {
             Ok(target)
         } else {
             Err(OpyProviderError::unsupported(format!(
-                "unsupported OPY provider target '{target}'"
+                "unsupported OPY provider target '{}'",
+                target
             )))
         }
     }
@@ -157,8 +159,9 @@ impl OpyProviderResolver {
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(err) => {
                 return Err(OpyProviderError::install(format!(
-                    "cannot read active OPY provider pointer '{}': {err}",
-                    active.display()
+                    "cannot read active OPY provider pointer '{}': {}",
+                    active.display(),
+                    err
                 )));
             }
         };
@@ -235,8 +238,9 @@ impl OpyProviderResolver {
     ) -> Result<(), OpyProviderError> {
         std::fs::create_dir_all(&self.store_dir).map_err(|e| {
             OpyProviderError::install(format!(
-                "cannot create the OPY provider store '{}': {e}",
-                self.store_dir.display()
+                "cannot create the OPY provider store '{}': {}",
+                self.store_dir.display(),
+                e
             ))
         })?;
 
@@ -277,16 +281,18 @@ impl OpyProviderResolver {
         let final_executable = final_dir.join(provider_binary(target));
         std::fs::create_dir_all(final_dir.parent().expect("parent exists")).map_err(|e| {
             OpyProviderError::install(format!(
-                "cannot create OPY provider version directory '{}': {e}",
-                final_dir.display()
+                "cannot create OPY provider version directory '{}': {}",
+                final_dir.display(),
+                e
             ))
         })?;
         match std::fs::rename(staging, &final_dir) {
             Ok(()) => self.activate(version, target),
             Err(_) if is_executable(&final_executable) => self.activate(version, target),
             Err(e) => Err(OpyProviderError::install(format!(
-                "cannot activate staged OPY provider '{}': {e}",
-                final_dir.display()
+                "cannot activate staged OPY provider '{}': {}",
+                final_dir.display(),
+                e
             ))),
         }
     }
@@ -306,8 +312,9 @@ impl OpyProviderResolver {
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
                 Err(e) => {
                     return Err(OpyProviderError::install(format!(
-                        "cannot create OPY provider staging directory '{}': {e}",
-                        staging.display()
+                        "cannot create OPY provider staging directory '{}': {}",
+                        staging.display(),
+                        e
                     )));
                 }
             }
@@ -330,20 +337,23 @@ impl OpyProviderResolver {
         let res = (|| -> Result<(), OpyProviderError> {
             let mut file = std::fs::File::create(&temporary).map_err(|e| {
                 OpyProviderError::install(format!(
-                    "cannot write temporary OPY provider pointer '{}': {e}",
-                    temporary.display()
+                    "cannot write temporary OPY provider pointer '{}': {}",
+                    temporary.display(),
+                    e
                 ))
             })?;
             write!(file, "{version}").map_err(|e| {
                 OpyProviderError::install(format!(
-                    "cannot write temporary OPY provider pointer '{}': {e}",
-                    temporary.display()
+                    "cannot write temporary OPY provider pointer '{}': {}",
+                    temporary.display(),
+                    e
                 ))
             })?;
             file.sync_all().map_err(|e| {
                 OpyProviderError::install(format!(
-                    "cannot persist temporary OPY provider pointer '{}': {e}",
-                    temporary.display()
+                    "cannot persist temporary OPY provider pointer '{}': {}",
+                    temporary.display(),
+                    e
                 ))
             })?;
             let active = self.store_dir.join("active");
@@ -353,7 +363,8 @@ impl OpyProviderResolver {
                     Ok(())
                 }
                 Err(error) => Err(OpyProviderError::install(format!(
-                    "cannot atomically activate OPY provider {version}: {error}"
+                    "cannot atomically activate OPY provider {}: {}",
+                    version, error
                 ))),
             }
         })();
@@ -386,7 +397,8 @@ fn target_for(os: &str, arch: &str) -> Result<String, OpyProviderError> {
         ("macos", "aarch64") => Ok("aarch64-apple-darwin".to_string()),
         ("windows", "x86_64") => Ok("x86_64-pc-windows-msvc".to_string()),
         _ => Err(OpyProviderError::unsupported(format!(
-            "unsupported OPY provider target {os}/{arch}; supported targets are linux/x86_64, darwin x86_64/aarch64, and windows x86_64"
+            "unsupported OPY provider target {}/{}; supported targets are linux/x86_64, darwin x86_64/aarch64, and windows x86_64",
+            os, arch
         ))),
     }
 }
@@ -417,7 +429,8 @@ fn normalize_version(version: &str) -> Result<String, OpyProviderError> {
         (parts.next(), parts.next(), parts.next(), parts.next())
     else {
         return Err(OpyProviderError::download(format!(
-            "invalid OPY provider release version '{core}' (expected X.Y.Z)"
+            "invalid OPY provider release version '{}' (expected X.Y.Z)",
+            core
         )));
     };
     if [major, minor, patch]
@@ -427,7 +440,8 @@ fn normalize_version(version: &str) -> Result<String, OpyProviderError> {
         Ok(core.to_string())
     } else {
         Err(OpyProviderError::download(format!(
-            "invalid OPY provider release version '{core}' (expected X.Y.Z)"
+            "invalid OPY provider release version '{}' (expected X.Y.Z)",
+            core
         )))
     }
 }
@@ -458,144 +472,6 @@ fn is_executable(path: &Path) -> bool {
     {
         true
     }
-}
-
-fn provider_client() -> Result<reqwest::blocking::Client, OpyProviderError> {
-    reqwest::blocking::Client::builder()
-        .user_agent(concat!("wright-opy-provider/", env!("CARGO_PKG_VERSION")))
-        .timeout(Duration::from_secs(60))
-        .build()
-        .map_err(|e| {
-            OpyProviderError::offline(format!(
-                "cannot initialize HTTPS client for OPY provider release source: {e}"
-            ))
-        })
-}
-
-fn fetch_text(client: &reqwest::blocking::Client, url: &str) -> Result<String, OpyProviderError> {
-    let bytes = fetch(client, url)?;
-    String::from_utf8(bytes)
-        .map_err(|e| OpyProviderError::download(format!("cannot decode response from {url}: {e}")))
-}
-
-fn fetch(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>, OpyProviderError> {
-    let response = client.get(url).send().map_err(|error| {
-        OpyProviderError::offline(format!(
-            "cannot reach OPY provider release source {url}: {error}"
-        ))
-    })?;
-    if !response.status().is_success() {
-        return Err(OpyProviderError::download(format!(
-            "GET {url} failed with HTTP {}",
-            response.status()
-        )));
-    }
-    let mut bytes = Vec::new();
-    response
-        .take(MAX_DOWNLOAD_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|e| OpyProviderError::download(format!("cannot read response from {url}: {e}")))?;
-    if bytes.len() as u64 > MAX_DOWNLOAD_BYTES {
-        return Err(OpyProviderError::download(format!(
-            "response from {url} exceeds the 128 MiB provider artifact limit"
-        )));
-    }
-    Ok(bytes)
-}
-
-fn verify_checksum(
-    archive: &[u8],
-    checksum_file: &str,
-    archive_name: &str,
-) -> Result<(), OpyProviderError> {
-    let published = checksum_file.split_whitespace().next().ok_or_else(|| {
-        OpyProviderError::integrity(format!("empty checksum file for {archive_name}"))
-    })?;
-    if published.len() != 64 || !published.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(OpyProviderError::integrity(format!(
-            "invalid SHA-256 checksum for {archive_name}"
-        )));
-    }
-    let expected = published;
-    let actual = crate::input::sha256_hex(archive);
-    if !actual.eq_ignore_ascii_case(expected) {
-        return Err(OpyProviderError::integrity(format!(
-            "SHA-256 verification failed for {archive_name} (published {expected}, got {actual}); the active provider was not changed"
-        )));
-    }
-    Ok(())
-}
-
-fn extract_provider(
-    archive: &[u8],
-    dest: &Path,
-    target: &str,
-) -> Result<PathBuf, OpyProviderError> {
-    let binary = provider_binary(target);
-    let decoder = GzDecoder::new(archive);
-    let mut archive = tar::Archive::new(decoder);
-    let entries = archive.entries().map_err(|error| {
-        OpyProviderError::install(format!("cannot read OPY provider archive: {error}"))
-    })?;
-    let mut found = false;
-    for entry in entries {
-        let mut entry = entry.map_err(|error| {
-            OpyProviderError::install(format!("cannot read OPY provider archive entry: {error}"))
-        })?;
-        let path = entry.path().map_err(|error| {
-            OpyProviderError::install(format!("cannot inspect OPY provider archive path: {error}"))
-        })?;
-        if path != Path::new(binary) {
-            return Err(OpyProviderError::install(
-                "OPY provider archive contains an unexpected path",
-            ));
-        }
-        if !entry.header().entry_type().is_file() {
-            return Err(OpyProviderError::install(
-                "OPY provider archive executable is not a regular file",
-            ));
-        }
-        let output = dest.join(binary);
-        let mut file = std::fs::File::create(&output).map_err(|error| {
-            OpyProviderError::install(format!(
-                "cannot create staged OPY provider '{}': {error}",
-                output.display()
-            ))
-        })?;
-        std::io::copy(&mut entry, &mut file).map_err(|error| {
-            OpyProviderError::install(format!(
-                "cannot unpack staged OPY provider '{}': {error}",
-                output.display()
-            ))
-        })?;
-        file.sync_all().map_err(|error| {
-            OpyProviderError::install(format!(
-                "cannot persist staged OPY provider '{}': {error}",
-                output.display()
-            ))
-        })?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = entry.header().mode().unwrap_or(0o755) | 0o111;
-            std::fs::set_permissions(&output, std::fs::Permissions::from_mode(mode)).map_err(
-                |error| {
-                    OpyProviderError::install(format!(
-                        "cannot make staged OPY provider executable '{}': {error}",
-                        output.display()
-                    ))
-                },
-            )?;
-        }
-        found = true;
-    }
-    let candidate = dest.join(binary);
-    if !found || !is_executable(&candidate) {
-        return Err(OpyProviderError::install(
-            "OPY provider archive does not contain an executable provider",
-        ));
-    }
-    Ok(candidate)
 }
 
 fn provider_binary(target: &str) -> &'static str {
@@ -695,6 +571,7 @@ impl From<OpyProviderError> for wright_lpp::ProviderError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
     use std::net::{TcpListener, TcpStream};
     use std::sync::{
         Arc, Barrier,

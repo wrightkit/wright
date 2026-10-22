@@ -37,6 +37,7 @@ pub(super) fn cfg_response(program: &Program, rule: RuleId) -> Response {
             error: ErrorInfo {
                 code: "invalid-id".into(),
                 message: format!("unknown rule {rule}"),
+                ..Default::default()
             },
         };
     };

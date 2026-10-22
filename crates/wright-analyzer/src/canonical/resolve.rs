@@ -105,20 +105,17 @@ impl SemanticIndex {
     /// says so: renaming one of the conflicting rules is the only way to
     /// select it.
     fn ambiguous_rule(&self, address: &str, candidates: &[&Symbol]) -> ErrorInfo {
-        let mut message = format!(
-            "ambiguous rule '{address}': {}",
+        let mut fields = error_fields();
+        fields.insert("name".to_string(), address.into());
+        fields.insert(
+            "candidates".to_string(),
             candidates
                 .iter()
                 .map(|rule| {
                     let id = rule.rule.expect("rule symbol");
-                    format!(
-                        "{} at {}",
-                        self.canonical_rule_address(id),
-                        location(rule.span)
-                    )
+                    candidate(self.canonical_rule_address(id), rule.span)
                 })
-                .collect::<Vec<_>>()
-                .join(", ")
+                .collect(),
         );
         // The address-grammar candidates a string resolves to, without the
         // error branch: `Some(id)` when it selects exactly `id`. Calling
@@ -143,11 +140,12 @@ impl SemanticIndex {
             !resolves_to(&self.canonical_rule_address(id), id)
         });
         if unaddressable {
-            message.push_str("; rename one of the conflicting rules to select it");
+            fields.insert("unaddressable".to_string(), true.into());
         }
         ErrorInfo {
             code: "ambiguous-rule".to_string(),
-            message,
+            message: format!("ambiguous rule '{address}'"),
+            fields,
         }
     }
 
@@ -184,24 +182,27 @@ impl SemanticIndex {
                 declared(),
                 "symbols",
             )),
-            _ => Err(ErrorInfo {
-                code: "ambiguous-symbol".to_string(),
-                message: format!(
-                    "ambiguous symbol '{address}': {}",
+            _ => {
+                let mut fields = error_fields();
+                fields.insert("name".to_string(), address.into());
+                fields.insert(
+                    "candidates".to_string(),
                     matches
                         .iter()
                         .map(|symbol| {
-                            format!(
-                                "{}:{} at {}",
-                                symbol.kind.as_str(),
-                                symbol.name,
-                                location(symbol.span)
+                            candidate(
+                                format!("{}:{}", symbol.kind.as_str(), symbol.name),
+                                symbol.span,
                             )
                         })
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-            }),
+                        .collect(),
+                );
+                Err(ErrorInfo {
+                    code: "ambiguous-symbol".to_string(),
+                    message: format!("ambiguous symbol '{address}'"),
+                    fields,
+                })
+            }
         }
     }
 }
@@ -232,21 +233,29 @@ fn ordinal_form(address: &str) -> Option<(&str, usize)> {
     Some((name, ordinal))
 }
 
-/// A candidate's location as `file:line:col` — `file` is the canonical
-/// file index (the driver has the spellings) — or `<unknown>` without one.
-fn location(span: Option<Span>) -> String {
-    span.map_or_else(
-        || "<unknown>".to_string(),
-        |span| {
-            format!(
-                "{}:{}:{}",
-                span.file.index(),
-                span.start.line,
-                span.start.col
-            )
-        },
-    )
+/// A candidate's structured location (`candidates` entry, #888): the
+/// canonical address a retry passes back plus the file-table index,
+/// line, and column each surface resolves to its own `path:line:col`
+/// spelling — the analyzer knows only file ids, never the spellings.
+fn candidate(address: String, span: Option<Span>) -> serde_json::Value {
+    let mut entry = serde_json::Map::new();
+    entry.insert("address".to_string(), address.into());
+    if let Some(span) = span {
+        entry.insert("file".to_string(), span.file.index().into());
+        entry.insert("line".to_string(), span.start.line.into());
+        entry.insert("column".to_string(), span.start.col.into());
+    }
+    entry.into()
 }
+
+/// The refusal-metadata map [`ErrorInfo::fields`] carries (#888).
+fn error_fields() -> serde_json::Map<String, serde_json::Value> {
+    serde_json::Map::new()
+}
+
+/// How many declared names an unknown-name error lists (#888); beyond the
+/// bound the error reports the total and names the unbounded listing.
+const NAME_LIST_LIMIT: usize = 20;
 
 fn unknown<'a>(
     code: &str,
@@ -255,9 +264,50 @@ fn unknown<'a>(
     declared: impl Iterator<Item = &'a Symbol>,
     operation: &str,
 ) -> ErrorInfo {
-    let candidates = nearest(name, declared.map(|symbol| symbol.name.as_str()));
+    let declared: Vec<&'a Symbol> = declared.collect();
+    let candidates = nearest(name, declared.iter().map(|symbol| symbol.name.as_str()));
+    let mut fields = error_fields();
+    fields.insert("name".to_string(), name.into());
     let hint = if candidates.is_empty() {
-        format!("no declared {noun} is near; the '{operation}' operation lists them")
+        // No near match: name the declared names — each once, in
+        // declaration order, bounded with the total (#888) — as `declared`
+        // fields and in the message, and let each surface append its own
+        // spelling of the `listOp` operation that lists them.
+        let mut seen = std::collections::HashSet::new();
+        let names: Vec<&str> = declared
+            .iter()
+            .filter(|symbol| seen.insert(symbol.name.as_str()))
+            .map(|symbol| symbol.name.as_str())
+            .collect();
+        fields.insert("listOp".to_string(), operation.into());
+        if names.is_empty() {
+            format!("no declared {noun} is near")
+        } else {
+            let over = names.len() > NAME_LIST_LIMIT;
+            if over {
+                fields.insert("listAll".to_string(), true.into());
+            }
+            fields.insert("declaredTotal".to_string(), names.len().into());
+            let listed: Vec<&str> = names.iter().take(NAME_LIST_LIMIT).copied().collect();
+            fields.insert(
+                "declared".to_string(),
+                serde_json::Value::Array(
+                    listed
+                        .iter()
+                        .map(|name| serde_json::Value::String((*name).to_string()))
+                        .collect(),
+                ),
+            );
+            let mut spelled: Vec<String> = listed.iter().map(|name| format!("'{name}'")).collect();
+            if over {
+                spelled.push("…".to_string());
+            }
+            format!(
+                "no declared {noun} is near; declared {noun} names ({} total): {}",
+                names.len(),
+                spelled.join(", "),
+            )
+        }
     } else {
         format!(
             "nearest declared: {}",
@@ -271,6 +321,7 @@ fn unknown<'a>(
     ErrorInfo {
         code: code.to_string(),
         message: format!("unknown {noun} '{name}'; {hint}"),
+        fields,
     }
 }
 
