@@ -32,6 +32,13 @@ Each entry carries its owner `identity`, `kind`, accepted `spelling`, and
 callable's return type in the same vocabulary as parameter `type`s (a
 Workshop `value` such as `distance` declares one; actions carry none),
 and `variadic: true` when the last parameter repeats for extra arguments.
+Each `parameters[]` member and each scoped `parameter` entry carries
+`name`, `type`, `required`, an optional `default`, an optional `enum`
+`{domain, members}` fact, an optional `displayName` (the editor's
+localized label), and an optional `content` fact describing the
+`rule-content-v1` argument the parameter supplies: `fold {call, arg}` for
+a surface parameter folded into a variable-target call, `operations` for
+the modify-operation call ids the position accepts.
 Callables also carry `signature`, a human-readable call shape Wright
 renders from the owner's parameter facts: required parameters name their
 type, optional parameters show `name?` or `name=default`, and an enum

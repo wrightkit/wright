@@ -33,10 +33,12 @@
   import StatementEditor from './lib/StatementEditor.svelte'
   import {
     buildRequest,
+    clean,
     effectiveDisabled,
     isStale,
     setDisabled,
     stageDeletes,
+    stageStatement,
     type BatchAction,
     type PendingChange,
     type StatementList,
@@ -63,6 +65,7 @@
     ToolErrorInfo,
     ToolResponse,
   } from './lib/types/generated/wright-agent-v1'
+  import type { Node } from './lib/types/generated/rule-content-v1'
 
   interface RuleEntry {
     summary: RuleSummary
@@ -472,16 +475,21 @@
     },
   })
 
-  function editorSave(disabled: boolean) {
+  function editorSave(disabled: boolean, args?: Node[]) {
     if (!editNode || !editEntry || !editTarget) return
-    setDisabled(
+    const statement = clean(editNode.node)
+    if (args !== undefined && editTarget.list === 'actions') {
+      ;(statement as { args?: Node[] }).args = args
+    }
+    if (disabled) statement.disabled = true
+    stageStatement(
       pending,
       editEntry.summary.id,
       editEntry.summary.name,
       editTarget.list,
       editTarget.index,
       editNode.node,
-      disabled,
+      statement,
     )
   }
 
@@ -686,6 +694,7 @@
     {names}
     disabled={editDisabled}
     {t}
+    locale={sessionLocale}
     onsave={editorSave}
     onclose={() => (editTarget = null)}
   />

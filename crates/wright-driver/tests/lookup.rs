@@ -755,3 +755,45 @@ fn opy_lookup_reports_unavailable_when_the_provider_lacks_the_capability() {
 
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn workshop_lookup_reports_parameter_content_facts() {
+    let mut owned = session(workshop_path());
+    let mut service = ToolService::new(&mut owned).unwrap();
+    let mut lookup = |query: &str| {
+        entries_of(service.handle(&ToolRequest::Lookup {
+            language: "workshop".to_string(),
+            query: Some(query.to_string()),
+            kind: None,
+            within: None,
+            locale: None,
+            limit: Some(10),
+        }))
+    };
+
+    let chase = lookup("chaseOverTime")
+        .into_iter()
+        .find(|entry| entry["identity"] == "chaseOverTime")
+        .expect("the chase action");
+    let params = chase["callable"]["parameters"]
+        .as_array()
+        .expect("parameters");
+    assert_eq!(
+        params[0]["content"]["fold"],
+        serde_json::json!({ "call": "globalVariable", "arg": 0 }),
+        "the variable target folds surface parameters into the call: {params:?}"
+    );
+
+    let modify = lookup("modifyGlobalVariable")
+        .into_iter()
+        .find(|entry| entry["identity"] == "modifyGlobalVariable")
+        .expect("the modify action");
+    let params = modify["callable"]["parameters"]
+        .as_array()
+        .expect("parameters");
+    let operations = params[1]["content"]["operations"]
+        .as_array()
+        .expect("declared modify operations");
+    assert!(operations.contains(&serde_json::json!("add")));
+    assert!(operations.contains(&serde_json::json!("removeFromArrayByIndex")));
+}

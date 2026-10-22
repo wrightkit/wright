@@ -42,7 +42,7 @@ export function keyFor(rule: number, list: string, index: number): string {
 }
 
 /** `span`/`spans` are output-only read keys; the `disabled` modifier is set deliberately. */
-function clean(node: StatementNode): RuleContentStatement {
+export function clean(node: StatementNode): RuleContentStatement {
   const { span: _span, spans: _spans, disabled: _disabled, ...rest } = node as unknown as Record<
     string,
     unknown
@@ -88,6 +88,31 @@ export function setDisabled(
   }
   const statement = clean(node)
   if (target) statement.disabled = true
+  pending.set(key, { rule, ruleName, list, index, tag: 'change', statement })
+}
+
+/**
+ * Stage an arbitrary replacement statement — the argument forms' edit.
+ * A row marked for deletion takes no further staging; a statement equal
+ * to the original unstages instead of producing a no-op `replace`.
+ */
+export function stageStatement(
+  pending: Map<string, PendingChange>,
+  rule: number,
+  ruleName: string,
+  list: StatementList,
+  index: number,
+  node: StatementNode,
+  statement: RuleContentStatement,
+): void {
+  const key = keyFor(rule, list, index)
+  if (pending.get(key)?.tag === 'delete') return
+  const original = clean(node)
+  if (node.disabled === true) original.disabled = true
+  if (JSON.stringify(original) === JSON.stringify(statement)) {
+    pending.delete(key)
+    return
+  }
   pending.set(key, { rule, ruleName, list, index, tag: 'change', statement })
 }
 
