@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.30.0](https://github.com/wrightkit/wright/compare/v0.29.0...v0.30.0) (2026-10-22)
+
+
+### Features
+
+* **analyzer:** select rules and symbols by ADR-0035 address grammar ([#903](https://github.com/wrightkit/wright/issues/903)) ([f6229b0](https://github.com/wrightkit/wright/commit/f6229b04f1677b07569aed4cd74cfbfdb4d7f47c)), closes [#895](https://github.com/wrightkit/wright/issues/895)
+* **cli:** give each selector spelling one meaning per ADR-0035 ([#902](https://github.com/wrightkit/wright/issues/902)) ([24f60f2](https://github.com/wrightkit/wright/commit/24f60f2cdb284fcfb9df9fa37cc5b3ca670106a5)), closes [#889](https://github.com/wrightkit/wright/issues/889)
+* **driver:** add editStatements operation with rule-content nodes ([f4d5171](https://github.com/wrightkit/wright/commit/f4d5171593513a779b2a840647e166ab0a4b0734)), closes [#855](https://github.com/wrightkit/wright/issues/855)
+* **driver:** add simulate operation backed by athena ([#893](https://github.com/wrightkit/wright/issues/893)) ([baca6fc](https://github.com/wrightkit/wright/commit/baca6fccb9f0b37a8b52e354ef6bcd3905816a10)), closes [#833](https://github.com/wrightkit/wright/issues/833)
+* **driver:** assert the diagnostic-code grammar at code constructors ([#906](https://github.com/wrightkit/wright/issues/906)) ([a57bdaf](https://github.com/wrightkit/wright/commit/a57bdafc1aa6f791b301b05ff215c0eec6c91613)), closes [#871](https://github.com/wrightkit/wright/issues/871)
+* **service:** name the working command in selector and usage errors ([b898dc3](https://github.com/wrightkit/wright/commit/b898dc3d41884c48ce5da7585896c7ec64bdaf58)), closes [#888](https://github.com/wrightkit/wright/issues/888)
+* **ui:** add session locale and locale selector ([#901](https://github.com/wrightkit/wright/issues/901)) ([021736a](https://github.com/wrightkit/wright/commit/021736a8e4c139f971a581490da61e14f79f4089)), closes [#883](https://github.com/wrightkit/wright/issues/883)
+* **ui:** add the editing layer's statement edits ([#894](https://github.com/wrightkit/wright/issues/894)) ([ebc16b4](https://github.com/wrightkit/wright/commit/ebc16b4daa28c9ae7862c6b335de89199fa9ef89)), closes [#834](https://github.com/wrightkit/wright/issues/834)
+* **ui:** diagnostics and variables dialogs ([#900](https://github.com/wrightkit/wright/issues/900)) ([b511844](https://github.com/wrightkit/wright/commit/b511844c79279b05f27c23938bb1be26e6f5c05a)), closes [#882](https://github.com/wrightkit/wright/issues/882)
+* **ui:** give wright ui the in-game page shell ([#896](https://github.com/wrightkit/wright/issues/896)) ([d1fb619](https://github.com/wrightkit/wright/commit/d1fb61929311f9fffc45f327c13f94df29710da8)), closes [#879](https://github.com/wrightkit/wright/issues/879)
+* **ui:** open rule body per design spec ([#898](https://github.com/wrightkit/wright/issues/898)) ([1c2dd16](https://github.com/wrightkit/wright/commit/1c2dd165c4d430e41907c8fceeeb1b9612c4fc00)), closes [#881](https://github.com/wrightkit/wright/issues/881)
+* **ui:** rules as expanding bars ([#897](https://github.com/wrightkit/wright/issues/897)) ([a83c92a](https://github.com/wrightkit/wright/commit/a83c92a4aee5fa54bf8f244d3430a50dd07b8ca7)), closes [#880](https://github.com/wrightkit/wright/issues/880)
+
+
+### Bug Fixes
+
+* **bench:** replace the absolute token ceiling with the drift band ([#885](https://github.com/wrightkit/wright/issues/885)) ([a616c01](https://github.com/wrightkit/wright/commit/a616c01ab22fc3651da28b3085839e4d58983fd8))
+
+
+### Code Refactoring
+
+* remove unsafe code and deny it workspace-wide ([#907](https://github.com/wrightkit/wright/issues/907)) ([77659e8](https://github.com/wrightkit/wright/commit/77659e8a7cfb36a9abd1aa5a77cebd23b34b8bd7)), closes [#887](https://github.com/wrightkit/wright/issues/887)
+
 ## [0.29.0](https://github.com/wrightkit/wright/compare/v0.28.0...v0.29.0) (2026-10-20)
 
 
