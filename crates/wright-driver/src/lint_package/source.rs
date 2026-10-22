@@ -3,6 +3,7 @@
 //! addressing a ref such as `/tree/<branch>` or `/releases/tag/<tag>`).
 
 use std::fmt;
+use wright_analyzer::service::marker;
 
 use super::LintPackageError;
 
@@ -18,12 +19,14 @@ impl LintPackageSource {
     pub fn new(owner: &str, repo: &str) -> Result<Self, LintPackageError> {
         if !valid_owner(owner) {
             return Err(LintPackageError::source(format!(
-                "invalid GitHub repository owner '{owner}'"
+                "invalid GitHub repository owner '{}'",
+                marker::escape(owner)
             )));
         }
         if !valid_repo(repo) {
             return Err(LintPackageError::source(format!(
-                "invalid GitHub repository name '{repo}'"
+                "invalid GitHub repository name '{}'",
+                marker::escape(repo)
             )));
         }
         Ok(Self {
@@ -56,7 +59,8 @@ impl LintPackageSource {
             let url = url::Url::parse(&text).map_err(|_| Self::invalid_input(input))?;
             if !matches!(url.host_str(), Some("github.com" | "www.github.com")) {
                 return Err(LintPackageError::source(format!(
-                    "lint rule packages are fetched from github.com repositories, not '{input}'"
+                    "lint rule packages are fetched from github.com repositories, not '{}'",
+                    marker::escape(input)
                 )));
             }
             return Self::parse_path(url.path().trim_start_matches('/'), input);
@@ -66,7 +70,8 @@ impl LintPackageSource {
 
     fn invalid_input(input: &str) -> LintPackageError {
         LintPackageError::source(format!(
-            "invalid lint package source '{input}': expected 'owner/repo' or a github.com repository URL"
+            "invalid lint package source '{}': expected 'owner/repo' or a github.com repository URL",
+            marker::escape(input)
         ))
     }
 

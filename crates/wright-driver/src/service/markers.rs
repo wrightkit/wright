@@ -78,39 +78,54 @@ impl<'a> ToolService<'a> {
     }
 
     /// Render a refusal's neutral markers for the agent surface (#888):
-    /// `{file:N}` against the served file table and the name-listing
-    /// marker as the operation name (`the 'rules' operation`).
+    /// `{file:N}` against the served file table, the name-listing
+    /// marker as the operation name (`the 'rules' operation`), and the
+    /// final `unescape` once both expansions ran.
     fn render_error_markers(&self, message: String) -> String {
         let message = match self.snapshot.as_ref().map(|snapshot| &snapshot.loaded) {
             Some(loaded) => render_file_markers(&message, loaded),
             None => message,
         };
-        render_list_markers(&message, |operation, _unbounded| {
+        let message = render_list_markers(&message, |operation, _unbounded| {
             format!("the '{operation}' operation")
-        })
+        });
+        wright_analyzer::service::marker::unescape(&message)
     }
 }
 
 /// Expand the `{marker:…}` tokens name-resolution messages carry
 /// (ADR-0035, #888): `render` answers each token's replacement, `None`
-/// keeps the text as written. One driver result carries the marker; each
-/// surface supplies the rendering.
+/// keeps the `{` as literal text. `{{` is escaped user content: both
+/// braces copy through verbatim — the surface's final `unescape` renders
+/// the literal `{` only after every expansion pass, so an escaped
+/// `{list:…}` can never re-expand on a later pass.
 fn expand_markers(message: &str, mut render: impl FnMut(&str) -> Option<String>) -> String {
     let mut out = String::with_capacity(message.len());
     let mut rest = message;
     while let Some(open) = rest.find('{') {
-        let Some(inner) = rest[open + 1..].find('}') else {
+        out.push_str(&rest[..open]);
+        rest = &rest[open..];
+        if rest.as_bytes().get(1) == Some(&b'{') {
+            out.push_str("{{");
+            rest = &rest[2..];
+            continue;
+        }
+        let Some(inner) = rest[1..].find('}') else {
             break;
         };
-        let close = open + 1 + inner;
-        match render(&rest[open + 1..close]) {
+        let close = 1 + inner;
+        match render(&rest[1..close]) {
             Some(rendered) => {
-                out.push_str(&rest[..open]);
                 out.push_str(&rendered);
+                rest = &rest[close + 1..];
             }
-            None => out.push_str(&rest[..=close]),
+            // Not a marker — emit the `{` and keep scanning: a stray
+            // brace must not swallow a real marker behind it.
+            None => {
+                out.push('{');
+                rest = &rest[1..];
+            }
         }
-        rest = &rest[close + 1..];
     }
     out.push_str(rest);
     out
@@ -143,4 +158,59 @@ pub fn render_list_markers(message: &str, mut render: impl FnMut(&str, bool) -> 
                     .map(|operation| render(operation, false))
             })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::expand_markers;
+    use wright_analyzer::service::marker::{escape, unescape};
+
+    /// A stub `file:N` renderer — expansion shape only, no session.
+    fn file(token: &str) -> Option<String> {
+        token
+            .strip_prefix("file:")
+            .map(|index| format!("path{index}.ws"))
+    }
+
+    // The scanner consumes `{{` as an escaped literal before marker
+    // parsing (#888): only a single-braced trusted token expands.
+    #[test]
+    fn escaped_and_unknown_braces_stay_literal() {
+        for (message, rendered) in [
+            ("{{file:0}}", "{{file:0}}"),
+            ("{file:0}", "path0.ws"),
+            ("{{x}}", "{{x}}"),
+            ("{{", "{{"),
+            ("{", "{"),
+            ("{file:", "{file:"),
+            ("{unknown:x}", "{unknown:x}"),
+            ("a{file:0}b{file:1}c", "apath0.wsbpath1.wsc"),
+            ("{file:0}{{file:1}}", "path0.ws{{file:1}}"),
+        ] {
+            assert_eq!(expand_markers(message, file), rendered, "{message}");
+        }
+    }
+
+    // Composition-time escaping (#888): user text spelled like a marker
+    // passes every expansion pass untouched and the final `unescape`
+    // returns it verbatim.
+    #[test]
+    fn escaped_content_round_trips_through_expansion() {
+        for text in [
+            "{file:0}",
+            "{list:rules}",
+            "a{list:rules}b",
+            "{{",
+            "{",
+            "{file:",
+            "{unknown:x}",
+            "plain",
+        ] {
+            assert_eq!(
+                unescape(&expand_markers(&escape(text), file)),
+                *text,
+                "{text}"
+            );
+        }
+    }
 }

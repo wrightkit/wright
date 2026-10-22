@@ -1,6 +1,7 @@
 //! The `callGraph` operation: caller rules → callee subroutines.
 
 use serde_json::json;
+use wright_analyzer::service::marker;
 
 use super::{ToolResponse, ToolService, invalid_selection};
 
@@ -30,7 +31,10 @@ impl<'a> ToolService<'a> {
                 .iter()
                 .any(|subroutine| subroutine.name == callee)
         {
-            return invalid_selection(format!("unknown callee subroutine '{callee}'"));
+            return invalid_selection(format!(
+                "unknown callee subroutine '{}'",
+                marker::escape(callee)
+            ));
         }
         let edges = program
             .rules

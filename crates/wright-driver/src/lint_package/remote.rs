@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::sync::Mutex;
 use std::time::Duration;
+use wright_analyzer::service::marker;
 
 use super::{LintPackageError, LintPackageSource};
 
@@ -117,7 +118,8 @@ pub(super) fn package_client() -> Result<reqwest::blocking::Client, LintPackageE
         .build()
         .map_err(|e| {
             LintPackageError::offline(format!(
-                "cannot initialize HTTPS client for lint package fetch: {e}"
+                "cannot initialize HTTPS client for lint package fetch: {}",
+                marker::escape(&e.to_string())
             ))
         })
 }
@@ -148,7 +150,11 @@ pub(super) fn api_get(
         request = request.header(reqwest::header::IF_NONE_MATCH, &cached.etag);
     }
     let response = request.send().map_err(|error| {
-        LintPackageError::offline(format!("cannot reach GitHub API {url}: {error}"))
+        LintPackageError::offline(format!(
+            "cannot reach GitHub API {}: {}",
+            marker::escape(url),
+            marker::escape(&error.to_string())
+        ))
     })?;
     let status = response.status();
     let headers = response.headers().clone();
@@ -156,7 +162,8 @@ pub(super) fn api_get(
     if status == reqwest::StatusCode::NOT_MODIFIED {
         return cached.map(|entry| entry.body).ok_or_else(|| {
             LintPackageError::remote(format!(
-                "GitHub answered 304 Not Modified for {url} without a stored response"
+                "GitHub answered 304 Not Modified for {} without a stored response",
+                marker::escape(url)
             ))
         });
     }
@@ -195,7 +202,11 @@ pub(super) fn fetch_archive(
     token_in_use: bool,
 ) -> Result<Vec<u8>, LintPackageError> {
     let response = client.get(url).send().map_err(|error| {
-        LintPackageError::offline(format!("cannot reach lint package archive {url}: {error}"))
+        LintPackageError::offline(format!(
+            "cannot reach lint package archive {}: {}",
+            marker::escape(url),
+            marker::escape(&error.to_string())
+        ))
     })?;
     let status = response.status();
     let headers = response.headers().clone();
@@ -219,7 +230,8 @@ pub(super) fn resolved_sha(
 ) -> Result<String, LintPackageError> {
     let unexpected = || {
         LintPackageError::remote(format!(
-            "GitHub returned an unexpected commits response for '{source}'"
+            "GitHub returned an unexpected commits response for '{}'",
+            marker::escape(&source.to_string())
         ))
     };
     let value: serde_json::Value = serde_json::from_slice(body).map_err(|_| unexpected())?;
@@ -231,7 +243,8 @@ pub(super) fn resolved_sha(
             Some(commit) => commit.clone(),
             None => {
                 return Err(LintPackageError::not_found(format!(
-                    "GitHub repository '{source}' has no commits"
+                    "GitHub repository '{}' has no commits",
+                    marker::escape(&source.to_string())
                 )));
             }
         }
@@ -259,11 +272,16 @@ fn read_body(
         .take(MAX_DOWNLOAD_BYTES + 1)
         .read_to_end(&mut body)
         .map_err(|error| {
-            LintPackageError::remote(format!("cannot read the response from {url}: {error}"))
+            LintPackageError::remote(format!(
+                "cannot read the response from {}: {}",
+                marker::escape(url),
+                marker::escape(&error.to_string())
+            ))
         })?;
     if body.len() as u64 > MAX_DOWNLOAD_BYTES {
         return Err(LintPackageError::remote(format!(
-            "response from {url} exceeds the 128 MiB limit"
+            "response from {} exceeds the 128 MiB limit",
+            marker::escape(url)
         )));
     }
     Ok(body)
@@ -306,16 +324,19 @@ fn rate_limit_error(headers: &reqwest::header::HeaderMap, token: bool) -> LintPa
 fn classify_api_status(status: reqwest::StatusCode, url: &str) -> LintPackageError {
     match status {
         reqwest::StatusCode::UNAUTHORIZED => LintPackageError::remote(format!(
-            "GitHub refused the request to {url} (HTTP 401); check that {TOKEN_ENV} is valid"
+            "GitHub refused the request to {} (HTTP 401); check that {TOKEN_ENV} is valid",
+            marker::escape(url)
         )),
         reqwest::StatusCode::NOT_FOUND
         | reqwest::StatusCode::GONE
         | reqwest::StatusCode::UNPROCESSABLE_ENTITY => LintPackageError::not_found(format!(
-            "GitHub repository or ref not found at {url} (HTTP {status}); the repository may be \
-             private — set {TOKEN_ENV} to read private repositories"
+            "GitHub repository or ref not found at {} (HTTP {status}); the repository may be \
+             private — set {TOKEN_ENV} to read private repositories",
+            marker::escape(url)
         )),
         _ => LintPackageError::remote(format!(
-            "GitHub API request to {url} failed with HTTP {status}"
+            "GitHub API request to {} failed with HTTP {status}",
+            marker::escape(url)
         )),
     }
 }
@@ -329,13 +350,15 @@ fn classify_fetch_status(
     match status {
         reqwest::StatusCode::NOT_FOUND | reqwest::StatusCode::GONE => {
             LintPackageError::not_found(format!(
-                "lint package '{source}' has no archive at commit {sha} (HTTP {status}); the \
+                "lint package '{}' has no archive at commit {sha} (HTTP {status}); the \
                  repository or SHA may not exist, or the repository is private — set {TOKEN_ENV} \
-                 to read private repositories"
+                 to read private repositories",
+                marker::escape(&source.to_string())
             ))
         }
         _ => LintPackageError::remote(format!(
-            "lint package archive request to {url} failed with HTTP {status}"
+            "lint package archive request to {} failed with HTTP {status}",
+            marker::escape(url)
         )),
     }
 }

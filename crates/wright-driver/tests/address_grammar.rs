@@ -355,3 +355,93 @@ rule ("tick") {
 
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
+// Neutral markers are emitted only by the analyzer (#888): a `{` inside
+// user content is escaped at composition, so a rule name or file
+// selector literally spelling `{file:N}`/`{list:OP}` stays literal
+// through the same rendering — including the `NAME#N` address that
+// prints and feeds back to select the rule (ADR-0035).
+#[test]
+fn marker_spellings_inside_user_content_stay_literal() {
+    let path = temp_workshop(
+        "brace.ws",
+        r#"rule ("a{list:rules}b") {
+    event {
+        Ongoing - Global;
+    }
+}
+rule ("a{list:rules}b") {
+    event {
+        Ongoing - Global;
+    }
+}
+"#,
+    );
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(path.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+
+    // The ambiguous refusal prints both canonical addresses verbatim —
+    // `{list:rules}` inside the name is text, not a listing marker.
+    let ToolResponse::Error { error } = service.handle(&ToolRequest::Cfg {
+        snapshot: None,
+        rule: "a{list:rules}b".into(),
+        kind: None,
+        max: None,
+        all: true,
+    }) else {
+        panic!("the duplicated name must refuse")
+    };
+    assert_eq!(error.code, "ambiguous-rule");
+    for candidate in ["a{list:rules}b#1", "a{list:rules}b#2"] {
+        assert!(
+            error.message.contains(candidate),
+            "the name prints verbatim with its ordinal: {error:?}"
+        );
+    }
+    assert!(
+        !error.message.contains("the 'rules' operation"),
+        "the marker spelling inside the name did not render: {error:?}"
+    );
+
+    // Print-and-pass-back: the printed address selects the rule.
+    result_of(
+        &mut service,
+        &ToolRequest::Cfg {
+            snapshot: None,
+            rule: "a{list:rules}b#1".into(),
+            kind: None,
+            max: None,
+            all: true,
+        },
+    );
+
+    // A `file` selector literally spelling a marker stays literal in
+    // the refusal — `{file:0}` never substitutes a path and
+    // `{list:rules}` never renders the operation.
+    for argument in ["{file:0}", "{list:rules}"] {
+        let ToolResponse::Error { error } = service.handle(&ToolRequest::Symbols {
+            kind: None,
+            file: Some(argument.into()),
+            max: None,
+            all: true,
+        }) else {
+            panic!("an unmatched file selector must refuse")
+        };
+        assert_eq!(error.code, "invalid-selection");
+        assert!(
+            error.message.contains(&format!("'{argument}'")),
+            "the selector argument prints verbatim: {error:?}"
+        );
+        assert!(
+            !error.message.contains("the 'rules' operation"),
+            "the marker spelling inside the selector did not render: {error:?}"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}

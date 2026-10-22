@@ -3,6 +3,7 @@
 //! live in [`crate::statement_edit`].
 
 use wright_analyzer::canonical::SemanticIndex;
+use wright_analyzer::service::marker;
 
 use super::{Address, StatementEditRequest, ToolErrorInfo, ToolResponse, ToolService};
 use crate::CompilerSession;
@@ -76,7 +77,7 @@ impl<'a> ToolService<'a> {
                         Stage::Discovery,
                         format!(
                             "the request's 'sources' carries no text for the loaded input '{}'",
-                            loaded.input.display
+                            marker::escape(&loaded.input.display)
                         ),
                     )]);
                 };

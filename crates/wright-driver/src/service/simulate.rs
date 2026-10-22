@@ -10,6 +10,7 @@
 //! and the refusal channel for a request that cannot be served at all.
 
 use std::collections::BTreeMap;
+use wright_analyzer::service::marker;
 
 use super::{ToolErrorInfo, ToolResponse, ToolService};
 use crate::CompilerSession;
@@ -90,7 +91,7 @@ impl<'a> ToolService<'a> {
                         "edit-unknown-source",
                         format!(
                             "the request's 'sources' carries no text for the loaded input '{}'",
-                            loaded.input.display
+                            marker::escape(&loaded.input.display)
                         ),
                     ));
                 };

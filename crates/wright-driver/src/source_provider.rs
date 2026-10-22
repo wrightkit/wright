@@ -1,10 +1,12 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
+use wright_analyzer::service::marker;
 
 use workshop_rs::program::{MAPPED_TEXT_V1, TEXT_V1};
+mod columns;
 use workshop_rs::{MappedText, SourceMap};
 
-use crate::diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage};
+use crate::diag::{Diagnostic, Origin, Severity, SourceSpan, Stage};
 use crate::input::InputTarget;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,6 +134,11 @@ pub enum SourceProviderError {
 /// parsing `message`.
 const PROVIDER_REFUSAL_CODE_PREFIX: &str = "provider-refusal-";
 
+/// Escape caller-supplied text before it enters a marker-carrying diagnostic (#888).
+fn esc(text: impl std::fmt::Display) -> String {
+    marker::escape(&text.to_string())
+}
+
 fn wright_refusal_code(code: &str) -> bool {
     code == "session-config-changed"
 }
@@ -214,7 +221,7 @@ impl LppSourceProvider {
                 code: "provider-invalid-entry".to_string(),
                 message: format!(
                     "cannot convert OPY entry '{}' to an absolute file URI",
-                    target.entry_path().display()
+                    esc(target.entry_path().display().to_string())
                 ),
             })?
             .to_string();
@@ -303,7 +310,8 @@ impl SourceProvider for LppSourceProvider {
                     SourceProviderError::Failed {
                         code: "provider-artifact-format".to_string(),
                         message: format!(
-                            "the source provider returned an invalid '{MAPPED_TEXT_V1}' artifact: {error}"
+                            "the source provider returned an invalid '{MAPPED_TEXT_V1}' artifact: {}",
+                            esc(error)
                         ),
                     }
                 })?;
@@ -314,7 +322,7 @@ impl SourceProvider for LppSourceProvider {
                     code: "provider-artifact-format".to_string(),
                     message: format!(
                         "the source provider returned unsupported artifact format '{}', expected '{TEXT_V1}'",
-                        a.format
+                        esc(&a.format)
                     ),
                 });
             }
@@ -333,7 +341,7 @@ impl SourceProvider for LppSourceProvider {
 fn request_context(operation: &str, target: &SourceTarget) -> String {
     format!(
         "the source provider {operation} request for '{}' failed",
-        target.entry_path().display()
+        esc(target.entry_path().display().to_string())
     )
 }
 
@@ -364,7 +372,7 @@ pub(crate) fn provider_error(
 ) -> SourceProviderError {
     SourceProviderError::Failed {
         code: provider_failure_code(&error),
-        message: format!("{context}: {error}"),
+        message: format!("{context}: {}", esc(error)),
     }
 }
 
@@ -404,13 +412,13 @@ fn provider_diagnostics(
                     code: d.code.unwrap_or_else(|| "provider-diagnostic".to_string()),
                     stage: Stage::Frontend,
                     severity,
-                    message: d.message,
+                    message: esc(&d.message),
                     status: None,
                     span: Some(SourceSpan {
                         file,
                         path: path.clone(),
-                        start: provider_position(d.range.start, &lines),
-                        end: provider_position(d.range.end, &lines),
+                        start: columns::provider_position(d.range.start, &lines),
+                        end: columns::provider_position(d.range.end, &lines),
                     }),
                     source: Some(Origin {
                         kind: SourceLanguage::Opy.as_str().to_string(),
@@ -458,8 +466,9 @@ pub(crate) fn provider_document_set(
             wright_analyzer::service::ErrorInfo {
                 code: "provider-document-unreadable".to_string(),
                 message: format!(
-                    "cannot read loaded project member '{}' for the provider document set: {error}",
-                    path.display()
+                    "cannot read loaded project member '{}' for the provider document set: {}",
+                    esc(path.display()),
+                    esc(error)
                 ),
             }
         })?;
@@ -506,8 +515,9 @@ pub(crate) fn provider_member(
             .map_err(|()| wright_analyzer::service::ErrorInfo {
                 code: "provider-document-uri".to_string(),
                 message: format!(
-                    "loaded project member '{member}' is not a disk file and cannot serve the \
-                     provider document set"
+                    "loaded project member '{}' is not a disk file and cannot serve the \
+                     provider document set",
+                    esc(member)
                 ),
             })?;
         return Ok((url.to_string(), path));
@@ -525,7 +535,8 @@ pub(crate) fn provider_member(
         .map_err(|()| wright_analyzer::service::ErrorInfo {
             code: "provider-document-uri".to_string(),
             message: format!(
-                "loaded project member '{member}' cannot be expressed as a file:// URI"
+                "loaded project member '{}' cannot be expressed as a file:// URI",
+                esc(member)
             ),
         })
 }
@@ -561,17 +572,6 @@ fn windows_drive_member(member: &str) -> Option<(String, std::path::PathBuf)> {
     let encoded = percent_encoding::utf8_percent_encode(&normalized, PATH_ENCODE);
     let url = url::Url::parse(&format!("file:///{encoded}")).ok()?;
     Some((url.to_string(), path))
-}
-
-fn provider_position(pos: wright_lpp::Position, lines: &[String]) -> Position {
-    let col = lines
-        .get(pos.line as usize)
-        .and_then(|line| crate::provider_edit::utf16_to_char_column(line, pos.character))
-        .unwrap_or_else(|| pos.character.saturating_add(1));
-    Position {
-        line: pos.line.saturating_add(1),
-        col,
-    }
 }
 
 #[cfg(test)]

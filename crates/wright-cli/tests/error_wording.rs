@@ -425,3 +425,98 @@ fn inapplicable_combination_names_the_applicable_form() {
 
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
+
+// A `{` in caller input is escaped before interpolation (#888): the
+// neutral markers are emitted only by the analyzer, so a `--file` value
+// or rule name literally spelling `{file:N}`/`{list:OP}` stays text —
+// never a substitution, never a rendered command.
+#[test]
+fn marker_spelling_file_argument_stays_literal() {
+    let path = temp_file("main.ws", DUP_RULES);
+    for argument in ["{file:0}", "{list:rules}"] {
+        let output = run(&[
+            "inspect",
+            "symbols",
+            path.to_str().unwrap(),
+            "--file",
+            argument,
+            "-f",
+            "json",
+        ]);
+        assert_eq!(output.status.code(), Some(1), "{}", command_result(&output));
+        let envelope = parse_json(&output.stdout);
+        assert_eq!(envelope["diagnostics"][0]["code"], "invalid-selection");
+        let message = envelope["diagnostics"][0]["message"].as_str().unwrap();
+        assert!(
+            message.contains(&format!("'{argument}'")),
+            "the literal argument text: {message}"
+        );
+        assert!(
+            !message.contains("wright inspect rules"),
+            "the marker spelling did not render a command: {message}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+// The print-and-pass-back contract (ADR-0035, #888): a rule literally
+// named `a{list:rules}b` prints its `NAME#N` addresses verbatim — the
+// `{list:rules}` inside the name never renders — and feeding a printed
+// address back selects that rule.
+#[test]
+fn brace_named_rule_round_trips_through_its_address() {
+    let path = temp_file(
+        "brace.ws",
+        r#"rule ("a{list:rules}b") {
+    event {
+        Ongoing - Global;
+    }
+}
+rule ("a{list:rules}b") {
+    event {
+        Ongoing - Global;
+    }
+}
+"#,
+    );
+    let output = run(&[
+        "inspect",
+        "cost",
+        path.to_str().unwrap(),
+        "--rule",
+        "a{list:rules}b",
+        "-f",
+        "json",
+    ]);
+    assert_eq!(output.status.code(), Some(1), "{}", command_result(&output));
+    let message = parse_json(&output.stdout)["diagnostics"][0]["message"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    for candidate in ["a{list:rules}b#1", "a{list:rules}b#2"] {
+        assert!(
+            message.contains(candidate),
+            "the candidate address prints verbatim: {message}"
+        );
+    }
+    assert!(
+        !message.contains("wright inspect rules"),
+        "the marker spelling inside the name did not render: {message}"
+    );
+
+    let output = run(&[
+        "inspect",
+        "cost",
+        path.to_str().unwrap(),
+        "--rule",
+        "a{list:rules}b#1",
+        "-f",
+        "json",
+    ]);
+    assert!(
+        output.status.success(),
+        "the printed address selects the rule: {}",
+        command_result(&output)
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}

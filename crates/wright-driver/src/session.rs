@@ -4,12 +4,15 @@
 //! whose JSON serialization is the machine-readable CLI contract.
 
 mod edit;
+mod protocol;
 mod registry;
 mod semantic;
 
+use protocol::mutual_protocol_version;
 pub(crate) use semantic::*;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use wright_analyzer::service::marker;
 
 use workshop_rs::Program;
 use wright_analyzer::canonical::SemanticService;
@@ -87,6 +90,12 @@ enum ProviderOperation {
 /// (workshop-rs ADR-0010).
 pub const WORKSHOP_CLIENT_ELEMENT_LIMIT: usize = 32768;
 
+/// Escape caller-supplied text before it enters a marker-carrying
+/// diagnostic (#888).
+fn esc(text: impl std::fmt::Display) -> String {
+    marker::escape(&text.to_string())
+}
+
 fn loaded_origin(loaded: &Loaded) -> Origin {
     Origin {
         kind: if loaded.provenance == Provenance::Unmapped {
@@ -141,7 +150,7 @@ impl CompilerSession {
             Diagnostic::error(
                 "catalog-error",
                 Stage::Internal,
-                format!("cannot load the built-in Workshop catalog: {error}"),
+                format!("cannot load the built-in Workshop catalog: {}", esc(error)),
             )
         })?;
         let lint_registry = registry::compose(&config)?;
@@ -646,7 +655,11 @@ impl CompilerSession {
                                     text,
                                 );
                             }
-                            Err(error) => unreadable.push(format!("{member} ({error})")),
+                            Err(error) => unreadable.push(format!(
+                                "{} ({})",
+                                esc(member),
+                                esc(error)
+                            )),
                         }
                     }
                     if !unreadable.is_empty() {
@@ -665,7 +678,8 @@ impl CompilerSession {
                     "source-map-mismatch",
                     Stage::Frontend,
                     format!(
-                        "the provider source map does not match its Workshop artifact ({error}); findings are reported as unmapped"
+                        "the provider source map does not match its Workshop artifact ({}); findings are reported as unmapped",
+                        esc(error)
                     ),
                 )),
             }
@@ -984,7 +998,7 @@ impl CompilerSession {
             envelope.diagnostics.push(Diagnostic::error(
                 "invalid-selection",
                 Stage::Emission,
-                format!("unknown baseline '{name}': no record under .wright/ for this input kind/locale/profile"),
+                format!("unknown baseline '{}': no record under .wright/ for this input kind/locale/profile", esc(&name)),
             ));
             envelope.ok = false;
             envelope.exit = crate::result::exit::SOURCE_ERROR;
@@ -1008,7 +1022,8 @@ impl CompilerSession {
                         "invalid-locale",
                         Stage::Discovery,
                         format!(
-                            "unknown output locale '{name}': declared locales are {}",
+                            "unknown output locale '{}': declared locales are {}",
+                            esc(name),
                             self.catalog
                                 .locales()
                                 .iter()
@@ -1209,7 +1224,8 @@ impl CompilerSession {
                     stage: Stage::Emission,
                     severity: Severity::Info,
                     message: format!(
-                        "the canonical element count is unavailable ({error}); the {WORKSHOP_CLIENT_ELEMENT_LIMIT}-element client import limit was not evaluated"
+                        "the canonical element count is unavailable ({}); the {WORKSHOP_CLIENT_ELEMENT_LIMIT}-element client import limit was not evaluated",
+                        esc(error)
                     ),
                     status: None,
                     span: None,
@@ -1236,7 +1252,8 @@ impl CompilerSession {
         if let Some(top) = report.rules.iter().max_by_key(|rule| rule.count) {
             diagnostic.message.push_str(&format!(
                 "; largest contributor: rule \"{}\" ({} elements)",
-                top.name, top.count
+                esc(&top.name),
+                top.count
             ));
             diagnostic.span = top.span.map(|span| {
                 source_span(
@@ -1332,7 +1349,7 @@ fn apply_profile(
             Diagnostic::error(
                 "transform-error",
                 Stage::Internal,
-                format!("Workshop transformation failed: {error}"),
+                format!("Workshop transformation failed: {}", esc(error)),
             )
         })?;
     }
@@ -1452,7 +1469,11 @@ fn provider_error_diagnostic(error: wright_lpp::ProviderError, operation: &str) 
     Diagnostic::error(
         crate::source_provider::provider_failure_code(&error),
         crate::source_provider::provider_failure_stage(&error),
-        format!("the provider could not {operation} the artifact: {error}"),
+        format!(
+            "the provider could not {} the artifact: {}",
+            esc(operation),
+            esc(error)
+        ),
     )
 }
 
@@ -1475,12 +1496,12 @@ fn map_issue(
     let status = status_for_classification(issue.classification);
     let mut message = format!(
         "Workshop construct '{}' is {} ({})",
-        issue.name,
+        esc(&issue.name),
         status_name(status),
         issue.classification.as_str()
     );
     if let Some(spelling) = &issue.suggestion {
-        message.push_str(&format!(" (did you mean '{spelling}'?)"));
+        message.push_str(&format!(" (did you mean '{}'?)", esc(spelling)));
     }
     Diagnostic {
         code: diagnostic_code(kind_code, &issue.name),
@@ -1546,33 +1567,6 @@ fn issue_span(span: Option<workshop_rs::source::Span>, path: &Path) -> SourceSpa
             col: end_col,
         },
     }
-}
-
-/// The highest LPP version both sides implement, honoring the target's
-/// negotiation floor (LPP §19.2, #638): entry requests cannot drop below
-/// 1.1 project loading, and a directory target cannot drop below the 1.3
-/// `sourceIdentity` contract its canonical load depends on.
-fn mutual_protocol_version(supported: &[String], target: InputTarget) -> Option<&'static str> {
-    let floor = match target {
-        InputTarget::Directory => wright_lpp::LPP_SOURCE_IDENTITY_PROTOCOL_VERSION,
-        _ => wright_lpp::LPP_PROJECT_LOADING_PROTOCOL_VERSION,
-    };
-    let floor = protocol_version_tuple(floor)?;
-    wright_lpp::LPP_SUPPORTED_PROTOCOL_VERSIONS
-        .iter()
-        .copied()
-        .filter_map(|version| protocol_version_tuple(version).map(|tuple| (tuple, version)))
-        .filter(|(tuple, _)| *tuple >= floor)
-        .filter(|(_, version)| supported.iter().any(|s| s == version))
-        .max_by_key(|(tuple, _)| *tuple)
-        .map(|(_, version)| version)
-}
-
-fn protocol_version_tuple(version: &str) -> Option<(u32, u32)> {
-    let mut parts = version.split('.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next()?.parse().ok()?;
-    Some((major, minor))
 }
 
 #[cfg(test)]

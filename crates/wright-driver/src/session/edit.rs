@@ -7,6 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use wright_analyzer::service::marker;
 
 use super::{CompilerSession, Loaded, Provenance};
 use crate::config::InputSpec;
@@ -294,7 +295,10 @@ impl CompilerSession {
                             vec![Diagnostic::error(
                                 "edit-invalid-transaction",
                                 Stage::Discovery,
-                                format!("the finding's fix transaction is malformed: {error}"),
+                                format!(
+                                    "the finding's fix transaction is malformed: {}",
+                                    marker::escape(&error.to_string())
+                                ),
                             )],
                         ),
                         None,

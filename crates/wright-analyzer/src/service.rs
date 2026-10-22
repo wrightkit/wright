@@ -88,6 +88,31 @@ pub mod marker {
         };
         format!("{{{prefix}{operation}}}")
     }
+
+    /// Escape a user-controlled substring before it is interpolated into
+    /// a message markers can appear in (#888): `{` becomes `{{`, which
+    /// every expansion pass copies through untouched and the surface's
+    /// final [`unescape`] collapses back to a literal `{`. Without it a
+    /// value like `{file:0}` or `{list:rules}` would render as a marker.
+    pub fn escape(text: &str) -> String {
+        text.replace('{', "{{")
+    }
+
+    /// The matching final rendering step: each `{{` collapses to a
+    /// literal `{`. It runs once per message, after every expansion
+    /// pass — never inside one, or an escaped `{list:…}` would surface
+    /// unescaped and re-expand on the next pass.
+    pub fn unescape(text: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+        let mut chars = text.chars().peekable();
+        while let Some(character) = chars.next() {
+            if character == '{' && chars.peek() == Some(&'{') {
+                chars.next();
+            }
+            out.push(character);
+        }
+        out
+    }
 }
 
 /// The origin of a compiled program, carried in tool responses.

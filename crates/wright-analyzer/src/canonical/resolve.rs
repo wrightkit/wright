@@ -11,7 +11,7 @@
 //! candidates' own selectable addresses so the caller can retry.
 
 use super::symbols::{RuleId, SemanticIndex, Symbol, SymbolKind};
-use crate::service::ErrorInfo;
+use crate::service::{ErrorInfo, marker};
 use workshop_rs::source::Span;
 
 const CANDIDATE_LIMIT: usize = 3;
@@ -106,14 +106,15 @@ impl SemanticIndex {
     /// select it.
     fn ambiguous_rule(&self, address: &str, candidates: &[&Symbol]) -> ErrorInfo {
         let mut message = format!(
-            "ambiguous rule '{address}': {}",
+            "ambiguous rule '{}': {}",
+            marker::escape(address),
             candidates
                 .iter()
                 .map(|rule| {
                     let id = rule.rule.expect("rule symbol");
                     format!(
                         "{} at {}",
-                        self.canonical_rule_address(id),
+                        marker::escape(&self.canonical_rule_address(id)),
                         location(rule.span)
                     )
                 })
@@ -187,14 +188,15 @@ impl SemanticIndex {
             _ => Err(ErrorInfo {
                 code: "ambiguous-symbol".to_string(),
                 message: format!(
-                    "ambiguous symbol '{address}': {}",
+                    "ambiguous symbol '{}': {}",
+                    marker::escape(address),
                     matches
                         .iter()
                         .map(|symbol| {
                             format!(
                                 "{}:{} at {}",
                                 symbol.kind.as_str(),
-                                symbol.name,
+                                marker::escape(&symbol.name),
                                 location(symbol.span)
                             )
                         })
@@ -241,7 +243,7 @@ fn location(span: Option<Span>) -> String {
         |span| {
             format!(
                 "{}:{}:{}",
-                crate::service::marker::file(span.file.index()),
+                marker::file(span.file.index()),
                 span.start.line,
                 span.start.col
             )
@@ -276,14 +278,14 @@ fn unknown<'a>(
         if names.is_empty() {
             format!(
                 "no declared {noun} is near; {} lists them",
-                crate::service::marker::list(operation, false)
+                marker::list(operation, false)
             )
         } else {
             let over = names.len() > NAME_LIST_LIMIT;
             let mut listed: Vec<String> = names
                 .iter()
                 .take(NAME_LIST_LIMIT)
-                .map(|name| format!("'{name}'"))
+                .map(|name| format!("'{}'", marker::escape(name)))
                 .collect();
             if over {
                 listed.push("…".to_string());
@@ -292,7 +294,7 @@ fn unknown<'a>(
                 "no declared {noun} is near; declared {noun} names ({} total): {}; {} lists them{}",
                 names.len(),
                 listed.join(", "),
-                crate::service::marker::list(operation, over),
+                marker::list(operation, over),
                 if over { " all" } else { "" },
             )
         }
@@ -301,14 +303,14 @@ fn unknown<'a>(
             "nearest declared: {}",
             candidates
                 .iter()
-                .map(|candidate| format!("'{candidate}'"))
+                .map(|candidate| format!("'{}'", marker::escape(candidate)))
                 .collect::<Vec<_>>()
                 .join(", ")
         )
     };
     ErrorInfo {
         code: code.to_string(),
-        message: format!("unknown {noun} '{name}'; {hint}"),
+        message: format!("unknown {noun} '{}'; {hint}", marker::escape(name)),
     }
 }
 

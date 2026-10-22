@@ -77,12 +77,14 @@ fn list_command(operation: &str, unbounded: bool) -> String {
 }
 
 /// Render the listing markers every envelope diagnostic carries — the
-/// CLI's own `wright inspect` command spelling (#888).
+/// CLI's own `wright inspect` command spelling (#888) — then collapse
+/// the `{{` escapes user content carries.
 pub(crate) fn render_inspect_diagnostics<T: serde::Serialize>(
     envelope: &mut wright_driver::Envelope<T>,
 ) {
     for diagnostic in &mut envelope.diagnostics {
-        diagnostic.message =
-            wright_driver::service::render_list_markers(&diagnostic.message, list_command);
+        diagnostic.message = wright_driver::service::unescape(
+            &wright_driver::service::render_list_markers(&diagnostic.message, list_command),
+        );
     }
 }

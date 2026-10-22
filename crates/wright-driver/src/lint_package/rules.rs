@@ -4,6 +4,7 @@
 
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
+use wright_analyzer::service::marker;
 
 use flate2::read::GzDecoder;
 use wright_analyzer::registry::{LintConfig, LintRegistry};
@@ -19,18 +20,25 @@ pub(super) fn extract_rules(archive: &[u8], staging: &Path) -> Result<(), LintPa
     let rules = staging.join("rules");
     std::fs::create_dir_all(&rules).map_err(|e| {
         LintPackageError::install(format!(
-            "cannot create staged lint package rules '{}': {e}",
-            rules.display()
+            "cannot create staged lint package rules '{}': {}",
+            marker::escape(&rules.display().to_string()),
+            marker::escape(&e.to_string())
         ))
     })?;
     let decoder = GzDecoder::new(archive);
     let mut tar = tar::Archive::new(decoder);
     let entries = tar.entries().map_err(|error| {
-        LintPackageError::remote(format!("cannot read the lint package archive: {error}"))
+        LintPackageError::remote(format!(
+            "cannot read the lint package archive: {}",
+            marker::escape(&error.to_string())
+        ))
     })?;
     for entry in entries {
         let mut entry = entry.map_err(|error| {
-            LintPackageError::remote(format!("cannot read a lint package archive entry: {error}"))
+            LintPackageError::remote(format!(
+                "cannot read a lint package archive entry: {}",
+                marker::escape(&error.to_string())
+            ))
         })?;
         if !entry.header().entry_type().is_file() {
             continue;
@@ -38,7 +46,8 @@ pub(super) fn extract_rules(archive: &[u8], staging: &Path) -> Result<(), LintPa
         let output = {
             let path = entry.path().map_err(|error| {
                 LintPackageError::remote(format!(
-                    "cannot inspect a lint package archive path: {error}"
+                    "cannot inspect a lint package archive path: {}",
+                    marker::escape(&error.to_string())
                 ))
             })?;
             rule_file_name(&path).map(|name| rules.join(name))
@@ -48,15 +57,17 @@ pub(super) fn extract_rules(archive: &[u8], staging: &Path) -> Result<(), LintPa
         };
         let mut file = std::fs::File::create(&output).map_err(|error| {
             LintPackageError::install(format!(
-                "cannot create staged lint rule '{}': {error}",
-                output.display()
+                "cannot create staged lint rule '{}': {}",
+                marker::escape(&output.display().to_string()),
+                marker::escape(&error.to_string())
             ))
         })?;
         let copied = std::io::copy(&mut (&mut entry).take(MAX_RULE_BYTES + 1), &mut file).map_err(
             |error| {
                 LintPackageError::install(format!(
-                    "cannot unpack staged lint rule '{}': {error}",
-                    output.display()
+                    "cannot unpack staged lint rule '{}': {}",
+                    marker::escape(&output.display().to_string()),
+                    marker::escape(&error.to_string())
                 ))
             },
         )?;
@@ -145,7 +156,7 @@ pub(super) fn validate_stored(
     if !intact_package(dir) {
         return Err(LintPackageError::install(format!(
             "the lint package store entry '{}' is incomplete or damaged; remove it and retry",
-            dir.display()
+            marker::escape(&dir.display().to_string())
         )));
     }
     validate_package(&dir.join("rules"), first_party)

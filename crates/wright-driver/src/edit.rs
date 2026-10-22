@@ -9,6 +9,11 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use wright_analyzer::service::marker;
+
+mod columns;
+use columns::{char_count, position_byte};
+pub use columns::{char_offset_to_utf16, utf16_offset_to_char};
 
 use serde::{Deserialize, Serialize};
 use workshop_rs::catalog::{Catalog, Locale};
@@ -76,7 +81,7 @@ impl EditTransaction {
                     Stage::Discovery,
                     format!(
                         "the transaction carries overlapping edits in '{}' at {}:{}-{} and {}:{}-{}",
-                        a.source,
+                        esc(&a.source),
                         a.range.start_line,
                         a.range.start_col,
                         a.range.end_line,
@@ -94,7 +99,9 @@ impl EditTransaction {
                     Stage::Discovery,
                     format!(
                         "the transaction carries order-dependent zero-width edits in '{}' at {}:{}; refusing rather than defining an arbitrary insertion order",
-                        a.source, a.range.start_line, a.range.start_col
+                        esc(&a.source),
+                        a.range.start_line,
+                        a.range.start_col
                     ),
                 ));
             }
@@ -134,6 +141,12 @@ impl EditTransaction {
         }
         Ok(previews)
     }
+}
+
+/// Escape caller-supplied text before it enters a marker-carrying
+/// diagnostic (#888).
+fn esc(text: impl std::fmt::Display) -> String {
+    marker::escape(&text.to_string())
 }
 
 fn is_zero_width(edit: &SourceEdit) -> bool {
@@ -200,7 +213,8 @@ pub fn validate_transaction(
             Stage::Discovery,
             format!(
                 "the edit targets '{}' which is not the loaded input '{}'",
-                edit.source, resolved.display
+                esc(&edit.source),
+                esc(&resolved.display)
             ),
         )]);
     }
@@ -304,7 +318,8 @@ pub(crate) fn edit_kind_gate(kind: SourceKind, provider_operation: &str) -> Opti
             "edit-requires-provider",
             Stage::Discovery,
             format!(
-                "raw edit operations cover Workshop input; for OPY sources route through '{provider_operation}' instead"
+                "raw edit operations cover Workshop input; for OPY sources route through '{}' instead",
+                esc(provider_operation)
             ),
         )),
         SourceKind::Ostw => Some(source_provider_unavailable()),
@@ -389,7 +404,7 @@ pub fn write_previews(
             Diagnostic::error(
                 "input-io",
                 Stage::Discovery,
-                format!("cannot read '{}': {error}", preview.source),
+                format!("cannot read '{}': {}", esc(&preview.source), esc(error)),
             )
         })?;
         let current = crate::input::decode_source_text(&bytes);
@@ -402,7 +417,7 @@ pub fn write_previews(
                 Stage::Discovery,
                 format!(
                     "'{}' changed since the transaction was validated; re-validate and retry",
-                    preview.source
+                    esc(&preview.source)
                 ),
             ));
         }
@@ -420,7 +435,11 @@ pub fn write_previews(
             return Err(Diagnostic::error(
                 "output-io",
                 Stage::Emission,
-                format!("cannot write '{}': {error}", write.temporary.display()),
+                format!(
+                    "cannot write '{}': {}",
+                    esc(write.temporary.display()),
+                    esc(error)
+                ),
             ));
         }
     }
@@ -464,12 +483,13 @@ fn rollback_write(writes: &[PlannedWrite], failed: usize, error: std::io::Error)
     let mut diverged = Vec::new();
     for write in &writes[..failed] {
         if std::fs::write(&write.path, &write.original).is_err() {
-            diverged.push(format!("'{}'", write.preview.source));
+            diverged.push(format!("'{}'", esc(&write.preview.source)));
         }
     }
     let mut message = format!(
-        "cannot replace '{}': {error}",
-        writes[failed].preview.source
+        "cannot replace '{}': {}",
+        esc(&writes[failed].preview.source),
+        esc(error)
     );
     if failed > 0 && diverged.is_empty() {
         message.push_str("; the files already written were restored to their validated content");
@@ -503,7 +523,7 @@ fn source_precondition(
             Stage::Discovery,
             format!(
                 "the edit targets '{}' but no current text was provided for it; supply the current source so the version precondition can be verified",
-                edit.source
+                esc(&edit.source)
             ),
         ));
     };
@@ -511,7 +531,7 @@ fn source_precondition(
         Diagnostic::error(
             "edit-stale-source",
             Stage::Discovery,
-            format!("the edit for '{}' targets a different source version (identity mismatch); re-fetch the source and retry", edit.source),
+            format!("the edit for '{}' targets a different source version (identity mismatch); re-fetch the source and retry", esc(&edit.source)),
         )
     })
 }
@@ -560,45 +580,6 @@ fn apply_edit(source: &str, edit: &SourceEdit) -> Result<String, Diagnostic> {
     ))
 }
 
-fn position_byte(lines: &[&str], line: u32, col: u32) -> usize {
-    lines[..line as usize - 1]
-        .iter()
-        .map(|line| line.len() + 1)
-        .sum::<usize>()
-        + char_col(lines[line as usize - 1], col)
-}
-
-fn char_count(line: &str) -> usize {
-    line.chars().count()
-}
-
-/// Convert a UTF-16 column to a Rust character offset, rounding up within a surrogate pair.
-pub fn utf16_offset_to_char(line: &str, utf16_offset: usize) -> usize {
-    let mut chars = 0usize;
-    let mut utf16 = 0usize;
-    for c in line.chars() {
-        if utf16 >= utf16_offset {
-            break;
-        }
-        utf16 += c.len_utf16();
-        chars += 1;
-    }
-    chars
-}
-
-/// Convert a Rust character offset to a UTF-16 column, clamping at the line end.
-pub fn char_offset_to_utf16(line: &str, char_offset: usize) -> usize {
-    line.chars().take(char_offset).map(char::len_utf16).sum()
-}
-
-fn char_col(line: &str, col: u32) -> usize {
-    let skip = col.saturating_sub(1) as usize;
-    line.char_indices()
-        .nth(skip)
-        .map(|(off, _)| off)
-        .unwrap_or(line.len())
-}
-
 /// Deprecated `wright-embedding/v1` compatibility surface (#514): the
 /// request consumed by [`rename_symbol`]. Kept source-compatible for v1
 /// callers; removal requires a breaking embedding-contract transition.
@@ -638,7 +619,8 @@ pub fn rename_symbol(source: &str, request: &RenameRequest) -> Result<SourceEdit
             Stage::Discovery,
             format!(
                 "no {} named '{}' is declared in the source",
-                request.symbol_kind, request.from
+                request.symbol_kind,
+                esc(&request.from)
             ),
         ));
     }

@@ -27,6 +27,7 @@ use wright_analyzer::canonical::{
 pub use wright_analyzer::service::ErrorInfo as ToolErrorInfo;
 /// A tool response: a structured owned result or a structured error.
 pub use wright_analyzer::service::Response as ToolResponse;
+use wright_analyzer::service::marker;
 use wright_analyzer::service::{Request, Response};
 
 mod callgraph;
@@ -35,6 +36,7 @@ mod cost;
 mod edit_statements;
 mod markers;
 mod simulate;
+mod stale_ids;
 
 /// The tool-service name and version.
 pub const SERVICE_NAME: &str = "wright-tool-service";
@@ -47,6 +49,8 @@ const DEFAULT_CONTENT_RULES: usize = 20;
 pub use capabilities::{Capabilities, OPERATIONS};
 pub(crate) use markers::render_file_markers;
 pub use markers::render_list_markers;
+/// The escape collapse every marker-rendering surface runs last (#888).
+pub use wright_analyzer::service::marker::unescape;
 
 pub use crate::request::{
     Address, StatementEditChange, StatementEditRequest, StatementList, ToolRequest,
@@ -390,64 +394,6 @@ impl<'a> ToolService<'a> {
 
     fn semantic(&self) -> &SemanticService<'static> {
         &self.snapshot().semantic
-    }
-
-    /// The snapshot gate for numeric addresses (#595): every numeric
-    /// symbol/rule address a request carries must be scoped to the served
-    /// program's generation — the request's `snapshot` member must match
-    /// `self.generation`. A missing token or a different generation is
-    /// refused `stale-id`, so a numeric id captured from an earlier program
-    /// can never silently resolve against a reloaded or recovered one. A
-    /// `references` request's numeric `rule` filter is checked like its
-    /// `symbol` (#592). A request whose addresses are all declared names is
-    /// generation-agnostic: it ignores `snapshot` and resolves against the
-    /// current program.
-    fn stale_id(&self, request: &ToolRequest) -> Option<ToolErrorInfo> {
-        let (numeric, snapshot) = match request {
-            ToolRequest::References {
-                symbol,
-                rule,
-                snapshot,
-                ..
-            } => (
-                matches!(symbol, Address::Id(_)) || matches!(rule, Some(Address::Id(_))),
-                *snapshot,
-            ),
-            ToolRequest::Usage { symbol, snapshot } => {
-                (matches!(symbol, Address::Id(_)), *snapshot)
-            }
-            ToolRequest::Cfg { rule, snapshot, .. } => (matches!(rule, Address::Id(_)), *snapshot),
-            ToolRequest::Rules { rule, snapshot, .. } => {
-                (matches!(rule, Some(Address::Id(_))), *snapshot)
-            }
-            ToolRequest::EditStatements {
-                edits, snapshot, ..
-            } => (
-                edits.iter().any(|edit| matches!(edit.rule, Address::Id(_))),
-                *snapshot,
-            ),
-            _ => (false, None),
-        };
-        if !numeric {
-            return None;
-        }
-        match snapshot {
-            Some(issued) if issued == self.generation => None,
-            Some(issued) => Some(ToolErrorInfo {
-                code: "stale-id".to_string(),
-                message: format!(
-                    "numeric symbol ids and rule indexes are scoped to the program generation that issued them: the served program is snapshot {} but this request's addresses were issued under snapshot {issued} — re-issue the ids from a current `symbols`/`rules` (or other id-reporting) response, or address by name",
-                    self.generation
-                ),
-            }),
-            None => Some(ToolErrorInfo {
-                code: "stale-id".to_string(),
-                message: format!(
-                    "a numeric `symbol`/`rule` address is scoped to the program generation that issued it: send the `snapshot` value an id-reporting response (`symbols`, `rules`, `inspect`, `project`, …) returned — the current generation is {}",
-                    self.generation
-                ),
-            }),
-        }
     }
 
     /// Report the serving generation on every response that issues numeric
@@ -991,7 +937,8 @@ impl<'a> ToolService<'a> {
             && !SymbolKind::ALL.iter().any(|known| known.as_str() == kind)
         {
             return invalid_selection(format!(
-                "unknown symbol kind '{kind}' (expected one of: {})",
+                "unknown symbol kind '{}' (expected one of: {})",
+                esc(kind),
                 SymbolKind::ALL
                     .iter()
                     .map(|known| known.as_str())
@@ -1029,7 +976,8 @@ impl<'a> ToolService<'a> {
                 .any(|known| known.as_str() == kind)
         {
             return invalid_selection(format!(
-                "unknown reference kind '{kind}' (expected one of: {})",
+                "unknown reference kind '{}' (expected one of: {})",
+                esc(kind),
                 ReferenceKind::ALL
                     .iter()
                     .map(|known| known.as_str())
@@ -1080,7 +1028,8 @@ impl<'a> ToolService<'a> {
             && !BLOCK_KINDS.contains(&kind)
         {
             return invalid_selection(format!(
-                "unknown cfg block kind '{kind}' (expected one of: {})",
+                "unknown cfg block kind '{}' (expected one of: {})",
+                esc(kind),
                 BLOCK_KINDS.join(", ")
             ));
         }
@@ -1190,6 +1139,12 @@ impl<'a> ToolService<'a> {
 
 /// An unknown selection/filter value is a structured usage error, never a
 /// silent empty result (#430, #531).
+/// Escape caller-supplied text before it enters a marker-carrying
+/// diagnostic (#888).
+fn esc(text: impl std::fmt::Display) -> String {
+    marker::escape(&text.to_string())
+}
+
 pub(crate) fn invalid_selection(message: String) -> ToolResponse {
     ToolResponse::Error {
         error: ToolErrorInfo {

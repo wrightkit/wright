@@ -3,6 +3,7 @@
 //! (ADR-0027/0030).
 
 use serde_json::json;
+use wright_analyzer::service::marker;
 use wright_analyzer::service::{Request, Response};
 
 use super::{ToolErrorInfo, ToolResponse, ToolService};
@@ -210,7 +211,7 @@ impl<'a> ToolService<'a> {
                 code: "invalid-selection".to_string(),
                 message: format!(
                     "unknown baseline '{}': no record under .wright/ for this input kind/locale/profile",
-                    run.baseline.as_deref().unwrap_or_default()
+                    marker::escape(run.baseline.as_deref().unwrap_or_default())
                 ),
             });
         }

@@ -10,6 +10,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use wright_analyzer::service::marker;
 
 use serde::{Deserialize, Serialize};
 use wright_analyzer::registry::LintRegistry;
@@ -95,7 +96,7 @@ impl FindingSelection {
         if let Some(rule) = &self.rule
             && !registry.contains(rule)
         {
-            return Err(format!("unknown rule id '{rule}'"));
+            return Err(format!("unknown rule id '{}'", marker::escape(rule)));
         }
         Ok(())
     }
@@ -347,13 +348,14 @@ pub(crate) fn file_error(
     let mut listed: Vec<String> = source_files
         .iter()
         .take(FILE_LIST_LIMIT)
-        .map(|source| format!("'{source}'"))
+        .map(|source| format!("'{}'", marker::escape(source)))
         .collect();
     if total > FILE_LIST_LIMIT {
         listed.push("…".to_string());
     }
     Some(format!(
-        "unknown file '{file}'; the loaded program's source files ({total} total): {}",
+        "unknown file '{}'; the loaded program's source files ({total} total): {}",
+        marker::escape(file),
         listed.join(", ")
     ))
 }
