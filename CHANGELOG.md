@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.31.0](https://github.com/wrightkit/wright/compare/v0.30.0...v0.31.0) (2026-10-22)
+
+
+### Features
+
+* **ui:** argument forms and dropdowns for the statement editor ([0929298](https://github.com/wrightkit/wright/commit/0929298c79ddb66ffedf315739a1089ca2781d1d)), closes [#835](https://github.com/wrightkit/wright/issues/835)
+* **ui:** expose the settings block and add the simulation panel ([f739b18](https://github.com/wrightkit/wright/commit/f739b1867884c045c3ed2f3d40a5bd1e867c41d5)), closes [#836](https://github.com/wrightkit/wright/issues/836)
+
+
+### Bug Fixes
+
+* **ui:** cover the simulate refusal path and Picker keyboard navigation ([e07967b](https://github.com/wrightkit/wright/commit/e07967ba9d0e9e02020f9894285746ff9429b1d5)), closes [#836](https://github.com/wrightkit/wright/issues/836)
+* **ui:** let a failed hero listing retry on the next open ([013050d](https://github.com/wrightkit/wright/commit/013050d9605a56cb87726252d0664fe35d7691ec)), closes [#836](https://github.com/wrightkit/wright/issues/836)
+
 ## [0.30.0](https://github.com/wrightkit/wright/compare/v0.29.0...v0.30.0) (2026-10-22)
 
 
