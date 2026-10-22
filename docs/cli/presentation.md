@@ -124,7 +124,8 @@ records for `lookup`. `diagnostic:` records render envelope diagnostics on
 stderr; result records stay on stdout, and artifacts keep byte-exact
 stdout ownership. A failed analysis result is the exception: its verdict,
 summary, and `diagnostic:` records all go to stdout, and stderr carries
-only usage errors (exit 2) and internal failures (exit 4) (#891). A
+only usage errors (exit 2) and internal failures (exit 4) (#891) —
+non-envelope surfaces such as `lookup` keep their own split. A
 `diagnostic:` carries `<severity> <code>` then
 `at=<path:line:col>`, `stage=`, `status=`, `source=`, `locale=`, and
 `message=`; a `finding:` carries the same shape plus `count=`/`spanKind=`/

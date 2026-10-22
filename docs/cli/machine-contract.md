@@ -23,6 +23,8 @@ infer them from process state alone.
   the summary, and every diagnostic, and stderr carries only usage errors
   (exit 2) and internal failures (exit 4). A caller that reads stdout alone
   still sees the failure's reason (#891, amending ADR-0030's stream split).
+  Non-envelope surfaces such as `lookup` keep their own documented stream
+  split ([presentation.md](presentation.md)).
 * JSON mode: exactly one envelope goes to stdout; stderr stays empty on
   success. Usage errors are the only case that writes to stderr without an
   envelope (exit 2).
