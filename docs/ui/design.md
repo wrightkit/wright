@@ -106,24 +106,79 @@ The dialogs are:
 - **Diagnostics.**
   - Summary cards in a grid: each card is a rounded dark panel with a label, a large italic number over a 2 px rule, and a short description. The figures come from `findings` and `inspect cost`.
   - Then the rules with the most elements.
-  - Then the findings, one per row in alternating row shades, coloured by severity.
+  - Then the findings, grouped by severity as [Diagnostics in place](#diagnostics-in-place) describes.
   - Clicking a rule or a finding closes the dialog and reveals that rule.
 - **Variables.**
   - Two columns, Global and Player, from `symbols`.
   - Subroutines centred under them.
   - Each name in a dark box.
   - Read-only until declaration edits exist.
-- **Editor** (editing layer).
-  - The title is the action or condition name, large and italic.
-  - Under it, a form: each argument is a row of a grey-blue label cell and a blue value control, side by side. The label cell lightens while its control has focus.
-  - Nested calls are indented under a left rule.
-  - A disable toggle sits above the form.
-  - Clicking a statement opens the editor. Clicking an argument opens the editor focused on that argument. Hovering an argument outlines the one a click would open.
+- **Editor** (editing layer). See [Editor](#editor-editing-layer).
 - **Pending changes** (editing layer).
   - A readable list grouped by rule.
   - Event changes come first, then conditions, then actions.
   - Each change is tagged insert, change, or delete.
   - The footer has Discard all, Cancel, and Submit.
+
+## Editor (editing layer)
+
+- **Open.**
+  - Clicking a statement row opens the editor for that statement.
+  - Clicking an argument opens it with that argument's control focused and scrolled into view.
+  - Hovering an argument outlines the argument a click would open.
+- **Title.** The statement's call name in the session locale, 34 px italic.
+- **First row.**
+  - For an action, the row is "Action" with a picker over all actions.
+  - For a condition, there are three rows: the left value, the operator (a picker over the comparison operators `lookup` declares), and the right value.
+- **Argument rows.**
+  - Each parameter is one row: a `--lbl` cell with the parameter's localized label from `lookup`, then a control.
+  - The label cell turns `--lbl-focus` while its control has focus.
+- **Controls by slot type, from `lookup`:**
+  - An enum slot uses a picker over the domain's members from `listEntries`.
+  - A variable slot (a variable-target action) uses a picker over the declared variables of the slot's scope from `symbols`.
+  - A value slot uses a picker over the values that `lookup` admits for the slot type, from `listEntries`. The chosen value's own arguments appear as nested rows under it, indented.
+  - A number literal uses a numeric input.
+  - A string literal uses a text input.
+  - A boolean literal uses a picker of the two literals.
+  - A default from `lookup` is filled in when a call is chosen. A slot with no value shows "unset" in `--warn`, and OK is disabled while any slot is unset.
+- **Disable toggle.** It sits above the form.
+- **OK.**
+  - OK stages one `replace` edit for the statement, through the pending-changes model.
+  - The new node is sent to `editStatements` for validation when the changes are submitted.
+  - The UI composes no Workshop text.
+- **Insert.**
+  - The column heading's `+` opens the same editor with an empty action (or condition).
+  - OK stages an `insert` at the end of the column, or after the selected row when exactly one row is selected.
+- **Debug.** The node JSON preview appears under the form only with `?debug`.
+
+## Diagnostics in place
+
+Findings come from `findings`. There are three severities, from most to least severe:
+
+| Severity | Colour | Mark |
+| --- | --- | --- |
+| error | `--error` | filled circle |
+| warning | `--warn` | filled triangle |
+| info | `--muted` | outlined circle |
+
+- **Toolbar.**
+  - The Diagnostics button carries one count badge per severity that has findings, in its severity colour.
+  - The badges show error first, and info only when no error or warning exists.
+- **Rule bar.**
+  - A rule with findings shows the mark and count of its most severe level, right of the event.
+  - Hovering the mark lists the rule's findings by severity.
+- **Statement row.**
+  - A finding is placed on a statement as follows:
+    - with an `action` index, on the action at that index in the rule's `actions`;
+    - with `action: null` and a span inside a condition's span, on that condition;
+    - otherwise, on the rule bar only.
+  - A row with findings has a 3 px left bar in its most severe colour and the mark at its right end.
+  - Hovering the mark shows the findings for that row: severity, code, and message.
+- **Dialog.**
+  - The findings list is grouped by severity, most severe first.
+  - The group headings are toggles that hide or show their level. Error and warning are shown by default, and info is collapsed. The choice persists for the session.
+  - Clicking a finding reveals its rule, scrolls to its row, and flashes the row once.
+- **Filter.** A toolbar toggle "Only rules with findings" limits the rule list to rules with a finding at or above the lowest shown severity.
 
 ## Pickers
 
@@ -146,15 +201,31 @@ The dialogs are:
 
 ## Selection and batch actions (editing layer)
 
-- Each statement row has a checkbox, hidden until hover or until any row in the column is selected.
-- Shift-click selects a range.
-- The column's select-all checkbox shows an indeterminate state when part of the column is selected.
-- While a selection exists, a bar under the column shows the count. It has square buttons for Disable, Enable, Delete, and Clear.
-- Keyboard:
-  - ⌘/Ctrl+A selects the column under the pointer;
-  - Delete deletes the selection;
-  - Esc clears it.
-- A selected row has a gold inset outline.
+- **Selection.**
+  - Each statement row has a checkbox. It is hidden until hover, or until any row in the column is selected.
+  - Click selects one row. Shift-click selects a range.
+  - A range never includes the hidden `End` of a block it does not fully contain (#899).
+- **Where the actions appear.**
+  - The batch actions sit in the column heading row, on the right, at the same level as the heading. This matches the place of the in-game top-right controls.
+  - With no selection, the right side shows `+`.
+  - With a selection, it shows `N selected`, then square buttons: Disable, Enable, Delete, and Clear.
+  - The bar under the column is removed.
+- **Sticky heading.**
+  - While an open rule's column is taller than the viewport, its heading row sticks to the top of the viewport until the column ends.
+  - The selection count and actions therefore stay reachable at any scroll position.
+  - The sticky heading has the `--dlg` background, so rows do not show through it.
+- **Large columns.** A column with more than 30 statements gets a filter field in its heading row, under the title:
+  - Typing filters the column to statements whose text in the session locale contains the query. A call-name prefix also matches.
+  - Hidden rows keep their selection.
+  - Select-all then selects the visible matches only, and the count says `N selected (M hidden)` when selected rows are hidden.
+  - Esc clears the filter.
+- **Structural selection.** Two context-menu entries on a statement row:
+  - "Select same action": every statement in the column with the same call id.
+  - "Select block": a control-flow opener with its whole body, up to and including its `End`.
+- **Keyboard.**
+  - ⌘/Ctrl+A selects the visible rows of the column under the pointer.
+  - Shift+↑/↓ extends the selection from the last clicked row.
+  - Delete deletes the selection. Esc clears the filter first, then the selection.
 
 Pending marks:
 
@@ -198,6 +269,22 @@ These colours define the look. Components use the tokens, not literals.
 - **Shapes.** Square corners, at most 3 px radius. Cards are the one exception, at 14 px.
 - **Type.** The system UI sans-serif with a CJK fallback (`-apple-system, "PingFang SC", "Noto Sans SC", system-ui, sans-serif`), 15 px base. Monospace is used only in debug detail. No web fonts are bundled.
 - **Square buttons.** 40 px in the toolbar, 36 px in column heads, 26–32 px inside rows and bars. The icon is 22 px or proportionally smaller.
+
+## Spacing and sizes
+
+| Element | Value |
+| --- | --- |
+| Page padding | 18 px top, 28 px sides, 60 px bottom |
+| Title | 54 px, italic, bold, 2 px letter-spacing; file name 26 px italic |
+| Toolbar | 6 px gap; 10 px padding below the 2 px rule line |
+| Rule list | rules 6 px apart; list starts 14 px under the toolbar |
+| Rule bar | 40 px high; 0 14 px padding; 12 px gap; chevron 40 px with 6 px gap to the bar |
+| Rule body | 70 px left indent from the list edge; 14 px above and below |
+| Event row | 38 px; label padding 8 14 px; rows 4 px apart; 16 px below the last row |
+| Columns | 40 px gap; heading 24 px light, 6 px below, 2 px line |
+| Statement row | min 40 px; padding 6 8 px; 4 px apart; text 14 px; 18 px indent per control-flow level |
+| Dialog | body padding 26 32 22 px; title 28 px; footer padding 14 px, 12 px button gap |
+| Editor form row | 36 px controls; 6 px between label and control; rows 5 px apart; nested calls 14 px indent plus 10 px after a 2 px rule |
 
 ## Not decided here
 
