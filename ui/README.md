@@ -11,7 +11,7 @@ carrying `Authorization: Bearer <token>` with the token from the session
 URL fragment. `vite dev`/`preview` serve the bundle but have no `/api`
 backend, so they render the loading state only.
 
-The look and interaction follow [`docs/ui/design.md`](../docs/ui/design.md).
+The look and interaction follow [`docs/ui/README.md`](../docs/ui/README.md).
 
 ## Build and test
 
