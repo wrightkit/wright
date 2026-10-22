@@ -17,6 +17,10 @@ export interface ChromeStrings {
   rulesCount: (count: number) => string
   /** The Diagnostics button tooltip and dialog title. */
   diagnostics: string
+  /** The "Only rules with findings" toolbar toggle's tooltip. */
+  onlyRulesWithFindings: string
+  /** A severity group's heading name in the Diagnostics dialog. */
+  severityName: (severity: 'error' | 'warning' | 'info') => string
   /** The Variables button tooltip and dialog title. */
   variables: string
   /** The pending-changes button tooltip and dialog title. */
@@ -129,6 +133,9 @@ const enUS: ChromeStrings = {
   rulesRegion: 'Rules',
   rulesCount: (count) => `Rules (${count})`,
   diagnostics: 'Diagnostics',
+  onlyRulesWithFindings: 'Only rules with findings',
+  severityName: (severity) =>
+    severity === 'error' ? 'Errors' : severity === 'warning' ? 'Warnings' : 'Info',
   variables: 'Variables',
   pendingChanges: 'Pending changes',
   filterPlaceholder: 'Filter rules…',
@@ -201,6 +208,9 @@ const zhCN: ChromeStrings = {
   rulesRegion: '规则',
   rulesCount: (count) => `规则（${count}）`,
   diagnostics: '诊断',
+  onlyRulesWithFindings: '仅有发现的规则',
+  severityName: (severity) =>
+    severity === 'error' ? '错误' : severity === 'warning' ? '警告' : '信息',
   variables: '变量',
   pendingChanges: '待定更改',
   filterPlaceholder: '筛选规则…',

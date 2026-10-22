@@ -197,17 +197,18 @@ describe('the page shell (#879)', () => {
     expect(toolbar.querySelector('.rule-count')?.textContent?.trim()).toBe('Rules (2)')
 
     // One square icon button per toolbar action, each with a `title`
-    // tooltip and an inline SVG: Diagnostics and Simulation on the left;
-    // Variables, the pending-changes view button, and a disabled Add rule
-    // on the right.
+    // tooltip and an inline SVG: Diagnostics, the findings toggle (#922),
+    // and Simulation on the left; Variables, the pending-changes view
+    // button, and a disabled Add rule on the right.
     const squares = [...toolbar.querySelectorAll<HTMLButtonElement>('.sq')]
-    expect(squares).toHaveLength(5)
+    expect(squares).toHaveLength(6)
     for (const button of squares) {
       expect(button.title).not.toBe('')
       expect(button.querySelector('svg')).not.toBeNull()
     }
-    const [diagnostics, simulation, variables, pending, addRule] = squares
+    const [diagnostics, onlyFindings, simulation, variables, pending, addRule] = squares
     expect(diagnostics.title).toBe('Diagnostics')
+    expect(onlyFindings.title).toBe('Only rules with findings')
     expect(simulation.title).toBe('Simulation')
     expect(variables.title).toBe('Variables')
     expect(pending.title).toBe('Pending changes')

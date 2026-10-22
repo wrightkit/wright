@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Finding } from './types/generated/wright-agent-v1'
   import { mostSevere } from './findings'
+  import SeverityMark from './SeverityMark.svelte'
   import type { ChromeStrings } from './chrome'
 
   let {
@@ -24,15 +25,7 @@
   role="img"
   aria-label={t.findingMarkLabel(severity, findings.length)}
 >
-  <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true">
-    {#if severity === 'error'}
-      <circle cx="5" cy="5" r="4" />
-    {:else if severity === 'warning'}
-      <path d="M5 1 L9.33 8.5 L0.67 8.5 Z" />
-    {:else}
-      <circle cx="5" cy="5" r="3.5" fill="none" stroke-width="1.8" />
-    {/if}
-  </svg>
+  <SeverityMark {severity} />
   {#if count}<span class="finding-count">{atLevel}</span>{/if}
   <span class="finding-card">
     {#each findings as finding, i (i)}
