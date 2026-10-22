@@ -488,6 +488,7 @@ impl LintRegistry {
 
     /// Run registered rules and retain per-rule statuses when canonical control
     /// flow cannot be analyzed.
+    #[allow(unsafe_code)] // hotpath 0.28 emits `#[unsafe(export_name)]` statics
     pub fn run_report(&self, program: &workshop_rs::Program, config: &LintConfig) -> LintRun {
         let mut report = LintRun::default();
         let mut available = Vec::with_capacity(program.rules.len());

@@ -287,6 +287,7 @@ fn inspect_result(service: &SemanticService<'_>, loaded: &Loaded) -> InspectResu
 /// location (#445). `facts.risks` is finding-shaped, so the session's
 /// finding selection narrows it exactly like `lint` findings and the
 /// outcome rides in `result.selection` (#635).
+#[allow(unsafe_code)] // hotpath 0.28 emits `#[unsafe(export_name)]` statics
 fn analyze_result(
     service: &SemanticService<'_>,
     loaded: &Loaded,

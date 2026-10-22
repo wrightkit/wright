@@ -457,20 +457,18 @@ fn max(d: &[Duration]) -> f64 {
 }
 
 fn peak_rss_mb() -> f64 {
-    // SAFETY: `usage` is a valid, correctly sized out-buffer for `getrusage`,
-    // and `RUSAGE_SELF` only reads the calling process's own accounting.
-    unsafe {
-        let mut usage: libc::rusage = std::mem::zeroed();
-        if libc::getrusage(libc::RUSAGE_SELF, &mut usage) == 0 {
-            let rss = usage.ru_maxrss as f64;
+    // `max_rss` is the raw `ru_maxrss` field — kilobytes on Linux, bytes on
+    // macOS — so the unit split below is unchanged from the libc call.
+    match nix::sys::resource::getrusage(nix::sys::resource::UsageWho::RUSAGE_SELF) {
+        Ok(usage) => {
+            let rss = usage.max_rss() as f64;
             if cfg!(target_os = "macos") {
                 rss / 1024.0 / 1024.0
             } else {
                 rss / 1024.0
             }
-        } else {
-            0.0
         }
+        Err(_) => 0.0,
     }
 }
 
