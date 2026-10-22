@@ -57,7 +57,7 @@ Goal principle 1 makes `wright` the product the user runs. The goal keeps a gene
    - **Svelte.** `$state` makes a deep tree of plain objects and arrays reactive in place, which matches how the editor mutates `rule-content-v1` nodes. `bind:` and component-scoped styles remove most of the prototype's hand-written form and style plumbing. The runtime is a few kilobytes, so size does not choose between small frameworks.
    - **Runes only.** Runes mode is set for the whole project in the compiler options, so the compiler rejects Svelte 3/4 component syntax, and `svelte-check` runs in CI.
    - **Snapshots at the boundary.** State proxies are not plain objects. Every value that leaves the reactive tree passes through `$state.snapshot` first: request bodies, copies, and anything handed to `structuredClone`.
-   - **Dependencies.** The only runtime dependency is `svelte`. No component library, CSS framework, router, or state library. A new runtime dependency needs a demonstrated need recorded in its PR.
+   - **Dependencies.** The only runtime dependency is `svelte`. No component library, CSS framework, router, or state library. A new runtime dependency needs a demonstrated need recorded in its PR. *Superseded by [ADR-0036](0036-ui-dependency-policy.md): libraries are preferred over hand-written behavior, one library per concern, as listed in [`docs/ui/dependencies.md`](../ui/dependencies.md).*
    - **Rejected stacks.** React was rejected as heavier than the problem needs. Preact with signals was the close alternative. It is equally small, but editing a deep tree needs either immutable path updates or one signal per node.
 
 8. **Types come from the committed schemas.**

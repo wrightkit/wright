@@ -1,12 +1,12 @@
 # `wright ui` design
 
-Context: for anyone changing the look or interaction of `wright ui` (`ui/`). ADR-0032 decides the form factor, ownership, and stack. These documents decide how the UI looks and behaves. Where a layer is not built yet, its section says so, and that section is still the target for the layer.
+Context: for anyone changing the look or interaction of `wright ui` (`ui/`). ADR-0032 decides the form factor, ownership, and stack. ADR-0036 decides the dependency policy. These documents decide how the UI looks and behaves. Where a layer is not built yet, its section says so, and that section is still the target for the layer.
 
 ## Principle
 
 The UI looks and behaves like the in-game Workshop editor. A person who knows the in-game editor should recognise every screen without reading anything.
 
-It does not copy game assets. WrightKit draws its own icons and backdrop and uses system fonts. No image, icon, font, or text from the game client or a community site enters `ui/`.
+It does not copy game assets. WrightKit uses Lucide icons, draws its own backdrop, and uses system fonts. No image, icon, font, or text from the game client or a community site enters `ui/`.
 
 Where the UI needs something the game editor lacks, it adds it in the same visual language, not a second one. Examples are filtering, diagnostics, pending changes, and debug detail.
 
@@ -37,6 +37,7 @@ Where the UI needs something the game editor lacks, it adds it in the same visua
 | [diagnostics.md](diagnostics.md) | severities, findings on rules and statements, and the Diagnostics dialog |
 | [dialogs.md](dialogs.md) | dialog chrome, Variables, and Pending changes |
 | [visual-system.md](visual-system.md) | colour tokens, backdrop, shapes, type, spacing and sizes |
+| [dependencies.md](dependencies.md) | which library owns which concern, under ADR-0036 |
 
 ## Not decided here
 
