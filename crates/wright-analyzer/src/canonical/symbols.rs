@@ -325,13 +325,15 @@ impl SemanticIndex {
         rule: Option<RuleId>,
         action: Option<ActionId>,
         value: Option<ValueId>,
-        span: Option<Span>,
+        // (reported span, identifier occurrence) — reported falls back to
+        // the statement span when the identifier is absent (#892).
+        spans: (Option<Span>, Option<Span>),
     ) {
         self.references.push(Reference {
             symbol,
             kind,
-            span,
-            occurrence: span,
+            span: spans.0,
+            occurrence: spans.1,
             rule,
             action,
             value,
@@ -370,13 +372,14 @@ impl SemanticIndex {
         if let Event::Subroutine(name) = event
             && let Some(symbol) = self.find_symbol(SymbolKind::Subroutine, name)
         {
+            let occurrence = program.rule_event_name_span(rule);
             self.push(
                 symbol,
                 ReferenceKind::Definition,
                 Some(rule),
                 None,
                 None,
-                program.rule_event_name_span(rule),
+                (occurrence.or_else(|| program.rule_span(rule)), occurrence),
             );
         }
     }
@@ -409,6 +412,7 @@ impl SemanticIndex {
             }
             _ => None,
         };
+        let statement = program.action_span(rule, action_id);
         if let Some((kind, name, reads_old_value)) = variable
             && let Some(symbol) = self.find_symbol(kind, name)
         {
@@ -418,7 +422,7 @@ impl SemanticIndex {
                 Some(rule),
                 Some(action_id),
                 None,
-                identifier,
+                (identifier.or(statement), identifier),
             );
             if reads_old_value {
                 self.push(
@@ -427,7 +431,7 @@ impl SemanticIndex {
                     Some(rule),
                     Some(action_id),
                     None,
-                    identifier,
+                    (identifier.or(statement), identifier),
                 );
             }
         }
@@ -440,7 +444,7 @@ impl SemanticIndex {
                         Some(rule),
                         Some(action_id),
                         None,
-                        identifier,
+                        (identifier.or(statement), identifier),
                     );
                 }
             }
@@ -471,10 +475,11 @@ impl SemanticIndex {
         root: ValueRoot,
         program: &Program,
     ) {
+        let statement = root.statement_span(program, rule);
         visit_value_tree(value, None, &mut |value, _, path| {
             let value_id = self.next_value_id;
             self.next_value_id += 1;
-            let span = root.span(program, rule, path);
+            let occurrence = root.span(program, rule, path);
             match value {
                 Value::GlobalVariable(name) => {
                     if let Some(symbol) = self.find_symbol(SymbolKind::GlobalVariable, name) {
@@ -484,7 +489,7 @@ impl SemanticIndex {
                             Some(rule),
                             action,
                             Some(value_id),
-                            span,
+                            (occurrence.or(statement), occurrence),
                         );
                     }
                 }
@@ -496,7 +501,7 @@ impl SemanticIndex {
                             Some(rule),
                             action,
                             Some(value_id),
-                            span,
+                            (occurrence.or(statement), occurrence),
                         );
                     }
                 }
@@ -508,7 +513,7 @@ impl SemanticIndex {
                             Some(rule),
                             action,
                             Some(value_id),
-                            span,
+                            (occurrence.or(statement), occurrence),
                         );
                     }
                 }
@@ -535,6 +540,14 @@ impl ValueRoot {
             Self::Argument { action, argument } => {
                 program.action_argument_value_span(rule, action, argument, path)
             }
+        }
+    }
+    /// The enclosing statement's span — the reported `span` fallback when
+    /// the provenance root carries no identifier occurrence (#892).
+    fn statement_span(self, program: &Program, rule: usize) -> Option<Span> {
+        match self {
+            Self::Condition(condition) => program.condition_span(rule, condition),
+            Self::Argument { action, .. } => program.action_span(rule, action),
         }
     }
 }
