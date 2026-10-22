@@ -104,6 +104,81 @@ export function enumIdentity(node: { enum: string; member: string }): string {
   return `${node.enum}.${node.member}`
 }
 
+/** The warmed display-name reads the text helpers take (`Names.peek`). */
+export interface PeekNames {
+  peek(identity: string, kinds?: string[]): { name: string; kind: string } | null
+}
+
+/**
+ * The plain text a statement row renders (docs/ui/main-screen.md §
+ * Statement text): `Expr` without the syntax spans — the call name then
+ * its arguments in parentheses, comparisons and arithmetic infix, and the
+ * variable-access forms reading `Global.name`/`owner.name`. The column
+ * filter matches against the same text the user reads, so it must resolve
+ * names through the same warmed cache.
+ */
+export function statementText(node: Node, names: PeekNames, kinds: string[]): string {
+  const text = (arg: Node) => statementText(arg, names, VALUE_KINDS)
+  if (typeof node === 'number') return String(node)
+  if (node === null || typeof node === 'boolean') return String(node)
+  if ('string' in node) return `"${node.string}"`
+  if ('localizedString' in node) {
+    return names.peek(node.localizedString)?.name ?? node.localizedString
+  }
+  if ('enum' in node) {
+    return names.peek(enumIdentity(node), ['enumMember'])?.name ?? `${node.enum}.${node.member}`
+  }
+  if ('variable' in node) return node.variable
+  if ('subroutine' in node) return node.subroutine
+  if ('ambiguous' in node) return node.ambiguous
+  if (node.call === 'globalVariable') {
+    // The scope label's canonical display name is the lowercase `global`
+    // keyword; the editor shows the capitalized form (`Global.score`).
+    const scope = names.peek('global', ['structural'])
+    const label = (scope?.name ?? 'Global').replace(/^\p{Ll}/u, (c) => c.toUpperCase())
+    return `${label}.${text(node.args[0])}`
+  }
+  if (node.call === 'playerVariable') return `${text(node.args[0])}.${text(node.args[1])}`
+  if (node.call === 'memberAccess') {
+    const member =
+      typeof node.args[1] === 'object' && node.args[1] !== null && 'string' in node.args[1]
+        ? node.args[1].string
+        : text(node.args[1])
+    const index = node.args.length > 2 ? `[${text(node.args[2])}]` : ''
+    return `${text(node.args[0])}.${member}${index}`
+  }
+  const head = names.peek(node.call, kinds)
+  const name = head?.name ?? node.call
+  if (head?.kind === 'operator' && node.args.length === 2) {
+    return `${text(node.args[0])} ${name} ${text(node.args[1])}`
+  }
+  if (node.args.length === 0) return name
+  return `${name}(${node.args.map(text).join(', ')})`
+}
+
+/**
+ * Whether a statement row survives the column filter (docs/ui/
+ * selection.md § Large columns): its session-locale text contains the
+ * query case-insensitively, or the query is a prefix of the call id —
+ * `setglobal` finds `setGlobalVariableAtIndex` rows, whose rendered text
+ * spells the localized name with spaces.
+ */
+export function statementMatches(
+  node: Node,
+  names: PeekNames,
+  kinds: string[],
+  query: string,
+): boolean {
+  const q = query.toLowerCase()
+  if (statementText(node, names, kinds).toLowerCase().includes(q)) return true
+  return (
+    typeof node === 'object' &&
+    node !== null &&
+    'call' in node &&
+    node.call.toLowerCase().startsWith(q)
+  )
+}
+
 /**
  * Every `lookup` identity a rule-content document references — call ids,
  * enum members, localized strings, the event and its filters — with the

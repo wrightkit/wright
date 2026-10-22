@@ -10,6 +10,7 @@
    * mode the bar also carries the rule's element count in monospace;
    * without debug the count is absent from the DOM.
    */
+  import { ChevronRight } from '@lucide/svelte'
   import SqButton from './SqButton.svelte'
   import type { ChromeStrings } from './chrome'
 
@@ -44,9 +45,8 @@
       title={open ? t.collapseRule : t.expandRule}
       label={open ? t.collapseRuleLabel(name) : t.expandRuleLabel(name)}
       onclick={ontoggle}
-    >
-      <path d="M9 6l6 6-6 6" />
-    </SqButton>
+      icon={ChevronRight}
+    />
   </span>
   <button type="button" class="bar" class:disabled aria-expanded={open} onclick={ontoggle}>
     <span class="bar-name">{name}</span>

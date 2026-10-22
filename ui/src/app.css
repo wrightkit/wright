@@ -396,6 +396,25 @@ select {
   color: var(--muted);
 }
 
+/* A column past thirty rows gains a filter field under its heading
+   (§ Selection · Large columns) — the spec's white control. */
+.rule-view .col-filter {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--form-ctl-height);
+  margin: 0 0 var(--stmt-gap);
+  padding: 0 var(--stmt-pad-inline);
+  border: 0;
+  border-radius: 3px;
+  background: var(--white);
+  color: var(--on-white);
+  font-size: var(--stmt-text);
+}
+
+.rule-view .col-filter::placeholder {
+  color: var(--dim);
+}
+
 .statements {
   list-style: none;
   margin: 0;

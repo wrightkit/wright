@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { nodeClass, statementDepths } from './nodes'
-import type { Action } from './types/generated/rule-content-v1'
+import { nodeClass, statementDepths, statementMatches, statementText, STATEMENT_KINDS } from './nodes'
+import type { Action, Node } from './types/generated/rule-content-v1'
 
 describe('nodeClass', () => {
   it('classifies every rule-content-v1 node kind', () => {
@@ -69,5 +69,75 @@ describe('statementDepths', () => {
       { call: 'end', args: [] },
     ]
     expect(statementDepths(actions)).toEqual([0, 1, null])
+  })
+})
+
+/** The warmed names `statementText`/`statementMatches` resolve through. */
+const NAMES: Record<string, { name: string; kind: string }> = {
+  wait: { name: 'Wait', kind: 'action' },
+  '==': { name: '==', kind: 'operator' },
+  isAlive: { name: 'Is Alive', kind: 'value' },
+  eventPlayer: { name: 'Event Player', kind: 'value' },
+  global: { name: 'global', kind: 'structural' },
+  setGlobalVariable: { name: 'Set Global Variable', kind: 'structural' },
+  'Status.STUNNED': { name: 'Stunned', kind: 'enumMember' },
+}
+const names = { peek: (identity: string) => NAMES[identity] ?? null }
+
+describe('statementText', () => {
+  it('renders each node form the way Expr does, without the spans', () => {
+    expect(statementText(1.5, names, [])).toBe('1.5')
+    expect(statementText(true, names, [])).toBe('true')
+    expect(statementText({ string: 'hi' }, names, [])).toBe('"hi"')
+    expect(statementText({ localizedString: 'hud.header' }, names, [])).toBe('hud.header')
+    expect(statementText({ enum: 'Status', member: 'STUNNED' }, names, [])).toBe('Stunned')
+    expect(statementText({ variable: 'score' }, names, [])).toBe('score')
+    expect(
+      statementText(
+        { ambiguous: 'Up', candidates: [{ enum: 'Vector', member: 'UP' }] },
+        names,
+        [],
+      ),
+    ).toBe('Up')
+    expect(statementText({ call: 'wait', args: [0.016] }, names, STATEMENT_KINDS)).toBe('Wait(0.016)')
+    // The scope word comes from the structural `global` entry, capitalized.
+    expect(
+      statementText({ call: 'globalVariable', args: [{ variable: 'score' }] }, names, []),
+    ).toBe('Global.score')
+    expect(
+      statementText(
+        { call: 'memberAccess', args: [{ call: 'eventPlayer', args: [] }, { string: 'health' }, 5] },
+        names,
+        [],
+      ),
+    ).toBe('Event Player.health[5]')
+    expect(
+      statementText(
+        { call: '==', args: [{ call: 'isAlive', args: [{ call: 'eventPlayer', args: [] }] }, true] },
+        names,
+        [],
+      ),
+    ).toBe('Is Alive(Event Player) == true')
+    // An unresolvable call id renders verbatim.
+    expect(statementText({ call: 'mysteryCall', args: [] }, names, [])).toBe('mysteryCall')
+  })
+})
+
+describe('statementMatches', () => {
+  const setVar = { call: 'setGlobalVariable', args: [{ variable: 'x' }, 1] } as Node
+
+  it('contains-matches the session-locale text case-insensitively', () => {
+    expect(statementMatches(setVar, names, STATEMENT_KINDS, 'SET GLOBAL')).toBe(true)
+    expect(statementMatches(setVar, names, STATEMENT_KINDS, 'variable(x')).toBe(true)
+    expect(statementMatches(setVar, names, STATEMENT_KINDS, 'player')).toBe(false)
+  })
+
+  it('matches a call-id prefix the localized text cannot contain', () => {
+    // "setglobal" is a prefix of the id but no substring of the spaced name.
+    expect(statementMatches(setVar, names, STATEMENT_KINDS, 'setglobal')).toBe(true)
+    expect(statementMatches(setVar, names, STATEMENT_KINDS, 'setglobx')).toBe(false)
+    // Non-call nodes have no call name to prefix against.
+    expect(statementMatches({ variable: 'x' }, names, [], 'x')).toBe(true)
+    expect(statementMatches(3, names, [], '3')).toBe(true)
   })
 })

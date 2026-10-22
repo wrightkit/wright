@@ -23,6 +23,7 @@
    * page never composes or writes Workshop text. A stale refusal clears
    * the staged edits and re-reads the program.
    */
+  import { Activity, FileText, List, Play, Plus } from '@lucide/svelte'
   import { tick } from 'svelte'
   import { SvelteMap, SvelteSet } from 'svelte/reactivity'
   import { apply, call } from './lib/api'
@@ -572,12 +573,8 @@
 
   <div class="toolbar" role="toolbar" aria-label={t.rulesToolbar}>
     <span class="rule-count">{t.rulesCount(rules?.length ?? 0)}</span>
-    <SqButton title={t.diagnostics} onclick={openDiagnostics}>
-      <path d="M3.5 12.5h4l2.5-7 4 13 2.5-6h4" />
-    </SqButton>
-    <SqButton title={t.simulation} onclick={openSimulate}>
-      <polygon points="8,5 8,19 19,12" fill="currentColor" stroke="none" />
-    </SqButton>
+    <SqButton title={t.diagnostics} icon={Activity} onclick={openDiagnostics} />
+    <SqButton title={t.simulation} icon={Play} onclick={openSimulate} />
     <div class="end">
       <input
         class="filter"
@@ -598,27 +595,18 @@
         {/each}
       </select>
       <span class="sep" aria-hidden="true"></span>
-      <SqButton title={t.variables} onclick={openVariables}>
-        <path d="M9.5 6h11M9.5 12h11M9.5 18h11" />
-        <circle cx="4.5" cy="6" r="1.4" fill="currentColor" stroke="none" />
-        <circle cx="4.5" cy="12" r="1.4" fill="currentColor" stroke="none" />
-        <circle cx="4.5" cy="18" r="1.4" fill="currentColor" stroke="none" />
-      </SqButton>
+      <SqButton title={t.variables} icon={List} onclick={openVariables} />
       <SqButton
         title={t.pendingChanges}
+        icon={FileText}
         badge={pending.size}
         onclick={() => {
           submitRefusal = null
           dialog = 'pending'
         }}
-      >
-        <path d="M6 4h12v16H6z" />
-        <path d="M9 9h6M9 12.5h6M9 16h4" />
-      </SqButton>
+      />
       <span class="sep" aria-hidden="true"></span>
-      <SqButton title={t.addRuleTitle} label={t.addRuleLabel} disabled>
-        <path d="M12 5v14M5 12h14" />
-      </SqButton>
+      <SqButton title={t.addRuleTitle} label={t.addRuleLabel} icon={Plus} disabled />
       {#if debug}<span class="debug" data-debug>debug</span>{/if}
     </div>
   </div>

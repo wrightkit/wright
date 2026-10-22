@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ChevronDown, Plus, Square, Play, Trash2, X } from '@lucide/svelte'
   import { SvelteSet } from 'svelte/reactivity'
   import SqButton from './SqButton.svelte'
   import Expr from './Expr.svelte'
@@ -14,6 +15,7 @@
     collectIdentities,
     isEventPlayerMember,
     statementDepths,
+    statementMatches,
     STATEMENT_KINDS,
     VALUE_KINDS,
   } from './nodes'
@@ -61,19 +63,25 @@
 
   // Selection is per column of the rule currently rendered; switching
   // rules or re-reading content drops it (staged marks survive — they
-  // live in the page's pending map).
+  // live in the page's pending map). The column filters reset with it.
   let selection = $state<{ conditions: Set<number>; actions: Set<number> }>({
     conditions: new SvelteSet(),
     actions: new SvelteSet(),
   })
   let anchor = $state<{ list: StatementList; index: number; extent: number } | null>(null)
   let hoverCol = $state<StatementList | null>(null)
+  let root: HTMLElement | undefined = $state()
+  let filters = $state<Record<StatementList, string>>({ conditions: '', actions: '' })
   $effect(() => {
     void summary.id
     void ruleState
     selection = { conditions: new SvelteSet(), actions: new SvelteSet() }
     anchor = null
+    filters = { conditions: '', actions: '' }
   })
+
+  /** A column shows its filter field once it renders past this many rows. */
+  const FILTER_THRESHOLD = 30
 
   const sel = (list: StatementList) => selection[list]
 
@@ -99,7 +107,7 @@
     if (anchor?.list !== list) return
     const lo = Math.min(anchor.index, index)
     const hi = Math.max(anchor.index, index)
-    for (const i of visibleIndices(list)) {
+    for (const i of shownIndices(list, visibleIndices(list))) {
       if (i >= lo && i <= hi) sel(list).add(i)
     }
     anchor.extent = index
@@ -110,10 +118,15 @@
     if (anchor?.list === list) anchor = null
   }
 
-  function selectAll(list: StatementList, visible: number[], checked: boolean) {
+  /**
+   * The column's select-all works on the rows the filter leaves visible:
+   * checking adds them, unchecking removes them. Rows the filter hid are
+   * outside the gesture — they keep their selection either way.
+   */
+  function selectAll(list: StatementList, shown: number[], checked: boolean) {
     const set = sel(list)
-    set.clear()
-    if (checked) for (const index of visible) set.add(index)
+    if (checked) for (const index of shown) set.add(index)
+    else for (const index of shown) set.delete(index)
     anchor = null
   }
 
@@ -125,32 +138,66 @@
     return depths.flatMap((depth, i) => (depth === null ? [] : [i]))
   }
 
+  /**
+   * The rendered rows a column's filter leaves: the session-locale text
+   * contains the query, or the call id takes it as a prefix. An empty
+   * query filters nothing out.
+   */
+  function shownIndices(list: StatementList, visible: number[]): number[] {
+    const query = filters[list]
+    if (query === '' || ruleState.phase !== 'ready') return visible
+    const kinds = list === 'conditions' ? VALUE_KINDS : STATEMENT_KINDS
+    const { content } = ruleState
+    return visible.filter((index) => {
+      const node =
+        list === 'conditions' ? content.conditions[index].value : content.actions[index]
+      return statementMatches(node, names, kinds, query)
+    })
+  }
+
   function onkeydown(event: KeyboardEvent) {
     if (event.defaultPrevented) return
     const el = event.target as HTMLElement | null
     if (
       el?.closest('input, textarea, select, dialog, [contenteditable="true"]') &&
-      !el?.closest('input.sel, input.sel-all')
+      !el?.closest('input.sel, input.sel-all, input.col-filter')
     )
       return
-    const list = hoverCol
+    // A column owns the gesture when the pointer is over it or the event's
+    // target sits inside it (the filter field keeps its own column's
+    // scope even when the pointer has moved off). The target must live in
+    // THIS rule's DOM — every open RuleView registers a window listener,
+    // so a `closest` hit in another instance would steal the gesture.
+    const col = el?.closest('.col')
+    const list =
+      (col && root?.contains(col)
+        ? (col.getAttribute('data-list') as StatementList | null)
+        : null) ?? hoverCol
     if (!list) return
     const set = sel(list)
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
+    const inFilter = el?.closest('input.col-filter') != null
+    if (!inFilter && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
       event.preventDefault()
-      selectAll(list, visibleIndices(list), true)
-    } else if (event.shiftKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+      selectAll(list, shownIndices(list, visibleIndices(list)), true)
+    } else if (!inFilter && event.shiftKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
       if (anchor?.list !== list) return
-      const visible = visibleIndices(list)
-      const next = visible.indexOf(anchor.extent) + (event.key === 'ArrowDown' ? 1 : -1)
+      const shown = shownIndices(list, visibleIndices(list))
+      const current = shown.indexOf(anchor.extent)
+      if (current < 0) return
+      const next = current + (event.key === 'ArrowDown' ? 1 : -1)
       event.preventDefault()
-      if (next >= 0 && next < visible.length) extendRange(list, visible[next]!)
-    } else if (event.key === 'Delete' && set.size > 0) {
+      if (next >= 0 && next < shown.length) extendRange(list, shown[next]!)
+    } else if (!inFilter && event.key === 'Delete' && set.size > 0) {
       event.preventDefault()
       onedit.batch(list, [...set], 'delete')
-    } else if (event.key === 'Escape' && set.size > 0) {
-      event.preventDefault()
-      clearSelection(list)
+    } else if (event.key === 'Escape') {
+      if (filters[list] !== '') {
+        filters[list] = ''
+        event.preventDefault()
+      } else if (set.size > 0) {
+        clearSelection(list)
+        event.preventDefault()
+      }
     }
   }
 
@@ -239,32 +286,24 @@
   </li>
 {/snippet}
 
-{#snippet columnActions(list: StatementList)}
+{#snippet columnActions(list: StatementList, hidden: number)}
   {@const set = sel(list)}
   <span class="column-actions">
     {#if set.size > 0}
-      <span class="sel-count">{t.selectedCount(set.size)}</span>
-      <SqButton title={t.disable} onclick={() => onedit.batch(list, [...set], 'disable')}>
-        <path d="M6 6h12v12H6z" />
-      </SqButton>
-      <SqButton title={t.enable} onclick={() => onedit.batch(list, [...set], 'enable')}>
-        <path d="m8 5 11 7-11 7z" />
-      </SqButton>
-      <SqButton title={t.delete} onclick={() => onedit.batch(list, [...set], 'delete')}>
-        <path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7" />
-      </SqButton>
-      <SqButton title={t.clear} onclick={() => clearSelection(list)}>
-        <path d="m6 6 12 12M6 18 18 6" />
-      </SqButton>
+      <span class="sel-count">{hidden > 0
+        ? t.selectedHiddenCount(set.size, hidden)
+        : t.selectedCount(set.size)}</span>
+      <SqButton icon={Square} title={t.disable} onclick={() => onedit.batch(list, [...set], 'disable')} />
+      <SqButton icon={Play} title={t.enable} onclick={() => onedit.batch(list, [...set], 'enable')} />
+      <SqButton icon={Trash2} title={t.delete} onclick={() => onedit.batch(list, [...set], 'delete')} />
+      <SqButton icon={X} title={t.clear} onclick={() => clearSelection(list)} />
     {:else}
-      <SqButton title={t.addStatementTitle(noun(list))} label={t.addStatement(noun(list))} disabled>
-        <path d="M12 5v14M5 12h14" />
-      </SqButton>
+      <SqButton icon={Plus} title={t.addStatementTitle(noun(list))} label={t.addStatement(noun(list))} disabled />
     {/if}
   </span>
 {/snippet}
 
-<section class="rule-view">
+<section class="rule-view" bind:this={root}>
   {#if ruleState.phase === 'loading' || (ruleState.phase === 'ready' && !namesReady)}
     <p class="muted">{t.loadingRule}</p>
   {:else if ruleState.phase === 'refused'}
@@ -280,17 +319,7 @@
         <div class="event-row">
           <span class="event-label">{row.label}</span>
           <span class="event-value"
-            >{row.value}<svg
-              viewBox="0 0 24 24"
-              width="14"
-              height="14"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg
-            ></span
+            >{row.value}<ChevronDown size={14} strokeWidth={2} aria-hidden="true" /></span
           >
         </div>
       {/each}
@@ -302,8 +331,14 @@
     {@const actSel = selection.actions}
     {@const actDepths = statementDepths(content.actions)}
     {@const actVisible = actDepths.flatMap((depth, i) => (depth === null ? [] : [i]))}
+    {@const actShown = shownIndices('actions', actVisible)}
+    {@const actShownSet = new Set(actShown)}
+    {@const actHiddenSel = [...actSel].filter((i) => !actShownSet.has(i)).length}
     {@const condSel = selection.conditions}
     {@const condVisible = content.conditions.map((_, i) => i)}
+    {@const condShown = shownIndices('conditions', condVisible)}
+    {@const condShownSet = new Set(condShown)}
+    {@const condHiddenSel = [...condSel].filter((i) => !condShownSet.has(i)).length}
     <div class="rule-cols">
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
@@ -319,16 +354,27 @@
             type="checkbox"
             class="sel-all"
             aria-label={t.selectAll(t.conditionNoun)}
-            checked={condSel.size === condVisible.length && condVisible.length > 0}
-            indeterminate={condSel.size > 0 && condSel.size < condVisible.length}
+            checked={condShown.length > 0 && condShown.every((i) => condSel.has(i))}
+            indeterminate={condShown.some((i) => condSel.has(i)) &&
+              !condShown.every((i) => condSel.has(i))}
             onchange={(event) =>
-              selectAll('conditions', condVisible, event.currentTarget.checked)}
+              selectAll('conditions', condShown, event.currentTarget.checked)}
           />
           {t.conditions} <span class="col-count">({content.conditions.length})</span>
-          {@render columnActions('conditions')}
+          {@render columnActions('conditions', condHiddenSel)}
         </h3>
+        {#if condVisible.length > FILTER_THRESHOLD}
+          <input
+            class="col-filter"
+            type="search"
+            placeholder={t.filterColumn(t.conditionNoun)}
+            aria-label={t.filterColumn(t.conditionNoun)}
+            bind:value={filters.conditions}
+          />
+        {/if}
         <ol class="statements" class:has-selection={condSel.size > 0}>
-          {#each content.conditions as condition, i (i)}
+          {#each condShown as i (i)}
+            {@const condition = content.conditions[i]}
             {@render stmtRow(
               'conditions',
               i,
@@ -359,27 +405,35 @@
             type="checkbox"
             class="sel-all"
             aria-label={t.selectAll(t.actionNoun)}
-            checked={actSel.size === actVisible.length && actVisible.length > 0}
-            indeterminate={actSel.size > 0 && actSel.size < actVisible.length}
-            onchange={(event) => selectAll('actions', actVisible, event.currentTarget.checked)}
+            checked={actShown.length > 0 && actShown.every((i) => actSel.has(i))}
+            indeterminate={actShown.some((i) => actSel.has(i)) &&
+              !actShown.every((i) => actSel.has(i))}
+            onchange={(event) => selectAll('actions', actShown, event.currentTarget.checked)}
           />
           {t.actions} <span class="col-count">({actVisible.length})</span>
-          {@render columnActions('actions')}
+          {@render columnActions('actions', actHiddenSel)}
         </h3>
+        {#if actVisible.length > FILTER_THRESHOLD}
+          <input
+            class="col-filter"
+            type="search"
+            placeholder={t.filterColumn(t.actionNoun)}
+            aria-label={t.filterColumn(t.actionNoun)}
+            bind:value={filters.actions}
+          />
+        {/if}
         <ol class="statements" class:has-selection={actSel.size > 0}>
-          {#each content.actions as action, i (i)}
-            {@const depth = actDepths[i]}
-            {#if depth !== null}
-              {@render stmtRow(
-                'actions',
-                i,
-                action,
-                STATEMENT_KINDS,
-                depth,
-                action.disabled,
-                action.span?.start.line ?? '?',
-              )}
-            {/if}
+          {#each actShown as i (i)}
+            {@const action = content.actions[i]}
+            {@render stmtRow(
+              'actions',
+              i,
+              action,
+              STATEMENT_KINDS,
+              actDepths[i]!,
+              action.disabled,
+              action.span?.start.line ?? '?',
+            )}
           {/each}
           {#if actVisible.length === 0}
             <li class="none">{t.none}</li>

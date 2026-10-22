@@ -57,6 +57,8 @@ export interface ChromeStrings {
   addStatement: (noun: string) => string
   addStatementTitle: (noun: string) => string
   selectedCount: (count: number) => string
+  selectedHiddenCount: (count: number, hidden: number) => string
+  filterColumn: (noun: string) => string
   /** The heading's batch actions. */
   disable: string
   enable: string
@@ -147,6 +149,8 @@ const enUS: ChromeStrings = {
   addStatement: (noun) => `Add ${noun}`,
   addStatementTitle: (noun) => `Add ${noun}: insertion is not available`,
   selectedCount: (count) => `${count} selected`,
+  selectedHiddenCount: (count, hidden) => `${count} selected (${hidden} hidden)`,
+  filterColumn: (noun) => `Filter ${noun}s…`,
   disable: 'Disable',
   enable: 'Enable',
   delete: 'Delete',
@@ -214,6 +218,8 @@ const zhCN: ChromeStrings = {
   addStatement: (noun) => `添加${noun}`,
   addStatementTitle: (noun) => `添加${noun}：插入功能不可用`,
   selectedCount: (count) => `已选择 ${count} 项`,
+  selectedHiddenCount: (count, hidden) => `已选择 ${count} 项（${hidden} 项已隐藏）`,
+  filterColumn: (noun) => `筛选${noun}…`,
   disable: '禁用',
   enable: '启用',
   delete: '删除',
