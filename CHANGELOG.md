@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.0](https://github.com/wrightkit/wright/compare/v0.31.0...v0.32.0) (2026-10-22)
+
+
+### Features
+
+* **cli:** self-update standalone Windows installs ([#930](https://github.com/wrightkit/wright/issues/930)) ([a9c484b](https://github.com/wrightkit/wright/commit/a9c484b4c3f958c9783dd168bf94da2c4e4805e7))
+
 ## [0.31.0](https://github.com/wrightkit/wright/compare/v0.30.0...v0.31.0) (2026-10-22)
 
 
