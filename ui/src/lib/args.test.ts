@@ -146,4 +146,17 @@ describe('stageStatement', () => {
     stageStatement(map, 0, 'r', 'actions', 0, modify as never, modify as never)
     expect(map.has(keyFor(0, 'actions', 0))).toBe(false)
   })
+
+  it('re-saving the staged statement keeps the pending change', () => {
+    // A reopened editor seeds its args from the staged change; an
+    // unchanged save must re-stage it, not drop it.
+    const map = new Map<string, PendingChange>()
+    const staged = {
+      ...modify,
+      args: [{ variable: 'kills' }, { call: 'subtract', args: [] }, 5],
+    }
+    stageStatement(map, 0, 'r', 'actions', 0, modify as never, staged as never)
+    stageStatement(map, 0, 'r', 'actions', 0, modify as never, staged as never)
+    expect(map.get(keyFor(0, 'actions', 0))?.statement).toEqual(staged)
+  })
 })

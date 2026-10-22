@@ -30,6 +30,7 @@
   import type {
     ListEntriesResult,
     LookupEntry,
+    RuleContentStatement,
     Symbol,
   } from './types/generated/wright-agent-v1'
   import type { SpannedAction, SpannedCondition } from './view'
@@ -38,6 +39,7 @@
     target,
     names,
     disabled,
+    staged,
     t,
     locale,
     onsave,
@@ -47,6 +49,8 @@
     names: Names
     /** The statement's effective disabled state, pending edits included. */
     disabled: boolean
+    /** The pending `change` staged at this statement, when one exists. */
+    staged?: RuleContentStatement
     /** The session locale's chrome strings. */
     t: ChromeStrings
     /** The session locale, for `listEntries`. */
@@ -66,6 +70,11 @@
   let enumOptions = $state<Record<string, { id: string; label: string }[]>>({})
   /** The project's declared variables, for `variable` fields. */
   let variableSymbols = $state<Symbol[] | null>(null)
+  /** In-flight option fetches, so a `fields` recompute can't duplicate them. */
+  const enumLoading = new Set<string>()
+  let symbolsLoading = false
+  /** The locale the option caches below were loaded under. */
+  let optionsLocale = ''
 
   const actionNode = $derived(
     target?.list === 'actions' ? (target.node as SpannedAction) : null,
@@ -84,9 +93,13 @@
         checked = disabled
         shownFor = target
         callableEntry = null
-        editedArgs = null
+        // A staged `change` seeds the form, so reopening shows it.
+        editedArgs = Array.isArray(staged?.args) ? (staged.args as Node[]) : null
         enumOptions = {}
         variableSymbols = null
+        enumLoading.clear()
+        symbolsLoading = false
+        optionsLocale = locale
         const callId = target.list === 'actions' ? (target.node as SpannedAction).call : null
         if (callId !== null) {
           void names.entries(callId).then((entries) => {
@@ -109,15 +122,24 @@
   // The form's option sources load once the callable's facts arrive:
   // operation spellings warm the names cache, enum domains list their
   // members, and a variable field pulls the project's declared symbols.
+  // A locale switch invalidates the caches so the next pass refetches.
   $effect(() => {
     if (fields.length === 0) return
+    if (optionsLocale !== locale) {
+      enumOptions = {}
+      variableSymbols = null
+      enumLoading.clear()
+      symbolsLoading = false
+      optionsLocale = locale
+    }
     const operationIds = fields.flatMap((field) => field.operations ?? [])
     if (operationIds.length > 0) void names.warm(operationIds)
     const domains = new Set(
       fields.map((field) => field.domain).filter((domain): domain is string => !!domain),
     )
     for (const domain of domains) {
-      if (enumOptions[domain]) continue
+      if (enumOptions[domain] || enumLoading.has(domain)) continue
+      enumLoading.add(domain)
       void call({
         op: 'listEntries',
         language: 'workshop',
@@ -126,7 +148,8 @@
         locale,
         pageSize: 500,
       }).then((response) => {
-        if ('result' in response) {
+        enumLoading.delete(domain)
+        if ('result' in response && locale === optionsLocale) {
           const entries = (response.result as ListEntriesResult).entries ?? []
           enumOptions = {
             ...enumOptions,
@@ -138,8 +161,14 @@
         }
       })
     }
-    if (fields.some((field) => field.kind === 'variable') && variableSymbols === null) {
+    if (
+      fields.some((field) => field.kind === 'variable') &&
+      variableSymbols === null &&
+      !symbolsLoading
+    ) {
+      symbolsLoading = true
       void call({ op: 'symbols', all: true }).then((response) => {
+        symbolsLoading = false
         if ('result' in response) {
           const result = response.result
           variableSymbols = (Array.isArray(result)
@@ -214,7 +243,8 @@
       <div class="editor-args">
         {#each fields as field (field.label + field.path.join('.'))}
           {@const node = shownAction ? argAt(shownAction.args, field.path) : undefined}
-          <div class="editor-arg">
+          {#if field.kind !== 'other' || node !== undefined}
+            <div class="editor-arg">
             <span class="editor-arg-label">{field.label}</span>
             {#if field.kind === 'other'}
               <span class="editor-arg-value">
@@ -229,7 +259,8 @@
                 onselect={(id) => choose(field, id)}
               />
             {/if}
-          </div>
+            </div>
+          {/if}
         {/each}
       </div>
     {/if}

@@ -36,6 +36,7 @@
     clean,
     effectiveDisabled,
     isStale,
+    keyFor,
     setDisabled,
     stageDeletes,
     stageStatement,
@@ -162,6 +163,12 @@
     editNode && editEntry && editTarget
       ? effectiveDisabled(pending, editEntry.summary.id, editTarget.list, editTarget.index, editNode.node)
       : false,
+  )
+  /** The staged `change` at the open target, so the editor shows it. */
+  const editStaged = $derived(
+    editNode && editEntry && editTarget
+      ? pending.get(keyFor(editEntry.summary.id, editTarget.list, editTarget.index))
+      : undefined,
   )
   const pendingRequest = $derived(
     debug && dialog === 'pending' && inputIdentity !== null
@@ -693,6 +700,7 @@
     target={editNode}
     {names}
     disabled={editDisabled}
+    staged={editStaged?.tag === 'change' ? editStaged.statement : undefined}
     {t}
     locale={sessionLocale}
     onsave={editorSave}
