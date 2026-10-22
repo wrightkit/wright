@@ -140,26 +140,31 @@
     for (const domain of domains) {
       if (enumOptions[domain] || enumLoading.has(domain)) continue
       enumLoading.add(domain)
+      // Capture the locale the request issues under; a response that
+      // lands after a switch is dropped, not installed.
+      const requestLocale = locale
       void call({
         op: 'listEntries',
         language: 'workshop',
         kind: 'enumMember',
         within: domain,
-        locale,
+        locale: requestLocale,
         pageSize: 500,
-      }).then((response) => {
-        enumLoading.delete(domain)
-        if ('result' in response && locale === optionsLocale) {
-          const entries = (response.result as ListEntriesResult).entries ?? []
-          enumOptions = {
-            ...enumOptions,
-            [domain]: entries.map((entry) => ({
-              id: entry.identity,
-              label: entry.displayName,
-            })),
-          }
-        }
       })
+        .then((response) => {
+          if ('result' in response && requestLocale === optionsLocale) {
+            const entries = (response.result as ListEntriesResult).entries ?? []
+            enumOptions = {
+              ...enumOptions,
+              [domain]: entries.map((entry) => ({
+                id: entry.identity,
+                label: entry.displayName,
+              })),
+            }
+          }
+        })
+        .catch(() => {})
+        .finally(() => enumLoading.delete(domain))
     }
     if (
       fields.some((field) => field.kind === 'variable') &&
@@ -167,15 +172,19 @@
       !symbolsLoading
     ) {
       symbolsLoading = true
-      void call({ op: 'symbols', all: true }).then((response) => {
-        symbolsLoading = false
-        if ('result' in response) {
-          const result = response.result
-          variableSymbols = (Array.isArray(result)
-            ? result
-            : ((result as { symbols?: Symbol[] }).symbols ?? [])) as Symbol[]
-        }
-      })
+      void call({ op: 'symbols', all: true })
+        .then((response) => {
+          if ('result' in response) {
+            const result = response.result
+            variableSymbols = (Array.isArray(result)
+              ? result
+              : ((result as { symbols?: Symbol[] }).symbols ?? [])) as Symbol[]
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          symbolsLoading = false
+        })
     }
   })
 

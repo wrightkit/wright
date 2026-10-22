@@ -80,15 +80,15 @@ export function setDisabled(
   target: boolean,
 ): void {
   const key = keyFor(rule, list, index)
-  if (pending.get(key)?.tag === 'delete') return
+  const staged = pending.get(key)
+  if (staged?.tag === 'delete') return
   if (effectiveDisabled(pending, rule, list, index, node) === target) return
-  if (target === (node.disabled === true)) {
-    pending.delete(key)
-    return
-  }
-  const statement = clean(node)
+  // Toggle `disabled` on the staged change when one exists so a batch
+  // action can't silently revert staged argument edits.
+  const statement = staged?.tag === 'change' ? { ...staged.statement } : clean(node)
   if (target) statement.disabled = true
-  pending.set(key, { rule, ruleName, list, index, tag: 'change', statement })
+  else delete statement.disabled
+  stageStatement(pending, rule, ruleName, list, index, node, statement)
 }
 
 /**

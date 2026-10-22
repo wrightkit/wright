@@ -10,7 +10,13 @@ import {
   variableNode,
   withArg,
 } from './args'
-import { buildRequest, keyFor, stageStatement, type PendingChange } from './edit'
+import {
+  buildRequest,
+  keyFor,
+  setDisabled,
+  stageStatement,
+  type PendingChange,
+} from './edit'
 import type { LookupEntry } from './types/generated/wright-agent-v1'
 import type { Action } from './types/generated/rule-content-v1'
 
@@ -158,5 +164,20 @@ describe('stageStatement', () => {
     stageStatement(map, 0, 'r', 'actions', 0, modify as never, staged as never)
     stageStatement(map, 0, 'r', 'actions', 0, modify as never, staged as never)
     expect(map.get(keyFor(0, 'actions', 0))?.statement).toEqual(staged)
+  })
+
+  it('a batch enable toggles disabled on the staged change, args kept', () => {
+    const map = new Map<string, PendingChange>()
+    const staged = {
+      ...modify,
+      args: [{ variable: 'kills' }, { call: 'subtract', args: [] }, 5],
+      disabled: true,
+    }
+    stageStatement(map, 0, 'r', 'actions', 0, modify as never, staged as never)
+    setDisabled(map, 0, 'r', 'actions', 0, modify as never, false)
+    expect(map.get(keyFor(0, 'actions', 0))?.statement).toEqual({
+      call: 'modifyGlobalVariable',
+      args: [{ variable: 'kills' }, { call: 'subtract', args: [] }, 5],
+    })
   })
 })
