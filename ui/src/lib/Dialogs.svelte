@@ -24,6 +24,8 @@
   } from './types/generated/wright-agent-v1'
   import type { ChromeStrings } from './chrome'
   import { closeDialog, showModal } from './dialog'
+  import { severityGroups, type Severity } from './findings'
+  import SeverityMark from './SeverityMark.svelte'
   import type { Names } from './names'
 
   let {
@@ -36,6 +38,8 @@
     onreveal,
     t,
     onclose,
+    groupOpen,
+    onGroupToggle,
   }: {
     which: 'variables' | 'diagnostics' | null
     symbols: unknown[] | null
@@ -45,11 +49,17 @@
     /** The `costEstimate?all` response; null until it lands. */
     costEstimate: ToolResponse | null
     names: Names
-    /** Reveal a `rules` listing id: close the dialog and open its bar. */
-    onreveal: (rule: number) => void
+    /** Reveal a rule: close the dialog and open its bar; the row form scrolls and flashes it. */
+    onreveal: (rule: number, finding?: Finding) => void
     /** The session locale's chrome strings. */
     t: ChromeStrings
     onclose: () => void
+    /**
+     * The severity headings' open state, kept by the page so the choice
+     * persists for the session (docs/ui/diagnostics.md § In the dialog).
+     */
+    groupOpen: Record<Severity, boolean>
+    onGroupToggle: (severity: Severity, open: boolean) => void
   } = $props()
 
   let dialogEl: HTMLDialogElement | undefined = $state()
@@ -154,6 +164,11 @@
   )
 
   const findingList = $derived((findings ?? []) as Finding[])
+
+  // The severity groups the dialog lists, most severe first
+  // (docs/ui/diagnostics.md § In the dialog): error and warning open,
+  // info collapsed, the choice kept in the page's session state.
+  const groups = $derived(severityGroups(findingList, groupOpen))
 
   function locationOf(finding: Finding): string {
     const span = finding.span
@@ -269,26 +284,43 @@
           {/if}
         {/if}
         {#if findingList.length > 0}
-          <ul class="finding-list">
-            {#each findingList as finding, i (i)}
-              {@const rule = finding.rule}
-              <li>
-                {#if rule !== null}
-                  <button
-                    type="button"
-                    class="finding severity-{finding.severity}"
-                    onclick={() => onreveal(rule)}
-                  >
-                    {@render findingRow(finding)}
-                  </button>
-                {:else}
-                  <div class="finding severity-{finding.severity}">
-                    {@render findingRow(finding)}
-                  </div>
-                {/if}
-              </li>
-            {/each}
-          </ul>
+          <!-- Findings grouped by severity, most severe first; each heading
+               toggles its level (error and warning open, info collapsed,
+               the choice kept for the session). -->
+          {#each groups as group (group.severity)}
+            <details
+              class="severity-group"
+              open={group.open}
+              ontoggle={(event) =>
+                onGroupToggle(group.severity, event.currentTarget.open)}
+            >
+              <summary class="severity-heading severity-{group.severity}">
+                <SeverityMark severity={group.severity} />
+                <span class="severity-name">{t.severityName(group.severity)}</span>
+                <span class="severity-count">({group.findings.length})</span>
+              </summary>
+              <ul class="finding-list">
+                {#each group.findings as finding, i (i)}
+                  {@const rule = finding.rule}
+                  <li>
+                    {#if rule !== null}
+                      <button
+                        type="button"
+                        class="finding severity-{finding.severity}"
+                        onclick={() => onreveal(rule, finding)}
+                      >
+                        {@render findingRow(finding)}
+                      </button>
+                    {:else}
+                      <div class="finding severity-{finding.severity}">
+                        {@render findingRow(finding)}
+                      </div>
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+            </details>
+          {/each}
         {:else if findingsError !== null}
           <p class="refusal findings-refusal"><code>{findingsError.code}</code> {findingsError.message}</p>
         {:else if findings !== null}

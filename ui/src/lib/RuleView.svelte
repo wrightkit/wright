@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ChevronDown, Plus, Square, Play, Trash2, X } from '@lucide/svelte'
+  import { tick } from 'svelte'
   import { SvelteSet } from 'svelte/reactivity'
   import SqButton from './SqButton.svelte'
   import Expr from './Expr.svelte'
@@ -31,6 +32,7 @@
     debug,
     pending,
     ruleFindings,
+    reveal,
     t,
     onedit,
   }: {
@@ -41,6 +43,12 @@
     pending: ReadonlyMap<string, PendingChange>
     /** This rule's placed findings (`docs/ui/diagnostics.md § In place`). */
     ruleFindings: RuleFindings
+    /**
+     * The row a finding reveal targets (§ In the dialog): a column
+     * filter hiding it is dropped, then the row scrolls in and flashes
+     * once; `nonce` re-arms each reveal.
+     */
+    reveal: { rule: number; list: StatementList; index: number; nonce: number } | null
     /** The session locale's chrome strings. */
     t: ChromeStrings
     onedit: {
@@ -134,6 +142,35 @@
     else for (const index of shown) set.delete(index)
     anchor = null
   }
+
+  /**
+   * A finding reveal (docs/ui/diagnostics.md § In the dialog): once the
+   * target row is rendered — the rule may still be warming its names
+   * when the click lands — a filter hiding it is dropped and it scrolls
+   * in and flashes once. The `nonce` re-arms the effect per reveal.
+   */
+  $effect(() => {
+    const target = reveal
+    if (target === null) return
+    void target.nonce
+    void namesReady
+    void tick().then(() => {
+      const el = root?.querySelector<HTMLElement>(
+        `.col[data-list="${target.list}"] .statement[data-index="${target.index}"]`,
+      )
+      if (!el) {
+        // Not rendered: either the names are still warming or the column
+        // filter hid it — clear the filter and let the flush retry.
+        if (filters[target.list] !== '') filters[target.list] = ''
+        return
+      }
+      el.scrollIntoView?.({ block: 'nearest' })
+      el.classList.remove('flash')
+      void el.offsetWidth
+      el.classList.add('flash')
+      el.addEventListener('animationend', () => el.classList.remove('flash'), { once: true })
+    })
+  })
 
   /** The flat-list indices that render as rows (`end` markers stay hidden). */
   function visibleIndices(list: StatementList): number[] {
@@ -261,6 +298,7 @@
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
   <li
     class="statement"
+    data-index={index}
     class:disabled
     class:selected={set.has(index)}
     class:pending-change={tag === 'change'}

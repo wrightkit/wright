@@ -11,10 +11,16 @@ import process from 'node:process'
 import { describe, expect, it } from 'vitest'
 import {
   allFor,
+  badgeSeverities,
+  DEFAULT_GROUP_OPEN,
   findingsFor,
+  hasFindingAtOrAbove,
+  lowestShownSeverity,
   mostSevere,
   placeFinding,
   placeFindings,
+  severityCounts,
+  severityGroups,
   spanContains,
   type RuleFindings,
 } from './findings'
@@ -182,6 +188,91 @@ describe('allFor', () => {
       rule: [finding({ severity: 'warning' })],
     }
     expect(allFor(slots).map((f) => f.severity)).toEqual(['error', 'warning', 'info'])
+  })
+})
+
+/**
+ * The toolbar's severity levels (#922, docs/ui/diagnostics.md § In
+ * place): one count badge per severity that has findings, in its
+ * severity colour — error first, and info only when no error or
+ * warning exists.
+ */
+describe('severity badges (#922)', () => {
+  const sev = (severity: Finding['severity']) => finding({ severity })
+
+  it('badges every shown severity with its own count', () => {
+    expect(severityCounts([])).toEqual({ error: 0, warning: 0, info: 0 })
+    expect(severityCounts([sev('error'), sev('error'), sev('info')])).toEqual({
+      error: 2,
+      warning: 0,
+      info: 1,
+    })
+  })
+
+  it.each([
+    [[], []],
+    [['error'], ['error']],
+    [['warning'], ['warning']],
+    [['info'], ['info']],
+    // Error first, then warning; info joins neither while any is shown.
+    [['error', 'warning', 'info'], ['error', 'warning']],
+    [['warning', 'info'], ['warning']],
+    [['error', 'info'], ['error']],
+    [['error', 'warning'], ['error', 'warning']],
+  ] as const)('badges %j as %j', (severities, expected) => {
+    expect(badgeSeverities(severities.map(sev))).toEqual(expected)
+  })
+
+  it('filters the rule list by the lowest shown severity', () => {
+    // Info is the lowest shown level only when it is the only one.
+    expect(lowestShownSeverity([sev('info'), sev('info')])).toBe('info')
+    expect(lowestShownSeverity([sev('warning'), sev('info')])).toBe('warning')
+    expect(lowestShownSeverity([sev('error'), sev('warning'), sev('info')])).toBe('warning')
+    expect(lowestShownSeverity([sev('error')])).toBe('error')
+    expect(lowestShownSeverity([])).toBeNull()
+
+    // A rule keeps a finding at or above the floor: an error survives a
+    // warning floor, an info does not.
+    const atFloor = (list: Finding['severity'][], floor: 'error' | 'warning' | 'info') =>
+      hasFindingAtOrAbove(
+        { actions: new Map(), conditions: new Map(), rule: list.map(sev) },
+        floor,
+      )
+    expect(atFloor(['error'], 'warning')).toBe(true)
+    expect(atFloor(['info', 'warning'], 'warning')).toBe(true)
+    expect(atFloor(['info'], 'warning')).toBe(false)
+    expect(atFloor(['warning', 'info'], 'info')).toBe(true)
+    expect(atFloor([], 'info')).toBe(false)
+  })
+})
+
+/**
+ * The dialog's severity groups (#922, docs/ui/diagnostics.md § In the
+ * dialog): findings grouped most severe first under toggling headings;
+ * error and warning open by default, info collapsed.
+ */
+describe('severity groups (#922)', () => {
+  const sev = (severity: Finding['severity']) => finding({ severity })
+
+  it('groups most severe first and skips empty levels', () => {
+    const groups = severityGroups(
+      [sev('info'), sev('error'), sev('info'), sev('warning')],
+      { error: true, warning: true, info: true },
+    )
+    expect(groups.map((group) => group.severity)).toEqual(['error', 'warning', 'info'])
+    expect(groups.map((group) => group.findings.length)).toEqual([1, 1, 2])
+
+    const only = severityGroups([sev('warning')], { ...DEFAULT_GROUP_OPEN })
+    expect(only.map((group) => group.severity)).toEqual(['warning'])
+  })
+
+  it('opens error and warning by default and collapses info', () => {
+    expect(DEFAULT_GROUP_OPEN).toEqual({ error: true, warning: true, info: false })
+    const groups = severityGroups(
+      [sev('info'), sev('error'), sev('warning')],
+      DEFAULT_GROUP_OPEN,
+    )
+    expect(groups.map((group) => group.open)).toEqual([true, true, false])
   })
 })
 

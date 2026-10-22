@@ -2,7 +2,7 @@ import type { Finding, SourceSpan } from './types/generated/wright-agent-v1'
 import type { RuleContent } from './view'
 
 /** The three severities, most severe first (`error` < `warning` < `info`). */
-const SEVERITIES = ['error', 'warning', 'info'] as const
+export const SEVERITIES = ['error', 'warning', 'info'] as const
 export type Severity = (typeof SEVERITIES)[number]
 
 const rank = (severity: Severity): number => SEVERITIES.indexOf(severity)
@@ -21,6 +21,71 @@ export function mostSevere(findings: readonly Finding[]): Severity {
     if (rank(finding.severity) < rank(top)) top = finding.severity
   }
   return top
+}
+
+/** Findings per severity, in spec order; a level with no findings holds []. */
+export function severityCounts(findings: readonly Finding[]): Record<Severity, number> {
+  const counts: Record<Severity, number> = { error: 0, warning: 0, info: 0 }
+  for (const finding of findings) counts[finding.severity] += 1
+  return counts
+}
+
+/**
+ * docs/ui/diagnostics.md § In place · Toolbar: the severities the
+ * Diagnostics button badges — error and warning whenever either has
+ * findings; info joins them only when neither error nor warning exists.
+ */
+export function badgeSeverities(findings: readonly Finding[]): Severity[] {
+  const counts = severityCounts(findings)
+  const hot = SEVERITIES.filter((severity) => severity !== 'info' && counts[severity] > 0)
+  return hot.length > 0 ? hot : counts.info > 0 ? ['info'] : []
+}
+
+/**
+ * docs/ui/diagnostics.md § In the dialog: the severity groups shown under
+ * their toggling headings — error and warning open by default, info
+ * collapsed. `open` is the session-persisted choice.
+ */
+export interface SeverityGroup {
+  severity: Severity
+  findings: Finding[]
+  open: boolean
+}
+
+/** The groups the dialog renders, most severe first, empties skipped. */
+export function severityGroups(
+  findings: readonly Finding[],
+  open: Readonly<Record<Severity, boolean>>,
+): SeverityGroup[] {
+  return SEVERITIES.flatMap((severity) => {
+    const group = findings.filter((finding) => finding.severity === severity)
+    return group.length > 0 ? [{ severity, findings: group, open: open[severity] }] : []
+  })
+}
+
+/** The dialog's default heading state: error and warning open, info closed. */
+export const DEFAULT_GROUP_OPEN: Record<Severity, boolean> = {
+  error: true,
+  warning: true,
+  info: false,
+}
+
+/**
+ * docs/ui/diagnostics.md § In place · Filter: the least severe level the
+ * toolbar shows — the last severity the Diagnostics button badges, so
+ * info counts only when no error or warning exists. No findings means
+ * no level is shown and the toggle keeps every rule (null).
+ */
+export function lowestShownSeverity(findings: readonly Finding[]): Severity | null {
+  return badgeSeverities(findings).at(-1) ?? null
+}
+
+/** A rule the "Only rules with findings" toggle keeps at the shown level. */
+export function hasFindingAtOrAbove(
+  slots: RuleFindings,
+  lowest: Severity,
+): boolean {
+  return allFor(slots).some((finding) => rank(finding.severity) <= rank(lowest))
 }
 
 /** Where a finding lands inside its rule. */
