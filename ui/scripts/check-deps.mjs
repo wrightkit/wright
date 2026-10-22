@@ -16,7 +16,8 @@ const { dependencies = {} } = JSON.parse(readFileSync(join(uiDir, 'package.json'
 const escapeRegExp = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 const missing = Object.keys(dependencies).filter(
-  (name) => !new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i').test(doc),
+  // Package-name boundaries — \b fails on scoped names like `@lucide/svelte`.
+  (name) => !new RegExp(`(?<![\\w@/.-])${escapeRegExp(name)}(?![\\w/.-])`, 'i').test(doc),
 )
 
 if (missing.length > 0) {

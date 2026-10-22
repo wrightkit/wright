@@ -21,7 +21,8 @@ describe('the runtime dependency registry (ADR-0036 decision 6)', () => {
     expect(names.length, 'package.json declares runtime dependencies').toBeGreaterThan(0)
     for (const name of names) {
       expect(
-        new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i').test(doc),
+        // Package-name boundaries — \b fails on scoped names like `@lucide/svelte`.
+        new RegExp(`(?<![\\w@/.-])${escapeRegExp(name)}(?![\\w/.-])`, 'i').test(doc),
         `${name} is registered in docs/ui/dependencies.md`,
       ).toBe(true)
     }
