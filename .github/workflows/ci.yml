@@ -314,14 +314,15 @@ jobs:
         run: cargo build --locked -p lpp-mock-provider
         working-directory: language-provider-protocol
 
-      # The LPP suites self-skip when this variable is unset — dropping it
-      # would turn the step green while running nothing.
+      # The LPP suites are `#[ignore]`d pending LPP_MOCK_PROVIDER, so this
+      # runs them explicitly; `--ignored` fails when no test matches, so an
+      # unset variable can never produce a green run that executed nothing.
       - name: Run LPP tests
         env:
           LPP_MOCK_PROVIDER: ${{ github.workspace }}/language-provider-protocol/target/debug/lpp-mock-provider
         run: >-
           cargo test --locked -p wright-lpp -p wright-driver
-          --test mock_provider --test lpp --test provider_edit
+          --test mock_provider --test lpp --test provider_edit -- --ignored
 
   cli-behavior:
     name: CLI behavior
@@ -663,7 +664,11 @@ jobs:
   # required job must never read as a pass.
   # `benchmark` (Benchmarks) and `metrics-latency` (Metrics latency (trend))
   # are deliberately NOT in `needs`: they are non-blocking evidence jobs.
-  # Every other job above must be listed here.
+  # Every other job above must be listed here — the marker below is generated
+  # by `scripts/ci-required-jobs.sh sync` from `scripts/lib/required-jobs.jq`,
+  # the same source the step's required-when conditions are evaluated from,
+  # so the two cannot drift.
+  # needs: agent-guide cli-behavior dist-cli-build dist-validation lpp-integration metrics-drift metrics-shard opy-integration rust-quality ui workshop-integration wright-cli-build
   ci-result:
     name: CI result
     if: always()
@@ -689,25 +694,15 @@ jobs:
           NEEDS: ${{ toJSON(needs) }}
           PATHS: ${{ toJSON(needs.paths.outputs) }}
         run: |
+          # The needs list above and the required-when matrix come from the
+          # same source — `required-jobs.jq` evaluated here and the `# needs:`
+          # marker `ci-required-jobs.sh` syncs into ci.yml.
+          chmod +x scripts/ci-required-jobs.sh
+          scripts/ci-required-jobs.sh check
           echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
           fail=0
           echo "$NEEDS" | jq -e 'all(.[]; .result != "failure" and .result != "cancelled")' >/dev/null || fail=1
-          # Each job's required-when expression must mirror its own `if:` —
-          # change both together whenever a job's path condition changes.
-          required=$(jq -n --argjson p "$PATHS" '{
-            "rust-quality": ($p.rust_core == "true"),
-            "workshop-integration": ($p.rust_core == "true"),
-            "wright-cli-build": ($p.opy == "true" or $p.cli == "true"),
-            "opy-integration": ($p.opy == "true"),
-            "lpp-integration": ($p.lpp == "true"),
-            "cli-behavior": ($p.cli == "true"),
-            "metrics-shard": ($p.opy == "true"),
-            "metrics-drift": ($p.opy == "true"),
-            "dist-cli-build": ($p.dist == "true"),
-            "dist-validation": ($p.dist == "true"),
-            "agent-guide": ($p.agent_guide == "true"),
-            "ui": ($p.ui == "true")
-          }')
+          required=$(jq -n --argjson p "$PATHS" -f scripts/lib/required-jobs.jq)
           for job in $(jq -r 'keys[]' <<<"$required"); do
             result=$(jq -r --arg job "$job" '.[$job].result // "missing"' <<<"$NEEDS")
             if [[ "$(jq -r --arg job "$job" '.[$job]' <<<"$required")" == "true" && "$result" != "success" ]]; then

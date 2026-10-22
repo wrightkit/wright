@@ -6,8 +6,9 @@
 //! LPP conformance mock provider binary (see
 //! `crates/wright-lpp/tests/mock_provider.rs` for build instructions and the
 //! pinned `language-provider-protocol` commit); the `LPP_MOCK_PROVIDER`
-//! environment variable names it, and CI sets it. Without the variable the
-//! tests are skipped with a clear reason.
+//! environment variable names it, CI sets it, and every test is
+//! `#[ignore]`d on it so a missing variable can never produce a green run
+//! that executed nothing.
 
 #![allow(clippy::result_large_err)]
 
@@ -26,17 +27,16 @@ fn workshop_path() -> PathBuf {
     workspace_root().join("tests/fixtures/workshop/synthetic/control-flow.ws")
 }
 
-fn mock_provider_path() -> Option<PathBuf> {
+/// The `#[ignore]` reason gates each provider test — see
+/// `crates/wright-lpp/tests/mock_provider.rs` for the contract.
+fn mock_provider_path() -> PathBuf {
     match std::env::var("LPP_MOCK_PROVIDER") {
-        Ok(path) if !path.is_empty() => Some(PathBuf::from(path)),
-        _ => {
-            eprintln!(
-                "SKIPPED: LPP_MOCK_PROVIDER is not set; build the LPP mock provider from the \
-                 pinned language-provider-protocol commit and point LPP_MOCK_PROVIDER at it \
-                 (see crates/wright-lpp/tests/mock_provider.rs)"
-            );
-            None
-        }
+        Ok(path) if !path.is_empty() => PathBuf::from(path),
+        _ => panic!(
+            "LPP_MOCK_PROVIDER is not set; build the LPP mock provider from the pinned \
+             language-provider-protocol commit and point LPP_MOCK_PROVIDER at it \
+             (see crates/wright-lpp/tests/mock_provider.rs)"
+        ),
     }
 }
 
@@ -55,11 +55,10 @@ fn demo_documents() -> DocumentSet {
     documents
 }
 
+#[ignore = "requires LPP_MOCK_PROVIDER pointing at a built lpp-mock-provider; CI sets it (see .github/workflows/ci.yml)"]
 #[test]
 fn session_spawns_initializes_and_queries_a_provider() {
-    let Some(path) = mock_provider_path() else {
-        return;
-    };
+    let path = mock_provider_path();
     let mut registry = wright_lpp::ProviderRegistry::new();
     registry
         .register(wright_lpp::ProviderConfig::new(
@@ -133,11 +132,10 @@ fn missing_first_party_opy_provider_is_a_structured_local_failure() {
     ));
 }
 
+#[ignore = "requires LPP_MOCK_PROVIDER pointing at a built lpp-mock-provider; CI sets it (see .github/workflows/ci.yml)"]
 #[test]
 fn tool_service_exposes_the_provider_seam() {
-    let Some(path) = mock_provider_path() else {
-        return;
-    };
+    let path = mock_provider_path();
     let mut registry = wright_lpp::ProviderRegistry::new();
     registry
         .register(wright_lpp::ProviderConfig::new(

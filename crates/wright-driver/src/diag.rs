@@ -216,13 +216,7 @@ pub(crate) fn workshop_diag(
         workshop_rs::WorkshopError::Unknown { kind, span, .. }
         | workshop_rs::WorkshopError::UnknownWithCandidates { kind, span, .. }
         | workshop_rs::WorkshopError::NotDetected { kind, span, .. } => {
-            // Owner kinds are phrases (`"enum member"`); the emitted code is
-            // a single kebab-case token (`unknown-enum-member`, #789).
-            (
-                format!("unknown-{}", kind.replace(' ', "-")),
-                Stage::Frontend,
-                to_span(*span),
-            )
+            (unknown_kind_code(kind), Stage::Frontend, to_span(*span))
         }
         workshop_rs::WorkshopError::Malformed { span, .. } => {
             ("parse-error".to_string(), Stage::Frontend, to_span(*span))
@@ -237,10 +231,30 @@ pub(crate) fn workshop_diag(
         }
         _ => ("workshop-error".to_string(), Stage::Internal, None),
     };
-    let mut diagnostic = Diagnostic::error(code, stage, error.to_string());
+    let mut diagnostic = Diagnostic::error(&code, stage, error.to_string());
     diagnostic.span = span;
     diagnostic.source = Some(resolved.origin.clone());
     diagnostic
+}
+
+/// The `unknown-<kind>` diagnostic code for an owner kind: `workshop-rs`
+/// `kind`s are phrases (`"enum member"`) and diagnostic codes are single
+/// kebab-case tokens, so the emitted code kebab-cases the phrase
+/// (`unknown-enum-member`, #789).
+fn unknown_kind_code(kind: &str) -> String {
+    format!("unknown-{}", kind.replace(' ', "-"))
+}
+
+/// `root` as an absolute path; a single-component relative input
+/// (`loop.opy`) resolves its root to the empty path, which names the
+/// invocation cwd — canonicalization cannot recover it from an empty
+/// string, so the cwd answers directly.
+pub(crate) fn canonical_root_or_cwd(root: &std::path::Path) -> Option<std::path::PathBuf> {
+    match root.canonicalize() {
+        Ok(root) => Some(root),
+        Err(_) if root.as_os_str().is_empty() => std::env::current_dir().ok(),
+        Err(_) => Some(root.to_path_buf()),
+    }
 }
 
 pub(crate) fn source_provider_unavailable() -> Diagnostic {

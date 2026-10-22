@@ -305,26 +305,114 @@ pub fn query(result: &Value, all: bool) -> Value {
     output
 }
 
+/// Bound one declared list in place the way `cap` bounds a result
+/// member, recording the truncation note at `truncation[key]`.
+fn cap_declared(
+    items: &mut Vec<Value>,
+    truncation: &mut serde_json::Map<String, Value>,
+    key: &str,
+    limit: usize,
+    all: bool,
+) {
+    if all || items.len() <= limit {
+        return;
+    }
+    let total = items.len();
+    let by_code = by_code_counts(items);
+    items.truncate(limit);
+    let mut note =
+        json!({"total":total,"shown":limit,"truncated":total-limit,"expand":"--all / all: true"});
+    if let Some(by_code) = by_code {
+        note["byCode"] = by_code;
+    }
+    truncation.insert(key.to_string(), note);
+}
+
+/// The `costEstimate` payload shapes `cost` binds (#724, ADR-0030
+/// decision 3): the `--rule` drill-down carries `statements`/`byNode` and
+/// no `elementCount`/`findings`; a failed whole-program count reports a
+/// bare `budget` plus `elementCountUnavailable` and no `rules` member to
+/// cap. Only the declared lists are bounded — a payload matching no
+/// variant passes through rather than fabricating members.
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(untagged)]
+enum CostPayload {
+    /// The `--rule` drill-down for one rule (#724).
+    RuleDrillDown {
+        #[allow(dead_code)]
+        rule: serde_json::Map<String, Value>,
+        statements: Vec<Value>,
+        #[serde(rename = "byNode")]
+        by_node: Vec<Value>,
+        #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+        truncation: serde_json::Map<String, Value>,
+        #[serde(flatten)]
+        rest: serde_json::Map<String, Value>,
+    },
+    /// The whole-program view with per-rule element shares.
+    WholeProgram {
+        #[serde(rename = "elementCount")]
+        element_count: ElementCount,
+        #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+        truncation: serde_json::Map<String, Value>,
+        #[serde(flatten)]
+        rest: serde_json::Map<String, Value>,
+    },
+    /// A failed count: `{"budget": N}` plus `elementCountUnavailable`
+    /// (ADR-0030 decision 3) — no `rules` member exists to cap.
+    BudgetOnly {
+        #[serde(rename = "elementCount")]
+        element_count: BareBudget,
+        #[serde(flatten)]
+        rest: serde_json::Map<String, Value>,
+    },
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct ElementCount {
+    rules: Vec<Value>,
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    truncation: serde_json::Map<String, Value>,
+    #[serde(flatten)]
+    rest: serde_json::Map<String, Value>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct BareBudget {
+    #[allow(dead_code)] // the member fixes the shape; its value is not read
+    budget: u64,
+    #[serde(flatten)]
+    rest: serde_json::Map<String, Value>,
+}
+
 /// `elementCount.rules` is already ranked largest-first by the service, so the
 /// default view keeps the five largest like analyze hotspots; the generic cap
 /// would otherwise keep twenty.
 pub fn cost(result: &Value, all: bool) -> Value {
-    let mut output = result.clone();
-    // The `--rule` drill-down (#724) carries no `elementCount`/`findings`;
-    // bound its two lists and leave the rest of the payload as-is so the
-    // CLI/agent comparison sees exactly the same items.
-    if output.get("rule").is_some_and(|rule| rule.is_object()) {
-        cap(&mut output, "statements", 5, all);
-        cap(&mut output, "byNode", 5, all);
-        return output;
+    let mut payload = match serde_json::from_value::<CostPayload>(result.clone()) {
+        Ok(payload) => payload,
+        // An unexpected payload passes through under the generic bounds
+        // rather than fabricating members.
+        Err(_) => return query(&result.clone(), all),
+    };
+    match &mut payload {
+        CostPayload::RuleDrillDown {
+            statements,
+            by_node,
+            truncation,
+            ..
+        } => {
+            cap_declared(statements, truncation, "statements", 5, all);
+            cap_declared(by_node, truncation, "byNode", 5, all);
+        }
+        CostPayload::WholeProgram { element_count, .. } => {
+            let rules = &mut element_count.rules;
+            let truncation = &mut element_count.truncation;
+            cap_declared(rules, truncation, "rules", 5, all);
+        }
+        CostPayload::BudgetOnly { .. } => {}
     }
-    // A failed count reports `{"budget": N}` plus `elementCountUnavailable`
-    // (ADR-0030 decision 3) — only cap the per-rule shares when they exist;
-    // indexing `["rules"]` on the bare-budget shape would fabricate a null
-    // member.
-    if output["elementCount"]["rules"].is_array() {
-        cap(&mut output["elementCount"], "rules", 5, all);
-    }
+    let output = serde_json::to_value(payload).expect("the cost payload serializes");
     let mut output = query(&output, all);
     // Findings carry resolved span objects (#722), which cost roughly four
     // times the lint `location` string — on a large project the default
@@ -458,6 +546,36 @@ mod tests {
         let note = &bounded["elementCount"]["truncation"]["rules"];
         assert_eq!(note["total"], DEFAULT_ITEMS + 1);
         assert_eq!(note["shown"], 5);
+        assert_eq!(cost(&input, true), input);
+    }
+    #[test]
+    fn cost_rule_drilldown_caps_statements_and_by_node() {
+        // #724: the `--rule` drill-down carries `statements`/`byNode` and
+        // no `elementCount`; only its declared lists are capped.
+        let statements = (0..9)
+            .map(|i| json!({"name": format!("s{i}"), "count": i}))
+            .collect::<Vec<_>>();
+        let by_node = (0..9)
+            .map(|i| json!({"name": format!("n{i}"), "count": i}))
+            .collect::<Vec<_>>();
+        let input = json!({"rule":{"id":0,"name":"r"},"statements":statements,"byNode":by_node});
+        let bounded = cost(&input, false);
+        assert_eq!(bounded["statements"].as_array().unwrap().len(), 5);
+        assert_eq!(bounded["byNode"].as_array().unwrap().len(), 5);
+        assert_eq!(bounded["truncation"]["statements"]["total"], 9);
+        assert_eq!(bounded["truncation"]["byNode"]["total"], 9);
+        assert_eq!(cost(&input, true), input);
+    }
+    #[test]
+    fn cost_budget_only_reports_no_fabricated_rules() {
+        // ADR-0030 decision 3: a failed count is `{budget}` plus
+        // `elementCountUnavailable` — the typed shape binds no `rules`
+        // member and adds none.
+        let input = json!({"elementCount":{"budget":32768},"elementCountUnavailable":"e","exact":{},"findings":[]});
+        let bounded = cost(&input, false);
+        assert!(bounded["elementCount"].get("rules").is_none());
+        assert_eq!(bounded["elementCount"]["budget"], 32768);
+        assert_eq!(bounded["elementCountUnavailable"], "e");
         assert_eq!(cost(&input, true), input);
     }
     #[test]

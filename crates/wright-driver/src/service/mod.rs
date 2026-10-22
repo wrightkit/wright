@@ -405,8 +405,8 @@ impl<'a> ToolService<'a> {
             ToolRequest::Findings { .. } => Some("findings"),
             ToolRequest::PersistentObjects { .. } => Some("persistentObjects"),
             // `references` without selection fields answers a bare array —
-            // the `handle` merge then moves `references`/`selection` onto the
-            // usage payload and stamps `snapshot` there.
+            // `merge_references_into_usage` then folds it onto the usage
+            // payload and stamps `snapshot` there.
             ToolRequest::References { .. } => Some("references"),
             ToolRequest::Project
             | ToolRequest::Usage { .. }

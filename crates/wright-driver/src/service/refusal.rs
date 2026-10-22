@@ -42,6 +42,30 @@ impl<'a> ToolService<'a> {
         }
     }
 
+    /// `references` reports the symbol's usage payload with the reference
+    /// list and selection moved onto it: a bare-array listing (no selection
+    /// fields) becomes `references`; a `{"references":…, "selection":…}`
+    /// result keeps both. `snapshot` stamps the generation onto the usage
+    /// payload — the bare-array listing shape has nowhere for it.
+    fn merge_references_into_usage(
+        &self,
+        references_result: serde_json::Value,
+        usage: serde_json::Value,
+    ) -> serde_json::Value {
+        let mut payload = usage;
+        payload["snapshot"] = json!(self.generation);
+        match references_result {
+            serde_json::Value::Object(mut selected) => {
+                payload["references"] = selected.remove("references").unwrap_or_default();
+                if let Some(selection) = selected.remove("selection") {
+                    payload["selection"] = selection;
+                }
+            }
+            result => payload["references"] = result,
+        }
+        payload
+    }
+
     fn handle_response(&mut self, request: &ToolRequest) -> ToolResponse {
         let response = self.handle_full(request);
         let ToolResponse::Ok { mut result } = response else {
@@ -67,17 +91,8 @@ impl<'a> ToolService<'a> {
                     ToolResponse::Ok { result } => result,
                     other => return other,
                 };
-                let mut payload = usage;
-                payload["snapshot"] = json!(self.generation);
-                if let Some(selected) = result.as_object_mut() {
-                    payload["references"] = selected.remove("references").unwrap_or_default();
-                    if let Some(selection) = selected.remove("selection") {
-                        payload["selection"] = selection;
-                    }
-                } else {
-                    payload["references"] = result;
-                }
-                result = crate::essential::query(&payload, *all);
+                result =
+                    crate::essential::query(&self.merge_references_into_usage(result, usage), *all);
             }
             ToolRequest::CostEstimate { all, .. } => result = crate::essential::cost(&result, *all),
             ToolRequest::Rules { all, .. }

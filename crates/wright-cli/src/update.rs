@@ -286,8 +286,7 @@ fn provider_report(previous: Option<&str>, resolved: &ResolvedOpyProvider) {
     }
 }
 
-/// `--check` resolution for the provider target: report availability without
-/// downloading or modifying anything.
+/// `--check` for the provider target: report availability without changes.
 fn provider_check(
     installed: Option<&ResolvedOpyProvider>,
     requested: Option<&str>,
@@ -430,14 +429,7 @@ fn self_update(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateEr
             )));
         }
         Some(Ordering::Less) => {}
-        // `current` is `CARGO_PKG_VERSION` and `target_version` already
-        // parsed, so this arm is unreachable by construction — but a version
-        // outside the release grammar is a failure, never a panic (#641).
-        None => {
-            return Err(UpdateError::failed(format!(
-                "could not compare installed version '{current}' with '{target_version}'"
-            )));
-        }
+        None => return unreachable_version_pair(&current, &target_version),
     }
 
     if check_only {
@@ -638,6 +630,14 @@ fn parse_version(version: &str) -> Result<Version, UpdateError> {
             "invalid version '{version}' (expected semver like 0.1.0)"
         ))
     })
+}
+
+/// `self_update` reaches `None` only if the release-grammar construction
+/// stopped holding; a failure, never a panic (#641).
+fn unreachable_version_pair(current: &str, target: &str) -> Result<u8, UpdateError> {
+    Err(UpdateError::failed(format!(
+        "could not compare installed version '{current}' with '{target}'"
+    )))
 }
 
 fn parse_version_str(version: &str) -> Option<Version> {

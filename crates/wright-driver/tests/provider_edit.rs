@@ -25,17 +25,16 @@ fn workshop_path() -> PathBuf {
     workspace_root().join("tests/fixtures/workshop/synthetic/control-flow.ws")
 }
 
-fn mock_provider_path() -> Option<PathBuf> {
+/// The `#[ignore]` reason gates each provider test — see
+/// `crates/wright-lpp/tests/mock_provider.rs` for the contract.
+fn mock_provider_path() -> PathBuf {
     match std::env::var("LPP_MOCK_PROVIDER") {
-        Ok(path) if !path.is_empty() => Some(PathBuf::from(path)),
-        _ => {
-            eprintln!(
-                "SKIPPED: LPP_MOCK_PROVIDER is not set; build the LPP mock provider from the \
-                 pinned language-provider-protocol commit and point LPP_MOCK_PROVIDER at it \
-                 (see crates/wright-lpp/tests/mock_provider.rs)"
-            );
-            None
-        }
+        Ok(path) if !path.is_empty() => PathBuf::from(path),
+        _ => panic!(
+            "LPP_MOCK_PROVIDER is not set; build the LPP mock provider from the pinned \
+             language-provider-protocol commit and point LPP_MOCK_PROVIDER at it \
+             (see crates/wright-lpp/tests/mock_provider.rs)"
+        ),
     }
 }
 
@@ -50,7 +49,7 @@ fn session_with_providers(providers: wright_lpp::ProviderRegistry) -> CompilerSe
 }
 
 fn tool_service(without: &[&str]) -> ToolService<'static> {
-    let path = mock_provider_path().expect("mock provider path");
+    let path = mock_provider_path();
     let mut registry = wright_lpp::ProviderRegistry::new();
     let mut args = Vec::new();
     for capability in without {
@@ -161,11 +160,10 @@ fn rename_all_occurrences_transaction() -> EditTransaction {
     .expect("transaction")
 }
 
+#[ignore = "requires LPP_MOCK_PROVIDER pointing at a built lpp-mock-provider; CI sets it (see .github/workflows/ci.yml)"]
 #[test]
 fn caller_transaction_validates_through_the_provider() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
+    let _ = mock_provider_path();
     let mut service = tool_service(&[]);
     let documents = single_document_set();
     let request = ToolRequest::ProviderValidateEdit {
@@ -186,11 +184,10 @@ fn caller_transaction_validates_through_the_provider() {
     assert!(preview[0].new_text.contains("solution = [ twice, twice ]"));
 }
 
+#[ignore = "requires LPP_MOCK_PROVIDER pointing at a built lpp-mock-provider; CI sets it (see .github/workflows/ci.yml)"]
 #[test]
 fn caller_transaction_that_breaks_the_source_refuses() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
+    let _ = mock_provider_path();
     let mut service = tool_service(&[]);
     let documents = single_document_set();
     // Deleting the target value produces a syntax error; the provider's
@@ -225,11 +222,10 @@ fn caller_transaction_that_breaks_the_source_refuses() {
 /// Provider mutations carry their own documents and project context: an
 /// unrelated broken session project neither blocks them nor gets loaded by
 /// them.
+#[ignore = "requires LPP_MOCK_PROVIDER pointing at a built lpp-mock-provider; CI sets it (see .github/workflows/ci.yml)"]
 #[test]
 fn provider_mutations_do_not_require_the_session_project() {
-    let Some(provider) = mock_provider_path() else {
-        return;
-    };
+    let provider = mock_provider_path();
     let mut registry = wright_lpp::ProviderRegistry::new();
     registry
         .register(wright_lpp::ProviderConfig::new(

@@ -246,7 +246,7 @@ mod server {
         token: &str,
     ) -> tiny_http::Response<Cursor<Vec<u8>>> {
         if header(request, "Host") != Some(authority) {
-            return respond(
+            return keep_alive_response(
                 403,
                 "text/plain; charset=utf-8",
                 "forbidden: this UI is bound to its own loopback address"
@@ -257,7 +257,7 @@ mod server {
         if let Some(sent) = header(request, "Origin")
             && sent != origin
         {
-            return respond(
+            return keep_alive_response(
                 403,
                 "text/plain; charset=utf-8",
                 "forbidden: the request origin is not this UI"
@@ -278,7 +278,7 @@ mod server {
             ("POST", APPLY_PATH) => apply(service, request, token),
             ("GET", "/") => asset("index.html"),
             ("GET", name) => asset(name.trim_start_matches('/')),
-            _ => respond(404, "text/plain; charset=utf-8", b"not found".to_vec()),
+            _ => keep_alive_response(404, "text/plain; charset=utf-8", b"not found".to_vec()),
         }
     }
 
@@ -291,7 +291,7 @@ mod server {
     ) -> Result<String, tiny_http::Response<Cursor<Vec<u8>>>> {
         let expected = format!("Bearer {token}");
         if header(request, "Authorization") != Some(expected.as_str()) {
-            return Err(respond(
+            return Err(keep_alive_response(
                 403,
                 "text/plain; charset=utf-8",
                 b"forbidden: missing or wrong session token".to_vec(),
@@ -303,7 +303,7 @@ mod server {
             .take(MAX_BODY + 1)
             .read_to_end(&mut body);
         if read.is_err() || body.len() as u64 > MAX_BODY {
-            return Err(respond(
+            return Err(keep_alive_response(
                 400,
                 "application/json",
                 br#"{"error":{"code":"malformed-request","message":"request body is unreadable or too large"}}"#
@@ -311,7 +311,7 @@ mod server {
             ));
         }
         String::from_utf8(body).map_err(|_| {
-            respond(
+            keep_alive_response(
                 400,
                 "application/json",
                 br#"{"error":{"code":"malformed-request","message":"request is not valid UTF-8"}}"#
@@ -335,7 +335,7 @@ mod server {
         // `serve` writes the dispatch result as one newline-terminated
         // line; the endpoint returns the same bytes, terminator included,
         // so both transports answer byte-identically (ADR-0032).
-        respond(
+        keep_alive_response(
             200,
             "application/json",
             format!("{}\n", serve::dispatch(service, &body)).into_bytes(),
@@ -361,7 +361,7 @@ mod server {
         let transaction = match serde_json::from_str::<EditTransaction>(&body) {
             Ok(transaction) => transaction,
             Err(_) => {
-                return respond(
+                return keep_alive_response(
                     400,
                     "application/json",
                     br#"{"error":{"code":"malformed-request","message":"the apply body is not an edit transaction"}}"#
@@ -370,7 +370,7 @@ mod server {
             }
         };
         let result = service.apply_edit_transaction(&transaction);
-        respond(
+        keep_alive_response(
             200,
             "application/json",
             format!("{}\n", serde_json::to_string(&result).expect("serializes")).into_bytes(),
@@ -384,8 +384,10 @@ mod server {
             None
         };
         match found {
-            Some((_, content_type, bytes)) => respond(200, content_type, bytes.to_vec()),
-            None => respond(404, "text/plain; charset=utf-8", b"not found".to_vec()),
+            Some((_, content_type, bytes)) => {
+                keep_alive_response(200, content_type, bytes.to_vec())
+            }
+            None => keep_alive_response(404, "text/plain; charset=utf-8", b"not found".to_vec()),
         }
     }
 
@@ -397,16 +399,16 @@ mod server {
             .map(|header| header.value.as_str())
     }
 
-    fn respond(
+    /// The response every route answers, keep-alive enabled: each
+    /// connection's reader parks on its own socket in tiny_http's worker
+    /// pool, so an idle preconnected socket never stalls the serial
+    /// dispatch loop — and `Connection: close` would drop requests a
+    /// browser already dispatched onto a socket it believed reusable.
+    fn keep_alive_response(
         status: u16,
         content_type: &str,
         body: Vec<u8>,
     ) -> tiny_http::Response<Cursor<Vec<u8>>> {
-        // Keep-alive stays enabled on purpose: each connection's reader task
-        // parks on its own socket inside tiny_http's unbounded worker pool, so
-        // an idle or preconnected socket never stalls the serial dispatch
-        // loop. Answering `Connection: close` instead would drop requests the
-        // browser had already dispatched onto a socket it believed reusable.
         tiny_http::Response::empty(status)
             .with_data(Cursor::new(body.clone()), Some(body.len()))
             .with_header(

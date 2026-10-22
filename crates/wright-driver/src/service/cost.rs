@@ -201,10 +201,8 @@ impl<'a> ToolService<'a> {
             ));
         }
         let cost_run = self.session.cost_run(loaded);
-        if run.baseline.is_some()
-            && !crate::cache::ci()
-            && !crate::cache::baseline_exists(&cost_run)
-        {
+        let env = crate::cache::CacheEnv::read();
+        if run.baseline.is_some() && !env.ci && !crate::cache::baseline_exists_in(&cost_run, &env) {
             return Err(ToolErrorInfo::new(
                 "invalid-selection",
                 format!(
@@ -216,7 +214,9 @@ impl<'a> ToolService<'a> {
         let Some(snapshot) = self.session.cost_snapshot(loaded) else {
             return Ok(None);
         };
-        Ok(crate::cache::compare_and_record(&cost_run, &snapshot))
+        Ok(crate::cache::compare_and_record_in(
+            &cost_run, &snapshot, &env,
+        ))
     }
 
     /// The `costEstimate` drill-down for one declared rule name (#724):

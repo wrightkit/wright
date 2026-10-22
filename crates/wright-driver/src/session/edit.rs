@@ -83,11 +83,7 @@ impl CompilerSession {
             // stdin was already consumed by the lint pass; a second resolve
             // would read EOF or block. Fixes still refuse directly: absent
             // sources let `validate_transaction` answer `edit-input-stdin`.
-            let sources = if self.config.input.path().is_some() {
-                current_sources(&self.config)
-            } else {
-                None
-            };
+            let sources = current_sources_once_stdin(&self.config);
             let outcomes = self
                 .fix_outcomes(&envelope.result.findings, sources.as_ref())
                 .into_iter()
@@ -389,6 +385,20 @@ fn current_sources(config: &crate::config::SessionConfig) -> Option<BTreeMap<Str
     input::resolve(config)
         .ok()
         .map(|resolved| BTreeMap::from([(resolved.display, resolved.text)]))
+}
+
+/// `lint_fix`'s preview path resolves the input once — the lint pass already
+/// consumed stdin, so a stdin/in-memory input gets no second resolve (it
+/// would read EOF or block) and `None` lets `validate_transaction` refuse
+/// each fix `edit-input-stdin`. A path input resolves its on-disk text.
+fn current_sources_once_stdin(
+    config: &crate::config::SessionConfig,
+) -> Option<BTreeMap<String, String>> {
+    if config.input.path().is_some() {
+        current_sources(config)
+    } else {
+        None
+    }
 }
 
 fn recompute_verdict(envelope: &mut Envelope<LintResult>) {

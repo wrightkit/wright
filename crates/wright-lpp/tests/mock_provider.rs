@@ -8,9 +8,11 @@
 //! by the provider through the normal `invalidLanguage` error path.
 //!
 //! The provider binary is located through the `LPP_MOCK_PROVIDER`
-//! environment variable. When the variable is absent the tests are skipped
-//! with a clear reason; CI sets it (see `.github/workflows/ci.yml`) so the
-//! suite is REQUIRED there. Build the provider from the pinned
+//! environment variable; every test is `#[ignore]`d on it. CI sets the
+//! variable (see `.github/workflows/ci.yml`) and runs the suite with
+//! `--ignored`, which fails when no test ran — a missing variable can
+//! never produce a green run that executed nothing. Build the provider
+//! from the pinned
 //! `language-provider-protocol` commit with:
 //!
 //! ```text
@@ -23,7 +25,7 @@
 //!
 //! ```text
 //! LPP_MOCK_PROVIDER=language-provider-protocol/target/debug/lpp-mock-provider \
-//!   cargo test -p wright-lpp --test mock_provider
+//!   cargo test -p wright-lpp --test mock_provider -- --ignored
 //! ```
 
 #![allow(clippy::result_large_err)]
@@ -47,17 +49,18 @@ const CLEAN_PUZZLE: &str = "puzzle clean {\n  target = 40\n  start = 10\n  ops {
 
 const BROKEN_PUZZLE: &str = "puzzle broken {\n  target = 40\n  start = 10\n  ops {\n    double: x => x * 2\n  }\n  solution = [ triple ]\n}";
 
-fn mock_provider_path() -> Option<PathBuf> {
+/// The `#[ignore]` reason on every test below is the gate: an unset
+/// `LPP_MOCK_PROVIDER` keeps the test out of default `cargo test` runs, and
+/// CI's `--ignored` invocation fails when no test ran — a missing variable
+/// can never produce a green run that executed nothing.
+fn mock_provider_path() -> PathBuf {
     match std::env::var("LPP_MOCK_PROVIDER") {
-        Ok(path) if !path.is_empty() => Some(PathBuf::from(path)),
-        _ => {
-            eprintln!(
-                "SKIPPED: LPP_MOCK_PROVIDER is not set; build the LPP mock provider \
-                 from the pinned language-provider-protocol commit {PINNED_LPP_COMMIT} \
-                 (cargo build -p lpp-mock-provider) and point LPP_MOCK_PROVIDER at it."
-            );
-            None
-        }
+        Ok(path) if !path.is_empty() => PathBuf::from(path),
+        _ => panic!(
+            "LPP_MOCK_PROVIDER is not set; build the LPP mock provider from the pinned \
+             language-provider-protocol commit {PINNED_LPP_COMMIT} \
+             (cargo build -p lpp-mock-provider) and point LPP_MOCK_PROVIDER at it"
+        ),
     }
 }
 
@@ -80,7 +83,7 @@ fn clean_document_set() -> DocumentSet {
 }
 
 fn provider() -> StdioLanguageProvider {
-    let path = mock_provider_path().expect("mock provider path");
+    let path = mock_provider_path();
     StdioLanguageProvider::spawn(&path, &[], std::time::Duration::from_secs(30))
         .expect("provider spawns")
 }
@@ -102,11 +105,10 @@ fn protocol_tuple(version: &str) -> (u32, u32) {
     (parse(parts.next()), parse(parts.next()))
 }
 
+#[ignore = "requires LPP_MOCK_PROVIDER pointing at a built lpp-mock-provider; CI sets it (see .github/workflows/ci.yml)"]
 #[test]
 fn initializes_and_negotiates_capabilities_with_x_demo_lang() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
+    let _ = mock_provider_path();
     let (mut provider, result) = initialize();
     assert_eq!(result.protocol_version, "1.0");
     assert_eq!(result.server_info.name, "lpp-mock-provider");
@@ -131,11 +133,10 @@ fn initializes_and_negotiates_capabilities_with_x_demo_lang() {
     assert_eq!(provider.exit_status(), Some(0));
 }
 
+#[ignore = "requires LPP_MOCK_PROVIDER pointing at a built lpp-mock-provider; CI sets it (see .github/workflows/ci.yml)"]
 #[test]
 fn registry_lookup_is_by_opaque_language_id() {
-    let Some(path) = mock_provider_path() else {
-        return;
-    };
+    let path = mock_provider_path();
     let mut registry = ProviderRegistry::new();
     registry
         .register(ProviderConfig::new(DEMO_LANGUAGE_ID, path, Vec::new()))
@@ -166,11 +167,10 @@ fn registry_lookup_is_by_opaque_language_id() {
     );
 }
 
+#[ignore = "requires LPP_MOCK_PROVIDER pointing at a built lpp-mock-provider; CI sets it (see .github/workflows/ci.yml)"]
 #[test]
 fn check_reports_clean_and_broken_documents() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
+    let _ = mock_provider_path();
     let (mut provider, _) = initialize();
 
     let clean = clean_document_set();
@@ -197,11 +197,10 @@ fn check_reports_clean_and_broken_documents() {
     provider.shutdown().expect("shutdown");
 }
 
+#[ignore = "requires LPP_MOCK_PROVIDER pointing at a built lpp-mock-provider; CI sets it (see .github/workflows/ci.yml)"]
 #[test]
 fn compile_produces_an_opaque_artifact_and_refuses_on_errors() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
+    let _ = mock_provider_path();
     let (mut provider, _) = initialize();
 
     let compiled = provider
@@ -242,11 +241,10 @@ fn compile_produces_an_opaque_artifact_and_refuses_on_errors() {
     provider.shutdown().expect("shutdown");
 }
 
+#[ignore = "requires LPP_MOCK_PROVIDER pointing at a built lpp-mock-provider; CI sets it (see .github/workflows/ci.yml)"]
 #[test]
 fn reconstruct_roundtrips_an_artifact_and_refuses_unknown_formats() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
+    let _ = mock_provider_path();
     let (mut provider, _) = initialize();
 
     let compiled = provider
@@ -283,11 +281,10 @@ fn reconstruct_roundtrips_an_artifact_and_refuses_unknown_formats() {
     provider.shutdown().expect("shutdown");
 }
 
+#[ignore = "requires LPP_MOCK_PROVIDER pointing at a built lpp-mock-provider; CI sets it (see .github/workflows/ci.yml)"]
 #[test]
 fn symbols_definition_and_references_resolve_across_the_document() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
+    let _ = mock_provider_path();
     let (mut provider, _) = initialize();
     let documents = clean_document_set();
 
@@ -352,11 +349,10 @@ fn symbols_definition_and_references_resolve_across_the_document() {
     provider.shutdown().expect("shutdown");
 }
 
+#[ignore = "requires LPP_MOCK_PROVIDER pointing at a built lpp-mock-provider; CI sets it (see .github/workflows/ci.yml)"]
 #[test]
 fn rename_computes_source_edits_and_refuses_invalid_names_and_collisions() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
+    let _ = mock_provider_path();
     let (mut provider, _) = initialize();
     let documents = clean_document_set();
     let uri = "file:///project/puzzle.xdl";
@@ -414,11 +410,10 @@ fn rename_computes_source_edits_and_refuses_invalid_names_and_collisions() {
     provider.shutdown().expect("shutdown");
 }
 
+#[ignore = "requires LPP_MOCK_PROVIDER pointing at a built lpp-mock-provider; CI sets it (see .github/workflows/ci.yml)"]
 #[test]
 fn validate_edits_applies_the_normative_rules() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
+    let _ = mock_provider_path();
     let (mut provider, _) = initialize();
     let document = demo_document("file:///project/puzzle.xdl", CLEAN_PUZZLE);
 
@@ -450,11 +445,10 @@ fn validate_edits_applies_the_normative_rules() {
     provider.shutdown().expect("shutdown");
 }
 
+#[ignore = "requires LPP_MOCK_PROVIDER pointing at a built lpp-mock-provider; CI sets it (see .github/workflows/ci.yml)"]
 #[test]
 fn unserved_language_id_is_refused_by_the_provider() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
+    let _ = mock_provider_path();
     let (mut provider, _) = initialize();
     let mut documents = DocumentSet::new();
     documents.insert(
@@ -477,11 +471,10 @@ fn unserved_language_id_is_refused_by_the_provider() {
     provider.shutdown().expect("shutdown");
 }
 
+#[ignore = "requires LPP_MOCK_PROVIDER pointing at a built lpp-mock-provider; CI sets it (see .github/workflows/ci.yml)"]
 #[test]
 fn missing_capability_is_an_explicit_refusal_not_a_fallback() {
-    let Some(path) = mock_provider_path() else {
-        return;
-    };
+    let path = mock_provider_path();
     let mut registry = ProviderRegistry::new();
     registry
         .register(ProviderConfig::new(
@@ -516,22 +509,20 @@ fn missing_capability_is_an_explicit_refusal_not_a_fallback() {
     provider.shutdown().expect("shutdown");
 }
 
+#[ignore = "requires LPP_MOCK_PROVIDER pointing at a built lpp-mock-provider; CI sets it (see .github/workflows/ci.yml)"]
 #[test]
 fn graceful_shutdown_exits_with_status_zero() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
+    let _ = mock_provider_path();
     let mut provider = provider();
     provider.initialize(None).expect("initialize");
     provider.shutdown().expect("shutdown");
     assert_eq!(provider.exit_status(), Some(0));
 }
 
+#[ignore = "requires LPP_MOCK_PROVIDER pointing at a built lpp-mock-provider; CI sets it (see .github/workflows/ci.yml)"]
 #[test]
 fn provider_crash_fails_requests_with_an_exit_status() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
+    let _ = mock_provider_path();
     let (command, args): (&str, Vec<String>) = if cfg!(windows) {
         ("cmd", vec!["/C".to_string(), "exit 3".to_string()])
     } else {
@@ -564,11 +555,10 @@ fn spawn_failure_is_deterministic() {
     assert!(matches!(error, ProviderError::Spawn { .. }));
 }
 
+#[ignore = "requires LPP_MOCK_PROVIDER pointing at a built lpp-mock-provider; CI sets it (see .github/workflows/ci.yml)"]
 #[test]
 fn provider_without_shutdown_is_cleaned_up_on_drop() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
+    let _ = mock_provider_path();
     let (provider, _) = initialize();
     drop(provider);
 }
