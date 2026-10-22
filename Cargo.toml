@@ -23,7 +23,7 @@ wright-driver = { path = "crates/wright-driver" }
 wright-transform = { path = "crates/wright-transform" }
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 unsafe_op_in_unsafe_fn = "deny"
 unreachable_pub = "deny"
 

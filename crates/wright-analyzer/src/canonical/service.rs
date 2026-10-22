@@ -114,6 +114,7 @@ impl<'a> SemanticService<'a> {
         )
     }
 
+    #[allow(unsafe_code)] // hotpath 0.28 emits `#[unsafe(export_name)]` statics
     fn with_program_and_origin_and_config_and_registry(
         program: ProgramSource<'a>,
         origin: Origin,
@@ -141,6 +142,7 @@ impl<'a> SemanticService<'a> {
         }
     }
 
+    #[allow(unsafe_code)] // hotpath 0.28 emits `#[unsafe(export_name)]` statics
     pub fn with_lint_config(&self, config: LintConfig) -> Self {
         let report = hotpath::measure_block!("analyzer::lint_run_reconfigured", {
             self.registry.run_report(self.program.as_ref(), &config)

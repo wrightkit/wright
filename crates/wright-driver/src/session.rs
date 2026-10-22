@@ -106,12 +106,9 @@ pub struct CompilerSession {
     ///
     /// Configuration is fixed at construction (#511): assign every field
     /// before `new`/`with_source_provider`. The field stays public for
-    /// source compatibility within `wright-embedding/v1`, but
-    /// post-construction mutation is not a supported capability — the next
-    /// workflow or `ToolService` construction refuses with
-    /// `session-config-changed` rather than serving state derived from the
-    /// earlier configuration. Changing configuration means constructing a
-    /// new session.
+    /// `wright-embedding/v1` source compatibility, but mutating it is
+    /// refused `session-config-changed` — changing configuration means
+    /// constructing a new session.
     pub config: SessionConfig,
     /// The construction-time snapshot `config` is verified against before
     /// every workflow (#511).
@@ -163,10 +160,9 @@ impl CompilerSession {
     }
 
     /// Build a session whose source-language workflow must use `provider`.
-    ///
     /// The provider is injected at the product boundary; its transport and
-    /// source project model are not visible to the session. A provider failure
-    /// is surfaced as-is and never falls back to an in-process OPY path.
+    /// project model are not visible to the session. Provider failures are
+    /// surfaced as-is, never falling back to an in-process OPY path.
     pub fn with_source_provider(
         mut config: SessionConfig,
         provider: Box<dyn SourceProvider>,
@@ -217,16 +213,14 @@ impl CompilerSession {
 
     /// Load (or reuse) the validated program for this session.
     ///
-    /// Loading is idempotent: repeated calls return the same program without
-    /// re-reading the input. Returns an owned snapshot so callers can hold it
-    /// while mutating the session.
+    /// Loading is idempotent: repeated calls return the same program.
+    /// Returns an owned snapshot so callers can hold it while mutating the
+    /// session.
     ///
     /// On the provider backend this is the canonical-snapshot read, not a
     /// workflow (#591): it serves the snapshot a compile-producing operation
-    /// already established and refuses when the session holds none — the
-    /// provider declined compile or has not been asked to compile. Workflows
-    /// that may compile (check, compile, lint, analyze, inspect, and the
-    /// `inspect` queries) call [`Self::load_with_operation`] instead, so the
+    /// established and refuses when the session holds none. Workflows that
+    /// may compile call [`Self::load_with_operation`] instead, so the
     /// provider's own compile answer — including a capability decline —
     /// reaches the caller (#655).
     pub fn load(&mut self) -> Result<Loaded, Diagnostic> {
@@ -274,6 +268,7 @@ impl CompilerSession {
         self.loaded.clone()
     }
 
+    #[allow(unsafe_code)] // hotpath 0.28 emits `#[unsafe(export_name)]` statics
     #[hotpath::measure]
     fn load_with_operation(
         &mut self,
@@ -862,6 +857,7 @@ impl CompilerSession {
         (!cache::ci() && !cache::baseline_exists(&run)).then(|| name.to_string())
     }
 
+    #[allow(unsafe_code)] // hotpath 0.28 emits `#[unsafe(export_name)]` statics
     fn load_workshop(&mut self, resolved: &ResolvedInput) -> Result<(Program, String), Diagnostic> {
         let override_locale = self
             .config
@@ -999,6 +995,7 @@ impl CompilerSession {
         envelope
     }
 
+    #[allow(unsafe_code)] // hotpath 0.28 emits `#[unsafe(export_name)]` statics
     fn compile_output(
         &mut self,
         to: Option<&str>,
@@ -1206,6 +1203,7 @@ impl CompilerSession {
     /// `workshop-rs` exposes them (`wrightkit/workshop-rs#346`), so target
     /// diagnostics stay free of source-language logic. `check` does not run
     /// this: it is a source-correctness workflow, not a client-import gate.
+    #[allow(unsafe_code)] // hotpath 0.28 emits `#[unsafe(export_name)]` statics
     fn attach_target_limits(&mut self, loaded: &Loaded) {
         let report = match hotpath::measure_block!("compile::element_count", {
             loaded.program.element_count(self.catalog)

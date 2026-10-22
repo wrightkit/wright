@@ -21,6 +21,7 @@ pub struct PassResult {
 
 /// Run the semantics-preserving transform profile over the canonical public
 /// Workshop program model.
+#[allow(unsafe_code)] // hotpath 0.28 emits `#[unsafe(export_name)]` statics
 #[hotpath::measure]
 pub fn run(
     program: &mut workshop_rs::Program,
@@ -35,6 +36,7 @@ pub fn run(
 /// The caller must successfully call [`workshop_rs::Program::validate`] after
 /// the last mutation before invoking this function. Input validation is skipped;
 /// non-off profiles still validate the program after the transform fixpoint.
+#[allow(unsafe_code)] // hotpath 0.28 emits `#[unsafe(export_name)]` statics
 #[hotpath::measure]
 pub fn run_validated(
     program: &mut workshop_rs::Program,
