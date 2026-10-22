@@ -33,10 +33,13 @@
   import StatementEditor from './lib/StatementEditor.svelte'
   import {
     buildRequest,
+    clean,
     effectiveDisabled,
     isStale,
+    keyFor,
     setDisabled,
     stageDeletes,
+    stageStatement,
     type BatchAction,
     type PendingChange,
     type StatementList,
@@ -63,6 +66,7 @@
     ToolErrorInfo,
     ToolResponse,
   } from './lib/types/generated/wright-agent-v1'
+  import type { Node } from './lib/types/generated/rule-content-v1'
 
   interface RuleEntry {
     summary: RuleSummary
@@ -159,6 +163,12 @@
     editNode && editEntry && editTarget
       ? effectiveDisabled(pending, editEntry.summary.id, editTarget.list, editTarget.index, editNode.node)
       : false,
+  )
+  /** The staged `change` at the open target, so the editor shows it. */
+  const editStaged = $derived(
+    editNode && editEntry && editTarget
+      ? pending.get(keyFor(editEntry.summary.id, editTarget.list, editTarget.index))
+      : undefined,
   )
   const pendingRequest = $derived(
     debug && dialog === 'pending' && inputIdentity !== null
@@ -472,16 +482,21 @@
     },
   })
 
-  function editorSave(disabled: boolean) {
+  function editorSave(disabled: boolean, args?: Node[]) {
     if (!editNode || !editEntry || !editTarget) return
-    setDisabled(
+    const statement = clean(editNode.node)
+    if (args !== undefined && editTarget.list === 'actions') {
+      ;(statement as { args?: Node[] }).args = args
+    }
+    if (disabled) statement.disabled = true
+    stageStatement(
       pending,
       editEntry.summary.id,
       editEntry.summary.name,
       editTarget.list,
       editTarget.index,
       editNode.node,
-      disabled,
+      statement,
     )
   }
 
@@ -685,7 +700,9 @@
     target={editNode}
     {names}
     disabled={editDisabled}
+    staged={editStaged?.tag === 'change' ? editStaged.statement : undefined}
     {t}
+    locale={sessionLocale}
     onsave={editorSave}
     onclose={() => (editTarget = null)}
   />

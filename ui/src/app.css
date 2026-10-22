@@ -1155,3 +1155,34 @@ dialog.view[open] {
   gap: 0.75rem;
   font-size: 0.85rem;
 }
+
+.editor-args {
+  margin-top: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.editor-arg {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.editor-arg-label {
+  flex: 0 0 9rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-align: right;
+}
+
+.editor-arg .picker-ctl {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.editor-arg-value {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+}

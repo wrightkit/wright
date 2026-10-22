@@ -21,7 +21,7 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 use workshop_rs::catalog::{Catalog, Kind, Locale};
-use workshop_rs::lookup::LookupMatch;
+use workshop_rs::lookup::{LookupMatch, SignatureParam};
 use workshop_rs::settings::{SettingDefinition, SettingValueDomain};
 use wright_lpp::{Capability, LookupParams, LookupWithin};
 
@@ -324,6 +324,7 @@ pub(crate) fn workshop_entry(
                         .collect::<Vec<_>>(),
                 });
             }
+            param_facts(&param, &mut parameter);
             json!({
                 "identity": identity,
                 "kind": "parameter",
@@ -390,6 +391,7 @@ fn callable_facts(signature: &workshop_rs::lookup::Signature) -> Value {
                         .unwrap_or_default(),
                 });
             }
+            param_facts(param, &mut wire);
             wire
         })
         .collect::<Vec<_>>();
@@ -401,6 +403,29 @@ fn callable_facts(signature: &workshop_rs::lookup::Signature) -> Value {
         facts["variadic"] = json!(true);
     }
     facts
+}
+
+/// The `rule-content-v1` facts a parameter declares beyond its surface
+/// type: the folded variable-target call it contributes to and the
+/// modify-operation call ids it accepts, plus the editor's localized
+/// parameter label. A parameter that maps one-to-one onto a plain content
+/// argument emits no `content` member.
+fn param_facts(param: &SignatureParam, fact: &mut Value) {
+    if let Some(content) = &param.content {
+        let mut wire = json!({});
+        if let Some(fold) = &content.fold {
+            wire["fold"] = json!({ "call": fold.call, "arg": fold.arg });
+        }
+        if !content.operations.is_empty() {
+            wire["operations"] = json!(content.operations);
+        }
+        if wire != json!({}) {
+            fact["content"] = wire;
+        }
+    }
+    if let Some(label) = &param.display_name {
+        fact["displayName"] = json!(label);
+    }
 }
 
 fn workshop_param<'a>(
