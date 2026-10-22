@@ -1,15 +1,4 @@
 <script lang="ts">
-  /**
-   * One placement's severity mark (docs/ui/diagnostics.md § Severity, §
-   * In place): the mark of the group's most severe finding — a filled
-   * circle for error, a filled triangle for warning, an outlined circle
-   * for info, each in its severity colour — and, when `count` is set
-   * (the rule bar's form), the number of findings at that level beside
-   * it. Hovering the mark opens a dark card listing the findings there:
-   * severity, code, and message. The mark sits inside the rule bar's
-   * button, so it is a labelled graphic — never a nested interactive
-   * element; the card opens on CSS hover.
-   */
   import type { Finding } from './types/generated/wright-agent-v1'
   import { mostSevere } from './findings'
   import type { ChromeStrings } from './chrome'
@@ -19,7 +8,6 @@
     count = false,
     t,
   }: {
-    /** The findings at this place; never empty — callers render the mark only with findings. */
     findings: Finding[]
     /** Show the count at the mark's level beside it (the rule bar's form). */
     count?: boolean
@@ -28,7 +16,6 @@
   } = $props()
 
   const severity = $derived(mostSevere(findings))
-  // The bar's count is of the most severe level, not the whole group.
   const atLevel = $derived(findings.filter((finding) => finding.severity === severity).length)
 </script>
 

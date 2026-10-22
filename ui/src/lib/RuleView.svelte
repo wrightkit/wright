@@ -6,7 +6,7 @@
   import FindingMark from './FindingMark.svelte'
   import type { ChromeStrings } from './chrome'
   import type { Names } from './names'
-  import { mostSevere, type RuleFindings } from './findings'
+  import { mostSevere, SEVERITY_TOKEN, type RuleFindings } from './findings'
   import {
     keyFor,
     type BatchAction,
@@ -247,9 +247,7 @@
 
 <!-- The statement-row shell the two columns share: the checkbox, the
      debug line number, the statement text, the pending tag, the findings
-     mark, and the debug node JSON. `depth` is the row's control-flow
-     nesting level; a row with findings carries a 3 px left severity bar
-     (`--finding`). -->
+     mark, and the debug node JSON. -->
 {#snippet stmtRow(
   list: StatementList,
   index: number,
@@ -271,7 +269,7 @@
     class:pending-change={tag === 'change'}
     class:pending-delete={tag === 'delete'}
     class:has-findings={rowSeverity !== null}
-    style="--depth: {depth};{rowSeverity !== null ? ` --finding: var(--${rowSeverity})` : ''}"
+    style="--depth: {depth};{rowSeverity !== null ? ` --finding: var(--${SEVERITY_TOKEN[rowSeverity]})` : ''}"
     onclick={() => onedit.open(list, index)}
   >
     <input

@@ -855,9 +855,6 @@ dialog.view[open] {
   opacity: 1;
 }
 
-/* A marked row's 3 px left severity bar (`--finding` is set inline per
-   row); the pending marks below are the user's active edit state and
-   take the slot over it. */
 .statement.has-findings {
   box-shadow: inset 3px 0 0 var(--finding);
 }
@@ -866,7 +863,6 @@ dialog.view[open] {
   box-shadow: inset 0 0 0 1px var(--gold);
 }
 
-/* Selection composes with the severity bar: the gold frame plus the bar. */
 .statement.has-findings.selected {
   box-shadow:
     inset 3px 0 0 var(--finding),
@@ -878,9 +874,23 @@ dialog.view[open] {
   background: color-mix(in srgb, var(--gold) 7%, transparent);
 }
 
+/* docs/ui/selection.md § Pending marks: the pending state owns the left
+   bar, so a pending row keeps the bar even while selected. */
+.statement.has-findings.selected.pending-change {
+  box-shadow:
+    inset 3px 0 0 var(--gold),
+    inset 0 0 0 1px var(--gold);
+}
+
 .statement.pending-delete {
   box-shadow: inset 3px 0 0 var(--error);
   text-decoration: line-through;
+}
+
+.statement.has-findings.selected.pending-delete {
+  box-shadow:
+    inset 3px 0 0 var(--error),
+    inset 0 0 0 1px var(--gold);
 }
 
 .pending-tag {
@@ -902,12 +912,6 @@ dialog.view[open] {
   color: var(--error);
   border: 1px solid var(--error);
 }
-
-/* Findings in place (docs/ui/diagnostics.md § Severity, § In place):
-   three marks — a filled circle for error, a filled triangle for
-   warning, an outlined circle for info — each in its severity colour,
-   and a 3 px left severity bar on a marked statement row. Hovering a
-   mark opens a dark card listing the findings there. */
 
 .finding-mark {
   position: relative;
@@ -951,8 +955,6 @@ dialog.view[open] {
   color: var(--muted);
 }
 
-/* The hover card: hidden until the mark is hovered or focused; a dark
-   `--dlg` panel listing severity, code, and message per finding. */
 .finding-card {
   position: absolute;
   top: calc(100% + 4px);

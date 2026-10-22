@@ -1,11 +1,3 @@
-/**
- * Placing `findings` on the main screen (docs/ui/diagnostics.md § In
- * place): each finding maps to its rule by the `rule` listing id, then to
- * one statement row — the `action` index in `actions` first, else the
- * first condition whose `span` contains the finding's, else the rule bar
- * only. A rule's marks show the most severe severity its findings reach;
- * a row's mark lists its findings on hover.
- */
 import type { Finding, SourceSpan } from './types/generated/wright-agent-v1'
 import type { RuleContent } from './view'
 
@@ -15,11 +7,14 @@ export type Severity = (typeof SEVERITIES)[number]
 
 const rank = (severity: Severity): number => SEVERITIES.indexOf(severity)
 
-/**
- * The severity a group of findings' mark carries — the most severe member.
- * An empty group reports `info`, which no caller observes (groups only
- * exist once a finding landed in them).
- */
+/** docs/ui/diagnostics.md § Severity: the token a severity's marks read. */
+export const SEVERITY_TOKEN: Record<Severity, string> = {
+  error: 'error',
+  warning: 'warn',
+  info: 'muted',
+}
+
+/** The severity a group of findings' mark carries — the most severe member. */
 export function mostSevere(findings: readonly Finding[]): Severity {
   let top: Severity = 'info'
   for (const finding of findings) {
@@ -37,23 +32,12 @@ export type FindingPlacement =
 const atOrBefore = (a: SourceSpan['start'], b: SourceSpan['start']): boolean =>
   a.line < b.line || (a.line === b.line && a.col <= b.col)
 
-/**
- * Whether `span` covers `inside` whole (docs/agent-contract.md § Rule
- * content: the span's `file`/`path` identify its source; endpoints compare
- * as `(line, col)` pairs, end inclusive).
- */
+/** docs/agent-contract.md § Rule content: span endpoints compare as `(line, col)` pairs, end inclusive. */
 export function spanContains(span: SourceSpan, inside: SourceSpan): boolean {
   if (span.file !== inside.file || span.path !== inside.path) return false
   return atOrBefore(span.start, inside.start) && atOrBefore(inside.end, span.end)
 }
 
-/**
- * One finding's place in a rule's content (docs/ui/diagnostics.md § In
- * place · Statement row): the action at `action`, else the first
- * condition whose span contains the finding's, else the rule bar only.
- * `action: null` skips the first step; an absent or unlocated span falls
- * to the rule.
- */
 export function placeFinding(
   finding: Pick<Finding, 'action' | 'span'>,
   content: RuleContent,
@@ -78,25 +62,15 @@ export function placeFinding(
   return { list: 'rule' }
 }
 
-/**
- * One rule's placed findings: `actions`/`conditions` key the flat
- * statement index to its findings; `rule` holds the bar-only ones.
- */
+/** One rule's placed findings by column and bar; `rule` holds the bar-only ones. */
 export interface RuleFindings {
   actions: Map<number, Finding[]>
   conditions: Map<number, Finding[]>
   rule: Finding[]
 }
 
-/** An empty placement — every rule renders the same absence. */
 const EMPTY: RuleFindings = { actions: new Map(), conditions: new Map(), rule: [] }
 
-/**
- * Group `findings` by `rule` listing id, then place each inside its
- * rule's content. A finding whose rule has no loaded content — or that
- * falls to the bar under `placeFinding` — lands on the rule bar: every
- * finding stays visible at its nearest expressible row.
- */
 export function placeFindings(
   findings: readonly Finding[],
   contentByRule: ReadonlyMap<number, RuleContent>,

@@ -108,9 +108,8 @@
   let filter = $state('')
   let fileName = $state<string | null>(null)
   let symbols = $state<unknown[] | null>(null)
-  // `findings?all` serves both the in-place marks and the dialog (#921):
-  // the call lands with `load` so bar marks render with the rules list.
   let findings = $state<Finding[] | null>(null)
+  let findingsError = $state<ToolErrorInfo | null>(null)
   let dialog = $state<'variables' | 'diagnostics' | 'pending' | 'simulate' | null>(null)
   // The loaded project and the simulation panel's hero options (#836):
   // `project` holds `inputIdentity` and the read-only settings tree the
@@ -145,10 +144,6 @@
   let costRequest: Promise<void> | null = null
   let pageEl: HTMLDivElement | undefined = $state()
 
-  // In-place findings (docs/ui/diagnostics.md § In place): placement
-  // needs each rule's `content`, so it recomputes when `findings` lands
-  // or the program is re-read. A rule whose content never resolved keeps
-  // its findings on the bar — `placeFindings` falls back, never drops.
   const placedFindings = $derived.by(() => {
     const contents = new Map<number, RuleContent>()
     for (const entry of rules ?? []) {
@@ -334,12 +329,6 @@
     return names.peek(event, ['event'])?.name ?? event
   }
 
-  /**
-   * `findings?all`, read once: the in-place marks and the Diagnostics
-   * dialog share it. A refusal or unreachable endpoint leaves the list
-   * null — marks simply never render, matching a program with no
-   * findings.
-   */
   async function loadFindings() {
     try {
       const response = await call({ op: 'findings', all: true })
@@ -350,9 +339,17 @@
             ? result
             : ((result as { findings?: Finding[] }).findings ?? [])
         ) as Finding[]
+        findingsError = null
+      } else {
+        findings = null
+        findingsError = response.error as ToolErrorInfo
       }
-    } catch {
-      // No findings surface: bars and rows render unmarked.
+    } catch (error) {
+      findings = null
+      findingsError = {
+        code: 'endpoint-unreachable',
+        message: error instanceof Error ? error.message : String(error),
+      }
     }
   }
 
@@ -469,8 +466,6 @@
   }
 
   function openDiagnostics() {
-    // `findings` loads with the page; a failed load retries on open so a
-    // transient refusal does not leave the dialog empty for the session.
     if (findings === null) void loadFindings()
     void ensureCostEstimate()
     dialog = 'diagnostics'
@@ -644,6 +639,12 @@
     </div>
   </div>
 
+  {#if findingsError}
+    <p class="refusal findings-refusal" role="alert">
+      {t.findingsUnavailable} <code>{findingsError.code}</code> {findingsError.message}
+    </p>
+  {/if}
+
   <section class="rule-list" aria-label={t.rulesRegion}>
     {#if loadError}
       <p class="refusal">{loadError}</p>
@@ -689,6 +690,7 @@
     which={dialog === 'pending' || dialog === 'simulate' ? null : dialog}
     {symbols}
     {findings}
+    {findingsError}
     {costEstimate}
     {names}
     {t}
