@@ -408,8 +408,10 @@
             heroesLocale = locale
           }
         } catch {
+          // A failed listing does not satisfy the locale: `heroesLocale`
+          // stays stale so the next open retries instead of locking in
+          // the previous locale's labels.
           heroes = heroes ?? []
-          heroesLocale = locale
         }
       })()
     }
