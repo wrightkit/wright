@@ -412,9 +412,20 @@
         "subroutines": { "type": "integer", "minimum": 0 },
         "rules": { "type": "integer", "minimum": 0 },
         "symbols": { "type": "integer", "minimum": 0 },
-        "findings": { "type": "integer", "minimum": 0 }
+        "findings": { "type": "integer", "minimum": 0 },
+        "settings": { "type": ["array", "null"], "items": { "$ref": "#/$defs/SettingsNode" }, "description": "The program's settings block projected read-only (#836): section and member names with scalar values — `null` when the program declares no settings block." }
       },
       "additionalProperties": true
+    },
+    "SettingsNode": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "description": "The section or member name — canonical for catalogued settings, authored otherwise." },
+        "value": { "type": "string", "description": "The member's scalar value as emitted text (`On`/`Off` for booleans). Absent on section nodes." },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/SettingsNode" }, "description": "A section's members. Absent on leaf nodes." }
+      },
+      "additionalProperties": false
     },
     "RulesResult": { "$ref": "#/$defs/RulesListingResult" },
     "RulesListingResult": {

@@ -197,16 +197,18 @@ describe('the page shell (#879)', () => {
     expect(toolbar.querySelector('.rule-count')?.textContent?.trim()).toBe('Rules (2)')
 
     // One square icon button per toolbar action, each with a `title`
-    // tooltip and an inline SVG: Diagnostics on the left; Variables, the
-    // pending-changes view button, and a disabled Add rule on the right.
+    // tooltip and an inline SVG: Diagnostics and Simulation on the left;
+    // Variables, the pending-changes view button, and a disabled Add rule
+    // on the right.
     const squares = [...toolbar.querySelectorAll<HTMLButtonElement>('.sq')]
-    expect(squares).toHaveLength(4)
+    expect(squares).toHaveLength(5)
     for (const button of squares) {
       expect(button.title).not.toBe('')
       expect(button.querySelector('svg')).not.toBeNull()
     }
-    const [diagnostics, variables, pending, addRule] = squares
+    const [diagnostics, simulation, variables, pending, addRule] = squares
     expect(diagnostics.title).toBe('Diagnostics')
+    expect(simulation.title).toBe('Simulation')
     expect(variables.title).toBe('Variables')
     expect(pending.title).toBe('Pending changes')
     // The count badge only renders once edits are staged.

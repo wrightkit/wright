@@ -44,6 +44,7 @@
   } from './lib/edit'
   import { Names } from './lib/names'
   import RuleView from './lib/RuleView.svelte'
+  import SimulatePanel from './lib/SimulatePanel.svelte'
   import SqButton from './lib/SqButton.svelte'
   import {
     debugEnabled,
@@ -56,6 +57,7 @@
   import type {
     CostEstimateResult,
     EditStatementsResult,
+    LookupEntry,
     ProjectResult,
     TargetMetadataResult,
     ToolErrorInfo,
@@ -99,7 +101,12 @@
   let fileName = $state<string | null>(null)
   let symbols = $state<unknown[] | null>(null)
   let findings = $state<unknown[] | null>(null)
-  let dialog = $state<'variables' | 'diagnostics' | 'pending' | null>(null)
+  let dialog = $state<'variables' | 'diagnostics' | 'pending' | 'simulate' | null>(null)
+  // The loaded project and the simulation panel's hero options (#836):
+  // `project` holds `inputIdentity` and the read-only settings tree the
+  // panel displays; `heroes` loads once, on the panel's first open.
+  let project = $state<ProjectResult | null>(null)
+  let heroes = $state<LookupEntry[] | null>(null)
 
   // The program's identity (`project`) and generation (the rules listing's
   // `snapshot`): the freshness pair an `editStatements` request carries.
@@ -180,6 +187,7 @@
       const response = await call({ op: 'project' })
       if ('result' in response) {
         const result = response.result as ProjectResult
+        project = result
         inputIdentity = result.inputIdentity ?? null
         const entry = result.sourceFiles?.[0]
         const base = entry?.split(/[\\/]/).filter(Boolean).pop()
@@ -371,6 +379,35 @@
     dialog = 'variables'
   }
 
+  /**
+   * The simulation panel (#836): its hero options load once on the first
+   * open — `listEntries` over the `Hero` domain in the session locale.
+   */
+  function openSimulate() {
+    dialog = 'simulate'
+    if (heroes === null) {
+      void (async () => {
+        try {
+          const response = await call({
+            op: 'listEntries',
+            language: 'workshop',
+            kind: 'enumMember',
+            within: 'Hero',
+            locale: sessionLocale,
+          })
+          if ('result' in response) {
+            heroes =
+              ((response.result as { entries?: LookupEntry[] }).entries ?? []).length > 0
+                ? (response.result as { entries: LookupEntry[] }).entries
+                : []
+          }
+        } catch {
+          heroes = heroes ?? []
+        }
+      })()
+    }
+  }
+
   function openDiagnostics() {
     if (findings === null) {
       void call({ op: 'findings', all: true }).then((response) => {
@@ -514,6 +551,9 @@
     <SqButton title={t.diagnostics} onclick={openDiagnostics}>
       <path d="M3.5 12.5h4l2.5-7 4 13 2.5-6h4" />
     </SqButton>
+    <SqButton title={t.simulation} onclick={openSimulate}>
+      <polygon points="8,5 8,19 19,12" fill="currentColor" stroke="none" />
+    </SqButton>
     <div class="end">
       <input
         class="filter"
@@ -598,13 +638,21 @@
   </section>
 
   <Dialogs
-    which={dialog === 'pending' ? null : dialog}
+    which={dialog === 'pending' || dialog === 'simulate' ? null : dialog}
     {symbols}
     {findings}
     {costEstimate}
     {names}
     {t}
     onreveal={(id) => void revealRule(id)}
+    onclose={() => (dialog = null)}
+  />
+
+  <SimulatePanel
+    open={dialog === 'simulate'}
+    {project}
+    {heroes}
+    {t}
     onclose={() => (dialog = null)}
   />
 

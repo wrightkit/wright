@@ -34,6 +34,7 @@ mod capabilities;
 mod cost;
 mod edit_statements;
 mod refusal;
+pub(crate) mod settings;
 mod simulate;
 mod stale_ids;
 
@@ -155,17 +156,12 @@ impl<'a> ToolService<'a> {
 
     /// Handle one tool request, returning a structured owned response.
     ///
-    /// A request that reads the loaded program requires a valid current
-    /// snapshot at request time (#471, #512): the deferred initial load runs
-    /// here when the service was built over an unloadable project, and a
-    /// changed input fingerprint reloads the session, so a long-lived
-    /// session serves the project as it exists now. Either failure is the
-    /// request's structured refusal — the previous snapshot is never served
-    /// silently. `capabilities` reports service metadata, `targetMetadata`
-    /// the static catalog, and `provider*` operations carrying their own
-    /// document set consult neither — a `provider*` request that omits its
-    /// document set derives it from the loaded project (#548) and so
-    /// triggers the load like any other program-reading operation.
+    /// A program-reading request requires a current snapshot (#471, #512):
+    /// the deferred initial load runs here, a changed input fingerprint
+    /// reloads, and either failure is the structured refusal — the stale
+    /// snapshot is never served silently. `capabilities`/`targetMetadata`
+    /// consult neither; a `provider*` request omitting its document set
+    /// derives it from the loaded project (#548), triggering the same load.
     ///
     /// `check` and `compile` are workflows, not snapshot queries (#591):
     /// they run the session's operation-aware load instead of requiring a
@@ -189,8 +185,7 @@ impl<'a> ToolService<'a> {
             ToolRequest::Check { .. } | ToolRequest::Compile { .. } => self.refresh_workflow(),
             _ if Self::reads_program(request) => {
                 // ADR-0029: `editStatements` answers on the resolved input
-                // kind, not on whether the project can load — an OPY/OSTW
-                // input fails `refresh` before the operation's own
+                // kind — an OPY/OSTW input fails `refresh` before the
                 // provider-boundary refusal could run, so the raw-Workshop
                 // gate evaluates first.
                 if let ToolRequest::EditStatements { .. } = request
@@ -1114,6 +1109,8 @@ impl<'a> ToolService<'a> {
             "sourceFiles": loaded.source_files.as_slice(), "globalVariables": loaded.program.global_variables.len(),
             "playerVariables": loaded.program.player_variables.len(), "subroutines": loaded.program.subroutines.len(),
             "rules": loaded.program.rules.len(), "symbols": index.symbols().count(), "findings": findings.len(),
+            // The simulation panel's read-only lobby settings (#836).
+            "settings": loaded.program.settings.as_ref().map(settings::settings_json),
         })
     }
 
