@@ -14,6 +14,7 @@
     "test": "vitest run",
     "generate-types": "node scripts/generate-types.mjs",
     "check-types": "node scripts/generate-types.mjs --check",
+    "check:deps": "node scripts/check-deps.mjs",
     "check:size": "node scripts/check-bundle-size.mjs"
   },
   "dependencies": {
