@@ -27,7 +27,7 @@ These colours define the look. Components use the tokens, not literals.
 - **Backdrop.** A light blue-grey diagonal gradient, `#c3c9e6` to `#98a6cc` to `#6f80aa`, under a fixed pattern of faint large triangles, drawn as inline SVG. The page never has a flat dark background.
 - **Shapes.** Square corners, at most 3 px radius. Cards are the one exception, at 14 px.
 - **Type.** The system UI sans-serif with a CJK fallback (`-apple-system, "PingFang SC", "Noto Sans SC", system-ui, sans-serif`), 15 px base. Monospace is used only in debug detail. No web fonts are bundled.
-- **Square buttons.** 40 px in the toolbar, 36 px in column heads, 26–32 px inside rows and bars. The icon is 22 px or proportionally smaller.
+- **Square buttons.** 40 px in the toolbar, 36 px in column heads, 26–32 px inside rows and bars. The icon is a Lucide icon at 22 px with stroke width 2, or proportionally smaller.
 
 ## Spacing and sizes
 

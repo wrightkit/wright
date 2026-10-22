@@ -55,4 +55,5 @@ its audit date.
 * [ADR-0033: The simulate operation in the driver and `wright-agent/v1`](0033-simulate-operation.md)
 * [ADR-0034: Snapshot-scoped numeric symbol and rule addresses](0034-snapshot-scoped-numeric-addresses.md)
 * [ADR-0035: One meaning per selector spelling](0035-cli-selector-vocabulary.md)
+* [ADR-0036: `wright ui` dependency policy](0036-ui-dependency-policy.md)
 * [Post-ADR-0010 decision inventory](post-0010-inventory.md)
