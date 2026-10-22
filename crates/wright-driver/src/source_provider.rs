@@ -169,7 +169,7 @@ impl SourceProviderError {
             Self::NotConfigured { .. } => Stage::Internal,
             Self::Failed { code, .. } => failed_stage(code),
         };
-        Diagnostic::error(self.code(), stage, self.to_string())
+        Diagnostic::carried_error(self.code(), stage, self.to_string())
     }
 }
 

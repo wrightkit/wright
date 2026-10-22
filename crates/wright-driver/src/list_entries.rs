@@ -10,10 +10,9 @@ use workshop_rs::catalog::{Catalog, Kind, Locale};
 use crate::CompilerSession;
 use crate::input::sha256_hex;
 use crate::lookup::{
-    OWNER_OPY, OWNER_WORKSHOP, UNKNOWN_WITHIN, refusal, workshop_entry, workshop_locale,
-    workshop_within,
+    OWNER_OPY, OWNER_WORKSHOP, UNKNOWN_WITHIN, workshop_entry, workshop_locale, workshop_within,
 };
-use crate::service::ToolResponse;
+use crate::service::{ToolResponse, carried_refusal, refusal};
 
 const LIST_ENTRIES_CAPABILITY: &str = "listEntries";
 /// `listEntries` pages hold this many entries without `pageSize`
@@ -118,7 +117,7 @@ pub(crate) fn list_entries(
             match workshop_within(catalog, &locale, within, None, Some("enumMember")) {
                 Ok(members) if !members.is_empty() => members,
                 Ok(_) => {
-                    return refusal(
+                    return carried_refusal(
                         UNKNOWN_WITHIN,
                         format!("'{within}' is not an enum domain with members"),
                     );

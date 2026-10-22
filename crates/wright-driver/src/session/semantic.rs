@@ -674,7 +674,7 @@ impl CompilerSession {
                             Some(&loaded),
                         );
                         let mut diagnostic =
-                            Diagnostic::error(error.code, Stage::Analysis, error.message);
+                            Diagnostic::carried_error(error.code, Stage::Analysis, error.message);
                         diagnostic.fields = error.fields;
                         session.diagnostics.push(diagnostic);
                         T::default()

@@ -156,6 +156,35 @@ impl Diagnostic {
         }
     }
 
+    /// An error diagnostic whose `code` is carried verbatim from another
+    /// contract — owner or LPP provider vocabulary such as
+    /// `lookup.unknownWithin`, or a `provider-refusal-<refusalCode>`
+    /// composition, or an existing diagnostic code moving between
+    /// envelopes. The wire contract fixes the spelling, so only the
+    /// whitespace-free floor is asserted
+    /// (`wright_analyzer::service::carried_code_ok`).
+    pub(crate) fn carried_error(
+        code: impl Into<String>,
+        stage: Stage,
+        message: impl Into<String>,
+    ) -> Diagnostic {
+        let code = code.into();
+        debug_assert!(
+            wright_analyzer::service::carried_code_ok(&code),
+            "carried diagnostic code {code:?} is empty or contains whitespace"
+        );
+        Diagnostic {
+            code,
+            stage,
+            severity: Severity::Error,
+            message: message.into(),
+            status: None,
+            span: None,
+            source: None,
+            fields: Default::default(),
+        }
+    }
+
     /// A warning diagnostic in the given stage.
     pub fn warning(
         code: impl Into<String>,
@@ -245,6 +274,22 @@ mod tests {
     #[should_panic(expected = "violates the code grammar")]
     fn error_rejects_an_uppercase_code() {
         let _ = Diagnostic::error("Unknown-Value", Stage::Frontend, "message");
+    }
+
+    #[test]
+    fn carried_error_keeps_foreign_vocabulary() {
+        let diagnostic = Diagnostic::carried_error(
+            "provider-refusal-compile.tooLarge",
+            Stage::Frontend,
+            "message",
+        );
+        assert_eq!(diagnostic.code, "provider-refusal-compile.tooLarge");
+    }
+
+    #[test]
+    #[should_panic(expected = "empty or contains whitespace")]
+    fn carried_error_rejects_whitespace() {
+        let _ = Diagnostic::carried_error("bad code", Stage::Frontend, "message");
     }
 
     /// #871: `workshop_diag` builds `unknown-{kind}` codes from owner `kind`

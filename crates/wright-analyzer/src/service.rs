@@ -54,12 +54,23 @@ pub enum Response {
 
 /// Whether `code` obeys the diagnostic-code grammar: a single kebab-case
 /// token of lowercase ASCII letters, digits, and hyphens — no spaces or
-/// other characters (`docs/cli/machine-contract.md`).
+/// other characters (`docs/cli/machine-contract.md`). Codes Wright coins
+/// must satisfy it; codes carried verbatim from another contract only
+/// need [`carried_code_ok`].
 pub fn valid_code(code: &str) -> bool {
     !code.is_empty()
         && code
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+/// The one guarantee every emitted code keeps — including a code carried
+/// verbatim from another contract (an LPP `refusalCode` or a provider
+/// failure code): nonempty and whitespace-free (#789). A foreign code's
+/// spelling is fixed by its own contract, so the kebab grammar does not
+/// apply to it.
+pub fn carried_code_ok(code: &str) -> bool {
+    !code.is_empty() && !code.chars().any(char::is_whitespace)
 }
 
 /// A structured error payload.
@@ -87,6 +98,24 @@ impl ErrorInfo {
         debug_assert!(
             valid_code(&code),
             "diagnostic code {code:?} violates the code grammar"
+        );
+        ErrorInfo {
+            code,
+            message: message.into(),
+            fields: Default::default(),
+        }
+    }
+
+    /// An error payload whose `code` is issued by another contract — an
+    /// LPP `refusalCode` such as `lookup.unknownWithin`, or a provider
+    /// failure code — and carried verbatim so consumers match it. Only
+    /// [`carried_code_ok`] is asserted: the wire contract fixes the
+    /// spelling.
+    pub fn carried(code: impl Into<String>, message: impl Into<String>) -> Self {
+        let code = code.into();
+        debug_assert!(
+            carried_code_ok(&code),
+            "carried diagnostic code {code:?} is empty or contains whitespace"
         );
         ErrorInfo {
             code,
@@ -147,5 +176,22 @@ mod tests {
     #[should_panic(expected = "violates the code grammar")]
     fn error_info_new_rejects_an_uppercase_code() {
         let _ = ErrorInfo::new("Unknown-Value", "message");
+    }
+
+    #[test]
+    fn error_info_carried_keeps_foreign_vocabulary() {
+        for code in [
+            "lookup.unknownWithin",
+            "provider-refusal-rename.nameCollision",
+        ] {
+            let error = ErrorInfo::carried(code, "message");
+            assert_eq!(error.code, code);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "empty or contains whitespace")]
+    fn error_info_carried_rejects_whitespace() {
+        let _ = ErrorInfo::carried("bad code", "message");
     }
 }

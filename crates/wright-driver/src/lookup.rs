@@ -27,7 +27,7 @@ use wright_lpp::{Capability, LookupParams, LookupWithin};
 
 use crate::CompilerSession;
 use crate::opy_provider;
-use crate::service::{SERVICE_NAME, SERVICE_VERSION, ToolErrorInfo, ToolResponse};
+use crate::service::{SERVICE_NAME, SERVICE_VERSION, ToolResponse, carried_refusal, refusal};
 
 /// `lookup` without `limit` returns at most this many entries (ADR-0021).
 const DEFAULT_LIMIT: usize = 3;
@@ -108,12 +108,6 @@ pub(crate) fn lookup(
             "invalid-language",
             format!("lookup serves 'workshop' and 'opy'; got '{other}'"),
         ),
-    }
-}
-
-pub(crate) fn refusal(code: &str, message: impl Into<String>) -> ToolResponse {
-    ToolResponse::Error {
-        error: ToolErrorInfo::new(code, message),
     }
 }
 
@@ -480,7 +474,7 @@ pub(crate) fn workshop_within(
             | workshop_rs::WorkshopError::UnknownWithCandidates {
                 kind: "lookup scope",
                 ..
-            } => refusal(UNKNOWN_WITHIN, error.to_string()),
+            } => carried_refusal(UNKNOWN_WITHIN, error.to_string()),
             _ => refusal("lookup-failed", error.to_string()),
         })?;
     let mut entries: Vec<Value> = children
@@ -565,7 +559,7 @@ fn opy_lookup(
                 "protocol-version-mismatch" | "capability-unavailable" => {
                     unavailable("opy", OWNER_OPY, error.to_string())
                 }
-                _ => refusal(error.code(), error.to_string()),
+                _ => carried_refusal(error.code(), error.to_string()),
             };
         }
     };
@@ -617,7 +611,7 @@ fn opy_lookup(
     let mut entries = match outcome {
         Ok(answer) => answer.entries,
         Err(error) => {
-            return refusal(
+            return carried_refusal(
                 error.refusal_code().unwrap_or_else(|| error.code()),
                 error.to_string(),
             );
@@ -762,22 +756,5 @@ fn lpp_default_text(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
         other => other.to_string(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    #[should_panic(expected = "violates the code grammar")]
-    fn refusal_rejects_a_spaced_code() {
-        let _ = refusal("invalid language", "message");
-    }
-
-    #[test]
-    #[should_panic(expected = "violates the code grammar")]
-    fn refusal_rejects_an_uppercase_code() {
-        let _ = refusal("Invalid-Language", "message");
     }
 }

@@ -66,9 +66,13 @@ Stable contract fields: `wright.contract`, `command`, `ok`, `exit`,
 `result` shape. Human-readable `message` wording is explicitly not part of the
 machine contract.
 
-A diagnostic `code` is a single kebab-case token — lowercase ASCII
-letters, digits, and hyphens, no spaces or other characters — and the
-constructors that emit codes assert that grammar (#871). The
+A diagnostic `code` Wright coins is a single kebab-case token —
+lowercase ASCII letters, digits, and hyphens, no spaces or other
+characters — and the constructors that emit codes assert that grammar
+(#871). A code carried verbatim from an owner or provider contract —
+the LPP `refusalCode` vocabulary such as `lookup.unknownWithin`, or a
+`provider-refusal-<refusalCode>` composition — keeps its wire spelling
+and asserts only the universal whitespace-free floor. The
 completeness-residual `workshop.<kind>.<name>` codes join kebab-case
 segments with dots.
 

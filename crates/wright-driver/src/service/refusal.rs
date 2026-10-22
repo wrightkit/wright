@@ -92,6 +92,24 @@ impl<'a> ToolService<'a> {
     }
 }
 
+/// A refusal with a Wright-coined `code` — the strict kebab grammar is
+/// asserted inside `ToolErrorInfo::new` (#871).
+pub(crate) fn refusal(code: &str, message: impl Into<String>) -> ToolResponse {
+    ToolResponse::Error {
+        error: ToolErrorInfo::new(code, message),
+    }
+}
+
+/// A refusal whose `code` is owner- or provider-issued vocabulary carried
+/// verbatim (the LPP `refusalCode` contract, e.g. `lookup.unknownWithin`):
+/// the wire contract fixes the spelling, so the kebab grammar does not
+/// apply — only the whitespace-free floor.
+pub(crate) fn carried_refusal(code: &str, message: impl Into<String>) -> ToolResponse {
+    ToolResponse::Error {
+        error: ToolErrorInfo::carried(code, message),
+    }
+}
+
 /// An unknown selection/filter value is a structured usage error, never a
 /// silent empty result (#430, #531).
 pub(crate) fn invalid_selection(message: String) -> ToolResponse {
@@ -245,5 +263,37 @@ fn compose_payload(
             .iter_mut()
             .for_each(|value| compose_payload(value, loaded, spelling)),
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic(expected = "violates the code grammar")]
+    fn refusal_rejects_a_spaced_code() {
+        let _ = refusal("invalid language", "message");
+    }
+
+    #[test]
+    #[should_panic(expected = "violates the code grammar")]
+    fn refusal_rejects_an_uppercase_code() {
+        let _ = refusal("Invalid-Language", "message");
+    }
+
+    #[test]
+    fn carried_refusal_keeps_the_lpp_refusal_code() {
+        let response = carried_refusal(crate::lookup::UNKNOWN_WITHIN, "message");
+        let ToolResponse::Error { error } = response else {
+            panic!("a refusal is always an error response");
+        };
+        assert_eq!(error.code, "lookup.unknownWithin");
+    }
+
+    #[test]
+    #[should_panic(expected = "empty or contains whitespace")]
+    fn carried_refusal_rejects_whitespace() {
+        let _ = carried_refusal("bad code", "message");
     }
 }

@@ -232,7 +232,8 @@ impl CompilerSession {
                 documents,
             })
             .map_err(|info| {
-                let mut diagnostic = Diagnostic::error(info.code, Stage::Discovery, info.message);
+                let mut diagnostic =
+                    Diagnostic::carried_error(info.code, Stage::Discovery, info.message);
                 diagnostic.fields = info.fields;
                 diagnostic
             })

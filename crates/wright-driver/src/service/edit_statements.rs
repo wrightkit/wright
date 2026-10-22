@@ -259,7 +259,8 @@ impl<'a> ToolService<'a> {
         // so the next program-reading request serves the edited program,
         // and surface a load failure here rather than on the next read.
         if let Err(error) = self.refresh() {
-            let mut diagnostic = Diagnostic::error(error.code, Stage::Discovery, error.message);
+            let mut diagnostic =
+                Diagnostic::carried_error(error.code, Stage::Discovery, error.message);
             diagnostic.fields = error.fields;
             return refuse(vec![diagnostic]);
         }

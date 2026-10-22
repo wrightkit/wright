@@ -1405,12 +1405,11 @@ fn workshop_diag_for_provider_artifact(
 }
 
 /// One provider failure on the `convert` reconstruction path (#569): the
-/// same classification the source-provider seam applies, with the failed
-/// operation named in the human message. The refusal code survives in the
-/// diagnostic code (`provider-refusal-<refusalCode>`) so consumers can
-/// classify it without parsing the message.
+/// same classification the source-provider seam applies, naming the failed
+/// operation. The refusal code survives in the diagnostic code
+/// (`provider-refusal-<refusalCode>`) so consumers can classify it.
 fn provider_error_diagnostic(error: wright_lpp::ProviderError, operation: &str) -> Diagnostic {
-    Diagnostic::error(
+    Diagnostic::carried_error(
         crate::source_provider::provider_failure_code(&error),
         crate::source_provider::provider_failure_stage(&error),
         format!(
