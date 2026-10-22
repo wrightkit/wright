@@ -100,6 +100,11 @@ fn run_with_stdin(args: &[&str], stdin: &str) -> std::process::Output {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .env_remove("CI")
+        .env_remove("GITHUB_ACTIONS")
+        .env_remove("GITHUB_STEP_SUMMARY")
+        .env_remove("NO_COLOR")
+        .env_remove("FORCE_COLOR")
         .spawn()
         .expect("wright runs");
     child
@@ -2987,7 +2992,6 @@ fn explicit_renderer_and_color_overrides_are_respected() {
         &[("GITHUB_ACTIONS", "true")],
     );
     assert_eq!(plain.status.code(), Some(1));
-    // #891: the failed result's diagnostics joined stdout.
     assert!(!String::from_utf8_lossy(&plain.stdout).contains("::error"));
     assert!(!String::from_utf8_lossy(&plain.stdout).contains("\x1b["));
     assert!(plain.stderr.is_empty());
@@ -3970,8 +3974,7 @@ fn cost_baseline_degrades_silently_under_ci() {
     names.sort();
     assert_eq!(names, ["baseline-bad.json", "baseline-v1.json"]);
 
-    // Outside CI the same unknown name is still refused; the failed
-    // result carries the diagnostic on stdout (#891).
+    // Outside CI the unknown name is still refused — diagnostic on stdout (#891).
     let outside = run(&["inspect", "cost", a, "--baseline", "nope"]);
     assert_eq!(
         outside.status.code(),
@@ -4863,7 +4866,6 @@ fn check_unknown_kind_code_is_kebab_case_on_every_surface() {
 
     let text = run(&["check", file, "--renderer", "plain", "--color", "never"]);
     assert_eq!(text.status.code(), Some(1));
-    // #891: the failed result's diagnostics joined stdout.
     let stdout = String::from_utf8_lossy(&text.stdout);
     assert!(
         stdout.contains("diagnostic: error unknown-enum-member "),
@@ -4921,7 +4923,6 @@ fn check_text_locates_unknown_setting_value_and_names_the_locale() {
         "never",
     ]);
     assert_eq!(output.status.code(), Some(1));
-    // #891: the failed result's diagnostics joined stdout.
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("at=") && stdout.contains("lookup-hint-zh.ow:9:"),
@@ -5011,7 +5012,6 @@ fn check_text_skips_the_lookup_hint_when_no_name_was_rejected() {
         "never",
     ]);
     assert_eq!(output.status.code(), Some(1));
-    // #891: the failed result's diagnostics joined stdout.
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("unknown-language"),
