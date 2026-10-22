@@ -149,7 +149,7 @@ Required tests, through both the CLI and `wright serve`:
 
 - **Agent-contract field names.** The `symbols`, `references`, and `cfg` operations call the category filter `kind`, where the CLI says `--only`. The meaning is the same, so this is a naming question for `wright serve` and is not decided here.
 - **Output streams and text determinism.** Where a failed text result writes its diagnostics, and how the docs describe `inspect cost` text that depends on `.wright/` state, are tracked in #891. `docs/cli/machine-contract.md` owns that contract. This ADR does not change ADR-0027.
-- **Reference locations in OPY projects.** Read, write, and call references in OPY projects have no source span. The owner of that mapping is classified in #892.
+- **Reference locations in OPY projects.** Resolved in #892: Wright owns the mapping. When a provider map carries no identifier occurrence, a reference's `span` falls back to the enclosing statement's span (`Program::action_span`/`condition_span`/`rule_span`) — the same statement-grain `at=` `inspect cost` reports.
 - **Cost entry points.** `analyze`, bare `inspect`, `inspect cost`, and `compile --baseline` all report element cost. Whether to reduce them is a separate product decision.
 - **Subject-first commands.** A shape such as `wright rule <NAME> --cost` is not decided here. There is no evidence yet that it outweighs ADR-0022's rule that the CLI uses the same names as the agent operations.
 - **Renderer defaults.** The agent guide asks for `--renderer plain` on every call. Whether `--renderer auto` should select plain output for non-terminal output is separate and untested here.

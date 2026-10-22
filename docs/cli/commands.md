@@ -259,6 +259,9 @@ Resolution never guesses.
   `rules`) as the header of the reference list; there is no separate usage
   command. The reference list includes the declaration entry alongside
   reads and writes, with identifier spans reported by the analyzer (#433).
+  When a source provider's map is statement-grain — no identifier
+  occurrences — a reference's span falls back to the enclosing statement's
+  span, the same `at=` `inspect cost` reports (#892).
 * `inspect symbols --only <KIND>` narrows the list to `globalVariable`,
   `playerVariable`, `subroutine`, or `rule` (kebab-case aliases work). It is
   spelled `--only` because `--kind` already selects the input frontend.
