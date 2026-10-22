@@ -689,6 +689,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # CI result reads `required-jobs.jq` and `ci-required-jobs.sh` — the
+      # single source for the needs list and required-when matrix.
+      - name: Checkout
+        uses: actions/checkout@v7
+
       - name: Fail on failed, cancelled, or wrongly skipped jobs
         env:
           NEEDS: ${{ toJSON(needs) }}

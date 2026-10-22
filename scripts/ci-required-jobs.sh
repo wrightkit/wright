@@ -30,7 +30,7 @@ case "${1:-check}" in
         ;;
     check)
         expected="${MARKER} $(jobs)"
-        found="$(grep "${MARKER}" "$CI_YML" | grep -v 'the `# needs:`' | sed 's/^[[:space:]]*//' || true)"
+        found="$(grep -E '^[[:space:]]*'"${MARKER}" "$CI_YML" | sed 's/^[[:space:]]*//' || true)"
         if [ "$found" != "$expected" ]; then
             echo "ci.yml '$MARKER' marker drifted: run scripts/ci-required-jobs.sh sync" >&2
             echo "expected: $expected" >&2
