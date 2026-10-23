@@ -95,10 +95,7 @@ fn bastion_hot_path_findings_fit_inside_condition_spans() {
         .join("../../tests/fixtures/workshop/real-world/bastion.ow");
     let source = std::fs::read_to_string(&path).unwrap();
     assert_eq!(
-        format!(
-            "{:x}",
-            <sha2::Sha256 as sha2::Digest>::digest(source.as_bytes())
-        ),
+        wright_driver::sha256_hex(source.as_bytes()),
         "44e453ddf7f373be65aea82d019abd45dd60f5ecb57c8d1607d3576a8bc60259"
     );
     let mut session = CompilerSession::new(SessionConfig {
