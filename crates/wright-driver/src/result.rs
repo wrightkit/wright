@@ -1,5 +1,3 @@
-//! Command result envelopes and exit code conventions.
-
 use crate::diag::{Diagnostic, Severity};
 use serde::Serialize;
 
@@ -74,10 +72,11 @@ pub fn exit_code_from(diagnostics: &[Diagnostic]) -> u8 {
         }
         if matches!(
             d.code.as_str(),
-            "output-exists" | "output-is-input" | "output-unnamed" | "profile-workshop-only"
-            // #759: an undeclared `--to` output locale is a flag error, not
-            // a source error.
-            | "invalid-locale"
+            "output-exists"
+                | "output-is-input"
+                | "output-unnamed"
+                | "profile-workshop-only"
+                | "invalid-locale"
         ) {
             return exit::USAGE;
         }
@@ -87,8 +86,6 @@ pub fn exit_code_from(diagnostics: &[Diagnostic]) -> u8 {
         if d.stage == crate::diag::Stage::Reconstruction
             || d.code == "adapter-stdin-unsupported"
             || d.code == "source-provider-unsupported"
-            // #569: a provider-declared capability gap is a recognized but
-            // unsupported operation, not a source error.
             || d.code == "capability-unavailable"
         {
             return exit::UNSUPPORTED;
@@ -337,10 +334,6 @@ pub struct LintFixPreview {
     pub new_text: String,
 }
 
-/// `lint` results keep only the per-rule identity needed to interpret a
-/// finding — the stable id and its effective severity (#431). Full rule
-/// metadata (summary, rationale, documentation, known limits, evidence, tags)
-/// is served by the `lintRules` operation instead of being inlined per call.
 pub(crate) fn compact_lint_rules(rules: Option<&serde_json::Value>) -> serde_json::Value {
     let Some(rules) = rules.and_then(serde_json::Value::as_array) else {
         return serde_json::json!([]);

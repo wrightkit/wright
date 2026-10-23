@@ -1,7 +1,3 @@
-//! #891: the text-mode stream contract for a failed analysis result —
-//! stdout carries the verdict, the summary, and every diagnostic; stderr
-//! keeps usage errors (exit 2) and internal failures (exit 4) only.
-
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -76,8 +72,6 @@ const VALID_LOOP: &str = "rule (\"r\") {
 
 #[test]
 fn failed_check_leads_with_verdict_then_diagnostics_then_next() {
-    // The failed result's stdout reads verdict, summary, diagnostics,
-    // follow-ups — blocking errors precede warnings.
     let path = temp_file("mixed.txt", MIXED_CHECK_SOURCE);
     let output = run(&[
         "check",
@@ -125,7 +119,6 @@ fn failed_check_leads_with_verdict_then_diagnostics_then_next() {
         "the stage is a field, not a sentence: {stdout}"
     );
     assert!(output.stderr.is_empty(), "{}", command_result(&output));
-    // The shared follow-ups (#792) then the lookup the rejected name needs.
     let mut lines = lines.skip_while(|line| line.starts_with("diagnostic:"));
     assert_eq!(lines.next(), Some("next: wright lint"), "{stdout}");
     for expected in ["next: wright analyze", "next: wright inspect"] {
@@ -138,8 +131,6 @@ fn failed_check_leads_with_verdict_then_diagnostics_then_next() {
 
 #[test]
 fn failed_text_result_puts_diagnostics_on_stdout() {
-    // A failed analysis result carries the verdict, the summary, and every
-    // diagnostic on stdout — stderr stays clean.
     let path = temp_file("loop.txt", VALID_LOOP);
     let output = run(&[
         "inspect",
@@ -162,8 +153,6 @@ fn failed_text_result_puts_diagnostics_on_stdout() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    // A usage error keeps the original split: exit 2 with the reason on
-    // stderr only.
     let output = run(&["inspect", "cost", path.to_str().unwrap(), "--severity"]);
     assert_eq!(output.status.code(), Some(2), "{}", command_result(&output));
     assert!(
@@ -177,8 +166,6 @@ fn failed_text_result_puts_diagnostics_on_stdout() {
 
 #[test]
 fn machine_contract_states_run_cache_dependence() {
-    // The determinism contract names the one output that follows `.wright/`
-    // state and how to disable it.
     let doc =
         std::fs::read_to_string(workspace_root().join("docs/cli/machine-contract.md")).unwrap();
     for needle in ["`.wright/`", "`--no-cache`", "`WRIGHT_NO_CACHE`", "`CI`"] {
@@ -187,10 +174,6 @@ fn machine_contract_states_run_cache_dependence() {
             "machine-contract.md states the cache dependence: {needle}"
         );
     }
-    // No CLI-contract doc may claim byte-identical output without naming
-    // the `.wright/` state the claim depends on. (`docs/agent-contract.md`
-    // is exempt: agent comparisons arrive as explicit inline request data,
-    // never implicit cache reads.)
     let mut pending = vec![workspace_root().join("docs/cli")];
     while let Some(dir) = pending.pop() {
         for entry in std::fs::read_dir(dir).unwrap() {

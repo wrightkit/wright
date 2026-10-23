@@ -263,8 +263,6 @@ impl<'a> SemanticService<'a> {
             result: json!({"id": id, "name": rule.name, "address": self.index.canonical_rule_address(id), "span": span_json(self.program.rule_span(id)), "disabled": rule.disabled, "event": event_name(&rule.event), "conditions": rule.conditions.len(), "actions": rule.actions.len()}),
         }
     }
-    /// The owner's rule-content document with Wright's statement spans added
-    /// to each condition and action (ADR-0024 decision 3).
     fn rule_content(&self, id: RuleId) -> Response {
         let Some(rule) = self.program.rules.get(id) else {
             return self.error("invalid-id", format!("unknown rule {id}"));
@@ -381,17 +379,11 @@ fn symbol_json(symbol: &Symbol) -> JsonValue {
 fn finding_json(index: &SemanticIndex, finding: &Finding) -> JsonValue {
     #[cfg(test)]
     tests::BUILDS.with(|count| count.set(count.get() + 1));
-    // `rule` is the positional coordinate; `ruleAddress` is the owning
-    // rule's canonical name address (ADR-0035) — the reusable identity.
     json!({"code": finding.code, "severity": finding.severity.as_str(), "message": finding.message, "span": span_json(finding.span), "rule": finding.rule, "ruleAddress": index.canonical_rule_address(finding.rule), "action": finding.action, "value": finding.value, "evidence": finding.evidence.as_str(), "boundedness": finding.boundedness.map(Boundedness::as_str), "repeated": finding.repeated})
 }
 fn reference_json(index: &SemanticIndex, program: &Program, reference: &Reference) -> JsonValue {
     #[cfg(test)]
     tests::BUILDS.with(|count| count.set(count.get() + 1));
-    // #792: a consumer joining on `rule` (the numeric id) needs the owning
-    // rule's identity to render a location — the same `{id, name, span}`
-    // shape `Request::ListRules` reports plus its canonical `address`
-    // (ADR-0035), `null` when the reference has no owning rule.
     let owning_rule = reference.rule.map_or(JsonValue::Null, |id| {
         json!({
             "id": id,

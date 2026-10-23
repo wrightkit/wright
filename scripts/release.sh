@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Usage: scripts/release.sh [version]
 
 set -euo pipefail
 
@@ -29,8 +28,6 @@ test -x "$BENCH_BIN" || { echo "release benchmark binary missing"; exit 1; }
 
 echo "==> first-party provider integration"
 "$BIN" update provider opy --version 0.1.38
-# ADR-0028: profiles apply to Workshop input only, so the OPY fixture
-# compiles without --profile; the Workshop check below keeps it.
 "$BIN" compile "$ROOT/tests/fixtures/opy/basic-rule.opy" >/dev/null
 
 echo "==> benchmarks"

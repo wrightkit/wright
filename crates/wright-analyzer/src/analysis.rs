@@ -1,6 +1,3 @@
-//! Each analysis produces [`Finding`]s with a stable code, a severity, a
-//! human-readable message, and the offending rule/action/value and span.
-
 use serde::{Deserialize, Serialize};
 
 /// The severity of a finding.

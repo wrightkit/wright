@@ -1,13 +1,3 @@
-//! Finding selection shared by the CLI workflow flags and the
-//! `wright-agent/v1` request fields (#430). One selection model drives every
-//! finding-shaped output (envelope diagnostics and `result.findings`), so the
-//! CLI and the agent contract return the same selected set.
-//!
-//! Selection only narrows what is *reported*: verdicts and exit codes are
-//! computed on the full set before selection applies, and the returned
-//! [`SelectionOutcome`] keeps the true total, the truncation count, and the
-//! full set's highest severity so no surface can understate the result.
-
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -69,10 +59,6 @@ fn severity_rank(severity: Severity) -> u8 {
     }
 }
 
-/// Serialized findings always carry a known severity; a missing or unknown
-/// value falls back to `Warning`, the same conservative default the CLI
-/// verdict uses (`SummaryStatus::from_finding_severity`), so malformed data
-/// can never understate the true maximum severity.
 fn parse_severity(value: Option<&str>) -> Severity {
     match value {
         Some("error") => Severity::Error,
@@ -201,9 +187,6 @@ impl FindingSelection {
                         .is_none_or(|matcher| matcher.matches_spelling_or_file_identity(path))
             })
             .collect();
-        // #791: per-code counts describe the filtered set `max` is about
-        // to truncate, so a capped result still reports every code's real
-        // count; `total` alone cannot.
         let mut by_code = BTreeMap::new();
         for item in &kept {
             let code = key(item).1;
@@ -227,11 +210,6 @@ impl FindingSelection {
     }
 }
 
-/// Apply one list selection to a semantic operation's items (#531): the
-/// caller's `keep` encodes the operation-specific filters, `file` and `max`
-/// are shared. `total` counts the set before selection and `withheld`
-/// counts only what `max` dropped — the same semantics `FindingSelection`
-/// establishes for findings (#430).
 pub(crate) fn select_list<T>(
     items: Vec<T>,
     file: Option<&str>,
@@ -266,15 +244,8 @@ pub(crate) fn select_list<T>(
     )
 }
 
-/// How many source-file spellings an unmatched-`file` error lists
-/// (ADR-0035): the program's own files, bounded, with the total.
 const FILE_LIST_LIMIT: usize = 10;
 
-/// The session finish-path diagnostic pipeline: apply the configured
-/// selection to the accumulated diagnostics, then (ADR-0035) refuse
-/// `invalid-selection` when `file` names no source file of the loaded
-/// program — joining after the filter so it cannot drop its own refusal.
-/// Returns the diagnostics, the selection outcome, and the exit code.
 pub(crate) fn envelope_diagnostics(
     config: &SessionConfig,
     loaded: Option<&Loaded>,
@@ -292,10 +263,6 @@ pub(crate) fn envelope_diagnostics(
     (diagnostics, outcome, exit)
 }
 
-/// The bases under which `file` and reported `span.path` spellings resolve
-/// on the finish path (#430): the loaded input's cwd and root, or the
-/// config-derived equivalents so pre-load diagnostics select the same way.
-/// Extra bases are safe — they only ever add true file identities.
 fn finish_bases(config: &SessionConfig, loaded: Option<&Loaded>) -> Vec<PathBuf> {
     if let Some(loaded) = loaded {
         return file_bases(&loaded.input);
@@ -322,14 +289,6 @@ fn finish_bases(config: &SessionConfig, loaded: Option<&Loaded>) -> Vec<PathBuf>
     bases
 }
 
-/// A `file` selector must name a source file of the loaded program
-/// (ADR-0035): it is matched against the program's own source spellings
-/// under the same bases `span.path` matching uses, so the value as passed,
-/// root-relative, or absolute all select the same file — no suffix
-/// matching. `Some` carries the `invalid-selection` message listing the
-/// program's source files (bounded, with the total) plus the queried
-/// `file` in its fields (#888); a `file` that matches a program file but
-/// selects nothing stays a valid empty result.
 pub(crate) fn file_error(
     file: &str,
     source_files: &[String],
@@ -362,12 +321,6 @@ pub(crate) fn file_error(
     ))
 }
 
-/// The `file` dimension matched by file identity rather than one string
-/// spelling: `span.path` is reported root-relative on finding surfaces and
-/// cwd-relative on diagnostic surfaces, so both sides resolve under the
-/// session's bases (invocation cwd and the input root) to a canonical path.
-/// Pseudo-paths (`<stdin>`, `<file N>`, `<provider-artifact>`) do not resolve
-/// and keep exact-match semantics only.
 struct FileMatch {
     spelled: String,
     canonical: BTreeSet<PathBuf>,
@@ -472,10 +425,6 @@ mod tests {
 
     #[test]
     fn file_selection_matches_by_canonical_identity() {
-        // #430 review: `span.path` spellings differ per surface — findings
-        // report root-relative paths, envelope diagnostics report the
-        // cwd-relative display path. `file` must select the same file from
-        // any spelling that resolves to it.
         let root = std::env::temp_dir().join(format!("wright-select-{}", std::process::id()));
         std::fs::create_dir_all(root.join("sub")).unwrap();
         let abs = root.join("sub/f.ws");

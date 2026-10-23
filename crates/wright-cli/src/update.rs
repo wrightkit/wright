@@ -47,7 +47,6 @@ impl UpdateError {
         }
     }
 
-    /// The record code for the failure class (#793).
     fn code(&self) -> &'static str {
         match self {
             Self::Usage(_) => "usage",
@@ -57,8 +56,6 @@ impl UpdateError {
         }
     }
 
-    /// The `error:` record for the plain surface (#793); `update` errors
-    /// are the command's machine-readable outcome.
     pub(crate) fn record(&self) -> String {
         format!(
             "error: {} {}",
@@ -86,7 +83,6 @@ impl Platform {
         format!("wright-{version}-{}.{ext}", self.target)
     }
 
-    /// The installed file name of a release binary.
     fn exe(self, name: &str) -> String {
         if self.windows {
             format!("{name}.exe")
@@ -95,7 +91,6 @@ impl Platform {
         }
     }
 
-    /// The official installer command, quoted in reinstall guidance.
     fn installer(self) -> &'static str {
         if self.windows {
             "irm https://install.wrightkit.dev/wright/install.ps1 | iex"
@@ -195,9 +190,6 @@ pub(crate) fn run(
     }
 }
 
-/// Plain `wright update`: every target Wright manages — the standalone
-/// installation plus already-installed first-party providers. A skipped or
-/// failed target never blocks the remaining ones.
 fn update_all(check_only: bool, pres: crate::present::Presentation) -> u8 {
     let mut code = exit::SUCCESS;
     match self_update(check_only, None) {
@@ -223,9 +215,6 @@ fn fold(code: u8, next: u8) -> u8 {
     if code == exit::SUCCESS { next } else { code }
 }
 
-/// The first-party provider update target. `may_install` distinguishes
-/// `update provider <NAME>` (install or update) from the installed-only
-/// enumeration used by `update` and `update provider`.
 fn provider_target(
     check_only: bool,
     requested: Option<&str>,
@@ -234,8 +223,6 @@ fn provider_target(
 ) -> u8 {
     let installed = match OpyProviderConfig::default().installed() {
         Ok(installed) => installed,
-        // A platform without provider artifacts has no provider target; an
-        // explicit request still reports the refusal as a failure.
         Err(error @ OpyProviderError::UnsupportedPlatform(_)) if !may_install => {
             println!("skipped opy provider: {error}");
             return exit::SUCCESS;
@@ -279,15 +266,11 @@ fn provider_report(previous: Option<&str>, resolved: &ResolvedOpyProvider) {
             Some(Ordering::Equal) => println!("opy provider {version} is already up to date"),
             Some(Ordering::Less) => println!("updated opy provider {current} -> {version}"),
             Some(Ordering::Greater) => println!("downgraded opy provider {current} -> {version}"),
-            // A provider-reported version outside the release grammar cannot
-            // be ordered; report what is installed without a direction.
             None => println!("opy provider {version} is active (was {current})"),
         },
     }
 }
 
-/// `--check` resolution for the provider target: report availability without
-/// downloading or modifying anything.
 fn provider_check(
     installed: Option<&ResolvedOpyProvider>,
     requested: Option<&str>,
@@ -295,8 +278,6 @@ fn provider_check(
     pres: crate::present::Presentation,
 ) -> u8 {
     let current = installed.and_then(|p| p.version.as_deref());
-    // An absent provider is not a target of `update --check`, so it is skipped
-    // without spending a release-pointer fetch on a version nobody would read.
     if current.is_none() && !may_install {
         println!("opy provider is not installed; skipping");
         return exit::SUCCESS;
@@ -357,8 +338,6 @@ fn provider_failure(error: &OpyProviderError, pres: crate::present::Presentation
     error.exit_code()
 }
 
-/// An update failure is a verdict tag on the terminal renderer and an
-/// `error:` record on the machine-readable surfaces (#793).
 fn report_update_error(
     pres: crate::present::Presentation,
     word: &str,
@@ -489,10 +468,6 @@ fn env_arch() -> String {
     std::env::var("WRIGHT_INSTALL_ARCH").unwrap_or_else(|_| std::env::consts::ARCH.to_string())
 }
 
-/// Package-manager ownership is recognized only from whole path components:
-/// a directory merely containing `scoop` or `winget` as a substring (a
-/// `scooped` download folder, a `mywinget` checkout) is a standalone
-/// installation with self-update guidance (#641).
 fn detect_provenance(exe: &Path) -> Provenance {
     let path = std::fs::canonicalize(exe).unwrap_or_else(|_| exe.to_path_buf());
     let is_component = |name: &str| {
@@ -512,9 +487,6 @@ fn detect_provenance(exe: &Path) -> Provenance {
     }
 }
 
-/// Resolve the latest stable version through the shared R2 distribution
-/// contract: `<base>/latest/version` is a plain-text version pointer, the same
-/// route `install.sh` and `install.ps1` read.
 fn resolve_latest(
     client: &reqwest::blocking::Client,
     base_url: &str,
@@ -569,18 +541,12 @@ fn fetch(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>, Updat
     Ok(bytes)
 }
 
-/// A release version in the grammar `install.sh` accepts:
-/// `v?[0-9]+.[0-9]+.[0-9]+` plus one optional `[-+][0-9A-Za-z.-]+` suffix.
-/// A `-` suffix is a semver prerelease (lower precedence than the release);
-/// a `+` suffix is build metadata and ignored for ordering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Version {
     core: (u64, u64, u64),
     prerelease: Vec<PrereleaseIdent>,
 }
 
-/// One dot-separated prerelease identifier: numeric identifiers order below
-/// alphanumeric ones (semver 2.0.0 §11).
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PrereleaseIdent {
     Numeric(u64),
@@ -609,7 +575,6 @@ impl Ord for Version {
         self.core.cmp(&other.core).then_with(|| {
             match (self.prerelease.is_empty(), other.prerelease.is_empty()) {
                 (true, true) => Ordering::Equal,
-                // A release outranks its own prereleases.
                 (true, false) => Ordering::Greater,
                 (false, true) => Ordering::Less,
                 (false, false) => self.prerelease.cmp(&other.prerelease),
@@ -651,7 +616,6 @@ fn parse_version_str(version: &str) -> Option<Version> {
     );
     let prerelease = match suffix.as_bytes().first() {
         None => Vec::new(),
-        // Build metadata does not participate in precedence.
         Some(b'+') => Vec::new(),
         Some(b'-') => suffix[1..]
             .split('.')
@@ -675,9 +639,6 @@ fn parse_version_str(version: &str) -> Option<Version> {
     Some(Version { core, prerelease })
 }
 
-/// Ordering of two version strings; `None` when either side is not in the
-/// release grammar — provider-reported versions are external input, so this
-/// never panics the way `.expect()` on a suffix did (#641).
 fn compare_versions(a: &str, b: &str) -> Option<Ordering> {
     Some(parse_version_str(a)?.cmp(&parse_version_str(b)?))
 }
@@ -709,9 +670,6 @@ mod tests {
 
     #[test]
     fn parse_version_accepts_the_suffixes_install_sh_accepts() {
-        // `install.sh` validates `v?[0-9]+.[0-9]+.[0-9]+([-+][0-9A-Za-z.-]+)?`
-        // — `update self --version` must not reject a version the installer
-        // would install (#641).
         for good in [
             "0.1.0-beta.1",
             "v0.1.0-rc",
@@ -743,8 +701,6 @@ mod tests {
             "a.b.c",
             "1.2.x",
             "",
-            // install.sh accepts exactly one suffix: a prerelease-then-build
-            // chain and an empty suffix body are outside its grammar.
             "0.1.0-rc+build",
             "0.1.0-",
             "0.1.0+",
@@ -779,8 +735,6 @@ mod tests {
     #[test]
     fn compare_versions_orders_prereleases_by_semver_precedence() {
         use std::cmp::Ordering::*;
-        // A release outranks its prereleases; prerelease identifiers compare
-        // per semver 2.0.0 §11 (numeric < alphanumeric, numeric numerically).
         assert_eq!(compare_versions("0.2.0-beta.1", "0.2.0"), Some(Less));
         assert_eq!(compare_versions("0.2.0", "0.2.0-rc.1"), Some(Greater));
         assert_eq!(compare_versions("0.2.0-alpha", "0.2.0-alpha.1"), Some(Less));
@@ -792,14 +746,11 @@ mod tests {
             compare_versions("0.2.0-beta.2", "0.2.0-beta.10"),
             Some(Less)
         );
-        // Build metadata does not participate in precedence.
         assert_eq!(compare_versions("0.2.0+build.1", "0.2.0"), Some(Equal));
         assert_eq!(
             compare_versions("0.2.0+build.1", "0.2.0+build.2"),
             Some(Equal)
         );
-        // External input (a provider-reported version) outside the release
-        // grammar yields no ordering instead of the old `.expect()` panic.
         assert_eq!(compare_versions("nightly", "0.2.0"), None);
         assert_eq!(compare_versions("0.2.0", ""), None);
     }
@@ -866,8 +817,6 @@ mod tests {
             provenance_of("/usr/local/bin/wright"),
             Provenance::Standalone
         );
-        // Package-manager names only count as whole path components (#641):
-        // `scooped`, `mywinget`, and `homebrewed` directories are standalone.
         assert_eq!(
             provenance_of("/c/Users/me/scooped/apps/wright/wright.exe"),
             Provenance::Standalone

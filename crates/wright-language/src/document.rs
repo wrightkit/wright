@@ -229,7 +229,6 @@ mod tests {
 
     #[test]
     fn utf16_offsets_account_for_non_bmp_characters() {
-        // 🎯 is U+1F3AF: one Rust char, two UTF-16 code units.
         let line = "🎯 score";
         assert_eq!(line.chars().count(), 7);
         assert_eq!(utf16_len(line), 8);
@@ -264,8 +263,6 @@ mod tests {
 
     #[test]
     fn span_to_range_uses_utf16_units_on_non_bmp_lines() {
-        // 🎯 is one Rust char but two UTF-16 units, so `score` (1-based
-        // column 16) starts at UTF-16 offset 16 and ends at 21.
         let source = "    debug(\"🎯\", score)\n";
         let span = workshop_rs::source::Span::new(
             workshop_rs::source::FileId::from_index(0),

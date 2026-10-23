@@ -1,7 +1,3 @@
-//! UTF-16 position and line/column conversion for provider edits:
-//! `wright_lpp::Position` is 0-based UTF-16; the transaction model is
-//! 1-based chars.
-
 use crate::diag::{Diagnostic, Stage};
 use crate::edit::{char_offset_to_utf16, utf16_offset_to_char};
 

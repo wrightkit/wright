@@ -1,31 +1,16 @@
-/**
- * The statement editor's argument forms (ADR-0032 layer 3, #835, #918):
- * one form row per content argument, built from the `lookup` callable's
- * `parameters` facts — the rows and their labels are fixture facts, not
- * text the page composes. A fold group's members map inside the folded
- * variable-target call that occupies the group's first member's content
- * position; a modify-operation position offers exactly the call ids
- * `content.operations` declares. A call argument shows its call name as
- * plain text with the chosen call's own `lookup` parameters as nested
- * rows. The forms emit `rule-content-v1` arg nodes only — no Workshop
- * text is composed here.
- */
 import type { LookupEntry } from './types/generated/wright-agent-v1'
 import type { Action, Node } from './types/generated/rule-content-v1'
 
 /** One `callable.parameters[]` member as `lookup` emits it. */
 export interface ParamFact {
   name?: string
-  /** The editor's localized parameter label. */
   displayName?: string
   type?: string
   required?: boolean
   default?: unknown
   enum?: { domain?: string }
   content?: {
-    /** A folded variable-target call this parameter contributes to. */
     fold?: { call?: string; arg?: number }
-    /** The modify-operation call ids this position accepts. */
     operations?: string[]
   }
 }
@@ -41,54 +26,17 @@ export type ArgFieldKind =
   | 'other'
 
 export interface ArgField {
-  /**
-   * Indices into the statement's `args` tree; a second level reaches
-   * inside the folded `globalVariable`/`playerVariable` call a fold group
-   * contributes to, or inside a `call` argument's own arguments.
-   */
   path: number[]
-  /** The row label — the localized parameter label or semantic name. */
   label: string
   kind: ArgFieldKind
-  /** Whether an empty slot disables OK (a required parameter). */
   required: boolean
-  /**
-   * Whether the `+` form can produce this slot's node yet (docs/ui/editor.md
-   * § Insert): a `{"variable"}` or modify-operation slot takes the pickers
-   * #919 adds — until then OK stays disabled rather than stage a node
-   * `editStatements` must refuse.
-   */
   insertable?: boolean
-  /** Which `symbols` kind a `variable` field's picker lists. */
   scope?: 'globalVariable' | 'playerVariable'
-  /** The enum domain an `enum` field lists members of via `listEntries`. */
   domain?: string
-  /** The modify-operation call ids an `operation` field lists. */
   operations?: string[]
-  /**
-   * The call id a `call` row displays when the field has no node at its
-   * own position — a condition's operator row names the value call.
-   */
   call?: string
-  /**
-   * The value node a `call` pseudo-field with no arg position names — a
-   * condition's single `call` row and a compare-shaped operator row both
-   * carry the whole `value` so a reserved call
-   * (`globalVariable`/`playerVariable`/`memberAccess`) still renders its
-   * variable-access text.
-   */
   node?: Node
-  /**
-   * The `lookup`-declared default for this position as a `rule-content-v1`
-   * node (`Wait.IGNORE_CONDITION` → `{"enum":"Wait","member":"IGNORE_CONDITION"}`,
-   * `"null"` → `null`, a number string → the literal); `undefined` when the
-   * parameter declares none.
-   */
   default?: Node
-  /**
-   * A `call` field's nested rows: the chosen call's own `lookup`
-   * parameters, addressed inside this field's node.
-   */
   nested?: ArgField[]
 }
 
@@ -102,28 +50,13 @@ function isObject(node: unknown): node is Record<string, unknown> {
   return typeof node === 'object' && node !== null && !Array.isArray(node)
 }
 
-/**
- * Whether the `+` form can produce a node for this slot (docs/ui/editor.md
- * § Insert). The `+` controls write literals (`number`, `{"string"}`) and
- * picker literals — until #919's pickers land no control produces a
- * `{"variable"}` node or a declared modify-operation call, so a slot
- * `editStatements` validates against one stays flagged and OK stays
- * disabled. A slot already holding the node it accepts submits as-is.
- */
 function needsPicker(param: ParamFact, node: Node | undefined): boolean {
-  // A modify-operation position accepts exactly its declared call ids;
-  // an operations node already in place is one of them.
   const operations = param.content?.operations ?? []
   if (operations.length > 0) {
     return !(
       isObject(node) && 'call' in node && operations.includes(node.call as string)
     )
   }
-  // A variable position — a `Variable`-typed parameter, or a fold
-  // member feeding the folded call's `{"variable"}` arg — accepts only
-  // the `{"variable"}` node. The fold's other args are value nodes the
-  // literal input can write, so only the tagged-variable arg flags:
-  // `globalVariable`'s single arg, `playerVariable`'s second.
   const foldsVariable =
     /^(Global |Player )?Variable$/.test(param.type ?? '') ||
     (param.content?.fold !== undefined &&
@@ -149,30 +82,10 @@ export function argAt(
   return node
 }
 
-/** The variable scope a `{"variable"}` slot draws its choices from. */
 function variableScope(foldCall: string | undefined, callId: string): ArgField['scope'] {
   return /player/i.test(foldCall ?? callId) ? 'playerVariable' : 'globalVariable'
 }
 
-/**
- * The form control a parameter position takes, from the `lookup` facts
- * and the node currently occupying the position.
- *
- * - `variable`: a `{"variable": name}` node — a picker over the declared
- *   variables of the slot's scope;
- * - `operation`: a `content.operations` position — a picker over those
- *   modify-operation call ids;
- * - `enum`: the parameter's declared domain or the node's own enum — a
- *   picker over the domain's `listEntries` members;
- * - `boolean`: a `Boolean` slot or a `true`/`false` node — the
- *   two-literal picker;
- * - `number`: a `Number` slot or a bare-number node — the numeric input;
- * - `string`: a `String` slot or a `{"string"}` node — the text input;
- * - `call`: a call node in value position — the call name as plain text
- *   (#919 turns it into a picker) with the call's own parameters as
- *   nested rows;
- * - `other`: an empty slot the facts do not pin down — it shows "unset".
- */
 function fieldKind(param: ParamFact, node: Node | undefined): ArgFieldKind {
   if (isObject(node) && 'variable' in node) return 'variable'
   if (
@@ -203,7 +116,6 @@ function fieldKind(param: ParamFact, node: Node | undefined): ArgFieldKind {
   return 'other'
 }
 
-/** One field row's facts from its parameter and the node at its path. */
 function fieldFor(
   param: ParamFact,
   path: number[],
@@ -247,7 +159,6 @@ export function argFields(
   nestedFacts?: (call: string) => ParamFact[] | null,
 ): ArgField[] {
   const fields: ArgField[] = []
-  // A fold group keeps the content position its first member claimed.
   let pos = 0
   let foldPos = 0
   for (let i = 0; i < params.length; i += 1) {
@@ -311,9 +222,6 @@ export function conditionFields(
         kind: 'call',
         required: true,
         call: value.call as string,
-        // The operator row has no arg position; the value node rides on
-        // the field so a two-arg reserved call (`playerVariable`,
-        // `memberAccess`) renders its statement text, not the raw id.
         node: value,
       }
       attachNested(left, value.args[0], nestedFacts)
@@ -324,11 +232,6 @@ export function conditionFields(
   const single =
     isObject(value) && 'call' in value
       ? {
-          // A call whose `lookup` entry declares no parameter facts: the
-          // form has no slot decomposition for it — the call name alone,
-          // read-only here (the picker that replaces it is #919's). The
-          // value node stays on the row so a reserved variable-access
-          // call renders its `Global.name` text, not the raw call id.
           path: [],
           label: compare[0]?.displayName ?? compare[0]?.name ?? '',
           kind: 'call' as const,
@@ -341,7 +244,6 @@ export function conditionFields(
   return [single]
 }
 
-/** A `call` field's nested rows, addressed inside the node at `path`. */
 function attachNested(
   field: ArgField,
   node: Node | undefined,
@@ -392,8 +294,6 @@ function setAtPath(node: Node, path: readonly number[], value: Node): Node {
   return { ...(node as Record<string, unknown>), args } as Node
 }
 
-/** The args array padded with `null`s to cover `index` — an unset slot
-    receives its first value through the same replace path. */
 function grow(args: readonly Node[], index: number): Node[] {
   const out = [...args]
   while (out.length <= index) out.push(null)
@@ -486,7 +386,6 @@ export function stringNode(text: string): Node {
  */
 export function defaultArgs(params: readonly ParamFact[]): Node[] {
   const args: Node[] = []
-  // A fold group's first member claims one position for the folded call.
   let foldPos = -1
   for (let i = 0; i < params.length; i += 1) {
     const param = params[i]
@@ -509,7 +408,6 @@ export function defaultArgs(params: readonly ParamFact[]): Node[] {
     }
     args.push(defaultNode(param.default, param) ?? undefined as unknown as Node)
   }
-  // A trailing run of empty slots carries no information the emitter needs.
   while (args.length > 0 && args[args.length - 1] === undefined) args.pop()
   return args
 }
@@ -530,8 +428,6 @@ export function currentId(node: Node | undefined): string | null {
 
 /** Whether the slot a field edits holds a value; an unset required slot disables OK. */
 export function slotSet(action: Action, field: ArgField): boolean {
-  // The `call` pseudo-field on a condition's operator has no arg position;
-  // its value is the call id itself — always set when present.
   if (field.path.length === 0) return field.kind === 'call' ? field.call !== undefined : false
   return argAt(action.args, field.path) !== undefined
 }

@@ -17,16 +17,11 @@ pub(crate) enum TransportArg {
     Mcp,
 }
 
-/// Parse `--kind` against the same vocabulary the workflow commands accept
-/// — a typo is a usage error naming the accepted spellings, not a silent
-/// `auto` (#593).
 pub(crate) fn parse_kind(value: &str) -> Result<SourceKind, String> {
     SourceKind::parse(value)
         .ok_or_else(|| "expected one of: auto, opy, ostw, workshop, protocol".to_string())
 }
 
-/// Parse `--profile` against the workflow vocabulary (#593); profiles
-/// apply to Workshop input only (ADR-0028, #725).
 pub(crate) fn parse_profile(value: &str) -> Result<wright_driver::Profile, String> {
     wright_driver::Profile::parse(value).ok_or_else(|| "expected one of: off, compat".to_string())
 }
@@ -55,10 +50,6 @@ pub(crate) struct LintPolicyArgs {
 }
 
 impl LintPolicyArgs {
-    /// Apply the configured policy to `config`, returning the first usage
-    /// error. Precedence matches `wright lint`: the YAML file establishes
-    /// the base, `--rule-file` extends the registry's load set, then
-    /// `--disable-rule` and `--rule-severity` override the file's entries.
     pub(crate) fn apply_to(&self, config: &mut SessionConfig) -> Result<(), String> {
         if let Some(path) = &self.lint_config {
             config.lint = wright_driver::config::LintConfig::from_yaml_path(path)
@@ -123,9 +114,6 @@ pub(crate) fn run(args: ServeArgs) -> ExitCode {
         input: InputSpec::Path(args.input.unwrap_or_else(|| ".".into())),
         ..SessionConfig::default()
     };
-    // Profiles apply to Workshop input only (ADR-0028): with an explicit
-    // `--kind` the combination is a startup usage error; when `--kind auto`
-    // resolves per request, the session's load rejects it the same way.
     if args.profile != wright_driver::Profile::Off
         && matches!(args.kind, SourceKind::Opy | SourceKind::Ostw)
     {
@@ -134,8 +122,6 @@ pub(crate) fn run(args: ServeArgs) -> ExitCode {
         );
         return ExitCode::from(2);
     }
-    // An invalid lint policy is a startup usage error before any request
-    // is served — never a silent fallback to the default registry (#594).
     if let Err(message) = args.policy.apply_to(&mut config) {
         eprintln!("wright: {message}");
         return ExitCode::from(2);
@@ -143,9 +129,6 @@ pub(crate) fn run(args: ServeArgs) -> ExitCode {
     let mut session = match wright_driver::CompilerSession::new(config) {
         Ok(session) => session,
         Err(diagnostic) => {
-            // A rejected configuration (an unreadable `--rule-file` path, an
-            // unknown `--disable-rule` selection) is a startup usage error,
-            // like the same failure on `wright lint` (#594).
             eprintln!("wright: {}", diagnostic.message);
             return ExitCode::from(2);
         }
@@ -169,8 +152,6 @@ fn serve_stdio(service: &mut ToolService<'_>) -> ExitCode {
     serve_lines(|line| {
         let line = match line {
             Ok(line) => line,
-            // A non-UTF-8 line is a malformed request on this transport too
-            // (#642).
             Err(_) => {
                 return Some(
                     json!({ "error": { "code": "malformed-request", "message": "request is not valid UTF-8" } })
@@ -186,8 +167,6 @@ fn serve_jsonrpc(service: &mut ToolService<'_>) -> ExitCode {
     serve_lines(|line| {
         let value = match line {
             Ok(line) => serde_json::from_str(line).ok(),
-            // Invalid UTF-8 is a JSON-RPC parse error, never a clean EOF
-            // (#642).
             Err(_) => None,
         };
         match value {
@@ -198,11 +177,6 @@ fn serve_jsonrpc(service: &mut ToolService<'_>) -> ExitCode {
     })
 }
 
-/// Read newline-delimited requests from stdin and write each response the
-/// dispatch produces. Input is split on raw `b'\n'` bytes and every line is
-/// UTF-8 validated *before* dispatch: an invalid line is delivered as `Err`
-/// so the transport emits its own parse error — the byte stream stays
-/// line-aligned and the session never dies as a silent success (#642).
 pub(crate) fn serve_lines(
     mut dispatch: impl FnMut(Result<&str, std::str::Utf8Error>) -> Option<String>,
 ) -> ExitCode {
@@ -306,9 +280,6 @@ fn jsonrpc_error(id: Value, code: i64, message: impl Into<String>) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message.into() } })
 }
 
-/// One `wright-agent/v1` request line in, one response line out — the exact
-/// body the stdio transport writes. `ui`'s loopback endpoint calls this so
-/// both transports emit identical bodies for the same request (ADR-0032).
 pub(crate) fn dispatch(service: &mut ToolService<'_>, line: &str) -> String {
     let request: ToolRequest = match serde_json::from_str(line) {
         Ok(request) => request,

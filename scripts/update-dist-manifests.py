@@ -26,7 +26,6 @@ from pathlib import Path
 RELEASE_BASE = "https://github.com/wrightkit/wright/releases/download"
 PLACEHOLDER_HASH = "0" * 64
 
-# Canonical release matrix; keys match the release workflow target triples.
 TARGETS = {
     "linux-x64": "x86_64-unknown-linux-gnu",
     "darwin-arm64": "aarch64-apple-darwin",
@@ -198,10 +197,6 @@ def generate(
     out_dir: Path,
     release_base: str = RELEASE_BASE,
 ) -> list:
-    """Write every distribution manifest for `version` into `out_dir`.
-
-    Returns the list of written paths (relative to out_dir).
-    """
     for key, value in hashes.items():
         if value and not valid_hash(value):
             raise SystemExit(f"invalid sha256 for {key}: {value!r}")

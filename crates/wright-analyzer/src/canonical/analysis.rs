@@ -272,10 +272,6 @@ fn values_equal(left: &Value, right: &Value) -> bool {
         _ => false,
     }
 }
-/// The tightest span on the path to a condition value: the value's own span
-/// when provenance records it, otherwise the nearest recorded ancestor —
-/// provider-backed programs that carry only rule/condition-level spans still
-/// locate the finding instead of reporting `null`.
 fn condition_value_or_ancestor_span(
     program: &Program,
     rule: RuleId,
@@ -376,13 +372,6 @@ fn collect_expensive_values(value: &Value) -> Vec<(Vec<usize>, &Value)> {
     out
 }
 
-/// Canonical ids of the value calls that evaluate every argument after the
-/// first once per element of the array argument, binding
-/// `Current Array Element` and `Current Array Index` to the current
-/// element — `Filtered Array`, `Sorted Array`, `Mapped Array`,
-/// `Is True For All`, and `Is True For Any`. The binding semantics are
-/// canonical Workshop owned by `workshop-rs`; the id list is rule-local
-/// knowledge the way `VOLATILE` is.
 const ELEMENT_BINDER_VALUES: &[&str] = &[
     "filteredArray",
     "isTrueForAll",
@@ -460,13 +449,6 @@ fn nested_binder_findings(
         .collect()
 }
 
-/// Collect every binder call — its canonical id, path from the visited
-/// root, and the nearest enclosing binder's canonical id — that sits inside
-/// an enclosing binder's per-element argument. `enclosing` names the binder
-/// whose per-element argument (any argument at index ≥ 1) the current
-/// subtree lives in. The array-source argument at index 0 stays in the
-/// enclosing scope: `Filtered Array(Sorted Array(x, r), c)` chains two
-/// binders without nesting a scope, and is not reported.
 fn collect_nested_binders<'a>(
     value: &'a Value,
     enclosing: Option<&'a str>,
@@ -559,19 +541,6 @@ fn duplicate_condition_findings(
     findings
 }
 
-/// The mechanically determined fix for a `duplicate-condition` finding
-/// (#556): delete the dead `Else If` branch — the marker line plus its body,
-/// through the next `Else If`/`Else`/`End` chain marker. The fix is offered
-/// only when the repeated condition cannot yield a different result when the
-/// chain re-evaluates it: calls evaluated fresh per evaluation rather than
-/// read from the tick snapshot (random numbers, advancing clocks, sampled
-/// server load) keep the branch reachable, so it stays.
-///
-/// Branch extents come from marker provenance when the provider records it
-/// (`Else If`/`Else` keywords and the `End` dedent position are authored
-/// spans in the source language, #583) — [`marker_branch_range`]. Raw
-/// Workshop markers carry no action span, so their extents are derived
-/// textually against the retained source — see [`SourceScan`].
 fn dead_branch_fix(
     program: &Program,
     rule_id: RuleId,
@@ -623,12 +592,6 @@ fn dead_branch_fix(
     dead_branch_span(&scan, start, end).map(|span| LintFix::RemoveDeadBranch { span })
 }
 
-/// The dead branch's byte range taken from marker provenance: the provider's
-/// recorded position for the dead `Else If` marker through the boundary
-/// marker. Returns `None` unless the chain's `If` opener, the dead marker,
-/// and the boundary marker all carry strictly increasing positions in the
-/// scanned file — provenance where every marker inherits the same position
-/// (or none) fails this check and the caller derives extents textually.
 fn marker_branch_range(
     program: &Program,
     rule_id: RuleId,
@@ -650,13 +613,6 @@ fn marker_branch_range(
     (head < start && start < end).then_some(start..end)
 }
 
-/// The branch-removal span between a dead `Else If` marker and the next
-/// chain marker, rounded to whole lines. `EditRange`s are half-open
-/// line/column positions applied as a standard text splice, so whole-line
-/// deletion covers the marker's line start through the boundary marker's
-/// line start — the newline-terminated dead lines entirely; either side
-/// keeps its exact extent when the marker shares its line with other
-/// statements.
 fn dead_branch_span(scan: &SourceScan, marker: usize, boundary: usize) -> Option<Span> {
     let text = scan.document.text();
     let marker_line = scan.line_start(marker);
@@ -715,13 +671,6 @@ fn chain_if_index(actions: &[Action], elseif: usize) -> Option<usize> {
     None
 }
 
-/// Whether `value` contains a call whose result can move between two
-/// evaluations in one synchronous pass — the `Random *` family, the
-/// advancing clocks, and the sampled server-load metrics, which are
-/// evaluated fresh per call. Every other call reads the per-tick snapshot
-/// the engine updates between passes — positions and objective state
-/// included (`Update Every Frame` exists precisely because position reads
-/// refresh only every few ticks) — so a duplicated condition stays equal.
 fn contains_volatile_call(value: &Value) -> bool {
     const VOLATILE: &[&str] = &[
         "randomInteger",
@@ -742,12 +691,6 @@ fn contains_volatile_call(value: &Value) -> bool {
     volatile
 }
 
-/// A byte-oriented view over one retained source document for deriving
-/// authored extents that provenance does not record (#556): value-call
-/// spans cover only the callee phrase, and `Else If`/`Else`/`End` markers
-/// carry no span at all. Positions inside `//` comments are trivia; every
-/// derived extent is re-verified by the edit transaction's reparse before
-/// any write, so a wrong derivation refuses rather than writes.
 struct SourceScan<'a> {
     document: &'a SourceDocument,
     comments: Vec<Range<usize>>,
@@ -846,13 +789,6 @@ impl<'a> SourceScan<'a> {
     }
 }
 
-/// The full authored extent of `value` as a byte range: spans record the
-/// callee phrase (`Compare`), not the `(...)` the expression occupies, so
-/// the end is completed from the last child's extent through the call's
-/// closing bracket. A derived/infix-shaped node — `a + b`, `a[i]`, `x ?
-/// y : z` — begins before its own token and is anchored backward to the
-/// `(` or `,` that starts its argument position. Returns `None` when the
-/// extent cannot be derived exactly.
 fn expr_extent_bytes(
     value: &Value,
     span_of: &mut dyn FnMut(&[usize]) -> Option<Span>,
@@ -935,10 +871,6 @@ fn is_member_path_char(c: char) -> bool {
     c.is_alphanumeric() || matches!(c, '_' | '.')
 }
 
-/// The start byte of the `Else If (<condition>);` marker statement whose
-/// condition's authored extent ends at `condition_end`: forward to the
-/// marker's `;` through its `)`s, back to the matching `(`, then over the
-/// `Else If` phrase.
 fn chain_marker_start(scan: &SourceScan, condition_end: usize, phrase: &str) -> Option<usize> {
     let mut pos = condition_end;
     let semi = loop {
@@ -1013,10 +945,6 @@ fn word_back(scan: &SourceScan, pos: usize) -> Option<(usize, usize)> {
     Some((start, end))
 }
 
-/// Where a collected value node sits inside the loop scope. The
-/// `Evaluate Once` remediation is only offered for positions the engine
-/// evaluates once per action execution; re-evaluating positions must keep
-/// their live read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OccurrenceOrigin {
     /// The loop's own `While` condition: re-evaluated every iteration, so
@@ -1034,8 +962,6 @@ enum OccurrenceOrigin {
 struct Collected<'a> {
     values: Vec<&'a Value>,
     parents: Vec<Option<usize>>,
-    /// The reported node span (`identifier.or(span)` — a callee phrase,
-    /// not the full expression extent).
     spans: Vec<Option<Span>>,
     paths: Vec<Vec<usize>>,
     arguments: Vec<usize>,
@@ -1111,12 +1037,6 @@ fn repeated_value_findings(
         .into_iter()
         .map(|family| {
             let first = family[0];
-            // Every occurrence renders identically; locate the finding at the
-            // first occurrence that carries a recorded span. Provider-compiled
-            // programs record no nested value spans at all, so the location
-            // then falls back to the enclosing loop action — and the finding
-            // says so, or the loop header would be mistaken for the
-            // expression's own position (#735).
             let member_span = family.iter().find_map(|&member| collected.spans[member]);
             let expression = value_text(collected.values[first]);
             let mut message = format!(
@@ -1164,12 +1084,6 @@ fn repeated_value_findings(
         .collect()
 }
 
-/// The canonical spelling of a value expression for a finding message
-/// (#735): canonical call ids and declared names in the same shapes the
-/// program dump and rule-content views use — `name(arg, …)`,
-/// `Domain.Member`, `receiver.variable`, `[a, b]` — so findings over
-/// different expressions in one loop are distinguishable from the message
-/// alone.
 fn value_text(value: &Value) -> String {
     match value {
         Value::Number(number) => workshop_rs::format::format_number(*number),
@@ -1200,8 +1114,6 @@ fn value_text(value: &Value) -> String {
         }
         Value::EventPlayer => "eventPlayer".to_string(),
         Value::Call { name, args } => {
-            // `__ambiguous_enum` is the workshop-rs sentinel for an unresolved
-            // bare enum spelling; its first argument is the authored phrase.
             if name == "__ambiguous_enum"
                 && let Some(Value::String(spelling)) = args.first()
             {
@@ -1215,11 +1127,6 @@ fn value_text(value: &Value) -> String {
     }
 }
 
-/// Collect a value tree for `repeated-value`, treating `Evaluate Once`
-/// subtrees as opaque leaves: their contents evaluate at most once per
-/// action evaluation, so they can never be the repeated-evaluation defect —
-/// and the rule must not re-flag code the remediation already wrapped
-/// (#556).
 fn collect_value_tree<'a>(
     value: &'a Value,
     argument: usize,
@@ -1271,11 +1178,6 @@ fn collect_value_at<'a>(
     }
 }
 
-/// Whether the `Evaluate Once` remediation applies to one duplicated
-/// family (#556): every occurrence must resolve to an exact authored
-/// extent, and after wrapping the once-evaluated occurrences at most one
-/// unwrappable occurrence may keep the shape — otherwise the family (and
-/// its finding) survives.
 fn evaluate_once_fix(
     program: &Program,
     rule_id: RuleId,
@@ -1327,9 +1229,6 @@ fn evaluate_once_fix(
     (unwrappable <= 1 && !occurrences.is_empty()).then_some(LintFix::EvaluateOnce { occurrences })
 }
 
-/// Whether `value` holds a live `Update Every Frame` subtree — one not
-/// already frozen inside `Evaluate Once`. Wrapping such an expression in
-/// `Evaluate Once` would freeze a value the engine re-evaluates every tick.
 fn contains_update_every_frame(value: &Value) -> bool {
     match value {
         Value::Call { name, .. } if name == "evaluateOnce" => false,
@@ -1340,23 +1239,6 @@ fn contains_update_every_frame(value: &Value) -> bool {
     }
 }
 
-/// Whether executing `action` can evaluate `argument` — the call's
-/// parameter position — more than once (#562): `Wait Until`'s polled
-/// condition and the `Loop If` family's condition are re-evaluated per
-/// pass (the condition `Loop` itself never polls), and a persistent-object
-/// action's reevaluation-mode parameter selects which fields stay live.
-/// The mode is catalog-pinned: its parameter's domain ends in `Reeval`,
-/// and the selected member's `reevaluation_coverage` names the parameter
-/// positions it re-evaluates. `If`/`Else If` conditions and assignment
-/// arguments evaluate once per action execution, so only `Call` actions
-/// can re-evaluate.
-///
-/// The gate stays conservative whenever coverage is unknown: a member that
-/// is not a reviewed literal (computed, or a non-`Enum` value), a `None`
-/// mode omitted where the catalog declares no explicit `NONE` default, an
-/// action without `reevaluation_coverage`, or a member absent from that
-/// map all keep their argument live — a wrong `Evaluate Once` freezes a
-/// value the engine reevaluates, which is a silent behavior change.
 fn action_argument_reevaluates(catalog: &Catalog, action: &Action, argument: usize) -> bool {
     let Action::Call { name, args } = action else {
         return false;
@@ -1365,9 +1247,6 @@ fn action_argument_reevaluates(catalog: &Catalog, action: &Action, argument: usi
         name.as_str(),
         "waitUntil" | "loopIf" | "loopIfConditionIsTrue" | "__loopIfConditionIsFalse__"
     ) {
-        // `Wait Until` polls only its condition argument; the `Loop If`
-        // family's only input is the condition. Their other positions
-        // evaluate once per action execution.
         return argument == 0;
     }
     let Some(entry) = catalog.entry(Kind::Action, name) else {
@@ -1601,10 +1480,6 @@ fn action_writes(action: &Action, variable: &CounterVariable) -> bool {
             if target == expected_variable && values_equal(player, expected_player))
         }
         Action::AssignMember { .. } => true,
-        // A subroutine call may write the counter through the callee's
-        // body. `Start Rule` without a statically named callee is still a
-        // call and conservatively may write; a builtin `Call` never
-        // reaches a subroutine merely by sharing its name.
         action => {
             subroutine_callee(action).is_some()
                 || matches!(action, Action::Call { name, .. } if name == "startRule")

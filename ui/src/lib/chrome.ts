@@ -7,133 +7,81 @@
 
 /** The chrome strings one locale provides; every key is required. */
 export interface ChromeStrings {
-  /** The title row's large italic name. */
   title: string
-  /** The toolbar's aria label. */
   rulesToolbar: string
-  /** The rule-list section's aria label. */
   rulesRegion: string
-  /** The toolbar's rule count. */
   rulesCount: (count: number) => string
-  /** The Diagnostics button tooltip and dialog title. */
   diagnostics: string
-  /** The "Only rules with findings" toolbar toggle's tooltip. */
   onlyRulesWithFindings: string
-  /** A severity group's heading name in the Diagnostics dialog. */
   severityName: (severity: 'error' | 'warning' | 'info') => string
-  /** The Variables button tooltip and dialog title. */
   variables: string
-  /** The pending-changes button tooltip and dialog title. */
   pendingChanges: string
-  /** The rule-name filter's placeholder. */
   filterPlaceholder: string
-  /** The locale selector's aria label. */
   language: string
-  /** The Add rule button's aria label. */
   addRuleLabel: string
-  /** The Add rule button's tooltip, naming why it is disabled. */
   addRuleTitle: string
-  /** The rule list's loading empty state. */
   loadingRules: string
-  /** The rule list's empty-filter state. */
   noRulesMatch: string
-  /** An open rule's loading state. */
   loadingRule: string
-  /** The refused-rule body's heading (the refusal text is the service's). */
   contentRefused: string
-  /** Event-row labels, in the in-game order. */
   event: string
   team: string
   player: string
   subroutine: string
-  /** The two statement column headings. */
   conditions: string
   actions: string
-  /** An empty statement column's row. */
   none: string
-  /** The singular nouns aria labels use for a conditions/actions row. */
   conditionNoun: string
   actionNoun: string
-  /** The column select-all checkbox aria label. */
   selectAll: (noun: string) => string
-  /** A statement row's checkbox aria label. */
   selectRow: (noun: string, index: number) => string
   addStatement: (noun: string) => string
   addStatementTitle: (noun: string) => string
   selectedCount: (count: number) => string
   selectedHiddenCount: (count: number, hidden: number) => string
   filterColumn: (noun: string) => string
-  /** The heading's batch actions. */
   disable: string
   enable: string
   delete: string
   clear: string
-  /** A statement row's context menu and its entries. */
   statementMenu: (noun: string, index: number) => string
   selectSameAction: string
   selectBlock: string
-  /** The rule-bar chevron tooltips. */
   expandRule: string
   collapseRule: string
-  /** The rule-bar chevron aria labels. */
   expandRuleLabel: (name: string) => string
   collapseRuleLabel: (name: string) => string
-  /** A severity mark's aria label: the severity and the finding count. */
   findingMarkLabel: (severity: string, count: number) => string
-  /** The dialogs' loading state. */
   loading: string
-  /** The findings surfaces' unavailable state (a refusal or transport error). */
   findingsUnavailable: string
-  /** The Variables dialog's empty state. */
   noVariables: string
-  /** The Diagnostics dialog's empty state. */
   noDiagnostics: string
-  /** The pending-changes dialog's empty state. */
   noPending: string
-  /** The view dialogs' close button. */
   close: string
-  /** The view dialogs' footer confirm button. */
   confirm: string
-  /** The pending-changes footer's buttons. */
   discardAll: string
   cancel: string
   submit: string
   applying: string
-  /** The statement editor's title for a condition (actions title by name). */
   conditionTitle: string
-  /** The `+` form's first-row label for an action's call picker. */
   actionLabel: string
-  /** The statement editor's disable toggle. */
   disabled: string
-  /** The statement editor's confirm button. */
   ok: string
-  /** The editor's empty-slot placeholder (a required argument with no value). */
   unset: string
-  /** The two boolean literals the editor's boolean picker lists. */
   trueLiteral: string
   falseLiteral: string
-  /** The simulation button's tooltip and the panel's title (#836). */
   simulation: string
-  /** The two room column headings. */
   simTeam1: string
   simTeam2: string
-  /** The user's slot label; other slots use `simSlot` with a number. */
   simYou: string
   simSlot: string
-  /** An empty hero dropdown's placeholder. */
   simNoHero: string
-  /** The lobby settings section's heading. */
   simLobbySettings: string
-  /** The run-length field's label. */
   simSeconds: string
-  /** The Start button's labels, running and idle. */
   simStart: string
   simRunning: string
-  /** A refusal's fallback message when the service sends none. */
   simRefused: string
-  /** The wording `not_modeled` and `missing_input` outcomes carry. */
   simNotVerified: string
-  /** The result section's headings. */
   simVariables: string
   simLogs: string
 }
@@ -301,7 +249,6 @@ const zhCN: ChromeStrings = {
   simLogs: '日志',
 }
 
-// Keys are lowercase: the service spells locales `zh-cn`/`en-us`.
 const TABLES: Record<string, ChromeStrings> = {
   'en-us': enUS,
   'zh-cn': zhCN,

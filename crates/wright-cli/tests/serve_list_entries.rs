@@ -1,5 +1,3 @@
-//! `listEntries` (ADR-0031) over the `wright serve` transports.
-
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -15,8 +13,6 @@ fn corpus_workshop(id: &str) -> PathBuf {
 }
 
 fn run_lines(transport: &str, input: &Path, lines: &[&str]) -> Vec<Value> {
-    // Each service process gets its own working directory, as `compile`
-    // writes next to it.
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let cwd = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
         "serve-list-entries-{}-{}",
@@ -54,8 +50,6 @@ fn run_lines(transport: &str, input: &Path, lines: &[&str]) -> Vec<Value> {
 
 #[test]
 fn list_entries_answers_identically_over_stdio_and_jsonrpc_and_is_not_an_mcp_tool() {
-    // ADR-0031: `listEntries` serves editors over stdio and JSON-RPC
-    // `request`, reads no program, and stays out of the MCP tool set.
     let input = corpus_workshop("synthetic/basic-rule");
     let request = r#"{"op":"listEntries","language":"workshop","kind":"enumMember","within":"Hero","pageSize":20}"#;
     let stdio = run_lines("stdio", &input, &[request]);
@@ -80,7 +74,6 @@ fn list_entries_answers_identically_over_stdio_and_jsonrpc_and_is_not_an_mcp_too
     let second = run_lines("stdio", &input, &[&next]);
     assert_ne!(second[0]["result"]["entries"], result["entries"]);
 
-    // A session over a missing input still answers: no project load.
     let dir =
         std::env::temp_dir().join(format!("wright-serve-list-entries-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

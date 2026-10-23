@@ -284,8 +284,6 @@ mod tests {
         dir
     }
 
-    /// Build a release archive (tar.gz, or zip for Windows) with the
-    /// `wright-<version>-<target>/` layout.
     fn build_archive(platform: Platform, files: &[(&str, &[u8])]) -> Vec<u8> {
         let dir = format!("wright-9.9.9-{}", platform.target);
         if platform.windows {

@@ -108,9 +108,6 @@ fn unconfigured_language_id_refuses_explicitly() {
     assert_eq!(diagnostic.code, "source-provider-unavailable");
 }
 
-/// A Wright transaction renaming every occurrence of `double` to `twice` in
-/// the clean puzzle (declaration at 5:5-5:11, references at 8:16-8:22 and
-/// 8:24-8:30, 1-based columns).
 fn rename_all_occurrences_transaction() -> EditTransaction {
     let source_identity = wright_driver::input_identity(CLEAN_PUZZLE);
     EditTransaction::new(vec![
@@ -182,8 +179,6 @@ fn caller_transaction_validates_through_the_provider() {
 fn caller_transaction_that_breaks_the_source_refuses() {
     let mut service = tool_service(&[]);
     let documents = single_document_set();
-    // Deleting the target value produces a syntax error; the provider's
-    // normative edit validation (apply, then re-parse) catches it.
     let transaction = EditTransaction::new(vec![SourceEdit {
         edit_kind: "edit".to_string(),
         source: URI.to_string(),
@@ -211,9 +206,6 @@ fn caller_transaction_that_breaks_the_source_refuses() {
     assert!(mutation.preview.is_none(), "no partial preview");
 }
 
-/// Provider mutations carry their own documents and project context: an
-/// unrelated broken session project neither blocks them nor gets loaded by
-/// them.
 #[test]
 #[ignore = "requires LPP_MOCK_PROVIDER pointing to the pinned LPP mock provider"]
 fn provider_mutations_do_not_require_the_session_project() {
@@ -258,10 +250,6 @@ fn provider_mutations_do_not_require_the_session_project() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// An LPP fake provider that accepts the mutation surface unconditionally:
-/// `lpp/validateEdits` accepts every edit and `lpp/check` reports a clean
-/// project. It records every document URI the project-level `lpp/check` is
-/// shown so the test can prove which set the session supplied.
 #[cfg(unix)]
 const SESSION_DOCS_PROVIDER: &str = r#"#!/usr/bin/env python3
 import json, sys
@@ -351,10 +339,6 @@ fn member_uri() -> String {
         .to_string()
 }
 
-/// `documents`/`sources` may be omitted (#548): the operation then derives
-/// the provider's document view from the session's loaded project — member
-/// disk text at version 0 under `file://` URIs — and `sources` defaults to
-/// each document's text.
 #[cfg(unix)]
 #[test]
 fn an_omitted_document_set_derives_from_the_loaded_project() {
@@ -450,9 +434,6 @@ fn an_omitted_document_set_validates_a_session_member_edit() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// `sources` alone may be omitted (#548): it defaults to each supplied
-/// document's text — the transaction's identity precondition verifies
-/// against that text.
 #[cfg(unix)]
 #[test]
 fn omitted_sources_default_to_each_documents_text() {

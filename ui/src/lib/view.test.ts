@@ -16,8 +16,6 @@ const content: RuleContent = {
   actions: [],
 }
 
-// `content` arrives as the schema's loose `{[k:string]: unknown}` shape, so
-// tests build summaries through a record and cast like the loader does.
 const summary = (extra: Record<string, unknown> = {}): RuleSummary =>
   ({ id: 0, name: 'rule', ...extra }) as unknown as RuleSummary
 

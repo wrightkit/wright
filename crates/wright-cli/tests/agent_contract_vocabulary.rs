@@ -1,6 +1,3 @@
-//! The committed `wright-agent/v1` schema against live vocabulary results:
-//! `lookup` facts and `listEntries` (ADR-0031) pages.
-
 use std::path::{Path, PathBuf};
 
 use jsonschema::validator_for;
@@ -26,9 +23,6 @@ fn service_response(request: &ToolRequest) -> ToolResponse {
 
 #[test]
 fn lookup_result_schema_covers_callable_returns_and_variadic() {
-    // #781/#798: `returns` and `variadic` are additive optional members of
-    // a `callable` fact; a live result that carries them must validate
-    // against the committed schema.
     let schema: Value = serde_json::from_str(
         &std::fs::read_to_string(workspace_root().join("schemas/wright-agent-v1.schema.json"))
             .unwrap(),
@@ -63,9 +57,6 @@ fn lookup_result_schema_covers_callable_returns_and_variadic() {
 
 #[test]
 fn list_entries_request_and_result_validate_against_the_committed_schema() {
-    // ADR-0031: the request shape (including the `pageSize` bounds and the
-    // listable kinds) and a live result validate against the committed
-    // schema.
     let schema: Value = serde_json::from_str(
         &std::fs::read_to_string(workspace_root().join("schemas/wright-agent-v1.schema.json"))
             .unwrap(),

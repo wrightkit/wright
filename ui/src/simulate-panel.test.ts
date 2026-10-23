@@ -1,10 +1,4 @@
 // @vitest-environment jsdom
-/**
- * The simulation panel's run path (#836): Start sends `simulate` with the
- * project identity and the room's scenario, a trace renders its outcome
- * and globals, and a refusal shows its message while the previous result
- * is kept.
- */
 import { flushSync, mount, unmount } from 'svelte'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import SimulatePanel from './lib/SimulatePanel.svelte'
@@ -66,7 +60,6 @@ afterEach(() => {
   api.handler = null
 })
 
-// Bits UI portals the dialog into `document.body`.
 function panel() {
   app = mount(SimulatePanel, {
     target: host,
@@ -118,7 +111,6 @@ describe('the simulation panel run path (#836)', () => {
     start()
     await settle()
     expect(dialog.querySelector('.refusal')?.textContent).toBe('the source changed')
-    // The earlier trace is still rendered — a refusal changes nothing else.
     expect(dialog.querySelector('.outcome strong')?.textContent).toBe('complete')
     expect(dialog.textContent).toContain('ran')
   })

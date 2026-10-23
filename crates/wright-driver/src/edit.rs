@@ -1,12 +1,3 @@
-//! Tools and agents propose edits as validated, source-oriented
-//! [`SourceEdit`]s — never as mutations of Wright's internal IR.
-//!
-//! Raw Workshop input is edited through `workshop-rs` itself (#434): a
-//! transaction applies to the caller-supplied current sources and the
-//! edited result is reparsed and validated through the session's own
-//! Workshop parse path. Source languages stay at the provider boundary
-//! (`providerValidateEdit`); there is no static fallback for them.
-
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -276,9 +267,6 @@ pub fn validate_transaction(
     }
 }
 
-/// Resolve the session input for an edit operation without consuming stdin:
-/// an input with no path carries no source identity, so edit operations
-/// refuse it outright.
 pub(crate) fn resolve_edit_input(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
     if config.input.path().is_none() {
         return Err(edit_stdin_refusal());
@@ -294,11 +282,6 @@ fn edit_stdin_refusal() -> Diagnostic {
     )
 }
 
-/// The source-kind boundary shared by the raw edit operations (#434): raw
-/// Workshop input validates through `workshop-rs`; OPY and other source
-/// languages belong to the provider operation (`providerValidateEdit`),
-/// which keeps its own contract. The refusal names the operation a caller
-/// should route to.
 pub(crate) fn edit_kind_gate(kind: SourceKind, provider_operation: &str) -> Option<Diagnostic> {
     match kind {
         SourceKind::Workshop => None,
@@ -322,9 +305,6 @@ pub(crate) fn edit_kind_gate(kind: SourceKind, provider_operation: &str) -> Opti
     }
 }
 
-/// Whether a `sources` key names the resolved input file: plain path
-/// spellings and `file://` URI spellings (even percent-encoded) of the
-/// same path compare by canonical identity.
 pub(crate) fn same_source(source: &str, resolved: &ResolvedInput) -> bool {
     resolved
         .path
@@ -333,9 +313,6 @@ pub(crate) fn same_source(source: &str, resolved: &ResolvedInput) -> bool {
 }
 
 fn same_file(source: &str, path: &Path) -> bool {
-    // `provider_uri_path` decodes `file://` URIs — `my%20dir` names the
-    // same member as `my dir` (#636) — and passes plain path spellings
-    // through.
     let source = crate::source_provider::provider_uri_path(source);
     source == path.to_string_lossy()
         || matches!(
@@ -344,10 +321,6 @@ fn same_file(source: &str, path: &Path) -> bool {
         )
 }
 
-/// Parse and validate Workshop text through the session's own path: locale
-/// detection (with the session's override), then `workshop-rs` parse and
-/// validation — a refused transaction carries the real Workshop
-/// diagnostics, not a Wright-side paraphrase.
 fn parse_workshop(
     text: &str,
     catalog: &Catalog,
@@ -385,8 +358,6 @@ pub fn write_previews(
     }
     let mut writes: Vec<PlannedWrite> = Vec::with_capacity(previews.len());
     for preview in previews {
-        // A provider-mapped edit names its source by `file://` URI (#583);
-        // `provider_uri_path` also passes plain path spellings through.
         let path = PathBuf::from(crate::source_provider::provider_uri_path(&preview.source));
         let bytes = std::fs::read(&path).map_err(|error| {
             Diagnostic::error(
@@ -438,10 +409,6 @@ pub fn write_previews(
         .collect())
 }
 
-/// One file of a staged write: the file to replace, the sibling temporary
-/// its new content is staged in, and the exact bytes the identity check
-/// captured so a later failure can roll the file back to what was
-/// validated.
 struct PlannedWrite<'a> {
     preview: &'a SourcePreview,
     path: PathBuf,
@@ -455,13 +422,6 @@ fn remove_staged(writes: &[PlannedWrite]) {
     }
 }
 
-/// Roll back a failed commit: the staged files that were never committed
-/// are removed and every file already replaced is written back to the
-/// bytes the identity check captured. The restore writes those bytes
-/// directly — the file already differs from the validated original, so a
-/// second temporary could only strand another sibling. A file whose
-/// restore fails keeps the new content, so the diagnostic names every
-/// file the caller still has to recover.
 fn rollback_write(writes: &[PlannedWrite], failed: usize, error: std::io::Error) -> Diagnostic {
     remove_staged(&writes[failed..]);
     let mut diverged = Vec::new();
@@ -485,8 +445,6 @@ fn rollback_write(writes: &[PlannedWrite], failed: usize, error: std::io::Error)
     Diagnostic::error("output-io", Stage::Emission, message)
 }
 
-/// A sibling temporary file next to `path` — same directory, so the final
-/// rename is atomic on the same filesystem.
 fn temporary_path(path: &Path) -> PathBuf {
     let mut name = path
         .file_name()
@@ -519,11 +477,6 @@ fn source_precondition(
     })
 }
 
-/// Apply one edit as a standard half-open splice: positions resolve to byte
-/// offsets and `source[..start] + new_text + source[end..]` is the result.
-/// A range covering whole lines — start at a line's first column, end at a
-/// later line's first column — removes the covered newlines with the lines,
-/// the same interpretation any consumer of the `EditRange` contract uses.
 fn apply_edit(source: &str, edit: &SourceEdit) -> Result<String, Diagnostic> {
     let lines: Vec<&str> = source.split('\n').collect();
     let (sl, sc, el, ec) = (
@@ -578,8 +531,6 @@ mod tests {
 
     #[test]
     fn same_file_binds_percent_encoded_file_uris() {
-        // #636: `file:///…/my%20dir/main.ws` names the same member as the
-        // decoded path — a space-carrying source spells either way.
         let path = Path::new("/tmp/my dir/main.ws");
         assert!(same_file("file:///tmp/my%20dir/main.ws", path));
         assert!(same_file("/tmp/my dir/main.ws", path));
@@ -752,9 +703,6 @@ mod tests {
 
     #[test]
     fn write_previews_refuses_stale_sources_and_updates_atomically() {
-        // #434: `write_previews` rechecks each file's identity before
-        // writing; a file that changed since validation refuses with no
-        // write at all.
         let (dir, path) = temp_workshop(WORKSHOP);
         let new_text = WORKSHOP.replacen("0: score", "0: total", 1).replacen(
             "Global.score",
@@ -790,8 +738,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// Build a write fixture: one preview per `(path, current, new_text)`
-    /// plus a transaction carrying each source's identity precondition.
     fn write_fixtures(files: &[(&Path, &str, &str)]) -> (Vec<SourcePreview>, EditTransaction) {
         let previews = files
             .iter()
@@ -836,9 +782,6 @@ mod tests {
     #[test]
     fn a_write_failure_on_a_later_file_leaves_every_source_untouched() {
         use std::os::unix::fs::PermissionsExt;
-        // #734: a multi-source transaction whose later file cannot be
-        // written must leave every source at the validated bytes — the
-        // write used to keep the earlier files' new content.
         let dir = std::env::temp_dir().join(format!(
             "wright-edit-atomic-{}-{}",
             std::process::id(),
@@ -875,12 +818,6 @@ mod tests {
 
     #[test]
     fn a_failed_replace_rolls_back_the_writes_already_committed() {
-        // #734: a later file's replace fails after an earlier one
-        // committed. The failure is deterministic here because a
-        // `file://` URI and the plain path spell the same file: both
-        // previews stage to one sibling temporary, so the second rename
-        // has nothing to move. The committed file is rolled back to the
-        // validated bytes and no temporary is left behind.
         let dir = std::env::temp_dir().join(format!(
             "wright-edit-rollback-{}-{}",
             std::process::id(),
@@ -932,8 +869,6 @@ mod tests {
 
     #[test]
     fn the_rollback_diagnostic_names_every_source_it_could_not_restore() {
-        // #734: a file whose restore fails still carries the new content,
-        // so the diagnostic names each one the caller has to recover.
         let dir = std::env::temp_dir().join(format!(
             "wright-edit-diverged-{}-{}",
             std::process::id(),

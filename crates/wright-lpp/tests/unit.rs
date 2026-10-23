@@ -133,7 +133,6 @@ fn run_script(
             FakeStep::Close => break,
         }
     }
-    // Dropping the writer closes the provider output: end-of-stream.
 }
 
 fn read_request(reader: &mut BufReader<os_pipe::PipeReader>, line: &mut String) -> Option<String> {
@@ -278,9 +277,6 @@ fn missing_response_times_out_deterministically() {
 
 #[test]
 fn late_response_after_timeout_is_ignored_and_session_survives() {
-    // Request ids are deterministic (1 = initialize, 2 = first check, 3 =
-    // second check). The late response for the timed-out request (id 2)
-    // must be ignored, not treated as a protocol violation.
     let (mut client, fake) = FakeProvider::spawn_with_timeout(
         vec![
             FakeStep::Respond(ok_response(init_result_json())),
@@ -347,9 +343,6 @@ fn malformed_json_poisons_the_session() {
 
 #[test]
 fn non_utf8_line_is_a_protocol_violation_not_eof() {
-    // A line of invalid UTF-8 is a protocol violation, not the clean
-    // stream close `read_line`'s InvalidData error used to be folded
-    // into (#764).
     let (mut client, fake) = FakeProvider::spawn(vec![
         FakeStep::Respond(ok_response(init_result_json())),
         FakeStep::RespondRawBytes(vec![0xff, 0xfe, 0xfd]),
@@ -373,9 +366,6 @@ fn non_utf8_line_is_a_protocol_violation_not_eof() {
 
 #[test]
 fn an_overlong_line_is_a_protocol_violation() {
-    // A line past MAX_PROVIDER_LINE_BYTES is refused at the bound: the
-    // reader stops reading there, so the provider's write fails rather
-    // than the client allocating without limit (#764).
     let (mut client, fake) = FakeProvider::spawn(vec![
         FakeStep::Respond(ok_response(init_result_json())),
         FakeStep::RespondRawBytes(vec![b'x'; MAX_PROVIDER_LINE_BYTES + 1]),
@@ -710,8 +700,6 @@ fn initialize_error_response_keeps_session_fresh_for_retry() {
 
 #[test]
 fn malformed_initialize_response_fails_the_initialize_only() {
-    // Both result and error: the payload is attributable to the initialize
-    // request, so the failure is request-scoped and the session stays fresh.
     let (mut client, fake) = FakeProvider::spawn(vec![
         FakeStep::Respond(
             json!({ "jsonrpc": "2.0", "id": 0, "result": null, "error": { "code": -32603, "message": "boom" } }),
@@ -769,9 +757,6 @@ fn capability_require_refuses_unnegotiated_capabilities() {
     );
 }
 
-/// #638: a provider MAY advertise any capability subset — an absent id reads
-/// as not offered instead of failing `provider-malformed`, and ids newer than
-/// this client's model are retained rather than silently dropped.
 #[test]
 fn capability_subsets_deserialize_and_unknown_ids_survive() {
     let sparse: Capabilities =
@@ -838,8 +823,6 @@ fn capability_ids_and_methods_match_the_spec_table() {
     assert_eq!(Capability::parse("bogus"), None);
 }
 
-/// #638: capability fields are optional on the wire — an absent id is a
-/// declined capability, not a malformed initialize result.
 #[test]
 fn initialize_result_accepts_capability_subsets() {
     let complete: Value = init_result_json();

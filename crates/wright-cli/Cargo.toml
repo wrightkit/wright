@@ -11,9 +11,6 @@ description = "The primary `wright` command-line interface over the compiler/ses
 workspace = true
 
 [features]
-# `wright ui` (ADR-0032): embeds the built ui/dist assets and serves the
-# read-only project view over a loopback endpoint. Off by default so a
-# Rust-only build never needs Node; the release job enables it.
 ui = ["dep:getrandom", "dep:tiny_http"]
 
 [[bin]]

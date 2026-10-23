@@ -1,17 +1,10 @@
 // @vitest-environment jsdom
-/**
- * The editing layer's submit path (ADR-0032 layer 2): staged statement
- * edits go out as one `editStatements` request, the returned transaction
- * posts to the host `/apply` route, and refusals — including a stale
- * identity — surface on the page without a write.
- */
 import { flushSync, mount, unmount } from 'svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App.svelte'
 import type { RuleContent } from './lib/view'
 import type { RuleSummary, ToolRequest, ToolResponse } from './lib/types/generated/wright-agent-v1'
 
-/** The api module the components call; each test installs its own handlers. */
 const api = vi.hoisted(() => ({
   handler: null as null | ((request: ToolRequest) => Promise<ToolResponse>),
   apply: null as null | ((transaction: unknown) => Promise<unknown>),
@@ -28,7 +21,6 @@ vi.mock('./lib/api', () => ({
   },
 }))
 
-/** Drain pending promise continuations, then flush Svelte's effects and DOM. */
 async function settle(): Promise<void> {
   for (let i = 0; i < 4; i++) {
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -59,7 +51,6 @@ const contentFor = (actions: RuleContent['actions']): RuleContent => ({
 const summaryFor = (id: number, name: string, content?: RuleContent): RuleSummary =>
   ({ id, name, span: null, ...(content ? { content } : {}) }) as unknown as RuleSummary
 
-/** The `lookup` row the `+` form's Action pick resolves `wait` to. */
 const WAIT_ENTRY = {
   identity: 'wait',
   kind: 'action',
@@ -80,7 +71,6 @@ const WAIT_ENTRY = {
   },
 }
 
-/** An action whose slots the `+` form cannot fill until #919's pickers. */
 const MODIFY_ENTRY = {
   identity: 'modifyGlobalVariable',
   kind: 'action',
@@ -143,7 +133,6 @@ const click = (el: Element) => {
   flushSync()
 }
 
-/** Bits UI opens its popover on pointerdown and selects on pointerup. */
 const pointerDown = (el: Element) => {
   el.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
   flushSync()
@@ -159,7 +148,6 @@ const type = (el: HTMLInputElement, value: string) => {
   flushSync()
 }
 
-// The editing layer lives in an open rule's body (#880); the bar opens it.
 const bar = (id: number) =>
   host.querySelector<HTMLButtonElement>(`.rule-slot[data-rule-id="${id}"] .bar`)!
 const openRule = async (id: number) => {
@@ -167,15 +155,12 @@ const openRule = async (id: number) => {
   await settle()
 }
 
-// The shell's pending-changes view button is the icon button labelled
-// "Pending changes"; its spec count badge shows the staged-edit count.
 const pendingButton = () =>
   host.querySelector<HTMLButtonElement>('.toolbar button[aria-label="Pending changes"]')!
 const pendingBadge = () => pendingButton().querySelector('.sq-badge')?.textContent ?? null
 
 const rows = () => [...host.querySelectorAll<HTMLLIElement>('.statement')]
 const checkbox = (row: Element) => row.querySelector<HTMLInputElement>('.sel')!
-// Bits UI portals the dialogs into `document.body`; mounted content is open.
 const dialog = () => document.body.querySelector<HTMLElement>('.dialog.pending')!
 const buttonByText = (root: Element, text: string) =>
   [...root.querySelectorAll('button')].find((button) => button.textContent === text)!
@@ -223,7 +208,6 @@ describe('the editing layer', () => {
     await openRule(1)
     expect(rows()).toHaveLength(2)
 
-    // Two statement checkboxes, then the heading's Disable button.
     click(checkbox(rows()[0]))
     click(checkbox(rows()[1]))
     expect(host.querySelector('.col[data-list="actions"] .sel-count')?.textContent).toBe('2 selected')
@@ -231,8 +215,6 @@ describe('the editing layer', () => {
     expect(pendingBadge()).toBe('2')
     expect(rows()[0].classList.contains('pending-change')).toBe(true)
 
-    // The pending dialog lists the changes; Submit sends the request and
-    // posts the returned transaction to the host apply path.
     click(pendingButton())
     await settle()
     expect(dialog(), 'the pending dialog is open').not.toBeNull()
@@ -258,7 +240,6 @@ describe('the editing layer', () => {
     }
     const transaction = (statements().result as { transaction: unknown }).transaction
     expect(applied).toEqual(transaction)
-    // The page re-reads the program after a write; the pending map cleared.
     expect(rulesCalls).toBe(2)
     expect(pendingBadge()).toBeNull()
   })
@@ -310,13 +291,10 @@ describe('the editing layer', () => {
     click(buttonByText(dialog(), 'Submit'))
     await settle()
 
-    // The refusal renders in the dialog; the apply route was never hit.
     expect(applySpy).not.toHaveBeenCalled()
     expect(document.body.querySelector('[data-testid="pending-refusal"]')?.textContent).toContain(
       'edit-stale-source',
     )
-    // A stale refusal drops the staging: the marks addressed a program the
-    // page no longer displays, and it re-reads.
     expect(pendingBadge()).toBeNull()
     expect(rows()[0].classList.contains('pending-delete')).toBe(false)
   })
@@ -451,8 +429,6 @@ describe('the editing layer', () => {
     await settle()
     await openRule(1)
 
-    // The heading + opens the editor on an empty action; OK is disabled
-    // until the Action pick lands and every required slot is set.
     click(host.querySelector('.col[data-list="actions"] .column-actions button')!)
     await settle()
     const editor = document.body.querySelector<HTMLElement>('.dialog.editor')!
@@ -468,8 +444,6 @@ describe('the editing layer', () => {
     pick(option)
     await settle()
 
-    // Wait's required Duration is unset until typed; the lookup default
-    // filled Wait Behavior already.
     expect(editor.textContent).toContain('Duration')
     type(
       editor.querySelector<HTMLInputElement>('[data-arg-control="0"] input')!,
@@ -480,7 +454,6 @@ describe('the editing layer', () => {
     click(ok)
     await settle()
 
-    // The new row's gold pending mark sits at the column end.
     const mark = host.querySelector('.col[data-list="actions"] .statement.pending-insert')
     expect(mark, 'the insert placeholder rendered').not.toBeNull()
     expect(mark!.querySelector('.pending-tag')!.textContent).toBe('insert')
@@ -551,8 +524,6 @@ describe('the editing layer', () => {
     await settle()
     await openRule(1)
 
-    // One selected row keeps the heading + beside the batch actions;
-    // the insert lands after the row, not at the column end.
     click(checkbox(rows()[0]))
     await settle()
     click(host.querySelector('.col[data-list="actions"] .column-actions button[aria-label="Add action"]')!)
@@ -574,8 +545,6 @@ describe('the editing layer', () => {
     click(buttonByText(editor, 'OK'))
     await settle()
 
-    // The placeholder sits between the two rows — after the selected
-    // row 0, before row 1.
     const items = [
       ...host.querySelectorAll('.col[data-list="actions"] .statement'),
     ]
@@ -602,10 +571,6 @@ describe('the editing layer', () => {
   })
 
   it('keeps OK disabled for a call whose slots need #919\'s pickers', async () => {
-    // `modifyGlobalVariable`'s Variable and Operation slots take the
-    // pickers #919 adds; until then the `+` form cannot produce their
-    // nodes, so OK stays disabled rather than stage an insert
-    // `editStatements` must refuse (#920 review).
     const summaries = [
       summaryFor(1, 'setup', contentFor([action('wait', [0.016]), action('kill', [])])),
     ]
@@ -675,11 +640,6 @@ describe('the editing layer', () => {
     )
     await settle()
 
-    // Filling the value slot's literal input still leaves the
-    // picker-bound variable/operation slots un-producible, so OK stays
-    // disabled — a staged insert can never be submitted (a synthetic
-    // click on the disabled button is a jsdom artifact, so the test
-    // stops at the control state).
     type(editor.querySelector<HTMLInputElement>('[data-arg-control="2"] input')!, '1')
     await settle()
     expect(ok.disabled, 'OK is disabled on a picker-bound call').toBe(true)

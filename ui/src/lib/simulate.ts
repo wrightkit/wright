@@ -1,9 +1,3 @@
-/**
- * The simulation panel's room→scenario mapping and trace reading (#836,
- * athena scenario-format): a room slot is `{hero, team}`, the scenario
- * carries only occupied slots as `p1`…`pN` players, and the run length
- * defaults from the project's `lobby.matchTimeLimit` setting or 60.
- */
 import type { AthenaTrace, SettingsNode } from './types/generated/wright-agent-v1'
 
 export interface RoomSlot {
@@ -65,12 +59,6 @@ export function outcomeText(trace: AthenaTrace): { status: string; detail: strin
   return { status: String(outcome.status), detail: null }
 }
 
-/**
- * One `athena` `Val` as display text. The wire shape is
- * `{"type":"…","value":…}` (`serde(tag, content)`); `null` carries no
- * `value` at all and `array`'s `value` is a list of `Val`s — neither
- * tolerates a raw `String()` on the object.
- */
 function valText(val: unknown): string {
   if (val === null || typeof val !== 'object') return String(val)
   const typed = val as { type?: string; value?: unknown }

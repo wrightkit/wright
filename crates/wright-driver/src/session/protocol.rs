@@ -1,13 +1,5 @@
-//! The LPP protocol-version negotiation helpers the source-provider
-//! session path shares: highest mutual version above the request's
-//! floor, and the `major.minor` tuple comparison.
-
 use crate::input::InputTarget;
 
-/// The highest LPP version both sides implement, honoring the target's
-/// negotiation floor (LPP §19.2, #638): entry requests cannot drop below
-/// 1.1 project loading, and a directory target cannot drop below the 1.3
-/// `sourceIdentity` contract its canonical load depends on.
 pub(super) fn mutual_protocol_version(
     supported: &[String],
     target: InputTarget,

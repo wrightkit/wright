@@ -206,8 +206,6 @@ fn directory_provider_compile_uses_the_owner_source_identity() {
     cleanup(dir);
 }
 
-/// #617: on a provider that refuses `compile`, `check` still executes the
-/// provider's check operation alone — the documented check-only path.
 #[test]
 fn provider_backend_check_falls_back_to_the_check_operation_on_a_check_only_provider() {
     let (dir, entry) = temp_entry();
@@ -244,9 +242,6 @@ fn provider_backend_check_falls_back_to_the_check_operation_on_a_check_only_prov
     cleanup(dir);
 }
 
-/// #617: a compile-capable provider's `check` calls `check` then `compile`
-/// once; the canonical snapshot the check load established serves the later
-/// `compile` from cache — no second provider round-trip.
 #[test]
 fn provider_backend_serves_compile_from_the_check_established_snapshot() {
     let (dir, entry) = temp_entry();
@@ -386,8 +381,6 @@ fn mapped_lint_session(
     edit: impl FnOnce(&mut serde_json::Value),
 ) -> CompilerSession {
     let text = workshop_fixture("synthetic/control-flow");
-    // The fake map's extracted spans carry this text's coordinates; write it
-    // as the member so retained-source validation sees in-range positions.
     std::fs::write(dir.join("main.opy"), &text).expect("member source");
     let provenance = mapped_provenance(&text, &dir.join("main.opy"), edit);
     let provider = RecordingProvider {
@@ -450,10 +443,6 @@ fn mapped_analyze_locations_resolve_to_authored_source() {
     cleanup(dir);
 }
 
-/// A mapped provider program's file table entries carry no retained source
-/// text, so the analyzer's document count reports 0 for a real source
-/// project. `program.files` reports the loaded source-file table instead,
-/// matching `project` (#536).
 #[test]
 fn mapped_provider_project_reports_its_source_file_count() {
     let (dir, entry) = temp_entry();
@@ -482,12 +471,6 @@ fn mapped_provider_project_reports_its_source_file_count() {
     cleanup(dir);
 }
 
-/// A provider map may carry a span that does not resolve inside the
-/// retained authored source (e.g. a position recorded against an expanded
-/// spelling rather than the authored line). `workshop-rs` prunes spans
-/// that do not resolve in the attached source (1.13), so the run still
-/// serves and mapped positions survive instead of failing the load
-/// (#583, #626).
 #[test]
 fn mapped_span_outside_retained_source_degrades_extents_not_the_load() {
     let (dir, entry) = temp_entry();
@@ -510,8 +493,6 @@ fn mapped_span_outside_retained_source_degrades_extents_not_the_load() {
     cleanup(dir);
 }
 
-/// A member the provider map names but no readable disk file serves no
-/// retained source; the load warns instead of silently dropping it (#583).
 #[test]
 fn unreadable_mapped_member_warns_instead_of_silently_dropping() {
     let (dir, entry) = temp_entry();
@@ -536,8 +517,6 @@ fn unreadable_mapped_member_warns_instead_of_silently_dropping() {
     cleanup(dir);
 }
 
-/// A conforming pre-1.4 provider allows one `lpp/initialize` per process, so
-/// the fallback after a refused 1.4 negotiation must use a restarted process.
 #[cfg(unix)]
 #[test]
 fn pre_lpp_14_provider_is_restarted_before_the_unmapped_fallback() {
@@ -623,11 +602,6 @@ fn nodes_without_an_authored_origin_stay_explicitly_unmapped() {
     cleanup(dir);
 }
 
-/// `lint --fix` on a provider-mapped program materializes the dead-branch
-/// removal against the authored OPY member — marker action spans give the
-/// branch extent — and validates the transaction through the provider edit
-/// pipeline (`lpp/validateEdits` + `lpp/check`) instead of the raw Workshop
-/// reparse (#583). `--write` applies it and re-lints clean.
 #[cfg(unix)]
 #[test]
 fn mapped_lint_fix_validates_and_writes_through_the_provider() {
@@ -654,25 +628,15 @@ for line in sys.stdin:
         reply(id, {})
 "#;
 
-    // The authored OPY member the fake provider's source map points into.
     const OPY: &str = "globalvar total\n\nrule \"dup\":\n    @Event global\n    if total == 0:\n        total = 1\n    elif total == 0:\n        total = 3\n    else:\n        total = 4\n";
     const FIXED_OPY: &str = "globalvar total\n\nrule \"dup\":\n    @Event global\n    if total == 0:\n        total = 1\n    else:\n        total = 4\n";
 
-    // The canonical artifact for each member state: the duplicate `elif`
-    // chain before the fix, the `else`-only chain after it — what a real
-    // provider emits when it recompiles the edited source.
     const ARTIFACT: &str = "variables {\n    global:\n        0: total\n}\nrule (\"dup\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        If(Compare(Global.total, ==, 0));\n            Set Global Variable(total, 1);\n        Else If(Compare(Global.total, ==, 0));\n            Set Global Variable(total, 3);\n        Else;\n            Set Global Variable(total, 4);\n        End;\n    }\n}\n";
     const ARTIFACT_FIXED: &str = "variables {\n    global:\n        0: total\n}\nrule (\"dup\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        If(Compare(Global.total, ==, 0));\n            Set Global Variable(total, 1);\n        Else;\n            Set Global Variable(total, 4);\n        End;\n    }\n}\n";
 
-    /// Marker action spans the way the owning frontend records them (#583):
-    /// the `if` keyword anchors the chain head, `elif`/`else` keywords mark
-    /// their branches, and the chain `End` sits at the dedent/EOF boundary.
     fn marker_map(text: &str, authored: &Path) -> wright_driver::SourceProvenance {
         mapped_provenance(text, authored, |artifact| {
             let spans = artifact["spans"].as_array_mut().expect("span list");
-            // Every extracted entry carries Workshop-artifact coordinates;
-            // a fake provider's map authors only the marker/condition spans
-            // this test declares (`apply` rejects position-less entries).
             spans.clear();
             let span = |sl: u32, sc: u32, el: u32, ec: u32| {
                 serde_json::json!({
@@ -692,8 +656,6 @@ for line in sys.stdin:
                     "span": span(sl, sc, el, ec),
                 }));
             }
-            // The dead `elif` condition's authored extent — the finding's
-            // span anchor and the fix's file resolution.
             spans.push(serde_json::json!({
                 "node": "action_argument", "rule": 0, "action": 2, "argument": 0,
                 "span": span(7, 10, 7, 20),
@@ -884,8 +846,6 @@ fn pinned_bastion_findings_resolve_to_authored_opy_locations() {
     }
 }
 
-/// A provider that can check but refuses compile — the "check-only provider
-/// path" #591 requires `check` to execute on without a compile prewarm.
 struct CheckOnlyProvider {
     operations: Arc<Mutex<Vec<&'static str>>>,
 }
@@ -923,9 +883,6 @@ impl SourceProvider for CheckOnlyProvider {
     }
 }
 
-/// A provider that re-compiles on every call — the repeatable counterpart
-/// of `RecordingProvider`, which takes its scripted result once. Its
-/// operations log lets a test distinguish which provider operation ran.
 struct ReloadableProvider {
     operations: Arc<Mutex<Vec<&'static str>>>,
     workshop_text: String,
@@ -962,10 +919,6 @@ impl SourceProvider for ReloadableProvider {
     }
 }
 
-/// #617: `check` gates an agent on the same canonical validation `compile`
-/// runs — the issue's reproducer class, where the provider's check op
-/// reports clean but its compile reports a `catalog-validation` error, must
-/// fail `check` with `compile`'s code and span.
 #[test]
 fn check_reports_the_catalog_validation_errors_compile_reports() {
     let (dir, entry) = temp_entry();
@@ -1066,8 +1019,6 @@ fn check_reports_the_catalog_validation_errors_compile_reports() {
     cleanup(dir2);
 }
 
-/// #617: over every committed canonical-artifact fixture, `check` and
-/// `compile` agree on whether the run reports an error.
 #[test]
 fn check_and_compile_agree_on_error_presence_across_the_artifact_corpus() {
     let corpus = workspace_root().join("tests/fixtures/workshop");
@@ -1132,9 +1083,6 @@ fn check_and_compile_agree_on_error_presence_across_the_artifact_corpus() {
     }
 }
 
-/// #591: `check` and `compile` are workflows, not snapshot queries — the
-/// service must run them through the operation-aware provider calls without
-/// first requiring a canonical compile result.
 #[test]
 fn service_check_and_compile_run_without_a_prewarmed_snapshot() {
     let (dir, entry) = temp_entry();
@@ -1154,9 +1102,6 @@ fn service_check_and_compile_run_without_a_prewarmed_snapshot() {
     assert!(service.loaded().is_none());
     assert_eq!(service.reload_count(), 0);
 
-    // `check` executes the provider's check operation, then asks for the
-    // canonical artifact (#617); the provider's compile refusal keeps it on
-    // the check-only path.
     let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check { all: true }) else {
         panic!("check must return the workflow envelope")
     };
@@ -1210,9 +1155,6 @@ fn service_check_and_compile_run_without_a_prewarmed_snapshot() {
     cleanup(dir);
 }
 
-/// #591: a successful `compile` establishes the snapshot later queries read,
-/// and an observed disk change re-runs the operation-aware load — recovery
-/// is the same workflow, never a re-prewarm requirement.
 #[test]
 fn service_compile_establishes_the_snapshot_and_recovers_after_reload() {
     let (dir, entry) = temp_entry();
@@ -1281,8 +1223,6 @@ fn service_compile_establishes_the_snapshot_and_recovers_after_reload() {
     cleanup(dir);
 }
 
-/// #591: `handle` check/compile and the direct service methods deliver the
-/// same workflow outcome over the same provider session.
 #[test]
 fn service_check_and_compile_match_the_direct_workflow_methods() {
     for via_request in [true, false] {
@@ -1312,8 +1252,6 @@ fn service_check_and_compile_match_the_direct_workflow_methods() {
         };
         assert_eq!(check["command"], "check");
         assert_eq!(check["ok"], true, "{check}");
-        // `check` consults the provider's check operation and its compile for
-        // canonical validation (#617).
         assert_eq!(*operations.lock().expect("ops"), vec!["check", "compile"]);
 
         let compile = if via_request {
@@ -1330,8 +1268,6 @@ fn service_check_and_compile_match_the_direct_workflow_methods() {
         };
         assert_eq!(compile["command"], "compile");
         assert_eq!(compile["ok"], true, "{compile}");
-        // The `check`-established canonical snapshot serves `compile` — no
-        // second provider round-trip.
         assert_eq!(*operations.lock().expect("ops"), vec!["check", "compile"]);
         cleanup(dir);
     }
@@ -1352,9 +1288,6 @@ fn provider_backend_rejects_stdin_without_fabricating_an_entry() {
     assert_eq!(result.diagnostics[0].code, "source-provider-unsupported");
 }
 
-/// #555: caller-held text is not a provider input either — the provider
-/// resolves the project from disk itself, so it cannot answer for a buffer
-/// only the caller holds.
 #[test]
 fn provider_backend_rejects_text_input_without_fabricating_an_entry() {
     let config = SessionConfig {
@@ -1463,9 +1396,6 @@ fn provider_backend_provider_resolution_failure_is_explicit() {
     cleanup(dir);
 }
 
-/// #569: a provider refusal surfaces at the frontend stage (exit 1) with
-/// the refusal code machine-readable in the diagnostic code — it is a
-/// deliberate decline of the request, not an internal failure.
 #[test]
 fn provider_refusal_is_a_frontend_failure_with_its_refusal_code() {
     let (dir, entry) = temp_entry();
@@ -1499,8 +1429,6 @@ fn provider_refusal_is_a_frontend_failure_with_its_refusal_code() {
     cleanup(dir);
 }
 
-/// #569: a negotiated-capability gap is a recognized but unsupported
-/// operation (exit 3), not a source error and not an internal failure.
 #[test]
 fn provider_capability_unavailable_exits_as_unsupported() {
     let (dir, entry) = temp_entry();
@@ -1531,8 +1459,6 @@ fn provider_capability_unavailable_exits_as_unsupported() {
     cleanup(dir);
 }
 
-/// #569: owner-side project loading failures are source-side request
-/// failures (exit 1), not internal errors.
 #[test]
 fn provider_project_load_failure_is_a_source_side_failure() {
     let (dir, entry) = temp_entry();
@@ -1562,8 +1488,6 @@ fn provider_project_load_failure_is_a_source_side_failure() {
     cleanup(dir);
 }
 
-/// #569: transport-level failures (timeout, exit, malformed traffic) stay
-/// internal (exit 4) and keep their structured codes.
 #[test]
 fn provider_transport_failures_stay_internal() {
     for code in ["provider-timeout", "provider-exited", "provider-malformed"] {
@@ -1595,9 +1519,6 @@ fn provider_transport_failures_stay_internal() {
     }
 }
 
-/// #569: a Wright-originated refusal (`session-config-changed`) keeps its
-/// verbatim code and discovery stage on this path too, matching the direct
-/// workflow refusal.
 #[test]
 fn wright_originated_refusal_keeps_its_verbatim_code() {
     let (dir, entry) = temp_entry();
@@ -1627,10 +1548,6 @@ fn wright_originated_refusal_keeps_its_verbatim_code() {
     cleanup(dir);
 }
 
-/// A `LanguageProvider` that fails the entry-scoped requests with a scripted
-/// typed error; every other method is unreachable on these paths. When
-/// `capabilities_failure` is `Some`, `capabilities()` fails with that error
-/// instead of being unreachable.
 struct FailingLppProvider {
     failure: wright_lpp::ProviderError,
     capabilities_failure: Option<wright_lpp::ProviderError>,
@@ -1734,9 +1651,6 @@ impl wright_lpp::LanguageProvider for FailingLppProvider {
     }
 }
 
-/// #569: an LPP refusal reaches the `SourceProvider` consumer as a
-/// classified frontend failure that still names its `refusalCode`, with the
-/// failing operation and entry in the message.
 #[test]
 fn lpp_source_provider_keeps_refusal_code_and_request_context() {
     let (dir, entry) = temp_entry();
@@ -1777,8 +1691,6 @@ fn lpp_source_provider_keeps_refusal_code_and_request_context() {
     cleanup(dir);
 }
 
-/// #569: a timeout stays internal and keeps the method/duration detail in
-/// the message of the classified error.
 #[test]
 fn lpp_source_provider_timeout_is_internal_with_typed_detail_in_text() {
     let (dir, entry) = temp_entry();
@@ -1803,9 +1715,6 @@ fn lpp_source_provider_timeout_is_internal_with_typed_detail_in_text() {
     cleanup(dir);
 }
 
-/// #569: a capability gap stays `capability-unavailable` (unsupported), a
-/// process exit and malformed traffic stay internal — each class keeps a
-/// distinct code a consumer can branch on without parsing `message`.
 #[test]
 fn lpp_source_provider_distinguishes_failure_classes() {
     for (failure, code) in [
@@ -1848,12 +1757,6 @@ fn lpp_source_provider_distinguishes_failure_classes() {
     }
 }
 
-/// #571: a failed capability query is a provider failure, not a legacy
-/// negotiation signal — `compile` propagates the typed error with its
-/// classification instead of silently dispatching the unnegotiated
-/// `lpp/compile` request. `failure` answers `compile_entry`, so a distinct
-/// capabilities failure reaching the caller proves no compile request was
-/// attempted.
 #[test]
 fn lpp_source_provider_propagates_a_capability_query_failure() {
     let (dir, entry) = temp_entry();
@@ -1887,10 +1790,6 @@ fn lpp_source_provider_propagates_a_capability_query_failure() {
     cleanup(dir);
 }
 
-/// #655: `inspect` and its query subcommands load provider-backed input
-/// through the provider's compile operation — the same operation-aware load
-/// `lint`/`analyze` run — so a compile-capable provider serves them, and one
-/// provider compile feeds every later query.
 #[test]
 fn provider_backend_inspect_and_queries_run_the_compile_load() {
     let (dir, entry) = temp_entry();
@@ -1925,9 +1824,6 @@ fn provider_backend_inspect_and_queries_run_the_compile_load() {
     cleanup(dir);
 }
 
-/// #655: a provider that declines its compile operation reports its own
-/// limitation — `inspect` relays that decline rather than refusing at the
-/// command level.
 #[test]
 fn check_only_provider_inspect_reports_the_provider_compile_decline() {
     let (dir, entry) = temp_entry();
@@ -1959,10 +1855,6 @@ fn check_only_provider_inspect_reports_the_provider_compile_decline() {
     cleanup(dir);
 }
 
-/// ADR-0024 decision 4: until the provider advertises the names capability,
-/// an OverPy program serves its canonical content with `unavailable`
-/// naming `opy-rs` instead of a `names` map. The repel fixture stands in
-/// for the compiled OverPy form; assertions read the content, never text.
 #[test]
 fn opy_rules_content_reports_names_unavailable() {
     let (dir, entry) = temp_entry();
@@ -2033,10 +1925,6 @@ fn opy_rules_content_reports_names_unavailable() {
     cleanup(dir);
 }
 
-/// #638: the first `check`/`compile` drains the session's diagnostic buffer
-/// into the load-time envelope; the cached `Loaded` keeps its load
-/// diagnostics so an identical repeated request reports the same set instead
-/// of `diagnostics: []` without calling the provider.
 #[test]
 fn a_repeated_check_reports_the_same_provider_diagnostics() {
     let (dir, entry) = temp_entry();
@@ -2099,10 +1987,6 @@ fn a_repeated_check_reports_the_same_provider_diagnostics() {
     cleanup(dir);
 }
 
-/// #638: an LPP provider without the compile capability declines
-/// `lpp/compile` through `capability-unavailable`, not `Unsupported` —
-/// `check` must still keep the check-only path and report the provider's
-/// own diagnostics.
 #[cfg(unix)]
 #[test]
 fn a_check_only_lpp_provider_keeps_the_check_only_path() {
@@ -2161,9 +2045,6 @@ for line in sys.stdin:
     cleanup(dir);
 }
 
-/// #638: the version-mismatch retry asks for the highest mutually supported
-/// version from `supportedProtocolVersions` (LPP §19.2) rather than a fixed
-/// next rung — and every initialize path sends `clientInfo.name: "wright"`.
 #[cfg(unix)]
 #[test]
 fn a_version_mismatch_retries_at_the_highest_mutual_version() {
@@ -2236,10 +2117,6 @@ for line in sys.stdin:
     cleanup(dir);
 }
 
-/// #638: a directory target loads through the LPP 1.3 source-identity
-/// contract — a negotiated session that does not advertise `sourceIdentity`
-/// is refused with a typed capability diagnostic rather than silently
-/// proceeding without a canonical identity.
 #[cfg(unix)]
 #[test]
 fn a_directory_target_requires_the_source_identity_capability() {

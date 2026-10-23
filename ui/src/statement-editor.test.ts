@@ -1,22 +1,11 @@
 // @vitest-environment jsdom
 /// <reference types="node" />
-/**
- * The statement editor's argument form (docs/ui/editor.md § Form, #918):
- * one row per `lookup` parameter labelled by the parameter's localized
- * name, the control the slot's type takes (numeric input, text input,
- * boolean-literal picker, nested call rows), the clicked argument's
- * control focused on open, "unset" in `--warn` with OK disabled while a
- * required slot is empty, and OK staging one `replace` edit whose node
- * differs only in the edited literal. The dialog composes no Workshop
- * text.
- */
 import { flushSync, mount, unmount } from 'svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App.svelte'
 import type { RuleContent } from './lib/view'
 import type { RuleSummary, ToolRequest, ToolResponse } from './lib/types/generated/wright-agent-v1'
 
-/** The api module the components call; each test installs its own handler. */
 const api = vi.hoisted(() => ({
   handler: null as null | ((request: ToolRequest) => Promise<ToolResponse>),
   apply: null as null | ((transaction: unknown) => Promise<unknown>),
@@ -33,7 +22,6 @@ vi.mock('./lib/api', () => ({
   },
 }))
 
-/** Drain pending promise continuations, then flush Svelte's effects and DOM. */
 async function settle(): Promise<void> {
   for (let i = 0; i < 4; i++) {
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -67,11 +55,6 @@ const contentFor = (
 const summaryFor = (id: number, name: string, content?: RuleContent): RuleSummary =>
   ({ id, name, span: null, ...(content ? { content } : {}) }) as unknown as RuleSummary
 
-/**
- * The fixture `lookup` rows the form's labels come from — `callable
- * .parameters` facts as the service emits them (`displayName` is the
- * localized parameter label the Workshop editor shows).
- */
 const LOOKUP: Record<string, object[]> = {
   ongoingGlobal: [{ kind: 'event', displayName: 'Ongoing - Global' }],
   wait: [
@@ -244,7 +227,6 @@ const click = (el: Element) => {
   flushSync()
 }
 
-/** Bits UI opens its popover on pointerdown and selects on pointerup. */
 const pointerDown = (el: Element) => {
   el.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
   flushSync()
@@ -293,8 +275,6 @@ describe('the statement editor form (#918)', () => {
     await settle()
 
     expect(editor(), 'the editor dialog is open').not.toBeNull()
-    // The title is the session-locale call name; the read-only `Expr`
-    // statement view is gone — the form rows carry the parameters.
     expect(editor().querySelector('.editor-title')!.textContent).toBe('Wait')
     expect(editor().querySelector('.editor-statement')).toBeNull()
     expect(editorLabels()).toEqual(['Duration', 'Wait Behavior'])
@@ -326,7 +306,6 @@ describe('the statement editor form (#918)', () => {
     await settle()
     await openRule(1)
 
-    // The statement text's second argument span opens the editor on it.
     const arg = rows()[0].querySelector<HTMLElement>('[data-arg-path="1"]')!
     expect(arg, 'the Wait Behavior argument carries its path').not.toBeNull()
     click(arg)
@@ -382,8 +361,6 @@ describe('the statement editor form (#918)', () => {
       document.body.querySelector('.dialog.editor'),
       'the editor closed',
     ).toBeNull()
-    // Submit the staged edit; the request carries one `replace` whose
-    // statement differs from the original only in the duration literal.
     click(
       host.querySelector<HTMLButtonElement>(
         '.toolbar button[aria-label="Pending changes"]',
@@ -412,15 +389,11 @@ describe('the statement editor form (#918)', () => {
     click(rows()[0])
     await settle()
 
-    // `enabled` is a required Boolean parameter with no argument in the
-    // slot: the row reads unset and OK stays disabled until a literal is
-    // picked.
     const slot = editor().querySelector<HTMLElement>('[data-arg-control="1"]')!
     expect(slot.classList.contains('unset')).toBe(true)
     expect(slot.querySelector('.picker-ctl')!.textContent).toContain('unset')
     expect(ok().disabled).toBe(true)
 
-    // Choose True in the boolean picker; the staged arg fills the slot.
     pointerDown(slot.querySelector('.picker-ctl')!)
     await settle()
     const all = [...document.body.querySelectorAll<HTMLElement>('.picker-option')]
@@ -430,7 +403,6 @@ describe('the statement editor form (#918)', () => {
     ])
     pick(all.find((option) => option.textContent?.trim() === 'True')!)
     await settle()
-    // The staged node is boolean `true`; the slot is set and OK frees.
     expect(editor().querySelector('.unset'), 'no required slot stays unset').toBeNull()
     expect(ok().disabled).toBe(false)
   })
@@ -447,8 +419,6 @@ describe('the statement editor form (#918)', () => {
         ]),
       ),
     ])
-    // `createHudText` needs a lookup row too — 11 parameters, arg 0
-    // VisibleTo: Player|Array.
     LOOKUP.createHudText = [
       {
         identity: 'createHudText',
@@ -469,8 +439,6 @@ describe('the statement editor form (#918)', () => {
     click(rows()[0])
     await settle()
 
-    // The first argument row shows the nested call's name as plain text;
-    // once the call's own `lookup` lands its parameters indent beneath.
     const first = editor().querySelector<HTMLElement>('[data-arg-control="0"]')!
     expect(first.querySelector('.editor-arg-value')!.textContent).toBe('All Players')
     const nested = editor().querySelector<HTMLElement>(
@@ -509,8 +477,6 @@ describe('the statement editor form (#918)', () => {
 
     expect(editor().querySelector('.editor-title')!.textContent).toBe('Condition')
     expect(editorLabels()).toEqual(['Value', 'Comparison', 'Value'])
-    // The operator row shows the call name as plain text — #919 turns it
-    // into a picker.
     const middle = editor().querySelector<HTMLElement>('[data-arg-control=""]')!
     expect(middle.querySelector('.editor-arg-value')!.textContent).toBe('>=')
     const right = editor().querySelector<HTMLInputElement>('[data-arg-control="1"] input')!
@@ -534,14 +500,11 @@ describe('the statement editor form (#918)', () => {
     click(rows()[0])
     await settle()
 
-    // The single call row shows the variable-access text, not the raw id.
     const row = editor().querySelector<HTMLElement>('[data-arg-control=""]')!
     expect(row.querySelector('.editor-arg-value')!.textContent).toBe('Global.score')
   })
 
   it('renders a two-arg reserved call condition as its statement text', async () => {
-    // `playerVariable`/`memberAccess` take the compare-shaped three-row
-    // form; the operator row still shows the statement text, not the id.
     api.handler = handlerFor([
       summaryFor(
         1,

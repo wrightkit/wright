@@ -124,9 +124,6 @@ describe('stageInsert', () => {
   })
 
   it('does not collide with a change or delete on the row at the index', () => {
-    // An insert at N and a delete of row N address different entries:
-    // the request carries both, and row N keeps its own pending mark
-    // while the `:new` placeholder renders the insert's.
     const map = pending()
     stageInsert(map, 1, 'r', 'actions', 1, [{ call: 'wait', args: [1] }])
     stageDeletes(map, 1, 'r', 'actions', [1])
@@ -143,8 +140,6 @@ describe('stageInsert', () => {
     expect(map.get(keyFor(1, 'actions', 1))?.tag).toBe('delete')
     expect(map.get(insertKey(1, 'actions', 1))?.tag).toBe('insert')
 
-    // The reverse order: a staged delete survives a later insert at
-    // the same index, and a staged change is not clobbered either.
     const second = pending()
     stageDeletes(second, 1, 'r', 'actions', [1])
     stageInsert(second, 1, 'r', 'actions', 1, [{ call: 'wait', args: [1] }])

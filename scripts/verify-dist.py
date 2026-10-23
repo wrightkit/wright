@@ -1,12 +1,4 @@
 #!/usr/bin/env python3
-"""Validate Wright distribution metadata and release packaging (#108, #338).
-
-Runs in CI and locally. It checks that install.sh covers the declared release
-target matrix, verifies the shell syntax of install.sh where Bash is native,
-and exercises release packaging on the current host with synthetic binaries.
-
-Usage: python3 scripts/verify-dist.py
-"""
 
 import importlib.util
 import json
@@ -54,12 +46,6 @@ def fail(message: str) -> None:
 
 
 def release_promotion_order() -> None:
-    """#293: the GitHub Release promotes only after verified R2 staging, and
-    wright/latest/version advances only after the canonical release is public.
-
-    Asserts the release workflow's `needs` edges — the mechanism GitHub uses to
-    gate promotion — so a failed R2 publish/verify cannot leave a public release,
-    and a missing canonical release cannot leave the pointer advanced."""
     parts = (REPO_ROOT / ".github/workflows/release.yml").read_text().split("\njobs:", 1)
     if len(parts) != 2:
         fail("release.yml has no jobs section")
@@ -140,8 +126,6 @@ def main() -> None:
         subprocess.run(["bash", "-n", str(REPO_ROOT / "install.sh")], check=True)
         print("ok: install.sh shell syntax valid")
     else:
-        # install.sh is a Unix-only installer (checked above); on Windows the
-        # `bash` on PATH is the WSL launcher, which fails without a distro.
         print("skip: install.sh shell syntax check (Unix-only, no real bash on Windows)")
 
     subprocess.run(

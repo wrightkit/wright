@@ -1,11 +1,3 @@
-//! Terminal renderer snapshots and contracts (ADR-0030 decision 4, #795).
-//!
-//! Every scoped command renders the verdict tag, the headline, and its
-//! hierarchy — snapshotted at the 100-column layout and the compact
-//! layout below 90 columns, with ANSI colour on and off. The snapshots
-//! keep ANSI escapes readable as `<ESC>` so they review like text; the
-//! raw bytes are what the terminal sees.
-
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -27,9 +19,6 @@ fn workshop(id: &str) -> String {
     .unwrap()
 }
 
-/// A scratch directory holding `files` under their relative names; runs
-/// address inputs relatively so diagnostics spell `flow.ws:11:9`, never a
-/// machine-specific absolute path.
 fn work_dir(name: &str, files: &[(&str, &str)]) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("wright-terminal-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -69,7 +58,6 @@ fn run(dir: &Path, args: &[&str], env: &[(&str, String)]) -> Outcome {
     }
 }
 
-/// One readable record per run: the exit code, then each stream.
 fn transcript(out: &Outcome) -> String {
     format!(
         "exit: {}\n--- stdout ---\n{}--- stderr ---\n{}",
@@ -79,9 +67,6 @@ fn transcript(out: &Outcome) -> String {
     )
 }
 
-/// The width × colour matrix the issue asks for: 100 and 80 columns,
-/// `--color never` and `--color always`. Snapshots land at
-/// `snapshots/terminal__<name>_w<columns>_<color>.snap`.
 fn snap(name: &str, dir: &Path, args: &[&str], env: &[(&str, String)]) {
     for (columns, color) in [
         (100u16, "never"),
@@ -147,8 +132,6 @@ fn compile_writes_an_artifact() {
 
 #[test]
 fn convert_streams_the_artifact() {
-    // The artifact keeps stdout pure; the tag only rides stderr when the
-    // run has something to report.
     let dir = work_dir(
         "convert",
         &[("flow.ws", &workshop("synthetic/control-flow"))],
@@ -249,8 +232,6 @@ fn lookup_entries() {
 
 #[test]
 fn update_pass() {
-    // Both targets skip deterministically: Windows has no standalone
-    // self-update, and the empty provider store holds nothing to update.
     let dir = work_dir("update", &[]);
     std::fs::create_dir_all(dir.join("provider-data")).unwrap();
     snap(
@@ -296,8 +277,6 @@ fn usage_error() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// `COLUMNS` is the explicit width override; a terminal wider than the
-/// 100-column cap still gets the capped layout.
 #[test]
 fn width_is_capped_at_100_columns() {
     let dir = work_dir(
@@ -330,8 +309,6 @@ fn width_is_capped_at_100_columns() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// `NO_COLOR` disables automatic colour; an explicit `--color always`
-/// still wins, matching every other surface's contract.
 #[test]
 fn no_color_and_color_flag_both_apply() {
     let dir = work_dir(
@@ -365,8 +342,6 @@ fn no_color_and_color_flag_both_apply() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// The verdict word never depends on colour alone: the same line is
-/// legible in the no-colour report.
 #[test]
 fn status_survives_without_colour() {
     let dir = work_dir(
@@ -395,16 +370,12 @@ fn status_survives_without_colour() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Parity with plain and JSON (ADR-0030): the terminal report agrees on
-/// the verdict, the exit code, and the reported counts for the same run.
 #[test]
 fn verdict_exit_and_counts_match_plain_and_json() {
     let dir = work_dir(
         "parity",
         &[("flow.ws", &workshop("synthetic/control-flow"))],
     );
-    // (args, terminal verdict line, plain verdict word, expected exit,
-    //  terminal count fragment, JSON diagnostics/findings count)
     struct Case {
         args: &'static [&'static str],
         tag_line: &'static str,
