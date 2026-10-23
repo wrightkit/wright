@@ -1,4 +1,25 @@
 <script lang="ts">
+  /**
+   * One value node rendered as syntax-coloured text (docs/ui/design.md
+   * § Statement text): the call name then its arguments in parentheses,
+   * comparisons and arithmetic infix. Every token takes its spec table
+   * class (`tok <class>`), so parentheses, commas, member dots, and index
+   * brackets are `punctuation`; every name comes from the warmed `Names`
+   * cache (lookup by identity). Reserved call forms get their documented
+   * structural render — a global variable reads `Global.name` with the
+   * scope word from the `global` structural entry, a player variable
+   * reads `owner.name` — and an unresolvable call id renders verbatim;
+   * the page invents no names.
+   *
+   * `path` is the node's index path into the statement's `args`: each
+   * argument token carries it on an `.arg` wrapper as `data-path`, so
+   * the statement row's hover card can name the argument and its slot
+   * (docs/ui/editor.md § Hover card). When the caller passes `onarg`
+   * the wrapper also reports `data-arg-path` and calls `onarg(path,
+   * event)` on click — the statement editor uses it to open the form
+   * at that argument. The statement's own root carries no path — it
+   * is not its own argument.
+   */
   import Expr from './Expr.svelte'
   import { enumIdentity, kindClass, nodeClass, VALUE_KINDS } from './nodes'
   import type { Names } from './names'
@@ -33,6 +54,7 @@
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
     <span
       class="arg"
+      data-path={childPath.join('.')}
       data-arg-path={childPath.join('.')}
       onclick={(event) => {
         event.stopPropagation()
@@ -41,7 +63,9 @@
       ><Expr node={child} {names} {onarg} path={childPath} /></span
     >
   {:else}
-    <Expr node={child} {names} path={childPath} />
+    <span class="arg" data-path={childPath.join('.')}
+      ><Expr node={child} {names} path={childPath} /></span
+    >
   {/if}
 {/snippet}
 
@@ -78,13 +102,15 @@
 {:else if node.call === 'memberAccess'}
   {@render arg(node.args[0], [...path, 0])}{@render punct('.')}{#if typeof node.args[1] === 'object' && node.args[1] !== null && 'string' in node.args[1]}{#if onarg}<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions --><span
         class="arg"
+        data-path={[...path, 1].join('.')}
         data-arg-path={[...path, 1].join('.')}
         onclick={(event) => {
           event.stopPropagation()
           onarg([...path, 1], event)
         }}><span class="tok variable">{node.args[1].string}</span></span>{:else}<span
-        class="tok variable"
-        >{node.args[1].string}</span
+        class="arg"
+        data-path={[...path, 1].join('.')}
+        ><span class="tok variable">{node.args[1].string}</span></span
       >{/if}{:else}{@render arg(node.args[1], [...path, 1])}{/if}{#if node.args.length > 2}{@render punct(
       '[',
     )}{@render arg(node.args[2], [...path, 2])}{@render punct(']')}{/if}

@@ -71,6 +71,14 @@ export interface ChromeStrings {
   unset: string
   trueLiteral: string
   falseLiteral: string
+  /** The argument hover card's slot line for a call parameter (§ Hover card). */
+  argParameterSlot: (index: number, label: string | null, call: string) => string
+  /** The argument hover card's slot lines for an infix operator's operands. */
+  argOperandLeft: string
+  argOperandRight: string
+  /** The scope word the hover card puts before a variable's kind. */
+  argScope: (scope: 'global' | 'player') => string
+  /** The simulation button's tooltip and the panel's title (#836). */
   simulation: string
   simTeam1: string
   simTeam2: string
@@ -153,6 +161,11 @@ const enUS: ChromeStrings = {
   unset: 'unset',
   trueLiteral: 'True',
   falseLiteral: 'False',
+  argParameterSlot: (index, label, call) =>
+    `parameter ${index + 1}${label ? ` (${label})` : ''} of ${call}`,
+  argOperandLeft: 'left operand',
+  argOperandRight: 'right operand',
+  argScope: (scope) => (scope === 'player' ? 'player' : 'global'),
   simulation: 'Simulation',
   simTeam1: 'Team 1',
   simTeam2: 'Team 2',
@@ -234,6 +247,11 @@ const zhCN: ChromeStrings = {
   unset: '未设置',
   trueLiteral: '真',
   falseLiteral: '假',
+  argParameterSlot: (index, label, call) =>
+    `参数 ${index + 1}${label ? `（${label}）` : ''}，属于 ${call}`,
+  argOperandLeft: '左操作数',
+  argOperandRight: '右操作数',
+  argScope: (scope) => (scope === 'player' ? '玩家' : '全局'),
   simulation: '模拟',
   simTeam1: '队伍 1',
   simTeam2: '队伍 2',
