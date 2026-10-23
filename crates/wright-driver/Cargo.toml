@@ -15,16 +15,21 @@ athena-sim = { git = "https://github.com/wrightkit/athena.git", tag = "v0.2.0" }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 sha2.workspace = true
-flate2.workspace = true
-tar.workspace = true
-reqwest.workspace = true
 url = "2"
 percent-encoding = "2"
 hotpath = "0.28"
 wright-analyzer.workspace = true
-wright-lpp = { path = "../wright-lpp" }
 wright-transform.workspace = true
 workshop-rs.workspace = true
+
+# Native-only capabilities (ADR-0037 decision 5): filesystem archives,
+# network fetches, and the LPP provider transport stay out of the
+# WebAssembly core.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+flate2.workspace = true
+tar.workspace = true
+reqwest.workspace = true
+wright-lpp = { path = "../wright-lpp" }
 
 [features]
 hotpath = ["hotpath/hotpath", "wright-analyzer/hotpath", "wright-transform/hotpath"]

@@ -13,6 +13,7 @@ use crate::diag::workshop_diag;
 use crate::diag::{Diagnostic, Stage, source_provider_unavailable};
 use crate::input::{self, ResolvedInput};
 use crate::result::exit_code_from;
+use crate::source_provider::provider_uri_path;
 
 /// One proposed source edit.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -306,14 +307,13 @@ pub(crate) fn edit_kind_gate(kind: SourceKind, provider_operation: &str) -> Opti
 }
 
 pub(crate) fn same_source(source: &str, resolved: &ResolvedInput) -> bool {
-    resolved
-        .path
-        .as_deref()
-        .is_some_and(|path| same_file(source, path))
+    resolved.path.as_deref().is_some_and(|path| same_file(source, path))
+        // Wasm has no filesystem — compare the emitted display form (#959).
+        || (cfg!(target_arch = "wasm32") && provider_uri_path(source) == resolved.display)
 }
 
 fn same_file(source: &str, path: &Path) -> bool {
-    let source = crate::source_provider::provider_uri_path(source);
+    let source = provider_uri_path(source);
     source == path.to_string_lossy()
         || matches!(
             (Path::new(&source).canonicalize(), path.canonicalize()),

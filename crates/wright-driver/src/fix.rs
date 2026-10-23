@@ -112,6 +112,7 @@ fn edit(loaded: &Loaded, span: Span, new_text: String) -> Option<SourceEdit> {
             range,
             new_text,
         }),
+        #[cfg(not(target_arch = "wasm32"))]
         Provenance::Mapped => {
             let member = loaded.source_files.get(span.file.index())?;
             let (uri, _) =
@@ -125,6 +126,11 @@ fn edit(loaded: &Loaded, span: Span, new_text: String) -> Option<SourceEdit> {
                 new_text,
             })
         }
+        // An injected provider can still produce a mapped provenance on
+        // WebAssembly, but its member-to-URI resolution needs the `url`
+        // filesystem conversions — the fix is simply not offered (#959).
+        #[cfg(target_arch = "wasm32")]
+        Provenance::Mapped => None,
         Provenance::Unmapped => None,
     }
 }

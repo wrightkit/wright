@@ -215,4 +215,78 @@ impl<'a> ToolService<'a> {
         }
         validation
     }
+
+    /// The WebAssembly host write path (#959, ADR-0037 decision 3 — host
+    /// behaviour, not a `wright-agent/v1` operation): the transaction an
+    /// `editStatements` result carried is re-validated against `sources`,
+    /// the host's current in-memory text — every edit's `source_identity`
+    /// is rechecked against that text, so a stale transaction refuses and
+    /// nothing changes. A valid transaction rewrites `sources` in place,
+    /// the session's held `InputSpec::Text` takes the edited text, and the
+    /// served snapshot reloads — the next `rules` answers the edited
+    /// program with a bumped `snapshot`.
+    ///
+    /// `validateEditTransaction` already reparses the edited text, so the
+    /// reload cannot fail for a validation the service just accepted;
+    /// `sources` is touched only after the reload lands.
+    pub fn apply_text_edit_transaction(
+        &mut self,
+        transaction: &EditTransaction,
+        sources: &mut std::collections::BTreeMap<String, String>,
+    ) -> EditValidation {
+        let refuse = |diagnostics: Vec<Diagnostic>| EditValidation {
+            ok: false,
+            exit: exit_code_from(&diagnostics),
+            diagnostics,
+            preview: None,
+        };
+        let validation = self
+            .session
+            .validate_edit_transaction(Some(&*sources), transaction);
+        if !validation.ok {
+            return validation;
+        }
+        let previews = validation.preview.clone().unwrap_or_default();
+        if previews.iter().any(|preview| {
+            !transaction
+                .edits
+                .iter()
+                .any(|edit| edit.source == preview.source)
+        }) {
+            return refuse(vec![Diagnostic::error(
+                "edit-unknown-source",
+                Stage::Discovery,
+                "the transaction's edits do not cover every source its preview writes",
+            )]);
+        }
+        // Every edit targets the loaded input (`validate_transaction`
+        // enforces `same_source`), so exactly one preview rewrites it;
+        // `resolve_edit_input` re-resolves rather than reading the
+        // snapshot — a never-loaded session still applies its own writes.
+        let resolved = match crate::edit::resolve_edit_input(&self.session.config) {
+            Ok(resolved) => resolved,
+            Err(diagnostic) => return refuse(vec![diagnostic]),
+        };
+        let Some(preview) = previews
+            .iter()
+            .find(|preview| crate::edit::same_source(preview.source.as_str(), &resolved))
+        else {
+            return refuse(vec![Diagnostic::error(
+                "edit-unknown-source",
+                Stage::Discovery,
+                "the transaction writes no source the loaded input owns",
+            )]);
+        };
+        let (key, text) = (preview.source.clone(), preview.new_text.clone());
+        self.session.set_text_input(text.clone());
+        self.invalidate();
+        if let Err(error) = self.refresh() {
+            let mut diagnostic =
+                Diagnostic::carried_error(error.code, Stage::Discovery, error.message);
+            diagnostic.fields = error.fields;
+            return refuse(vec![diagnostic]);
+        }
+        sources.insert(key, text);
+        validation
+    }
 }

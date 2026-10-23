@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::lint_package::LintPackageStore;
 use crate::source_provider::SourceBackend;
 pub use wright_analyzer::registry::{LintConfig, LintPackagePin};
@@ -111,7 +112,12 @@ pub struct SessionConfig {
     /// Comparison is reported on `compile`/`inspect cost` when a reference
     /// exists; `--max-total` is an explicit gate that reads no cache.
     pub run: RunOptions,
+    /// The LPP provider registry — native-only: the WebAssembly core
+    /// carries no provider transport (ADR-0037 decision 5).
+    #[cfg(not(target_arch = "wasm32"))]
     pub providers: wright_lpp::ProviderRegistry,
+    /// OPY provider resolution — native-only for the same reason.
+    #[cfg(not(target_arch = "wasm32"))]
     pub opy_provider: crate::opy_provider::OpyProviderConfig,
 }
 
@@ -151,6 +157,7 @@ pub struct LintPackageConfig {
 }
 
 impl LintPackageConfig {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn store(&self) -> LintPackageStore {
         let mut store = LintPackageStore::new(
             self.store_dir
@@ -213,11 +220,14 @@ impl SessionConfig {
         if self.run != other.run {
             changed.push("run");
         }
-        if self.providers != other.providers {
-            changed.push("providers");
-        }
-        if self.opy_provider != other.opy_provider {
-            changed.push("opy_provider");
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if self.providers != other.providers {
+                changed.push("providers");
+            }
+            if self.opy_provider != other.opy_provider {
+                changed.push("opy_provider");
+            }
         }
         changed
     }

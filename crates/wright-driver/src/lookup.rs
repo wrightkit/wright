@@ -4,11 +4,15 @@ use serde_json::{Value, json};
 use workshop_rs::catalog::{Catalog, Kind, Locale};
 use workshop_rs::lookup::{LookupMatch, SignatureParam};
 use workshop_rs::settings::{SettingDefinition, SettingValueDomain};
+#[cfg(not(target_arch = "wasm32"))]
 use wright_lpp::{Capability, LookupParams, LookupWithin};
 
 use crate::CompilerSession;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::opy_provider;
-use crate::service::{SERVICE_NAME, SERVICE_VERSION, ToolResponse, carried_refusal, refusal};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::service::{SERVICE_NAME, SERVICE_VERSION};
+use crate::service::{ToolResponse, carried_refusal, refusal};
 
 const DEFAULT_LIMIT: usize = 3;
 const MAX_LIMIT: usize = 10;
@@ -32,6 +36,7 @@ const KINDS: [&str; 12] = [
     "operator",
 ];
 pub(crate) const UNKNOWN_WITHIN: &str = "lookup.unknownWithin";
+#[cfg(not(target_arch = "wasm32"))]
 const WITHIN_KINDS: [&str; 3] = ["enum", "callable", "settings"];
 
 pub(crate) fn lookup(
@@ -490,6 +495,27 @@ fn setting_facts(definition: &SettingDefinition) -> Value {
     wire
 }
 
+/// OPY lookup needs the LPP provider transport — native-only (ADR-0037
+/// decision 5); the wasm build reports the capability as unavailable,
+/// naming the owning implementation the same way an unconfigured provider
+/// does (#959).
+#[cfg(target_arch = "wasm32")]
+fn opy_lookup(
+    _session: &CompilerSession,
+    _query: Option<&str>,
+    _kind: Option<&str>,
+    _within: Option<&str>,
+    _locale: Option<&str>,
+    _limit: usize,
+) -> ToolResponse {
+    unavailable(
+        "opy",
+        OWNER_OPY,
+        "the WebAssembly build carries no LPP provider transport for 'opy' lookups",
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn opy_lookup(
     session: &CompilerSession,
     query: Option<&str>,
@@ -646,6 +672,7 @@ fn render_signature(
     format!("{head}({})", rendered.join(", "))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn lpp_signature(entry: &Value, callable: &Value) -> Option<String> {
     let head = entry["spelling"].as_str()?;
     let receiver = callable["receiver"].as_str();
@@ -686,6 +713,7 @@ fn lpp_signature(entry: &Value, callable: &Value) -> Option<String> {
     Some(render_signature(head, receiver, variadic, params))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn lpp_default_text(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),

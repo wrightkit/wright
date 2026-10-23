@@ -5,6 +5,10 @@ use crate::diag::{Diagnostic, Stage};
 
 pub(super) fn compose(config: &SessionConfig) -> Result<LintRegistry, Diagnostic> {
     let mut registry = LintRegistry::default();
+    // Lint rule packages resolve and fetch through the filesystem and the
+    // network — native-only (ADR-0037 decision 5). The wasm core builds
+    // with no pinned packages, so the registry carries its defaults.
+    #[cfg(not(target_arch = "wasm32"))]
     crate::lint_package::activate_pinned(&config.lint, &config.lint_package, &mut registry)?;
     for path in &config.lint_rule_paths {
         registry.load_path(path).map_err(|error| {

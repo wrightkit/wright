@@ -7,12 +7,15 @@ pub mod edit;
 pub mod essential;
 pub mod fix;
 pub mod input;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod lint_package;
 pub(crate) mod list_entries;
 pub(crate) mod lookup;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod opy_provider;
 pub mod output;
 pub mod progress;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod provider_edit;
 pub(crate) mod request;
 pub mod result;
@@ -29,10 +32,12 @@ pub use config::{
 };
 pub use diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage, Status};
 pub use input::{InputTarget, ResolvedInput, sha256_hex};
+#[cfg(not(target_arch = "wasm32"))]
 pub use lint_package::{
     InstalledPackage, LintPackageError, LintPackageSource, LintPackageStore, PackageSearch,
     PackageSearchHit, RemoteCheck, RemovedPackage, StoreEntry,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use opy_provider::{
     OpyProviderConfig, OpyProviderError, OpyProviderResolver, ResolvedOpyProvider,
 };
