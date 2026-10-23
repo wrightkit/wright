@@ -10,6 +10,12 @@
    * scope word from the `global` structural entry, a player variable
    * reads `owner.name` — and an unresolvable call id renders verbatim;
    * the page invents no names.
+   *
+   * `path` is the node's index path into the statement's `args` (the
+   * prototype's `data-path`): each argument token carries it on an
+   * `.arg` wrapper so the statement row's hover card can name the
+   * argument and its slot (docs/ui/editor.md § Hover card). The
+   * statement's own root carries no path — it is not its own argument.
    */
   import Expr from './Expr.svelte'
   import { enumIdentity, kindClass, nodeClass, VALUE_KINDS } from './nodes'
@@ -20,7 +26,8 @@
     node,
     names,
     kinds = VALUE_KINDS,
-  }: { node: Node; names: Names; kinds?: string[] } = $props()
+    path = [],
+  }: { node: Node; names: Names; kinds?: string[]; path?: number[] } = $props()
 
   function callName(call: string): { name: string; kind: string | undefined } {
     const resolved = names.peek(call, kinds)
@@ -55,28 +62,59 @@
   <!-- The scope label's canonical display name is the lowercase `global`
        keyword; the editor shows the capitalized form (`Global.score`). -->
   {@const label = (scope?.name ?? 'Global').replace(/^\p{Ll}/u, (c) => c.toUpperCase())}
-  <span class="tok {kindClass(scope?.kind)}">{label}</span>{@render punct('.')}<Expr
-    node={node.args[0]}
-    {names}
-  />
+  <span class="tok {kindClass(scope?.kind)}">{label}</span>{@render punct('.')}<span
+    class="arg"
+    data-path={[...path, 0].join('.')}><Expr node={node.args[0]} {names} path={[...path, 0]} /></span
+  >
 {:else if node.call === 'playerVariable'}
-  <Expr node={node.args[0]} {names} />{@render punct('.')}<Expr node={node.args[1]} {names} />
+  <span class="arg" data-path={[...path, 0].join('.')}><Expr
+      node={node.args[0]}
+      {names}
+      path={[...path, 0]}
+    /></span>{@render punct('.')}<span class="arg" data-path={[...path, 1].join('.')}><Expr
+      node={node.args[1]}
+      {names}
+      path={[...path, 1]}
+    /></span>
 {:else if node.call === 'memberAccess'}
-  <Expr node={node.args[0]} {names} />{@render punct('.')}{#if typeof node.args[1] === 'object' && node.args[1] !== null && 'string' in node.args[1]}<span
+  <span class="arg" data-path={[...path, 0].join('.')}><Expr
+      node={node.args[0]}
+      {names}
+      path={[...path, 0]}
+    /></span>{@render punct('.')}{#if typeof node.args[1] === 'object' && node.args[1] !== null && 'string' in node.args[1]}<span
       class="tok variable">{node.args[1].string}</span
-    >{:else}<Expr node={node.args[1]} {names} />{/if}{#if node.args.length > 2}{@render punct(
+    >{:else}<span class="arg" data-path={[...path, 1].join('.')}><Expr
+        node={node.args[1]}
+        {names}
+        path={[...path, 1]}
+      /></span>{/if}{#if node.args.length > 2}{@render punct(
       '[',
-    )}<Expr node={node.args[2]} {names} />{@render punct(']')}{/if}
+    )}<span class="arg" data-path={[...path, 2].join('.')}><Expr
+        node={node.args[2]}
+        {names}
+        path={[...path, 2]}
+      /></span>{@render punct(']')}{/if}
 {:else}
   {@const head = callName(node.call)}
   {@const cls = nodeClass(node, head.kind)}
   {#if head.kind === 'operator' && node.args.length === 2}
-    <Expr node={node.args[0]} {names} />
+    <span class="arg" data-path={[...path, 0].join('.')}><Expr
+        node={node.args[0]}
+        {names}
+        path={[...path, 0]}
+      /></span>
     <span class="tok {cls}">{head.name}</span>
-    <Expr node={node.args[1]} {names} />
+    <span class="arg" data-path={[...path, 1].join('.')}><Expr
+        node={node.args[1]}
+        {names}
+        path={[...path, 1]}
+      /></span>
   {:else if node.args.length === 0}
     <span class="tok {cls}">{head.name}</span>
   {:else}
-    <span class="tok {cls}">{head.name}</span>{@render punct('(')}{#each node.args as arg, i (i)}{#if i > 0}{@render punct(', ')}{/if}<Expr node={arg} {names} />{/each}{@render punct(')')}
+    <span class="tok {cls}">{head.name}</span>{@render punct('(')}{#each node.args as argNode, i (i)}{#if i > 0}{@render punct(', ')}{/if}<span
+        class="arg"
+        data-path={[...path, i].join('.')}><Expr node={argNode} {names} path={[...path, i]} /></span
+      >{/each}{@render punct(')')}
   {/if}
 {/if}

@@ -87,11 +87,23 @@ export class Names {
    * the effect so the new locale's name shows.
    */
   peek(identity: string, kinds: string[] = []): ResolvedName | null {
+    const entry = this.peekEntry(identity, kinds)
+    return entry ? { name: entry.displayName, kind: entry.kind } : null
+  }
+
+  /**
+   * The best `lookup` entry for an identity out of the warmed cache —
+   * `peek` with the full record (`callable.parameters`, …) kept. Reading
+   * it inside an effect subscribes like `peek` does.
+   */
+  peekEntry(identity: string, kinds: string[] = []): LookupEntry | null {
     this.subscribe()
     const exact = this.resolved.get(identity) ?? []
-    const entry =
-      kinds.map((kind) => exact.find((entry) => entry.kind === kind)).find(Boolean) ?? exact[0]
-    return entry ? { name: entry.displayName, kind: entry.kind } : null
+    return (
+      kinds.map((kind) => exact.find((entry) => entry.kind === kind)).find(Boolean) ??
+      exact[0] ??
+      null
+    )
   }
 
   /**

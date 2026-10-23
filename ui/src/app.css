@@ -567,6 +567,17 @@ select {
   color: var(--tok-punctuation);
 }
 
+/* docs/ui/editor.md § Form/§ Hover card: an argument token carries its
+   `data-path`; hovering outlines the argument a click would open — the
+   same `--gold` inset ring the editor's argument outline uses. */
+.arg {
+  border-radius: 2px;
+}
+
+.arg-hovered {
+  box-shadow: 0 0 0 1px var(--gold);
+}
+
 .debug {
   font-size: 0.7rem;
   color: var(--muted);
