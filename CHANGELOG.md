@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.0](https://github.com/wrightkit/wright/compare/v0.37.0...v0.38.0) (2026-10-23)
+
+
+### Features
+
+* **wasm:** package and publish the WebAssembly core as @wrightkit/core ([#973](https://github.com/wrightkit/wright/issues/973)) ([d697fef](https://github.com/wrightkit/wright/commit/d697fefaf8ed4c126924181ad4bc777e8a48e3f1)), closes [#960](https://github.com/wrightkit/wright/issues/960)
+
 ## [0.37.0](https://github.com/wrightkit/wright/compare/v0.36.0...v0.37.0) (2026-10-23)
 
 
