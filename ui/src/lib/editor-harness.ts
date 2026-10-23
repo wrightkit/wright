@@ -223,17 +223,6 @@ export const LISTINGS: Record<string, object[]> = {
       },
     },
     {
-      identity: 'setGlobalVariable',
-      kind: 'action',
-      displayName: 'Set Global Variable',
-      callable: {
-        parameters: [
-          { name: 'variable', displayName: 'Variable', type: 'Variable', required: true },
-          { name: 'value', displayName: 'Value', type: 'Any', required: true },
-        ],
-      },
-    },
-    {
       identity: 'setCrouchEnabled',
       kind: 'action',
       displayName: 'Set Crouch Enabled',
@@ -241,6 +230,21 @@ export const LISTINGS: Record<string, object[]> = {
         parameters: [
           { name: 'player', displayName: 'Player', type: 'Player|Array', required: true },
           { name: 'enabled', displayName: 'Enabled', type: 'Boolean', required: true },
+        ],
+      },
+    },
+  ],
+  // The callable statement forms `listEntries kind:'structural'`
+  // serves — the Action row merges them with the `action` catalog.
+  structural: [
+    {
+      identity: 'setGlobalVariable',
+      kind: 'structural',
+      displayName: 'Set Global Variable',
+      callable: {
+        parameters: [
+          { name: 'variable', displayName: 'Variable', type: 'Variable', required: true },
+          { name: 'value', displayName: 'Value', type: 'Any', required: true },
         ],
       },
     },

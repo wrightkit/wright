@@ -59,7 +59,7 @@ describe('the statement editor pickers (#919)', () => {
 
     // The Action row heads the form and opens the `listEntries` action
     // catalog.
-    const actionRow = editor().querySelector<HTMLElement>('[data-arg-control="call"]')!
+    const actionRow = editor().querySelector<HTMLElement>('[data-arg-control="action"]')!
     const options = await pickerOptions(actionRow)
     const labels = options.map((option) => option.textContent?.trim())
     expect(labels).toContain('Set Global Variable')
@@ -87,7 +87,7 @@ describe('the statement editor pickers (#919)', () => {
 
     // Switching back to `wait` fills its declared defaults: Wait
     // Behavior gets `Wait.IGNORE_CONDITION`.
-    const actionRow2 = editor().querySelector<HTMLElement>('[data-arg-control="call"]')!
+    const actionRow2 = editor().querySelector<HTMLElement>('[data-arg-control="action"]')!
     const options2 = await pickerOptions(actionRow2)
     pick(options2.find((option) => option.textContent?.trim() === 'Wait')!)
     await settle()
@@ -95,6 +95,81 @@ describe('the statement editor pickers (#919)', () => {
     const waitRow = editor().querySelector<HTMLElement>('[data-arg-control="1"]')!
     expect(waitRow.querySelector('.picker-value')!.textContent).toBe('Ignore Condition')
     expect(editor().querySelector('.editor-title')!.textContent).toBe('Wait')
+  })
+
+  it('a null-padded crossed slot stays unset and keeps OK disabled (r1 finding 1)', async () => {
+    // Choosing `wait` seeds `[null, {enum:Wait.IGNORE_CONDITION}]` — the
+    // Duration position crossed by the Wait Behavior default is a `null`
+    // pad, not a value: the required slot must show "unset" with its
+    // value picker, and OK stays disabled until it is filled.
+    api.handler = handlerFor(
+      [
+        summaryFor(
+          1,
+          'setup',
+          contentFor([action('kill', [])]),
+        ),
+      ],
+      [{ kind: 'globalVariable', name: 'score' }],
+    )
+    mountApp()
+    await settle()
+    await openRule(1)
+    click(rows()[0])
+    await settle()
+
+    const actionRow = editor().querySelector<HTMLElement>('[data-arg-control="action"]')!
+    const options = await pickerOptions(actionRow)
+    pick(options.find((option) => option.textContent?.trim() === 'Wait')!)
+    await settle()
+
+    const duration = editor().querySelector<HTMLElement>('[data-arg-control="0"]')!
+    expect(duration.querySelector('.editor-arg-value'), 'no static `null` text').toBeNull()
+    expect(duration.querySelector('.picker-ctl'), 'the Duration value picker renders').not.toBeNull()
+    expect(duration.classList.contains('unset'), 'the crossed slot is unset').toBe(true)
+    expect(ok().disabled, 'OK is disabled while the required slot is unset').toBe(true)
+  })
+
+  it('repicks the original structural call after switching the Action away (r1 finding 2)', async () => {
+    // On a `setGlobalVariable` statement the Action picker lists the
+    // `listEntries` `structural` catalog merged with `action`, and the
+    // original call stays pickable after another action is chosen.
+    api.handler = handlerFor(
+      [
+        summaryFor(
+          1,
+          'setup',
+          contentFor([action('setGlobalVariable', [{ variable: 'score' }, 0])]),
+        ),
+      ],
+      [{ kind: 'globalVariable', name: 'score' }],
+    )
+    mountApp()
+    await settle()
+    await openRule(1)
+    click(rows()[0])
+    await settle()
+
+    const actionRow = () => editor().querySelector<HTMLElement>('[data-arg-control="action"]')!
+    let options = await pickerOptions(actionRow())
+    const labels = options.map((option) => option.textContent?.trim())
+    expect(labels).toContain('Set Global Variable')
+    expect(labels).toContain('Wait')
+
+    // Switch to `wait` and back — the original structural call is still
+    // in the option list (the structural listing, plus the current-call
+    // fallback), not lost to the `action` catalog's gap.
+    pick(options.find((option) => option.textContent?.trim() === 'Wait')!)
+    await settle()
+    expect(editorLabels()).toEqual(['Action', 'Duration', 'Wait Behavior'])
+
+    options = await pickerOptions(actionRow())
+    const repick = options.find((option) => option.textContent?.trim() === 'Set Global Variable')
+    expect(repick, 'the original structural call stays listed').toBeDefined()
+    pick(repick!)
+    await settle()
+    expect(editorLabels()).toEqual(['Action', 'Variable', 'Value'])
+    expect(editor().querySelector('.editor-title')!.textContent).toBe('Set Global Variable')
   })
 
   it('lists the slot-admitted values in a value slot picker', async () => {

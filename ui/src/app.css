@@ -919,6 +919,15 @@ details.debug pre {
   background: color-mix(in srgb, var(--gold) 7%, transparent);
 }
 
+/* The staged `+` insert placeholder (docs/ui/selection.md § Pending
+   marks): the gold left bar an inserted row carries, with no checkbox
+   or click target, sitting where the row lands. */
+.statement.pending-insert {
+  min-height: 1.7rem;
+  color: var(--muted);
+  cursor: default;
+}
+
 .statement.has-findings.selected.pending-change {
   box-shadow:
     inset 3px 0 0 var(--gold),
@@ -961,7 +970,8 @@ details.debug pre {
   margin-left: 0.5rem;
 }
 
-.pending-tag.change {
+.pending-tag.change,
+.pending-tag.insert {
   color: var(--gold);
   border: 1px solid var(--gold);
 }

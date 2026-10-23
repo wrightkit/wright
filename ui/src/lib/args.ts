@@ -63,9 +63,19 @@ export interface ArgField {
   label: string
   kind: ArgFieldKind
   required: boolean
+  /**
+   * `false` when the slot's accepted node is a tagged shape the `+`
+   * form's literal/enum controls cannot write — a `{"variable"}`,
+   * `{"subroutine"}` (no declared subroutines), or `content.operations`
+   * position — until #919's pickers fill it. OK stays disabled while a
+   * `+` form holds one; a slot already holding the node it accepts is
+   * not flagged.
+   */
+  insertable?: boolean
   scope?: 'globalVariable' | 'playerVariable'
   domain?: string
   operations?: string[]
+  /** The parameter's declared `type` (`Subroutine`, `Any`, `Number`, …). */
   type?: string
   call?: string
   node?: Node
@@ -81,6 +91,50 @@ export function paramFacts(entry: LookupEntry | null | undefined): ParamFact[] {
 
 function isObject(node: unknown): node is Record<string, unknown> {
   return typeof node === 'object' && node !== null && !Array.isArray(node)
+}
+
+/**
+ * Whether the slot the parameter names needs a `rule-content-v1` node
+ * the `+` form's literal/enum controls cannot produce — derived from
+ * the param's declared `type` and `content` facts, not the node shape:
+ *
+ * - `content.operations`: the position takes a zero-argument modify
+ *   operation call (`{"call":"add","args":[]}`) whose id is one of the
+ *   declared ids;
+ * - a `Variable`/`Global Variable`/`Player Variable` type, or a fold
+ *   member occupying the variable position of its folded
+ *   `globalVariable`/`playerVariable` call: the position takes a
+ *   `{"variable": name}` node bound to a declared symbol;
+ * - `Subroutine`: the position takes a `{"subroutine": name}` node bound
+ *   to a declared subroutine (`startRule`) — insertable only when the
+ *   program declares one (`hasSubroutines`).
+ *
+ * A slot already holding the node it accepts is not flagged — a
+ * re-staged form or a default-seeded folded call shell may carry it.
+ */
+export function needsPicker(
+  param: ParamFact,
+  node: Node | undefined,
+  hasSubroutines = false,
+): boolean {
+  const operations = param.content?.operations ?? []
+  if (operations.length > 0) {
+    return !(
+      isObject(node) && 'call' in node && operations.includes(node.call as string)
+    )
+  }
+  if (param.type === 'Subroutine') {
+    if (isObject(node) && 'subroutine' in node) return false
+    return !hasSubroutines
+  }
+  const fold = param.content?.fold
+  const foldsVariable =
+    /^(Global |Player )?Variable$/.test(param.type ?? '') ||
+    (fold !== undefined &&
+      ((fold.call === 'globalVariable' && fold.arg === 0) ||
+        (fold.call === 'playerVariable' && fold.arg === 1)))
+  if (!foldsVariable) return false
+  return !(isObject(node) && 'variable' in node)
 }
 
 /** The node at `path`, descending into call args; `[]` reads the root. */
@@ -123,7 +177,12 @@ function fieldKind(param: ParamFact, node: Node | undefined): ArgFieldKind {
     return 'string'
   }
   if (isObject(node) && 'call' in node) return 'call'
-  if (node !== undefined) return 'other'
+  // A JSON `null` is a pad `defaultArgs`/`fillGaps`/`grow` left where a
+  // filled later position crosses an unset one — it is no value, so the
+  // slot falls through to its declared control below rather than
+  // rendering an uneditable static `null`. The picked Null literal is
+  // the `{call:"null"}` node this never masks.
+  if (node !== undefined && node !== null) return 'other'
   if (VARIABLE_PARAM_TYPES.has(param.type ?? '')) return 'variable'
   if (param.type === '__Operator__') return 'comparison'
   if (param.type !== undefined && !NON_CALL_PARAM_TYPES.has(param.type)) return 'call'
@@ -135,6 +194,7 @@ function fieldFor(
   path: number[],
   node: Node | undefined,
   foldCall: string | undefined,
+  hasSubroutines = false,
 ): ArgField {
   const field: ArgField = {
     path,
@@ -156,6 +216,7 @@ function fieldFor(
       param.enum?.domain ??
       (isObject(node) && typeof node.enum === 'string' ? node.enum : undefined)
   }
+  if (needsPicker(param, node, hasSubroutines)) field.insertable = false
   return field
 }
 
@@ -164,7 +225,9 @@ function fieldFor(
  * arguments. Non-fold parameters advance one content position each; a
  * fold group's members share the position its first member takes and
  * address an argument inside the folded call. The row's kind follows the
- * node currently at that position and the choices the parameter declares.
+ * node currently at that position and the choices the parameter
+ * declares. `hasSubroutines` lets a `Subroutine` slot render its name
+ * picker instead of flagging it picker-bound.
  *
  * `nestedFacts` resolves a `call` field's own `lookup` parameters by the
  * nested call id so its rows render indented under it.
@@ -173,6 +236,7 @@ export function argFields(
   params: readonly ParamFact[],
   action: Action,
   nestedFacts?: (call: string) => ParamFact[] | null,
+  hasSubroutines = false,
 ): ArgField[] {
   const fields: ArgField[] = []
   let pos = 0
@@ -192,7 +256,7 @@ export function argFields(
       pos += 1
     }
     const node = argAt(action.args, path)
-    const field = fieldFor(param, path, node, foldFact?.call)
+    const field = fieldFor(param, path, node, foldFact?.call, hasSubroutines)
     if (field.kind === 'variable') {
       field.scope = variableScope(foldFact?.call, action.call)
     }
@@ -401,6 +465,15 @@ export function stringNode(text: string): Node {
 }
 
 /**
+ * The `{"subroutine": name}` node a `Subroutine` slot accepts —
+ * `editStatements` validates it against the program's declared
+ * subroutines.
+ */
+export function subroutineNode(name: string): Node {
+  return { subroutine: name }
+}
+
+/**
  * Whether a value entry's declared `returns` fits a slot's declared
  * parameter `type` — the same union-membership the owner's acceptance
  * rules apply (`semantic_types_compatible`): `Any`/`Unknown` on either
@@ -476,6 +549,7 @@ export function callNode(call: string, params: readonly ParamFact[]): Node {
   return { call, args: defaultArgs(params) }
 }
 
+
 /**
  * The picker `id` matching the node currently at a field's position.
  * Literal fields map `true`/`false` to their picker ids.
@@ -497,7 +571,8 @@ export function slotSet(action: Action, field: ArgField): boolean {
       ? field.call !== undefined
       : false
   }
-  return argAt(action.args, field.path) !== undefined
+  // A JSON `null` pad is not a value — the slot it occupies is unset.
+  return argAt(action.args, field.path) != null
 }
 
 /** Every unset required field under `action`, nested `call` rows included. */

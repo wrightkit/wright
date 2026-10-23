@@ -5,8 +5,8 @@ import type {
 } from './types/generated/wright-agent-v1'
 import type { SpannedAction, SpannedCondition } from './view'
 
-/** The pending-dialog tags (design.md): a toggle is a `change`, a removal a `delete`. */
-export type PendingTag = 'change' | 'delete'
+/** The pending-dialog tags (design.md): a new statement is an `insert`, a toggle a `change`, a removal a `delete`. */
+export type PendingTag = 'change' | 'delete' | 'insert'
 
 /** The two `rule-content-v1` statement lists an edit addresses. */
 export type StatementList = 'conditions' | 'actions'
@@ -22,12 +22,48 @@ export interface PendingChange {
   index: number
   tag: PendingTag
   statement?: RuleContentStatement
+  statements?: RuleContentStatement[]
+  /** Set on the placeholder mark an insert renders: view state, never an edit. */
+  mark?: boolean
 }
 
 export type StatementNode = SpannedCondition | SpannedAction
 
 export function keyFor(rule: number, list: string, index: number): string {
   return `${rule}:${list}:${index}`
+}
+
+/**
+ * The pending-map key of an `insert` staged at `index`, in its own
+ * `insert:` namespace so it never collides with the `change`/`delete`
+ * `keyFor` addresses an existing row at the same index. The two are
+ * still the same `editStatements` address — the service refuses a pair
+ * at one address with `edit-duplicate-address` — so an insert and a
+ * row edit at one index cannot coexist: the later staging supersedes
+ * (see `stageInsert`/`stageDeletes`).
+ */
+export function insertKey(rule: number, list: string, index: number): string {
+  return `insert:${rule}:${list}:${index}`
+}
+
+/**
+ * The pending-map key of the placeholder mark a staged `insert` renders
+ * where the new row lands — also `insert:`-namespaced, a different entry
+ * from the edit so the mark is view state, never a second edit.
+ */
+export function insertMarkKey(rule: number, list: string, index: number): string {
+  return `insert:${rule}:${list}:${index}:mark`
+}
+
+/** Drop a staged insert's edit and placeholder mark at `index`. */
+function clearInsertAt(
+  pending: Map<string, PendingChange>,
+  rule: number,
+  list: string,
+  index: number,
+): void {
+  pending.delete(insertKey(rule, list, index))
+  pending.delete(insertMarkKey(rule, list, index))
 }
 
 /** `span`/`spans` are output-only read keys; the `disabled` modifier is set deliberately. */
@@ -100,10 +136,13 @@ export function stageStatement(
     pending.delete(key)
     return
   }
+  // A row edit and an `insert` at one index share the editStatements
+  // address; the later staging supersedes.
+  clearInsertAt(pending, rule, list, index)
   pending.set(key, { rule, ruleName, list, index, tag: 'change', statement })
 }
 
-/** Stage deletions; a staged `change` at the address is superseded. */
+/** Stage deletions; a staged `change` or `insert` at the address is superseded. */
 export function stageDeletes(
   pending: Map<string, PendingChange>,
   rule: number,
@@ -112,8 +151,58 @@ export function stageDeletes(
   indices: Iterable<number>,
 ): void {
   for (const index of indices) {
+    clearInsertAt(pending, rule, list, index)
     pending.set(keyFor(rule, list, index), { rule, ruleName, list, index, tag: 'delete' })
   }
+}
+
+/**
+ * The position a column's `+` targets (docs/ui/editor.md § Form ·
+ * Insert): after the selected row when exactly one row is selected,
+ * else the column end. As an `editStatements` address that is the row's
+ * index + 1, or the list length — the flat index space `rules` reports,
+ * hidden `end` markers included.
+ */
+export function insertAddress(length: number, selected: readonly number[]): number {
+  return selected.length === 1 ? selected[0] + 1 : length
+}
+
+/**
+ * Stage an `insert`: the new statements at `index` under `insertKey`,
+ * plus the placeholder mark under `insertMarkKey` the column renders
+ * where the row lands. Two inserts at the same index re-stage (the
+ * second replaces the first). An insert at `index` shares the
+ * `editStatements` address of a `change`/`delete` on the existing row
+ * at that index — the service refuses both (`edit-duplicate-address`)
+ * — so staging the insert supersedes a staged row edit there, and
+ * staging a row edit supersedes the insert (the later gesture wins,
+ * like `change`/`delete` supersession).
+ */
+export function stageInsert(
+  pending: Map<string, PendingChange>,
+  rule: number,
+  ruleName: string,
+  list: StatementList,
+  index: number,
+  statements: RuleContentStatement[],
+): void {
+  pending.delete(keyFor(rule, list, index))
+  pending.set(insertKey(rule, list, index), {
+    rule,
+    ruleName,
+    list,
+    index,
+    tag: 'insert',
+    statements,
+  })
+  pending.set(insertMarkKey(rule, list, index), {
+    rule,
+    ruleName,
+    list,
+    index,
+    tag: 'insert',
+    mark: true,
+  })
 }
 
 /**
@@ -126,17 +215,32 @@ export function buildRequest(
   inputIdentity: string,
   snapshot: number | undefined,
 ): EditStatementsRequest {
-  const edits: StatementEdit[] = [...pending.values()].map((change) =>
-    change.tag === 'delete'
-      ? { rule: change.rule, list: change.list, index: change.index, change: 'delete' }
-      : {
+  const edits: StatementEdit[] = [...pending.values()].flatMap((change): StatementEdit[] => {
+    if (change.mark === true) return []
+    if (change.tag === 'delete') {
+      return [{ rule: change.rule, list: change.list, index: change.index, change: 'delete' }]
+    }
+    if (change.tag === 'insert') {
+      return [
+        {
           rule: change.rule,
           list: change.list,
           index: change.index,
-          change: 'replace',
-          statement: change.statement,
+          change: 'insert',
+          statements: (change.statements ?? []) as [RuleContentStatement, ...RuleContentStatement[]],
         },
-  )
+      ]
+    }
+    return [
+      {
+        rule: change.rule,
+        list: change.list,
+        index: change.index,
+        change: 'replace',
+        statement: change.statement,
+      },
+    ]
+  })
   return {
     op: 'editStatements',
     inputIdentity,

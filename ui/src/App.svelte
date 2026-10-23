@@ -12,10 +12,12 @@
     buildRequest,
     clean,
     effectiveDisabled,
+    insertAddress,
     isStale,
     keyFor,
     setDisabled,
     stageDeletes,
+    stageInsert,
     stageStatement,
     type BatchAction,
     type PendingChange,
@@ -111,6 +113,8 @@
     list: StatementList
     index: number
     argPath?: number[]
+    /** Set when the `+` opened the form for a new statement at `index`. */
+    insert?: { index: number }
   } | null>(null)
   let submitting = $state(false)
   let submitRefusal = $state<Refusal[] | null>(null)
@@ -159,13 +163,20 @@
 
   const editNode = $derived.by(() => {
     if (editTarget === null || !editEntry || editEntry.state.phase !== 'ready') return null
+    if (editTarget.insert) {
+      const node =
+        editTarget.list === 'actions'
+          ? ({ call: '', args: [] } as StatementNode)
+          : ({ value: null } as StatementNode)
+      return { ...editTarget, node }
+    }
     const node = editEntry.state.content[editTarget.list][editTarget.index] as
       | StatementNode
       | undefined
     return node ? { ...editTarget, node } : null
   })
   const editDisabled = $derived(
-    editNode && editEntry && editTarget
+    editNode && editEntry && editTarget && !editTarget.insert
       ? effectiveDisabled(pending, editEntry.summary.id, editTarget.list, editTarget.index, editNode.node)
       : false,
   )
@@ -177,7 +188,7 @@
     return out
   })
   const editStaged = $derived(
-    editNode && editEntry && editTarget
+    editNode && editEntry && editTarget && !editTarget.insert
       ? pending.get(keyFor(editEntry.summary.id, editTarget.list, editTarget.index))
       : undefined,
   )
@@ -186,6 +197,8 @@
       ? buildRequest(pending, inputIdentity, snapshot)
       : null,
   )
+  /** The staged edits the badge and pending dialog list — view marks excluded. */
+  const pendingChanges = $derived([...pending.values()].filter((change) => !change.mark))
 
   async function loadOne(id: number, generation?: number): Promise<RuleState> {
     try {
@@ -452,15 +465,20 @@
         if (node) setDisabled(pending, rule, entry.summary.name, list, index, node, target)
       }
     },
+    /** The column `+`: the editor opens on an empty statement at the
+        position `insertAddress` computes — the column end, or after the
+        one selected row (docs/ui/editor.md § Form · Insert). */
+    insert: (list: StatementList, selected: number[], length: number) => {
+      const index = insertAddress(length, selected)
+      editTarget = { rule, list, index, insert: { index } }
+    },
   })
 
-  function editorSave(disabled: boolean, callId?: string, args?: Node[], value?: Node) {
+  function editorSave(disabled: boolean, args?: Node[], value?: Node, call?: string) {
     if (!editNode || !editEntry || !editTarget) return
     const statement = clean(editNode.node)
-    if (callId !== undefined) {
-      if (editTarget.list === 'actions') {
-        ;(statement as { call?: string }).call = callId
-      }
+    if (call !== undefined && editTarget.list === 'actions') {
+      ;(statement as { call?: string }).call = call
     }
     if (args !== undefined && editTarget.list === 'actions') {
       ;(statement as { args?: Node[] }).args = args
@@ -469,6 +487,17 @@
       ;(statement as { value?: Node }).value = value
     }
     if (disabled) statement.disabled = true
+    if (editTarget.insert) {
+      stageInsert(
+        pending,
+        editEntry.summary.id,
+        editEntry.summary.name,
+        editTarget.list,
+        editTarget.insert.index,
+        [statement],
+      )
+      return
+    }
     stageStatement(
       pending,
       editEntry.summary.id,
@@ -583,7 +612,7 @@
       <SqButton
         title={t.pendingChanges}
         icon={FileText}
-        badge={pending.size}
+        badge={pendingChanges.length}
         onclick={() => {
           submitRefusal = null
           dialog = 'pending'
@@ -669,7 +698,7 @@
 
   <PendingChanges
     open={dialog === 'pending'}
-    changes={[...pending.values()]}
+    changes={pendingChanges}
     refusal={submitRefusal}
     {submitting}
     request={pendingRequest}
@@ -692,6 +721,7 @@
     locale={sessionLocale}
     used={usedIds}
     focusPath={editTarget?.argPath ?? null}
+    isInsert={editTarget?.insert !== undefined}
     onsave={editorSave}
     onclose={() => (editTarget = null)}
   />

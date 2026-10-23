@@ -2,10 +2,14 @@ import { describe, expect, it } from 'vitest'
 import {
   buildRequest,
   effectiveDisabled,
+  insertAddress,
+  insertKey,
+  insertMarkKey,
   isStale,
   keyFor,
   setDisabled,
   stageDeletes,
+  stageInsert,
   type PendingChange,
   type StatementNode,
 } from './edit'
@@ -93,6 +97,83 @@ describe('stageDeletes', () => {
   })
 })
 
+describe('insertAddress', () => {
+  it('appends at the column end with no selection', () => {
+    expect(insertAddress(3, [])).toBe(3)
+    expect(insertAddress(0, [])).toBe(0)
+  })
+
+  it('targets after the one selected row', () => {
+    expect(insertAddress(3, [1])).toBe(2)
+    expect(insertAddress(3, [2])).toBe(3)
+  })
+
+  it('appends at the column end when more than one row is selected', () => {
+    expect(insertAddress(3, [0, 1])).toBe(3)
+  })
+})
+
+describe('stageInsert', () => {
+  it('stages the statement plus its placeholder mark', () => {
+    const map = pending()
+    stageInsert(map, 2, 'setup', 'actions', 1, [{ call: 'wait', args: [0.25] }])
+    const change = map.get(insertKey(2, 'actions', 1))
+    expect(change?.tag).toBe('insert')
+    expect(change?.statements).toEqual([{ call: 'wait', args: [0.25] }])
+    const mark = map.get(insertMarkKey(2, 'actions', 1))
+    expect(mark?.tag).toBe('insert')
+    expect(mark?.mark).toBe(true)
+    expect(mark?.statements).toBeUndefined()
+  })
+
+  it('never shares the editStatements address with a row edit at the index', () => {
+    // The service refuses two edits at one address
+    // (`edit-duplicate-address`), so an `insert` at N and a
+    // `change`/`delete` on row N cannot coexist: the later staging
+    // supersedes — under its own `insert:` key, never clobbering
+    // `keyFor` silently (#920 r1).
+    const map = pending()
+    stageInsert(map, 1, 'r', 'actions', 1, [{ call: 'wait', args: [1] }])
+    stageDeletes(map, 1, 'r', 'actions', [1])
+    expect(map.get(keyFor(1, 'actions', 1))?.tag).toBe('delete')
+    expect(map.has(insertKey(1, 'actions', 1))).toBe(false)
+    expect(map.has(insertMarkKey(1, 'actions', 1))).toBe(false)
+    expect(buildRequest(map, 'digest', 0).edits).toEqual([
+      { rule: 1, list: 'actions', index: 1, change: 'delete' },
+    ])
+
+    const second = pending()
+    stageDeletes(second, 1, 'r', 'actions', [1])
+    stageInsert(second, 1, 'r', 'actions', 1, [{ call: 'wait', args: [1] }])
+    expect(second.has(keyFor(1, 'actions', 1))).toBe(false)
+    expect(buildRequest(second, 'digest', 0).edits).toEqual([
+      {
+        rule: 1,
+        list: 'actions',
+        index: 1,
+        change: 'insert',
+        statements: [{ call: 'wait', args: [1] }],
+      },
+    ])
+
+    const third = pending()
+    setDisabled(third, 1, 'r', 'actions', 1, node(), true)
+    stageInsert(third, 1, 'r', 'actions', 1, [{ call: 'wait', args: [1] }])
+    expect(third.has(keyFor(1, 'actions', 1))).toBe(false)
+    expect(third.get(insertKey(1, 'actions', 1))?.tag).toBe('insert')
+  })
+
+  it('replaces a prior insert at the same index but not a row edit there', () => {
+    const map = pending()
+    stageInsert(map, 1, 'r', 'actions', 1, [{ call: 'wait', args: [1] }])
+    stageInsert(map, 1, 'r', 'actions', 1, [{ call: 'kill', args: [] }])
+    expect(map.get(insertKey(1, 'actions', 1))?.statements).toEqual([
+      { call: 'kill', args: [] },
+    ])
+    expect(buildRequest(map, 'digest', 0).edits).toHaveLength(1)
+  })
+})
+
 describe('buildRequest', () => {
   it('carries the freshness pair and one edit per staged change', () => {
     const map = pending()
@@ -115,6 +196,23 @@ describe('buildRequest', () => {
         { rule: 1, list: 'actions', index: 2, change: 'delete' },
       ],
     })
+  })
+
+  it('emits an insert at its address and skips the placeholder mark', () => {
+    const map = pending()
+    stageInsert(map, 2, 'setup', 'actions', 1, [
+      { call: 'wait', args: [0.25, { enum: 'Wait', member: 'IGNORE_CONDITION' }] },
+    ])
+    const request = buildRequest(map, 'sha256:abc', 4)
+    expect(request.edits).toEqual([
+      {
+        rule: 2,
+        list: 'actions',
+        index: 1,
+        change: 'insert',
+        statements: [{ call: 'wait', args: [0.25, { enum: 'Wait', member: 'IGNORE_CONDITION' }] }],
+      },
+    ])
   })
 })
 
