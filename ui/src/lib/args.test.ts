@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   type ParamFact,
+  admitsCall,
   argAt,
   argFields,
+  callNode,
   conditionFields,
   currentId,
+  defaultArgs,
   defaultNode,
   enumNode,
   fillGaps,
@@ -259,7 +262,7 @@ describe('conditionFields', () => {
     expect(fields.map((field) => field.label)).toEqual(['Value', 'Comparison', 'Value'])
     expect(fields[0].path).toEqual([0])
     expect(fields[0].kind).toBe('call')
-    expect(fields[1]).toMatchObject({ kind: 'call', call: '>=', path: [] })
+    expect(fields[1]).toMatchObject({ kind: 'comparison', call: '>=', path: [] })
     expect(fields[2]).toMatchObject({ kind: 'number', path: [1] })
   })
 
@@ -318,6 +321,98 @@ describe('paramFacts', () => {
   it('reads callable.parameters from a lookup entry', () => {
     expect(paramFacts(entry(modifyParams))).toHaveLength(3)
     expect(paramFacts(null)).toEqual([])
+  })
+})
+
+describe('defaultArgs', () => {
+  it('omits positions past the last declared default', () => {
+    // `setGlobalVariable`: a required Variable and a required Value,
+    // neither declaring a default — the fresh call stays fully unset.
+    expect(
+      defaultArgs([
+        { name: 'variable', type: 'Variable', required: true },
+        { name: 'value', type: 'Any', required: true },
+      ]),
+    ).toEqual([])
+  })
+
+  it('fills declared defaults and pads crossed positions with null', () => {
+    // `wait`: Duration unset, Wait Behavior's declared enum default.
+    expect(
+      defaultArgs([
+        { name: 'time', type: 'Any', required: true },
+        {
+          name: 'waitBehavior',
+          type: 'Wait',
+          required: false,
+          default: 'Wait.IGNORE_CONDITION',
+          enum: { domain: 'Wait' },
+        },
+      ]),
+    ).toEqual([null, { enum: 'Wait', member: 'IGNORE_CONDITION' }])
+  })
+
+  it('materializes a fold group so member writes have a call', () => {
+    expect(
+      defaultArgs([
+        {
+          name: 'player',
+          type: 'Player',
+          required: true,
+          content: { fold: { call: 'playerVariable', arg: 0 } },
+        },
+        {
+          name: 'variable',
+          type: 'Variable',
+          required: true,
+          content: { fold: { call: 'playerVariable', arg: 1 } },
+        },
+      ]),
+    ).toEqual([{ call: 'playerVariable', args: [] }])
+    expect(
+      defaultArgs([
+        {
+          name: 'player',
+          type: 'Player',
+          required: true,
+          content: { fold: { call: 'playerVariable', arg: 0 } },
+        },
+        {
+          name: 'variable',
+          type: 'Variable',
+          required: true,
+          default: 'aim',
+          content: { fold: { call: 'playerVariable', arg: 1 } },
+        },
+      ]),
+    ).toEqual([{ call: 'playerVariable', args: [null, { variable: 'aim' }] }])
+  })
+
+  it('callNode builds the fresh call with its default args', () => {
+    expect(
+      callNode('allPlayers', [
+        {
+          name: 'array',
+          type: 'Team',
+          required: false,
+          default: 'Team.ALL',
+          enum: { domain: 'Team' },
+        },
+      ]),
+    ).toEqual({ call: 'allPlayers', args: [{ enum: 'Team', member: 'ALL' }] })
+  })
+})
+
+describe('admitsCall', () => {
+  it('admits the returns types a slot type declares', () => {
+    expect(admitsCall('Any', 'Number')).toBe(true)
+    expect(admitsCall('Player|Array', 'Player')).toBe(true)
+    expect(admitsCall('Player|Array', 'Array')).toBe(true)
+    expect(admitsCall('Player|Array', 'Number')).toBe(false)
+    expect(admitsCall('Object|Array', 'Object')).toBe(true)
+    expect(admitsCall('Object', 'Array')).toBe(false)
+    expect(admitsCall(undefined, 'Number')).toBe(true)
+    expect(admitsCall('Any', undefined)).toBe(true)
   })
 })
 

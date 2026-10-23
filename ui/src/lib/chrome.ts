@@ -107,6 +107,8 @@ export interface ChromeStrings {
   ok: string
   /** The editor's empty-slot placeholder (a required argument with no value). */
   unset: string
+  /** The statement editor's action picker row label. */
+  actionPickerLabel: string
   /** The two boolean literals the editor's boolean picker lists. */
   trueLiteral: string
   falseLiteral: string
@@ -199,6 +201,7 @@ const enUS: ChromeStrings = {
   disabled: 'Disabled',
   ok: 'OK',
   unset: 'unset',
+  actionPickerLabel: 'Action',
   trueLiteral: 'True',
   falseLiteral: 'False',
   simulation: 'Simulation',
@@ -279,6 +282,7 @@ const zhCN: ChromeStrings = {
   disabled: '禁用',
   ok: '确定',
   unset: '未设置',
+  actionPickerLabel: '动作',
   trueLiteral: '真',
   falseLiteral: '假',
   simulation: '模拟',

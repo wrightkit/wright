@@ -59,6 +59,7 @@
     type Severity,
   } from './lib/findings'
   import { Names } from './lib/names'
+  import { collectUsed } from './lib/nodes'
   import RuleView from './lib/RuleView.svelte'
   import SimulatePanel from './lib/SimulatePanel.svelte'
   import SqButton from './lib/SqButton.svelte'
@@ -233,6 +234,16 @@
       ? effectiveDisabled(pending, editEntry.summary.id, editTarget.list, editTarget.index, editNode.node)
       : false,
   )
+  /** The identities the loaded program uses — the pickers' usage-first
+      ordering source (docs/ui/editor.md § Pickers). */
+  const usedIds = $derived.by(() => {
+    const out = new Set<string>()
+    for (const entry of rules ?? []) {
+      if (entry.state.phase === 'ready') collectUsed(entry.state.content, out)
+    }
+    return out
+  })
+
   /** The staged `change` at the open target, so the editor shows it. */
   const editStaged = $derived(
     editNode && editEntry && editTarget
@@ -598,9 +609,14 @@
     },
   })
 
-  function editorSave(disabled: boolean, args?: Node[], value?: Node) {
+  function editorSave(disabled: boolean, callId?: string, args?: Node[], value?: Node) {
     if (!editNode || !editEntry || !editTarget) return
     const statement = clean(editNode.node)
+    if (callId !== undefined) {
+      if (editTarget.list === 'actions') {
+        ;(statement as { call?: string }).call = callId
+      }
+    }
     if (args !== undefined && editTarget.list === 'actions') {
       ;(statement as { args?: Node[] }).args = args
     }
@@ -839,6 +855,7 @@
     staged={editStaged?.tag === 'change' ? editStaged.statement : undefined}
     {t}
     locale={sessionLocale}
+    used={usedIds}
     focusPath={editTarget?.argPath ?? null}
     onsave={editorSave}
     onclose={() => (editTarget = null)}
