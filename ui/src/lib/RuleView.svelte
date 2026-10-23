@@ -5,6 +5,7 @@
   import SqButton from './SqButton.svelte'
   import Expr from './Expr.svelte'
   import FindingMark from './FindingMark.svelte'
+  import RowMenu from './components/RowMenu.svelte'
   import type { ChromeStrings } from './chrome'
   import type { Names } from './names'
   import { mostSevere, SEVERITY_TOKEN, type RuleFindings } from './findings'
@@ -15,8 +16,10 @@
     type StatementList,
   } from './edit'
   import {
+    blockRange,
     collectIdentities,
     isEventPlayerMember,
+    sameCallIndices,
     statementDepths,
     statementMatches,
     STATEMENT_KINDS,
@@ -201,7 +204,7 @@
     if (event.defaultPrevented) return
     const el = event.target as HTMLElement | null
     if (
-      el?.closest('input, textarea, select, dialog, [contenteditable="true"]') &&
+      el?.closest('input, textarea, select, dialog, [role="menu"], [contenteditable="true"]') &&
       !el?.closest('input.sel, input.sel-all, input.col-filter')
     )
       return
@@ -243,6 +246,51 @@
   /** The singular noun an aria label names for a row of `list`. */
   const noun = (list: StatementList) =>
     list === 'conditions' ? t.conditionNoun : t.actionNoun
+
+  /**
+   * The row's flat-stream nodes: an action list renders its actions; a
+   * condition list renders each condition's `value`.
+   */
+  function rowNodes(list: StatementList): Node[] {
+    if (ruleState.phase !== 'ready') return []
+    return list === 'conditions'
+      ? ruleState.content.conditions.map((condition) => condition.value)
+      : ruleState.content.actions
+  }
+
+  /**
+   * The row's context menu entries (docs/ui/selection.md § Structural
+   * selection): "Select same action" checks every row in the column
+   * sharing the row's call id; "Select block" checks the opener, its
+   * body, and its `End` — enabled only on control-flow openers.
+   */
+  function menuItems(list: StatementList, index: number) {
+    const nodes = rowNodes(list)
+    const block =
+      list === 'actions' && ruleState.phase === 'ready'
+        ? blockRange(ruleState.content.actions, index)
+        : null
+    return [
+      {
+        label: t.selectSameAction,
+        disabled: sameCallIndices(nodes, index).length === 0,
+        onselect: () => {
+          for (const i of sameCallIndices(nodes, index)) sel(list).add(i)
+          anchor = null
+        },
+      },
+      {
+        label: t.selectBlock,
+        disabled: block === null,
+        onselect: () => {
+          if (block === null) return
+          const set = sel(list)
+          for (let i = block[0]; i <= block[1]; i++) set.add(i)
+          anchor = null
+        },
+      },
+    ]
+  }
 
   /**
    * The event rows, in the in-game order: Event always, then Team, Player,
@@ -296,40 +344,45 @@
   {@const rowFindings = ruleFindings[list].get(index) ?? []}
   {@const rowSeverity = rowFindings.length > 0 ? mostSevere(rowFindings) : null}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
-  <li
-    class="statement"
-    data-index={index}
-    class:disabled
-    class:selected={set.has(index)}
-    class:pending-change={tag === 'change'}
-    class:pending-delete={tag === 'delete'}
-    class:has-findings={rowSeverity !== null}
-    style="--depth: {depth};{rowSeverity !== null ? ` --finding: var(--${SEVERITY_TOKEN[rowSeverity]})` : ''}"
-    onclick={() => onedit.open(list, index)}
-  >
-    <input
-      type="checkbox"
-      class="sel"
-      aria-label={t.selectRow(noun(list), index + 1)}
-      checked={set.has(index)}
-      onclick={(event) => {
-        event.stopPropagation()
-        selectRow(list, index, event)
-      }}
-    />
-    {#if debug}<span class="line-no" data-debug>{line}</span>{/if}
-    <span class="statement-text"><Expr {node} {kinds} {names} /></span>
-    {#if tag}<span class="pending-tag {tag}">{tag}</span>{/if}
-    {#if rowFindings.length > 0}
-      <FindingMark findings={rowFindings} {t} />
-    {/if}
-    {#if debug}
-      <details class="debug" data-debug>
-        <summary>node</summary>
-        <pre>{JSON.stringify($state.snapshot(node), null, 2)}</pre>
-      </details>
-    {/if}
-  </li>
+  <RowMenu ariaLabel={t.statementMenu(noun(list), index + 1)} items={menuItems(list, index)}>
+    {#snippet children({ props })}
+      <li
+        {...props}
+        class="statement"
+        data-index={index}
+        class:disabled
+        class:selected={set.has(index)}
+        class:pending-change={tag === 'change'}
+        class:pending-delete={tag === 'delete'}
+        class:has-findings={rowSeverity !== null}
+        style="--depth: {depth};{rowSeverity !== null ? ` --finding: var(--${SEVERITY_TOKEN[rowSeverity]})` : ''}"
+        onclick={() => onedit.open(list, index)}
+      >
+        <input
+          type="checkbox"
+          class="sel"
+          aria-label={t.selectRow(noun(list), index + 1)}
+          checked={set.has(index)}
+          onclick={(event) => {
+            event.stopPropagation()
+            selectRow(list, index, event)
+          }}
+        />
+        {#if debug}<span class="line-no" data-debug>{line}</span>{/if}
+        <span class="statement-text"><Expr {node} {kinds} {names} /></span>
+        {#if tag}<span class="pending-tag {tag}">{tag}</span>{/if}
+        {#if rowFindings.length > 0}
+          <FindingMark findings={rowFindings} {t} />
+        {/if}
+        {#if debug}
+          <details class="debug" data-debug>
+            <summary>node</summary>
+            <pre>{JSON.stringify($state.snapshot(node), null, 2)}</pre>
+          </details>
+        {/if}
+      </li>
+    {/snippet}
+  </RowMenu>
 {/snippet}
 
 {#snippet columnActions(list: StatementList, hidden: number)}
@@ -379,12 +432,18 @@
     {@const actVisible = actDepths.flatMap((depth, i) => (depth === null ? [] : [i]))}
     {@const actShown = shownIndices('actions', actVisible)}
     {@const actShownSet = new Set(actShown)}
-    {@const actHiddenSel = [...actSel].filter((i) => !actShownSet.has(i)).length}
+    {@const actVisibleSet = new Set(actVisible)}
+    {@const actHiddenSel = [...actSel].filter(
+      (i) => actVisibleSet.has(i) && !actShownSet.has(i),
+    ).length}
     {@const condSel = selection.conditions}
     {@const condVisible = content.conditions.map((_, i) => i)}
     {@const condShown = shownIndices('conditions', condVisible)}
     {@const condShownSet = new Set(condShown)}
-    {@const condHiddenSel = [...condSel].filter((i) => !condShownSet.has(i)).length}
+    {@const condVisibleSet = new Set(condVisible)}
+    {@const condHiddenSel = [...condSel].filter(
+      (i) => condVisibleSet.has(i) && !condShownSet.has(i),
+    ).length}
     <div class="rule-cols">
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div

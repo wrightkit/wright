@@ -477,6 +477,176 @@ describe('column selection', () => {
   })
 })
 
+describe('the statement-row context menu (#917)', () => {
+  // wait · if( wait · while( wait ) end ) else · wait · end · wait
+  const actions = [
+    action('wait', [0]),
+    action('if', [true]),
+    action('wait', [1]),
+    action('while', [true]),
+    action('wait', [2]),
+    action('end'),
+    action('else'),
+    action('wait', [3]),
+    action('end'),
+    action('wait', [4]),
+  ]
+  const conditions = [
+    { value: { call: 'isAlive', args: [{ call: 'eventPlayer', args: [] }] } },
+    { value: true },
+    { value: { call: 'isAlive', args: [{ call: 'eventPlayer', args: [] }] } },
+  ]
+
+  async function setup() {
+    const content = contentFor(
+      { id: 'global' },
+      conditions as RuleContent['conditions'],
+      actions,
+    )
+    api.handler = handlerFor([summaryFor(1, 'menu', content)])
+    mountApp()
+    await settle()
+    await openRule(1)
+  }
+
+  const column = (list: 'conditions' | 'actions' = 'actions') =>
+    slot(1)!.querySelector<HTMLElement>(`.col[data-list="${list}"]`)!
+  const rows = (list: 'conditions' | 'actions' = 'actions') =>
+    [...column(list).querySelectorAll<HTMLLIElement>('.statement')]
+  // The rendered rows, by flat index: hidden `end` markers render no row
+  // but still carry selection (Select block includes them).
+  const selected = (list: 'conditions' | 'actions' = 'actions') =>
+    new Map(
+      rows(list).map((row) => [
+        Number(row.getAttribute('data-index')),
+        row.classList.contains('selected'),
+      ]),
+    )
+  const menu = () => document.body.querySelector<HTMLElement>('[role="menu"]')
+  const menuItems = () => [...menu()!.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+  const itemNamed = (label: string) =>
+    menuItems().find((item) => item.textContent === label)!
+
+  const contextmenu = async (row: HTMLElement) => {
+    row.dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }),
+    )
+    await settle()
+  }
+  // Menu items fire `menuitemselect` from `click` (or pointerup without
+  // a preceding pointerdown); a pointerdown+pointerup pair stays armed.
+  const choose = async (item: HTMLElement) => {
+    item.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await settle()
+  }
+
+  it('selects every same-call row across nested blocks', async () => {
+    await setup()
+    await contextmenu(rows()[2]!)
+    expect(menu(), 'the menu opened in the top layer').not.toBeNull()
+    await choose(itemNamed('Select same action'))
+    // Every `wait` in the column — depth does not matter; the `if`/`while`
+    // openers and `else` are untouched.
+    expect(selected()).toEqual(
+      new Map([
+        [0, true],
+        [1, false],
+        [2, true],
+        [3, false],
+        [4, true],
+        [6, false],
+        [7, true],
+        [9, true],
+      ]),
+    )
+    expect(menu(), 'choosing closed the menu').toBeNull()
+  })
+
+  it('selects a block through its End and no row past it', async () => {
+    await setup()
+    await contextmenu(rows()[1]!)
+    await choose(itemNamed('Select block'))
+    // Every rendered row of the `if` block is selected — the opener, its
+    // body including the `else` and the nested `while` — and the row after
+    // the block is not. The two hidden `end` markers count too.
+    expect(selected()).toEqual(
+      new Map([
+        [0, false],
+        [1, true],
+        [2, true],
+        [3, true],
+        [4, true],
+        [6, true],
+        [7, true],
+        [9, false],
+      ]),
+    )
+    // Flat indices 1–8 including both hidden `end` markers.
+    expect(column().querySelector('.sel-count')?.textContent).toBe('8 selected')
+  })
+
+  it('selects a nested block without its enclosing block', async () => {
+    await setup()
+    await contextmenu(rows()[3]!)
+    await choose(itemNamed('Select block'))
+    // The `while` opener, its body, and its own `end` — flat indices 3–5,
+    // of which index 5 renders no row.
+    expect(selected()).toEqual(
+      new Map([
+        [0, false],
+        [1, false],
+        [2, false],
+        [3, true],
+        [4, true],
+        [6, false],
+        [7, false],
+        [9, false],
+      ]),
+    )
+    expect(column().querySelector('.sel-count')?.textContent).toBe('3 selected')
+  })
+
+  it('disables Select block on a non-opener', async () => {
+    await setup()
+    await contextmenu(rows()[0]!)
+    const item = itemNamed('Select block')
+    expect(item.getAttribute('aria-disabled'), 'aria-disabled').toBe('true')
+    await choose(item)
+    expect([...selected().values()], 'a disabled item selects nothing').toEqual(
+      rows().map(() => false),
+    )
+    // "Select same action" stays enabled — `wait` is a call.
+    expect(itemNamed('Select same action').getAttribute('aria-disabled')).toBe('false')
+  })
+
+  it('selects same-call conditions and disables Select block on a condition row', async () => {
+    await setup()
+    await contextmenu(rows('conditions')[0]!)
+    await choose(itemNamed('Select same action'))
+    expect(selected('conditions')).toEqual(
+      new Map([
+        [0, true],
+        [1, false],
+        [2, true],
+      ]),
+    )
+
+    await contextmenu(rows('conditions')[0]!)
+    expect(itemNamed('Select block').getAttribute('aria-disabled')).toBe('true')
+  })
+
+  it('renders the menu in the popover style of editor.md § Pickers', async () => {
+    await setup()
+    await contextmenu(rows()[0]!)
+    const pop = menu()!
+    expect(pop.classList.contains('picker-pop'), 'the popover chrome').toBe(true)
+    expect(pop.getAttribute('aria-label'), 'the menu is labelled').toBe('action 1 menu')
+    for (const item of menuItems()) {
+      expect(item.classList.contains('picker-option')).toBe(true)
+    }
+  })
+})
+
 describe('a refused rule (#881)', () => {
   it('renders the refusal code and message in the body while the next rule opens', async () => {
     const good = summaryFor(
