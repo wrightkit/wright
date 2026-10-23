@@ -27,10 +27,7 @@ pub(crate) use addresses::{edge_caller, rule_address, rule_name, tree_rule};
 
 use crate::plain;
 
-/// The report's layout width ceiling (ADR-0030 decision 4).
 const MAX_WIDTH: u16 = 100;
-/// Below this width the terminal report switches to its compact layout:
-/// children of a section item align at the item's column.
 const COMPACT_BELOW: u16 = 90;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -197,8 +194,6 @@ struct RuntimeEnvironment {
     no_color: bool,
     force_color: bool,
     term_dumb: bool,
-    /// The `COLUMNS` environment variable when it parses to a nonzero
-    /// column count — the explicit width override.
     columns: Option<u16>,
 }
 
@@ -219,10 +214,6 @@ impl RuntimeEnvironment {
     }
 }
 
-/// The terminal's actual column count via `TIOCGWINSZ` (rustix's safe
-/// `tcgetwinsize`); `None` when stdout is not a terminal or the platform
-/// cannot answer. `COLUMNS` is checked separately — it doubles as the test
-/// override.
 #[cfg(unix)]
 fn terminal_columns() -> Option<u16> {
     rustix::termios::tcgetwinsize(std::io::stdout())
@@ -254,8 +245,6 @@ impl Presentation {
         )
     }
 
-    /// Presentation for the commands that carry their own output flags
-    /// rather than [`CommonArgs`] (`lookup`, `update`).
     pub(crate) fn from_output(
         format: OutputFormatArg,
         renderer: RendererArg,
@@ -297,7 +286,6 @@ impl Presentation {
                     && (!env.term_dumb || env.force_color)
             }
         };
-        // `COLUMNS` beats the detected width; else the widest layout.
         let columns = env.columns.or_else(|| {
             if env.stdout_terminal {
                 terminal_columns()
@@ -315,14 +303,10 @@ impl Presentation {
         }
     }
 
-    /// Whether the terminal report (verdict tag, hierarchy, semantic
-    /// colour) renders — the only caller-facing renderer question.
     pub(crate) fn is_terminal(&self) -> bool {
         self.renderer == Renderer::Terminal
     }
 
-    /// The compact layout below 90 columns: children of a section item
-    /// align at the item's column instead of indenting deeper.
     fn compact(&self) -> bool {
         self.width < COMPACT_BELOW
     }
@@ -373,17 +357,11 @@ pub(crate) fn render<
     };
     match pres.renderer {
         Renderer::GithubActions => render_github(envelope, &ctx),
-        // Plain is the agent-facing line-record surface (#793); terminal
-        // renders the verdict-tag report.
         Renderer::Plain => plain::render(envelope, &ctx),
         Renderer::Terminal => terminal::render(envelope, pres, elapsed, source_base, subject),
     }
 }
 
-/// Inputs a result body or footer may need beyond the envelope: display
-/// policy, the base that root-relative `span.path` spellings resolve
-/// against (absent when the input never loaded), and the query target the
-/// CLI was asked for when the payload does not carry it (#446).
 pub(crate) struct RenderContext<'a> {
     pub(crate) presentation: Presentation,
     pub(crate) elapsed: Duration,
@@ -391,15 +369,10 @@ pub(crate) struct RenderContext<'a> {
     pub(crate) subject: Option<&'a str>,
 }
 
-/// A failed analysis result puts its diagnostics with the report on
-/// stdout — stderr keeps usage errors and internal failures only (#891).
-/// Gated results and artifact streams keep diagnostics on stderr.
 pub(crate) fn diagnostics_on_stdout<T: serde::Serialize>(envelope: &Envelope<T>) -> bool {
     !envelope.ok && !envelope.gated && envelope.exit != 2 && envelope.exit != 4
 }
 
-/// Diagnostics render in action order — errors first — without changing the
-/// reported set or the driver's production order (#443).
 pub(crate) fn severity_rank(severity: Severity) -> u8 {
     match severity {
         Severity::Error => 0,
@@ -416,22 +389,16 @@ fn dim(value: &str, color: bool) -> String {
     }
 }
 
-/// The markers for one item inside a grouped block (#703): `head` starts
-/// the item's first line and `pad` prefixes each of its child lines. The
-/// plain renderer's flat deterministic contract keeps both as indentation.
 struct Marks {
     head: String,
     pad: String,
 }
 
 impl Presentation {
-    /// Marks for an item under a section header's two-space indent.
     fn section_marks(&self) -> Marks {
         self.connector("  ")
     }
 
-    /// `base` is the item's own indent; its child lines sit two spaces
-    /// deeper.
     fn connector(&self, base: &str) -> Marks {
         Marks {
             head: base.to_string(),
@@ -439,15 +406,11 @@ impl Presentation {
         }
     }
 
-    /// The prefix of the closing metadata line: a plain indent.
     fn footer_head(&self) -> &'static str {
         "  "
     }
 }
 
-/// One GitHub Actions annotation before emission (#794): the command kind,
-/// its escaped properties, the message, and the dedup/ordering keys.
-/// `notice` is never a per-item annotation — it closes a withheld set.
 struct GithubAnnotation {
     kind: &'static str,
     props: Vec<String>,
@@ -459,9 +422,6 @@ struct GithubAnnotation {
 }
 
 impl GithubAnnotation {
-    /// Dedup identity (ADR-0030 decision 8): same rule at the same location
-    /// is one annotation, however many findings repeat it. Owned so the
-    /// `retain` closure can keep keys without borrowing the vector.
     fn key(&self) -> (u8, String, String, u64, u64) {
         (
             (self.kind != "error") as u8,
@@ -473,17 +433,10 @@ impl GithubAnnotation {
     }
 }
 
-/// The platform drops annotations past 10 per severity class per step
-/// (#794); the renderer stays inside the bound and says what it withheld.
 const GITHUB_ANNOTATION_LIMIT: usize = 10;
 
-/// The step summary's ceiling — comfortably inside the platform's 1 MiB.
 const GITHUB_SUMMARY_BUDGET: usize = 900_000;
 
-/// Dedup annotations by rule and location, order them by severity (errors
-/// first, stable within), and bound each severity class to the platform's
-/// per-step limit (#794). Returns the withheld count — the closing notice
-/// reports it.
 fn bound_annotations(annotations: &mut Vec<GithubAnnotation>) -> usize {
     annotations.sort_by_key(|annotation| (annotation.kind != "error") as u8);
     let mut seen = std::collections::BTreeSet::new();
@@ -516,9 +469,6 @@ fn render_github<T: serde::Serialize + ResultPresentation + plain::PlainReport>(
     envelope: &Envelope<T>,
     ctx: &RenderContext<'_>,
 ) {
-    // Errors and warnings only, deduplicated by rule and location, ordered
-    // by severity — the platform's per-step budget goes to the items a
-    // reviewer should see first (ADR-0030 decision 8).
     let mut annotations: Vec<GithubAnnotation> = envelope
         .diagnostics
         .iter()
@@ -533,8 +483,6 @@ fn render_github<T: serde::Serialize + ResultPresentation + plain::PlainReport>(
     for annotation in &annotations {
         emit_workflow_annotation(annotation.kind, &annotation.props, &annotation.message);
     }
-    // The log group is titled with the verdict and headline, then carries
-    // the same records the plain renderer prints (ADR-0030 decision 9).
     let status = summary_status(envelope);
     let headline = envelope
         .result
@@ -565,8 +513,6 @@ fn render_github<T: serde::Serialize + ResultPresentation + plain::PlainReport>(
     emit_summary(envelope, ctx, &annotations);
 }
 
-/// The GitHub Actions render path never reaches `render_body` for
-/// context-consuming commands — a bare placeholder suffices.
 fn github_context(subject: Option<&str>) -> RenderContext<'_> {
     RenderContext {
         presentation: Presentation {
@@ -583,9 +529,6 @@ fn github_context(subject: Option<&str>) -> RenderContext<'_> {
     }
 }
 
-/// A diagnostic as an annotation, when it is actionable on the platform:
-/// errors and warnings only (#794) — an informational diagnostic still
-/// reports in the log group and summary but never draws a notice card.
 fn diagnostic_annotation(diagnostic: &wright_driver::Diagnostic) -> Option<GithubAnnotation> {
     let kind = match diagnostic.severity {
         Severity::Error => "error",
@@ -623,16 +566,12 @@ fn diagnostic_annotation(diagnostic: &wright_driver::Diagnostic) -> Option<Githu
     })
 }
 
-/// A finding as an annotation, when it locates in a real source file
-/// (#794): error/warning severities only; a finding whose span is absent
-/// or pseudo-pathed still reports in the log group and summary.
 fn finding_annotation(finding: &serde_json::Value) -> Option<GithubAnnotation> {
     let kind = match finding_severity(finding) {
         Severity::Error => "error",
         Severity::Warning => "warning",
         Severity::Info => return None,
     };
-    // A `location` string joins `span` — the essential payloads carry one.
     let located;
     let finding = match finding_location_span(finding) {
         Some(span) => {
@@ -722,8 +661,6 @@ impl From<Severity> for SummaryStatus {
     }
 }
 
-/// Severity as a gating rank: `info < warning < error`. `Severity` carries
-/// no `Ord`; the verdict/`--fail-on` threshold compares levels.
 fn severity_level(severity: Severity) -> u8 {
     match severity {
         Severity::Info => 0,
@@ -732,9 +669,6 @@ fn severity_level(severity: Severity) -> u8 {
     }
 }
 
-/// A serialized finding's severity as [`Severity`], keeping `info` distinct.
-/// The fallback matches selection's `parse_severity`: a missing or unknown
-/// severity reads as `Warning`, never understating the result's maximum.
 fn finding_severity(finding: &serde_json::Value) -> Severity {
     match finding.get("severity").and_then(serde_json::Value::as_str) {
         Some("error") => Severity::Error,
@@ -743,9 +677,6 @@ fn finding_severity(finding: &serde_json::Value) -> Severity {
     }
 }
 
-/// The finding set's highest severity, selection-aware (#430): under a
-/// selection the outcome's recorded full-set maximum governs; otherwise the
-/// reported findings' severities do.
 fn max_finding_severity(
     findings: &serde_json::Value,
     selection: &Option<wright_driver::SelectionOutcome>,
@@ -766,20 +697,12 @@ pub(crate) trait ResultPresentation {
         None
     }
     fn render_body(&self, ctx: &RenderContext<'_>);
-    /// Whether the body is the command's source artifact, printed instead of
-    /// a verdict (`convert`, `compile -o -`).
     fn is_artifact_stream(&self) -> bool {
         false
     }
-    /// The finding objects the GitHub Actions renderer annotates (#794) —
-    /// raw payload items; span/`location` merging happens in the collector.
     fn github_findings(&self) -> Vec<serde_json::Value> {
         Vec::new()
     }
-    /// The result's highest finding severity across its complete set, or
-    /// `None` when the command carries no findings — the one severity
-    /// source shared by the verdict (`update_summary_status`) and the
-    /// `--fail-on` gate.
     fn max_finding_severity(&self) -> Option<Severity> {
         None
     }
@@ -822,13 +745,7 @@ impl ResultPresentation for CheckResult {
 }
 
 impl ResultPresentation for LintResult {
-    /// The lint verdict leads with finding counts by severity — the counts a
-    /// human needs to judge priority. Under a selection the per-severity
-    /// breakdown of the full set is unknown, so the verdict reports the true
-    /// total instead of counting the selected remainder.
     fn metadata(&self) -> Option<String> {
-        // The same program inventory `analyze`/`inspect cost` report: every
-        // declared rule, disabled included — not the lint-rule count (#788).
         let rules = count(&self.program, "rules");
         if let Some(selection) = &self.selection {
             return Some(format!(
@@ -891,22 +808,14 @@ impl ResultPresentation for LintResult {
     fn github_findings(&self) -> Vec<serde_json::Value> {
         self.findings.as_array().cloned().unwrap_or_default()
     }
-    /// Selection narrows the reported list only; the verdict keeps the
-    /// full set's highest severity (#430).
     fn max_finding_severity(&self) -> Option<Severity> {
         max_finding_severity(&self.findings, &self.selection)
     }
 }
 
-/// The verdict of an essential result: the collection counts the
-/// summary reports — severity-grouped finding totals first, then the
-/// remaining collection totals in a stable order.
 fn essential_metadata(value: &serde_json::Value) -> String {
     let counts = &value["counts"];
     let mut parts = Vec::new();
-    // `analyze` reports the performance/stability risk subset — naming the
-    // group states the documented difference from `lint`/`inspect cost`,
-    // which report the full finding set (#788).
     for (key, noun) in [("findings", "finding(s)"), ("risks", "risk(s)")] {
         if let Some(group) = counts.get(key) {
             let total = group["total"].as_u64().unwrap_or(0);
@@ -955,8 +864,6 @@ impl ResultPresentation for EssentialResult {
 
     fn metadata(&self) -> Option<String> {
         Some(if let Some(selection) = &self.selection {
-            // `analyze` selects the risk subset; `lint` selects findings
-            // (#788).
             let noun = if self.result["counts"].get("risks").is_some() {
                 "risk(s)"
             } else {
@@ -970,10 +877,6 @@ impl ResultPresentation for EssentialResult {
     fn render_body(&self, ctx: &RenderContext<'_>) {
         render_essential(self, ctx);
     }
-    /// The counts carry the reported severities, so the verdict still
-    /// reflects the highest-severity finding of the full set — under a
-    /// selection the counts describe the selected remainder, so the
-    /// outcome's recorded full-set maximum governs instead (#635).
     fn max_finding_severity(&self) -> Option<Severity> {
         if let Some(selection) = &self.selection {
             return selection.max_severity;
@@ -995,8 +898,6 @@ impl ResultPresentation for EssentialResult {
     }
 }
 
-/// A reported span as `path:line:col` for inline display, or `None` when the
-/// result carries no resolved path.
 pub(crate) fn inline_location(span: &serde_json::Value) -> Option<String> {
     let path = span
         .get("path")
@@ -1007,8 +908,6 @@ pub(crate) fn inline_location(span: &serde_json::Value) -> Option<String> {
     Some(format!("{}:{line}:{col}", display_location_path(path)))
 }
 
-/// The section heading for one symbol kind. Kinds outside the known set keep
-/// their canonical name so nothing silently renames them.
 fn symbol_kind_heading(kind: &str) -> &str {
     match kind {
         "globalVariable" => "Global variables",
@@ -1019,9 +918,6 @@ fn symbol_kind_heading(kind: &str) -> &str {
     }
 }
 
-/// The item array of a semantic query payload (#531): the bare array of an
-/// unselected request, or the `<key>` member of a `{<key>: [...], selection:
-/// {...}}` selected result.
 pub(crate) fn query_items<'a>(value: &'a serde_json::Value, key: &str) -> &'a [serde_json::Value] {
     value
         .as_array()
@@ -1030,7 +926,6 @@ pub(crate) fn query_items<'a>(value: &'a serde_json::Value, key: &str) -> &'a [s
         .map_or(&[][..], Vec::as_slice)
 }
 
-/// Report the count a selected query payload withheld, when there is one.
 fn print_query_withheld(value: &serde_json::Value, noun: &str) {
     print_truncation(value);
     if let Some(withheld) = value["selection"]["withheld"]
@@ -1045,8 +940,6 @@ impl ResultPresentation for RulesResult {
     fn metadata(&self) -> Option<String> {
         Some(format!("{} rule(s)", query_items(&self.0, "rules").len()))
     }
-    /// One entry per rule: identity and location, then — with `--content` —
-    /// the conditions and actions, each statement one call-tree line.
     fn render_body(&self, ctx: &RenderContext<'_>) {
         let rules = query_items(&self.0, "rules");
         println!("\nRules");
@@ -1074,7 +967,6 @@ impl ResultPresentation for RulesResult {
     }
 }
 
-/// One rule-content node as a single `name(arg, ...)` line.
 pub(crate) fn render_node(node: &serde_json::Value) -> String {
     if let Some(call) = node["call"].as_str() {
         let args = node["args"]
@@ -1101,9 +993,6 @@ impl ResultPresentation for SymbolsResult {
             query_items(&self.0, "symbols").len()
         ))
     }
-    /// One section per symbol kind, in encounter order, so a mixed list stays
-    /// scannable; each entry is identity plus primary location on one line,
-    /// The shared projection bounds the reported list.
     fn render_body(&self, _ctx: &RenderContext<'_>) {
         let symbols = query_items(&self.0, "symbols");
         println!("\nSymbols");
@@ -1148,8 +1037,6 @@ impl ResultPresentation for RefsResult {
             count(&self.0, "rules"),
         ))
     }
-    /// The verdict already reports the usage counts, so the body is the target
-    /// identity plus the bounded location list (#446).
     fn render_body(&self, _ctx: &RenderContext<'_>) {
         let references = self.0["references"]
             .as_array()
@@ -1164,8 +1051,6 @@ impl ResultPresentation for RefsResult {
             return;
         }
         for reference in references.iter() {
-            // ADR-0035: the owning rule prints as its canonical `address`;
-            // the numeric `rule` id is the fallback.
             let owner = rule_address(&reference["owningRule"])
                 .map(String::from)
                 .or_else(|| reference["rule"].as_u64().map(|rule| rule.to_string()));
@@ -1190,8 +1075,6 @@ impl ResultPresentation for RefsResult {
     }
 }
 
-/// Call-graph entries with a count above one, ranked by count then name for
-/// deterministic order (#446).
 fn notable_callers<'a>(
     counts: &std::collections::BTreeMap<&'a str, usize>,
 ) -> Vec<(&'a str, usize)> {
@@ -1217,11 +1100,6 @@ impl ResultPresentation for CfgResult {
             cfg_edge_count(blocks)
         ))
     }
-    /// Rule identity and the high-level shape lead; the block/edge detail is
-    /// bounded because a large rule's graph is a reference dump (#446).
-    /// `ctx.subject` is the CLI's queried rule name — the shared result
-    /// payload carries only blocks, so the name comes from the request, not
-    /// a second query.
     fn render_body(&self, ctx: &RenderContext<'_>) {
         let blocks = self.0["blocks"].as_array().map_or(&[][..], Vec::as_slice);
         match ctx.subject {
@@ -1260,7 +1138,6 @@ impl ResultPresentation for CfgResult {
             if block["waits"].as_bool().unwrap_or(false) {
                 flags.push("waits");
             }
-            // `calls` is a list of subroutine indices, not a bool.
             if block["calls"]
                 .as_array()
                 .is_some_and(|calls| !calls.is_empty())
@@ -1306,9 +1183,6 @@ impl ResultPresentation for CallGraphResult {
     fn metadata(&self) -> Option<String> {
         Some(format!("{} edge(s)", query_items(&self.0, "edges").len()))
     }
-    /// The shape summary leads (calling rules are the graph's roots, since
-    /// edges are rule → subroutine), then notable fan-in/fan-out, then the
-    /// bounded edge list (#446).
     fn render_body(&self, _ctx: &RenderContext<'_>) {
         let edges = query_items(&self.0, "edges");
         println!("\nCall graph");
@@ -1358,8 +1232,6 @@ impl ResultPresentation for CallGraphResult {
 
 impl ResultPresentation for CostResult {
     fn metadata(&self) -> Option<String> {
-        // The `--rule` drill-down (#724) carries no `exact` block; its
-        // metadata is the selected rule's identity and element count.
         if let Some(rule) = self.result.get("rule").filter(|rule| rule.is_object()) {
             return Some(format!(
                 "{} · {} element(s)",
@@ -1368,9 +1240,6 @@ impl ResultPresentation for CostResult {
             ));
         }
         let exact = &self.result["exact"];
-        // A failed emission reports `null` plus `emittedBytesUnavailable` —
-        // the verdict says unavailable, never a fabricated zero (ADR-0030
-        // decision 3).
         let emitted = match exact["emittedBytes"].as_u64() {
             Some(bytes) => format!("{bytes} emitted byte(s)"),
             None => "emitted byte(s) unavailable".to_string(),
@@ -1382,11 +1251,6 @@ impl ResultPresentation for CostResult {
             count(exact, "waitActions"),
         ))
     }
-    /// Totals lead; findings — the cost-relevant units — sort by severity and
-    /// collapse identical repeats, bounded like the other query lists (#446).
-    /// With `--rule` the result is the per-rule breakdown instead (#724):
-    /// the rule's identity/location, its statements ranked by recursive
-    /// count, and the per-name own-cost shares reconciling to its total.
     fn render_body(&self, ctx: &RenderContext<'_>) {
         if self.result.get("rule").is_some_and(|rule| rule.is_object()) {
             render_cost_rule_body(&self.result, ctx);
@@ -1407,14 +1271,6 @@ impl ResultPresentation for CostResult {
         println!("  rules: {}", count(exact, "programRules"));
         println!("  waits: {}", count(exact, "waitActions"));
 
-        // The canonical element count against the client budget (#691),
-        // then each rule's share in payload order — ranked by count, largest
-        // first, with `index` carrying the canonical rule position — and the
-        // generic truncation note when the list was capped. Each rule
-        // prints its source location (#722); a node without a retained
-        // span simply omits it.
-        // The count is `Some(total)` or absent — unavailable, never zero —
-        // while the known budget still reports (ADR-0030 decision 3).
         let elements = &self.result["elementCount"];
         if let Some(total) = elements["total"].as_u64() {
             println!(
@@ -1466,9 +1322,6 @@ impl ResultPresentation for CostResult {
         if findings.is_empty() {
             println!("  none");
         }
-        // Findings sharing a rule id and message collapse into one entry
-        // listing each occurrence's location (#722) — like `lint`, so a
-        // hot pattern stays scannable instead of dominating the screen.
         let mut index = 0;
         while index < findings.len() {
             let first = &findings[index];
@@ -1501,9 +1354,6 @@ impl ResultPresentation for CostResult {
         {
             println!("  ... {withheld} finding(s) withheld (--max)");
         }
-        // Skipped rule evaluations are disclosed exactly like `lint`'s —
-        // the finding set above cannot cover rules whose canonical CFG was
-        // unavailable (#788).
         let skipped = array_len(&self.result["skipped"]);
         if skipped > 0 {
             println!("  {skipped} rule evaluation(s) skipped");
@@ -1515,16 +1365,11 @@ impl ResultPresentation for CostResult {
             .cloned()
             .unwrap_or_default()
     }
-    /// Static findings carry severities, so `cost` judges them like lint
-    /// findings (#635).
     fn max_finding_severity(&self) -> Option<Severity> {
         max_finding_severity(&self.result["findings"], &self.selection)
     }
 }
 
-/// The `--rule` body (#724): the rule's identity and location, then its
-/// direct statements ranked by recursive count and the per-name
-/// own-cost shares — the two reconciliations the issue fixes.
 fn render_cost_rule_body(result: &serde_json::Value, ctx: &RenderContext<'_>) {
     let rule = &result["rule"];
     let marks = ctx.presentation.section_marks();
@@ -1547,8 +1392,6 @@ fn render_cost_rule_body(result: &serde_json::Value, ctx: &RenderContext<'_>) {
         .as_array()
         .map_or(&[][..], Vec::as_slice);
     let by_node = result["byNode"].as_array().map_or(&[][..], Vec::as_slice);
-    // A `truncation` note carries the pre-cap `total`; the printed line
-    // names both so the withheld count is recoverable without `--all`.
     let shown = |key: &str| {
         result["truncation"][key].as_object().map(|note| {
             (
@@ -1557,9 +1400,6 @@ fn render_cost_rule_body(result: &serde_json::Value, ctx: &RenderContext<'_>) {
             )
         })
     };
-    // `Costliest statements` are the rule's direct children ranked by
-    // recursive `count`; each carries its source location when a span
-    // was retained.
     println!("\nCostliest statements");
     if statements.is_empty() {
         println!("  none");
@@ -1583,9 +1423,6 @@ fn render_cost_rule_body(result: &serde_json::Value, ctx: &RenderContext<'_>) {
     if let Some((shown, total)) = shown("statements") {
         println!("  showing {shown} of {total}; --all to see every item");
     }
-    // `By node name` sums each node's own (base + adjustment) cost per
-    // canonical name — inclusive counts are not used, so the entries
-    // add up to the rule's total.
     println!("\nBy node name");
     if by_node.is_empty() {
         println!("  none");
@@ -1610,11 +1447,6 @@ fn render_cost_rule_body(result: &serde_json::Value, ctx: &RenderContext<'_>) {
     }
 }
 
-/// The `--fail-on` gate (ADR-0030 decision 13): a result whose complete
-/// diagnostic/finding set reaches the threshold severity exits 1 with a
-/// FAIL verdict. The gate can only raise a verdict — a command already
-/// failing keeps its exit code, so selecting the option never turns a
-/// failing command into a passing one.
 pub(crate) fn gate<T: serde::Serialize + ResultPresentation>(
     envelope: &mut Envelope<T>,
     threshold: Severity,
@@ -1631,10 +1463,6 @@ pub(crate) fn gate<T: serde::Serialize + ResultPresentation>(
     }
 }
 
-/// The full result set's highest severity — envelope diagnostics plus the
-/// findings each result type carries — on the same full-set rule as the
-/// verdict (#430): a selection's recorded maximum stands in for the
-/// reported remainder.
 fn max_envelope_severity<T: serde::Serialize + ResultPresentation>(
     envelope: &Envelope<T>,
 ) -> Option<Severity> {
@@ -1661,8 +1489,6 @@ pub(crate) fn summary_status<T: serde::Serialize + ResultPresentation>(
         SummaryStatus::Error
     };
     match &envelope.selection {
-        // The verdict reflects the full diagnostic set, not the selected
-        // remainder (#430).
         Some(selection) => {
             if let Some(severity) = selection.max_severity {
                 status = status.max(severity.into());
@@ -1675,19 +1501,12 @@ pub(crate) fn summary_status<T: serde::Serialize + ResultPresentation>(
         }
     }
     envelope.result.update_summary_status(&mut status);
-    // A gated result reports FAIL — the verdict the raised exit 1 maps to —
-    // not ERROR, which stays the genuine-failure word.
     if envelope.gated {
         status = SummaryStatus::Fail;
     }
     status.as_str()
 }
 
-/// The Markdown step summary (ADR-0030 decision 10): one section per
-/// invocation titled with command and input — verdict and headline, the
-/// leading annotated items with blob links when the workflow env resolves
-/// them, the baseline comparison when one ran, and the full record report
-/// in a collapsed block inside the platform's size budget.
 fn emit_summary<T: serde::Serialize + ResultPresentation + plain::PlainReport>(
     envelope: &Envelope<T>,
     ctx: &RenderContext<'_>,
@@ -1750,8 +1569,6 @@ fn emit_summary<T: serde::Serialize + ResultPresentation + plain::PlainReport>(
         let mut report = String::new();
         let mut shown = 0usize;
         let total = out.len() + err.len();
-        // The collapsed block carries the full report until the budget
-        // runs out — then a line states the remainder (ADR-0030 decision 10).
         for line in out.iter().chain(err.iter()) {
             let next = report.len() + line.len() + 1;
             if next > GITHUB_SUMMARY_BUDGET {
@@ -1791,9 +1608,6 @@ fn emit_summary<T: serde::Serialize + ResultPresentation + plain::PlainReport>(
     }
 }
 
-/// A `…/blob/<sha>/<path>#L<line>` link when the workflow env names the
-/// server, repository, and commit — and the path stays repository-relative.
-/// An absolute or pseudo path never guesses a blob URL.
 fn github_blob_url(path: &str, line: u64) -> Option<String> {
     if path.is_empty() || Path::new(path).is_absolute() {
         return None;
@@ -1845,19 +1659,12 @@ fn render_convert(result: &ConvertResult) {
     print!("{}", result.text);
 }
 
-/// A line diff of `new_text` against `original`: the common prefix and
-/// suffix collapse, and the changed middle aligns on its longest common
-/// subsequence so lines that moved through the edit stay paired. Changed
-/// lines print as `-`/`+` rows with their own file's line number; unchanged
-/// lines are elided.
 fn render_diff_lines(original: &str, new_text: &str, indent: &str) {
     for row in diff_rows(original, new_text) {
         println!("{indent}{row}");
     }
 }
 
-/// The changed rows of the diff as `{:>4} - text` / `{:>4} + text` strings
-/// (no indent), so the plain renderer's `patch:` records share one diff.
 pub(crate) fn diff_rows(original: &str, new_text: &str) -> Vec<String> {
     let old_lines: Vec<&str> = original.split('\n').collect();
     let new_lines: Vec<&str> = new_text.split('\n').collect();
@@ -1883,12 +1690,6 @@ pub(crate) fn diff_rows(original: &str, new_text: &str) -> Vec<String> {
     rows
 }
 
-/// The differing rows of a longest-common-subsequence alignment between
-/// `old` and `new`: each entry is a removed old-line index or an added
-/// new-line index, so a changed line renders as adjacent `-`/`+` rows.
-/// Equal lines are skipped so unchanged context inside a changed region
-/// does not render as churn. Above a size bound the middle falls back to
-/// one remove/add block rather than allocate a quadratic table.
 fn align_lines<'a>(old: &[&'a str], new: &[&'a str]) -> Vec<(Option<usize>, Option<usize>)> {
     const MAX_CELLS: usize = 4_000_000;
     let (n, m) = (old.len(), new.len());
@@ -1938,9 +1739,6 @@ pub(crate) fn count(value: &serde_json::Value, key: &str) -> usize {
         .unwrap_or(0) as usize
 }
 
-/// The inline location for a report entry: a real authored path when the
-/// fact carries one, a verbatim `<…>` marker for provider artifacts, or an
-/// explicit unmapped note when there is no location at all.
 fn location_suffix(span: Option<&serde_json::Value>) -> String {
     let Some(span) = span.filter(|span| span.is_object()) else {
         return " (unmapped)".to_string();
@@ -1956,9 +1754,6 @@ fn location_suffix(span: Option<&serde_json::Value>) -> String {
     }
 }
 
-/// A one-line persistent-object summary for the risks section: kind counts,
-/// then the statically knowable fan-out/identity facts (#445). These are
-/// structural facts, not defect claims (#262).
 fn persistent_object_summary(objects: &serde_json::Value) -> String {
     let kinds = objects["byKind"]
         .as_object()
@@ -1979,9 +1774,6 @@ fn persistent_object_summary(objects: &serde_json::Value) -> String {
     format!("{} [static]", notes.join("; "))
 }
 
-/// The lint footer's metadata parts: affected files, skipped rule
-/// evaluations, and elapsed time — interactive terminals only, so plain
-/// output stays deterministic.
 fn lint_footer_parts(files: usize, skipped: usize, ctx: &RenderContext<'_>) -> Vec<String> {
     let mut parts = Vec::new();
     if files > 0 {
@@ -1996,10 +1788,6 @@ fn lint_footer_parts(files: usize, skipped: usize, ctx: &RenderContext<'_>) -> V
     parts
 }
 
-/// The severity rank a finding sorts by in the human view: errors first,
-/// unknown severities conservatively ordered as warnings, and informational
-/// severities last. The driver's reported set and order are unchanged
-/// — this is a presentation-layer reorder only.
 pub(crate) fn finding_severity_rank(finding: &serde_json::Value) -> u8 {
     match finding.get("severity").and_then(serde_json::Value::as_str) {
         Some("error") => 0,
@@ -2008,9 +1796,6 @@ pub(crate) fn finding_severity_rank(finding: &serde_json::Value) -> u8 {
     }
 }
 
-/// The `lint --fix [--write]` fix report (#556): each offered fix's
-/// disposition — its summary, location, validated diff, or the structured
-/// refusal — under the findings it remediates.
 fn render_lint_fixes(result: &LintResult, ctx: &RenderContext<'_>) {
     let Some(fixes) = &result.fixes else {
         return;
@@ -2055,9 +1840,6 @@ fn render_lint(result: &LintResult, ctx: &RenderContext<'_>) {
     if findings.is_empty() {
         println!("  none");
     }
-    // Consecutive findings sharing a rule id and message collapse into one
-    // entry that lists its locations (#430); severity sorting keeps groups
-    // consecutive because one rule id has one effective severity.
     let mut index = 0;
     while index < findings.len() {
         let first = &findings[index];
@@ -2094,9 +1876,6 @@ fn render_lint(result: &LintResult, ctx: &RenderContext<'_>) {
     }
 }
 
-/// The essential report body: the summary's highest-priority items, then
-/// the expansion hint. Finding items render through the lint finding
-/// style; rule/fact items render as `name — N element(s) --> location`.
 fn render_essential(result: &EssentialResult, ctx: &RenderContext<'_>) {
     let value = &result.result;
     if value.get("hotspots").is_some() {
@@ -2302,10 +2081,6 @@ fn render_essential_analyze(value: &serde_json::Value, ctx: &RenderContext<'_>) 
     }
 }
 
-/// One finding entry: severity, rule id, and message lead; locations and a
-/// source frame follow; evidence metadata trails dimmed so it never
-/// outweighs the message. A repeated group names its finding count — pseudo-path
-/// and spanless members join the group but never render a `-->` line.
 fn render_finding_group(group: &[serde_json::Value], ctx: &RenderContext<'_>, marks: &Marks) {
     let first = &group[0];
     let code = first["code"].as_str().unwrap_or("finding");
@@ -2327,9 +2102,6 @@ fn render_finding_group(group: &[serde_json::Value], ctx: &RenderContext<'_>, ma
             render_finding_location(span, ctx, &marks.pad, false);
         }
     }
-    // Secondary notes — the evidence class, boundedness evidence, and spans
-    // that point at no readable source file — render dimmed under the
-    // problem line rather than competing with it.
     let mut notes = vec![format!(
         "evidence: {}",
         first["evidence"].as_str().unwrap_or("exact")
@@ -2347,8 +2119,6 @@ fn render_finding_group(group: &[serde_json::Value], ctx: &RenderContext<'_>, ma
     );
 }
 
-/// Object spans in the group that render as `-->` file locations — the basis
-/// for the listed locations and the "more locations" fold.
 fn renderable_group_spans(group: &[serde_json::Value]) -> Vec<&serde_json::Value> {
     group
         .iter()
@@ -2362,9 +2132,6 @@ fn renderable_group_spans(group: &[serde_json::Value]) -> Vec<&serde_json::Value
         .collect()
 }
 
-/// A location line plus, for a lone finding, a one-line source frame when
-/// the finding's path resolves to a readable file under the session's bases.
-/// Collapsed groups omit frames so a repeated rule stays bounded.
 fn render_finding_location(
     span: &serde_json::Value,
     ctx: &RenderContext<'_>,
@@ -2387,13 +2154,6 @@ fn render_finding_location(
     }
 }
 
-/// Resolve the user-facing spelling of a finding's `span.path` and the path
-/// the source frame reads, or `None` for spans without a real path (their
-/// pseudo-path renders as a secondary note instead). Reported paths are
-/// root-relative to the input include root; the display prefers the first
-/// spelling that resolves to a real file — root-relative first, then the
-/// reported spelling itself — so subdirectory inputs keep an actionable
-/// location.
 fn finding_location(
     span: &serde_json::Value,
     source_base: Option<&Path>,
@@ -2420,9 +2180,6 @@ fn finding_location(
     Some((display_location_path(path), None))
 }
 
-/// Every pseudo-path position in the group (`<stdin>`, `<provider-artifact>`,
-/// `<file N>`) as `(path, line, col)`, so an unmapped input still reports
-/// where a repeated rule matched instead of folding positions away.
 fn unmapped_positions(group: &[serde_json::Value]) -> Vec<(String, u64, u64)> {
     group
         .iter()
@@ -2441,10 +2198,6 @@ fn unmapped_positions(group: &[serde_json::Value]) -> Vec<(String, u64, u64)> {
         .collect()
 }
 
-/// Fold pseudo-path positions into one secondary note matching the
-/// diagnostic treatment: positions are reported but never dressed up as file
-/// locations. Positions sharing one pseudo-path collapse to `path:l:c, l:c`;
-/// the list stays bounded at `MAX_GROUP_LOCATIONS` entries.
 fn unmapped_positions_note(positions: &[(String, u64, u64)]) -> Option<String> {
     let first_path = &positions.first()?.0;
     let shared = positions.iter().all(|(path, ..)| path == first_path);
@@ -2483,8 +2236,6 @@ fn finding_severity_label(finding: &serde_json::Value, color: bool) -> String {
     }
 }
 
-/// The user-facing spelling of a reported path: cwd-relative when possible so
-/// locations read the same regardless of which stage produced them (#443).
 pub(crate) fn display_location_path(path: &str) -> String {
     wright_driver::input::display_path(Path::new(path))
 }
@@ -2750,8 +2501,6 @@ mod tests {
 
     #[test]
     fn gate_fires_on_findings_without_diagnostics() {
-        // Lint-style results carry their severity in `result.findings`,
-        // not in envelope diagnostics.
         let mut envelope = summary_envelope(
             true,
             Vec::new(),
@@ -2764,8 +2513,6 @@ mod tests {
 
     #[test]
     fn gate_counts_info_severity_for_fail_on_info() {
-        // `info` findings map to PASS on the summary scale but are still at
-        // the `--fail-on info` threshold.
         let mut envelope =
             summary_envelope(true, Vec::new(), serde_json::json!([{"severity": "info"}]));
         gate(&mut envelope, Severity::Info);
@@ -2775,8 +2522,6 @@ mod tests {
 
     #[test]
     fn gate_judges_the_full_set_not_the_selected_remainder() {
-        // `selection.max_severity` records the unselected maximum — the gate
-        // reads it exactly like the verdict (#430).
         let mut envelope = check_envelope(
             vec![diagnostic(Severity::Info)],
             Some(wright_driver::SelectionOutcome {
@@ -2808,8 +2553,6 @@ mod tests {
 
     #[test]
     fn gate_never_lowers_a_failing_result() {
-        // Even at the lowest threshold a real failure keeps its verdict and
-        // exit code — the gate only raises.
         let mut envelope = summary_envelope(
             false,
             vec![diagnostic(Severity::Error)],
@@ -2845,8 +2588,6 @@ mod tests {
 
     #[test]
     fn gate_reads_the_essential_projection_counts() {
-        // `analyze`/`lint` render an `EssentialResult`: severity totals live
-        // under `counts.<group>` after the essential projection.
         let mut envelope = Envelope {
             wright: wright_driver::result::VersionInfo {
                 version: "test".to_string(),
@@ -2976,7 +2717,6 @@ mod tests {
                 "42 ms".to_string()
             ]
         );
-        // Plain output omits wall-clock values so it stays deterministic.
         assert_eq!(
             lint_footer_parts(2, 0, &ctx(false)),
             vec!["2 file(s) affected".to_string()]
@@ -2998,7 +2738,6 @@ mod tests {
         );
         assert!(display.ends_with("sub/f.ws"), "{display}");
 
-        // Pseudo-paths have no file location; they render as notes instead.
         let pseudo = serde_json::json!({"path": "<stdin>", "start": {"line": 1, "col": 1}});
         assert!(finding_location(&pseudo, Some(&root)).is_none());
         let positions = unmapped_positions(&[serde_json::json!({"span": pseudo})]);
@@ -3055,9 +2794,6 @@ mod tests {
 
     #[test]
     fn align_lines_keeps_unchanged_context_out_of_the_diff() {
-        // The case that motivated the LCS pass: removing two lines near the
-        // top of a longer file must not render the whole shifted tail as
-        // removed/added pairs.
         let old = vec!["a", "b", "c", "d", "e", "f", "g"];
         let new = vec!["a", "b", "c", "f", "g"];
         assert_eq!(
@@ -3068,9 +2804,6 @@ mod tests {
 
     #[test]
     fn align_lines_skips_matching_lines_inside_a_changed_region() {
-        // A change where one line survives between two changed ones renders
-        // only the real rows — the positional fallback would pair the
-        // unchanged middle line as a remove/add.
         let old = vec!["x", "keep", "y"];
         let new = vec!["u", "keep", "v"];
         assert_eq!(
@@ -3124,7 +2857,6 @@ mod tests {
             .chain((1..=3).map(|line| annotation("error", "b", line)))
             .collect();
         assert_eq!(bound_annotations(&mut annotations), 2);
-        // Errors lead, then the bounded warnings.
         assert_eq!(annotations.len(), 13);
         assert!(annotations[..3].iter().all(|a| a.kind == "error"));
         assert!(annotations[3..].iter().all(|a| a.kind == "warning"));

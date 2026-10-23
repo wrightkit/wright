@@ -1,10 +1,3 @@
-"""Band-comparison and contract tests for benchmarks/metrics/metrics.py.
-
-The heavy path (spawn wright, measure the corpus) is exercised once against
-the smallest vendored project; the band logic itself is tested on synthetic
-metric documents — the values below are independent expectations, not
-echoes of the implementation.
-"""
 
 import json
 import tempfile
@@ -144,8 +137,6 @@ class BandTest(unittest.TestCase):
         self.assertIn(("q", "added-to-run"), kinds)
 
     def test_skipped_run_project_fails_when_baseline_measured(self):
-        # #643: a run-side project failure is a violation, not a warning —
-        # a broken run must not pass `check`.
         base = _doc({"p": {"status": "ok", "metrics": {"m": _metric()}}})
         run = _doc({"p": {"status": "skipped", "reason": "no provider"}})
         violations, _ = metrics.compare_metrics(base, run)
@@ -207,10 +198,7 @@ class BandTest(unittest.TestCase):
         dup = {"rules": [{"name": "same"}, {"name": "same"}], "snapshot": 3}
         self.assertIsNone(metrics.unique_name(dup))
         self.assertEqual(metrics.agent_counts("symbols", wrapped), {"items": 2})
-        # `snapshot` is contract metadata, never a counted field.
         self.assertNotIn("snapshot", metrics.default_counts({"snapshot": 2, "reads": 3}))
-        # A capped listing keeps `truncation`/`selection` members; the list is
-        # still found among them and measures in the legacy `items` vocabulary.
         capped = {
             "rules": [{"id": 0}, {"id": 1}],
             "selection": {"withheld": 5},
@@ -227,7 +215,6 @@ class BandTest(unittest.TestCase):
                 "truncation": {"items": {"total": 7, "shown": 2, "truncated": 5}},
             },
         )
-        # Two list members make the payload ambiguous — no unwrapping.
         self.assertIsNone(metrics._snapshot_listing({"rules": [], "symbols": [], "snapshot": 1}))
         self.assertIsNone(metrics._snapshot_listing([{"id": 0}]))
 
@@ -418,7 +405,6 @@ class MergeTest(unittest.TestCase):
 
 
 def _check_main(baseline_path: Path, *extra: str) -> int:
-    """Invoke `check` against a canned baseline without touching wright."""
     argv = ["metrics.py", "check", "--baseline", str(baseline_path), *extra]
     with mock.patch("sys.argv", argv):
         return metrics.main()

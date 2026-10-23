@@ -1,9 +1,5 @@
 use workshop_rs::{Action, Value};
 
-/// The action a `Disabled` wrapper carries, through nested wrappers.
-/// `disabled` prefixes one statement: a disabled block opener still claims
-/// the region through its matching `End`, so block matching sees through the
-/// wrapper while nothing inside the region is live.
 pub(crate) fn unwrapped(action: &Action) -> &Action {
     let mut current = action;
     while let Action::Disabled { action } = current {
@@ -12,8 +8,6 @@ pub(crate) fn unwrapped(action: &Action) -> &Action {
     current
 }
 
-/// Whether the statement opens a block closed by a matching `End`.
-/// `Disabled` is seen through: a disabled opener still owns its region.
 pub(crate) fn opens_block(action: &Action) -> bool {
     matches!(
         unwrapped(action),
@@ -24,9 +18,6 @@ pub(crate) fn opens_block(action: &Action) -> bool {
     )
 }
 
-/// One past the last index the `disabled` statement at `index` claims: the
-/// `End` matching a disabled block opener, or the statement itself for a
-/// leaf. An unclosed disabled opener claims the rest of the list.
 fn disabled_end(actions: &[Action], index: usize) -> usize {
     if opens_block(&actions[index]) {
         super::cfg::matching_end(actions, index).map_or(actions.len(), |end| end + 1)
@@ -125,10 +116,6 @@ pub(super) fn visit_action_roots<'a>(action: &'a Action, visit: &mut impl FnMut(
     }
 }
 
-/// Visit a value tree in pre-order. `path` passed to `visit` is the child's
-/// position chain matching `Program::condition_value_span` /
-/// `Program::action_argument_value_span`: `Array`/`Call` children by index,
-/// `Vector` components as 0/1/2, a `PlayerVariable` player at 0.
 pub(super) fn visit_value_tree<'a>(
     value: &'a Value,
     parent: Option<usize>,

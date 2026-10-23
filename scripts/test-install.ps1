@@ -131,8 +131,6 @@ http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), http.server.Sim
     }
     Write-Host "PASS: checksum mismatch is rejected before installation"
 
-    # The checksum file matches the served bytes, so the failure must come
-    # from extraction rather than checksum verification.
     "not a zip archive" | Set-Content -LiteralPath $Archive -NoNewline -Encoding ASCII
     $InvalidArchiveHash = (Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash.ToLowerInvariant()
     "$InvalidArchiveHash  $ArchiveName" | Set-Content -LiteralPath "${Archive}.sha256" -NoNewline -Encoding ASCII

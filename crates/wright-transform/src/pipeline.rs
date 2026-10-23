@@ -91,11 +91,6 @@ pub fn run_validated(
 
 pub use self::run as run_canonical;
 
-/// Whether a value contains nothing but literals — the condition under
-/// which a short-circuit fold may discard it. `GlobalVariable`,
-/// `PlayerVariable`, `Subroutine`, `EventPlayer`, and `Call` all carry
-/// identifier occurrences (or nested operands that may), so dropping them
-/// would remove occurrences semantic services index (#639).
 fn literal_only(value: &workshop_rs::Value) -> bool {
     use workshop_rs::Value;
     match value {
@@ -159,8 +154,6 @@ fn fold_action_once(action: &mut workshop_rs::Action, nodes: &mut usize) -> usiz
     }
 }
 
-/// Fold one tree level. The caller repeats this pass to a fixpoint so a
-/// parent sees values produced by a previous pass, matching the WIR pass.
 fn fold_value_once(value: &mut workshop_rs::Value, nodes: &mut usize) -> bool {
     *nodes += 1;
     use workshop_rs::Value;
@@ -200,11 +193,6 @@ fn fold_value_once(value: &mut workshop_rs::Value, nodes: &mut usize) -> bool {
                 > 0;
             if args.len() == 2 {
                 if let (Value::Number(left), Value::Number(right)) = (&args[0], &args[1]) {
-                    // Folding must not turn a valid program into an invalid
-                    // one: `Divide(1, 0)` and friends produce NaN/infinity,
-                    // which post-validation rejects as non-canonical — leave
-                    // the call unfolded so the profile keeps the input's
-                    // pass/fail result (#639).
                     let result = match name.as_str() {
                         "+" | "add" => Some(left + right),
                         "-" | "subtract" => Some(left - right),
@@ -228,11 +216,6 @@ fn fold_value_once(value: &mut workshop_rs::Value, nodes: &mut usize) -> bool {
                         changed = true;
                     }
                 } else {
-                    // The short-circuit folds discard the other operand
-                    // entirely — apply them only when that operand is
-                    // literal-only, so a folded `Or(True, Global.g)` cannot
-                    // drop the identifier occurrence `references` indexes
-                    // (#639).
                     let boolean_result = match (&args[0], &args[1]) {
                         (Value::Bool(left), Value::Bool(right)) if name == "and" => {
                             Some(*left && *right)
@@ -329,10 +312,6 @@ mod tests {
         }
     }
 
-    /// #639: folding must not turn a valid program into an invalid one —
-    /// `Divide(1, 0)` produces infinity and `sqrt(-1)` produces NaN, both
-    /// rejected by post-validation, so non-finite fold results stay
-    /// unfolded and the profile preserves the input's pass/fail result.
     #[test]
     fn non_finite_fold_results_stay_unfolded() {
         use workshop_rs::{Action, Event, Program, Rule, Value, Variable};
@@ -363,10 +342,6 @@ mod tests {
         }
     }
 
-    /// #639: the short-circuit folds discard the other operand — they apply
-    /// only when that operand is literal-only, so a folded `Or(True,
-    /// Global.g)` cannot drop the identifier occurrence semantic services
-    /// index, while a literal operand still folds.
     #[test]
     fn short_circuit_folds_drop_only_literal_operands() {
         use workshop_rs::{Action, Condition, Event, Program, Rule, Value, Variable};

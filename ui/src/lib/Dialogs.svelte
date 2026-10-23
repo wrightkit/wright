@@ -1,20 +1,4 @@
 <script lang="ts">
-  /**
-   * The Diagnostics and Variables view dialogs (docs/ui/design.md §
-   * Dialogs): the shared chrome — a centred title over the scrolling
-   * `--dlg` body and a `--dlg-foot` band holding the one orange Confirm —
-   * around the two read-only views. Esc and a backdrop click close, as
-   * does Confirm.
-   *
-   * Diagnostics layers the `costEstimate` summary cards (a failure renders
-   * one error card in their place), the ten most element-heavy rules, and
-   * the `findings` rows over each other. Clicking a top rule or a finding
-   * that carries a rule asks the page to reveal that rule, which closes
-   * the dialog. Variables groups the `symbols` declarations into the
-   * Global and Player columns with the subroutines centred under them;
-   * the headings resolve through `lookup` in the session locale like
-   * every other Workshop name, with English as the fallback.
-   */
   import type {
     CostEstimateResult,
     Finding,
@@ -44,28 +28,18 @@
     which: 'variables' | 'diagnostics' | null
     symbols: unknown[] | null
     findings: unknown[] | null
-    /** The `findings` refusal or transport error; the list stays null while it shows. */
     findingsError?: ToolErrorInfo | null
-    /** The `costEstimate?all` response; null until it lands. */
     costEstimate: ToolResponse | null
     names: Names
-    /** Reveal a rule: close the dialog and open its bar; the row form scrolls and flashes it. */
     onreveal: (rule: number, finding?: Finding) => void
-    /** The session locale's chrome strings. */
     t: ChromeStrings
     onclose: () => void
-    /**
-     * The severity headings' open state, kept by the page so the choice
-     * persists for the session (docs/ui/diagnostics.md § In the dialog).
-     */
     groupOpen: Record<Severity, boolean>
     onGroupToggle: (severity: Severity, open: boolean) => void
   } = $props()
 
   const VARIABLE_HEADINGS = ['global', 'player', 'subroutines']
 
-  // The variables headings' `lookup` warm: bumped when it lands so the
-  // heads re-read `peek`, which answers the fallback until then.
   let headingNames = $state(0)
   $effect(() => {
     if (which === 'variables') {
@@ -75,7 +49,6 @@
     }
   })
 
-  /** A heading's session-locale name, capitalised for display. */
   function heading(id: string, fallback: string): string {
     void headingNames
     const name = names.peek(id, ['structural'])?.name
@@ -88,8 +61,6 @@
     subroutine: Symbol[]
   }
 
-  // Rules already have their own column on the page; the dialog shows
-  // declared variables and subroutines.
   const variableGroups = $derived.by<SymbolGroups>(() => {
     const groups: SymbolGroups = { globalVariable: [], playerVariable: [], subroutine: [] }
     for (const raw of symbols ?? []) {
@@ -111,8 +82,6 @@
       ? (costEstimate.result as CostEstimateResult)
       : null,
   )
-  // The response members' index signatures keep `in` from narrowing the
-  // union itself, so the error side reads as an explicit cast.
   const costError = $derived.by<ToolErrorInfo | null>(() => {
     if (costEstimate === null) return null
     return 'error' in costEstimate ? (costEstimate.error as ToolErrorInfo) : null
@@ -126,8 +95,6 @@
     count: number
   }
 
-  // `elementCount.rules[].index` is the `rules` listing id (#691): the ten
-  // largest by `count`, index ascending on ties like the service's order.
   const topRules = $derived.by<TopRule[]>(() => {
     const entries = (elementCount?.rules ?? []) as {
       index?: unknown
@@ -157,9 +124,6 @@
 
   const findingList = $derived((findings ?? []) as Finding[])
 
-  // The severity groups the dialog lists, most severe first
-  // (docs/ui/diagnostics.md § In the dialog): error and warning open,
-  // info collapsed, the choice kept in the page's session state.
   const groups = $derived(severityGroups(findingList, groupOpen))
 
   function locationOf(finding: Finding): string {
@@ -271,9 +235,6 @@
         {/if}
       {/if}
       {#if findingList.length > 0}
-        <!-- Findings grouped by severity, most severe first; each heading
-             toggles its level (error and warning open, info collapsed,
-             the choice kept for the session). -->
         {#each groups as group (group.severity)}
           <details
             class="severity-group"

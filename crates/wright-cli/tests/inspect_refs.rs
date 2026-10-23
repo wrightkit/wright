@@ -1,7 +1,3 @@
-//! `inspect refs` text/JSON output: every non-definition reference carries
-//! `at=<path>:<line>:<column>` from its `span`, and `rule=` prints the
-//! canonical `NAME#N` address that disambiguates same-named rules (#892).
-
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 

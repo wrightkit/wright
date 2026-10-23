@@ -1,12 +1,4 @@
 <script lang="ts">
-  /**
-   * The pending-changes dialog (ADR-0032 editing layer): staged statement
-   * edits grouped by rule, tagged change/delete, submitted through
-   * `editStatements` and the host `/apply` write path. A refusal —
-   * including a stale identity — renders here and writes nothing; a stale
-   * refusal also clears the staged edits, which addressed a program the
-   * page no longer displays.
-   */
   import type { EditStatementsRequest } from './types/generated/wright-agent-v1'
   import type { ChromeStrings } from './chrome'
   import Dialog from './components/Dialog.svelte'
@@ -26,13 +18,10 @@
   }: {
     open: boolean
     changes: PendingChange[]
-    /** Diagnostics from the refused `editStatements` result or apply. */
     refusal: { code?: string; message?: string }[] | null
     submitting: boolean
-    /** The `editStatements` request Submit would send — `?debug` only. */
     request: EditStatementsRequest | null
     debug: boolean
-    /** The session locale's chrome strings. */
     t: ChromeStrings
     onsubmit: () => void
     ondiscard: () => void
@@ -46,9 +35,6 @@
       group.items.push(change)
       byRule.set(change.rule, group)
     }
-    // The dialog orders a rule's lists the way the document does
-    // (design.md): event first — no event edits exist yet — then
-    // conditions, then actions.
     const order = { conditions: 0, actions: 1 }
     for (const group of byRule.values()) {
       group.items.sort((a, b) => order[a.list] - order[b.list] || a.index - b.index)

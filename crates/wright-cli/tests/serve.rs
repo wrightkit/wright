@@ -33,8 +33,6 @@ fn run_lines_with(
     input: &Path,
     lines: &[&str],
 ) -> Vec<serde_json::Value> {
-    // `compile` writes `<entry stem>.ow` in the working directory, so every
-    // service process gets its own.
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let cwd = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
         "serve-{}-{}",
@@ -201,8 +199,6 @@ fn serve_reserves_stdin_for_session_requests() {
 
 #[test]
 fn stdio_transport_applies_finding_selection() {
-    // #430: selection fields ride on the wire request and the response
-    // reports the withheld count; an unknown rule id is a structured error.
     let input = corpus_workshop("real-world/overpy-cake");
     let responses = run_lines(
         "stdio",
@@ -354,8 +350,6 @@ fn malformed_requests_are_structured_errors() {
     assert_eq!(responses[0]["error"]["code"], "malformed-request");
 }
 
-/// Write raw bytes to the transport's stdin — the UTF-8 cases need bytes no
-/// `String` can hold (#642).
 fn run_bytes(transport: &str, input: &Path, bytes: &[u8]) -> std::process::Output {
     let mut child = Command::new(wright())
         .args(["serve", "--transport", transport])
@@ -378,8 +372,6 @@ fn run_bytes(transport: &str, input: &Path, bytes: &[u8]) -> std::process::Outpu
 fn invalid_utf8_on_stdin_is_a_parse_error_not_a_clean_eof() {
     let input = corpus_workshop("synthetic/basic-rule");
 
-    // stdio: the malformed request gets the transport's own error shape and
-    // the line-aligned stream survives for the next request (#642).
     let output = run_bytes(
         "stdio",
         &input,
@@ -437,8 +429,6 @@ fn invalid_utf8_on_stdin_is_a_parse_error_not_a_clean_eof() {
 
 #[test]
 fn a_tools_call_without_an_id_is_an_invalid_request() {
-    // Only `notifications/*` methods may omit `id` silently; a `tools/call`
-    // without one is not a notification and must not vanish (#642).
     let responses = run_lines(
         "mcp",
         &corpus_workshop("synthetic/basic-rule"),
@@ -458,8 +448,6 @@ fn a_tools_call_without_an_id_is_an_invalid_request() {
 
 #[test]
 fn legacy_jsonrpc_methods_reject_a_params_key() {
-    // Verification (#642): a `params` key on a legacy method was already
-    // -32602; this test records the contract.
     let responses = run_lines(
         "jsonrpc",
         &corpus_workshop("synthetic/basic-rule"),
@@ -477,8 +465,6 @@ fn legacy_jsonrpc_methods_reject_a_params_key() {
 
 #[test]
 fn compile_request_carries_the_output_locale() {
-    // wright#759: `to` on the compile request selects the Workshop output
-    // locale, identical semantics to `wright compile --to`.
     let responses = run_lines(
         "stdio",
         &corpus_workshop("synthetic/basic-rule"),
@@ -528,9 +514,6 @@ fn capability_negotiation_is_preserved() {
 
 #[test]
 fn stdio_and_jsonrpc_transports_serve_over_an_unloadable_project() {
-    // #512: a configured input that cannot load must not stop `wright
-    // serve` — project-independent operations answer and program-reading
-    // operations refuse with the loader's diagnostic on every transport.
     let dir = std::env::temp_dir().join(format!("wright-serve-512-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let input = dir.join("missing.ws");
@@ -562,8 +545,6 @@ fn stdio_and_jsonrpc_transports_serve_over_an_unloadable_project() {
             r#"{"jsonrpc":"2.0","id":2,"method":"check"}"#,
         ],
     );
-    // Service refusals stay application results: the loader's code rides
-    // `result.error`, never the JSON-RPC `error` member.
     assert_eq!(jsonrpc[0]["result"]["error"]["code"], "input-io");
     assert!(jsonrpc[0].get("error").is_none());
     assert_eq!(jsonrpc[1]["id"], 2);
@@ -573,9 +554,6 @@ fn stdio_and_jsonrpc_transports_serve_over_an_unloadable_project() {
 
 #[test]
 fn lookup_answers_over_every_transport_and_a_broken_project() {
-    // #529: `lookup` reads owner vocabulary, never the program — the same
-    // result arrives over stdio, JSON-RPC `request`, and MCP `tools/call`,
-    // even over a session whose input cannot load.
     let input = corpus_workshop("synthetic/basic-rule");
     let stdio = run_lines(
         "stdio",
@@ -614,8 +592,6 @@ fn lookup_answers_over_every_transport_and_a_broken_project() {
     assert_eq!(result, &jsonrpc[0]["result"]);
     assert_eq!(result, &mcp_payload(&mcp[0]));
 
-    // #512 + #529: a session over a missing input still answers lookup —
-    // the request never touches the failed project load.
     let dir = std::env::temp_dir().join(format!("wright-serve-529-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let missing = dir.join("missing.ws");
@@ -630,9 +606,6 @@ fn lookup_answers_over_every_transport_and_a_broken_project() {
 
 #[test]
 fn lookup_callable_carries_returns_and_variadic_on_every_transport() {
-    // #781/#798: the owner-declared `returns` and `variadic` members are
-    // part of a Workshop entry's `callable` fact and reach stdio,
-    // JSON-RPC `request`, and MCP `tools/call` identically.
     let input = corpus_workshop("synthetic/basic-rule");
     let stdio = run_lines(
         "stdio",
@@ -693,10 +666,6 @@ fn lookup_callable_carries_returns_and_variadic_on_every_transport() {
 
 #[test]
 fn lookup_rejects_an_out_of_range_limit_on_every_transport() {
-    // #783: a `limit` outside the schema's 1..=10 is refused
-    // `malformed-request`, the same code every other schema violation
-    // produces — on stdio, on JSON-RPC `request`, and as an MCP
-    // tool-result error. The boundary `limit: 10` still answers.
     let input = corpus_workshop("synthetic/basic-rule");
     let stdio = run_lines(
         "stdio",
@@ -725,7 +694,6 @@ fn lookup_rejects_an_out_of_range_limit_on_every_transport() {
             r#"{"jsonrpc":"2.0","id":2,"method":"request","params":{"op":"lookup","language":"workshop","query":"wait","limit":11}}"#,
         ],
     );
-    // A service refusal rides `result.error`, never the protocol `error`.
     assert_eq!(jsonrpc[0]["result"]["error"]["code"], "malformed-request");
     assert_eq!(jsonrpc[1]["result"]["error"]["code"], "malformed-request");
     assert!(jsonrpc[0].get("error").is_none() && jsonrpc[1].get("error").is_none());
@@ -754,9 +722,6 @@ fn lookup_rejects_an_out_of_range_limit_on_every_transport() {
 
 #[test]
 fn stdio_transport_recovers_in_the_same_process() {
-    // #512: a session that started over a missing input loads the repaired
-    // project on the next program-reading request — no restart, no reload
-    // request.
     use std::io::{BufRead, BufReader};
     let dir = std::env::temp_dir().join(format!("wright-serve-512-live-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -812,14 +777,9 @@ fn stdio_transport_recovers_in_the_same_process() {
 
 #[test]
 fn stdio_transport_serves_mutation_operations() {
-    // #130/#434: the stdio adapter exposes the shared mutation operations as
-    // thin mappings — a validated edit preview — with the same structured
-    // all-or-nothing results as in-process consumers. On raw Workshop input
-    // it validates through `workshop-rs` reparse.
     let input = corpus_workshop("synthetic/control-flow");
     let source = std::fs::read_to_string(&input).unwrap();
     let identity = wright_driver::input_identity(&source);
-    // A rule-name rewrite stays valid Workshop: `"bounded while"` at 6:8-21.
     let request = serde_json::json!({
         "op": "validateEditTransaction",
         "sources": { input.to_string_lossy().into_owned(): source.clone() },
@@ -853,13 +813,6 @@ fn stdio_transport_serves_mutation_operations() {
 
 #[test]
 fn a_long_lived_session_observes_disk_changes_and_enforces_fresh_ids() {
-    // #471: `wright serve` is long-lived, so an agent mutating the project on
-    // disk between requests must observe the new program — while numeric ids
-    // are scoped to the `snapshot` generation that issued them (#595): a
-    // numeric address without it, or carrying the generation a reload
-    // dropped, refuses `stale-id`, and only the value — never the act of
-    // listing — scopes the ids a response reports. Stdio `writeln!` flushes
-    // per line, so requests and edits can interleave on one live process.
     use std::io::{BufRead, BufReader};
     let dir = std::env::temp_dir().join(format!("wright-serve-471-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -939,8 +892,6 @@ rule ("extra") {
     assert_eq!(names(&listed), ["score", "setup"]);
     let snapshot = listed["result"]["snapshot"].as_u64().unwrap();
 
-    // A numeric address without the issuing generation refuses `stale-id`,
-    // and `symbols {max:0}` — a pure query — does not unlock the space.
     let empty = exchange(r#"{"op":"symbols","max":0}"#);
     assert_eq!(empty["result"]["snapshot"], snapshot, "{empty}");
     assert_eq!(
@@ -970,7 +921,6 @@ rule ("extra") {
         "stale-id"
     );
 
-    // The new generation's listing scopes the ids it reports.
     let listed = exchange(r#"{"op":"symbols"}"#);
     assert_eq!(names(&listed), ["points", "setup", "extra"]);
     let snapshot = listed["result"]["snapshot"].as_u64().unwrap();
@@ -1022,8 +972,6 @@ rule ("extra") {
 
 #[test]
 fn transports_are_equivalent_for_mutation_operations() {
-    // #130/#434: stdio and JSON-RPC map the same mutation request to the same
-    // in-process behavior.
     let input = corpus_workshop("synthetic/control-flow");
     let source = std::fs::read_to_string(&input).unwrap();
     let validate = serde_json::json!({
@@ -1069,8 +1017,6 @@ fn mcp_call(id: u64, name: &str, arguments: serde_json::Value) -> String {
     .to_string()
 }
 
-/// The tool result's JSON payload: the single text content block parsed back
-/// into a value.
 fn mcp_payload(response: &serde_json::Value) -> serde_json::Value {
     serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap())
         .expect("tool content is JSON")
@@ -1079,10 +1025,6 @@ fn mcp_payload(response: &serde_json::Value) -> serde_json::Value {
 #[cfg(unix)]
 #[test]
 fn stdio_transport_routes_opy_inputs_to_the_provider_backend() {
-    // #530: `wright serve` must serve OPY inputs like the one-shot commands —
-    // through the provider backend — instead of refusing every request with
-    // `source-provider-unavailable`. The provider is a staged LPP-conforming
-    // script so the test stays hermetic.
     use std::io::{BufRead, BufReader};
     use std::os::unix::fs::PermissionsExt;
 
@@ -1183,10 +1125,6 @@ for line in sys.stdin:
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// `--kind`/`--profile`/`--transport` share the workflow vocabulary: a typo is
-// a usage error naming the accepted values, never a silently remapped
-// default.
-
 #[test]
 fn unknown_serve_kind_profile_and_transport_are_usage_errors() {
     let input = corpus_workshop("synthetic/basic-rule");
@@ -1220,8 +1158,6 @@ fn accepted_serve_kind_profile_and_transport_values_still_work() {
     let default = run_lines("stdio", &input, &[r#"{"op":"check"}"#]);
     assert_eq!(default[0]["result"]["ok"], true, "{default:?}");
 
-    // `--kind` keeps the workflow aliases (`ws` for workshop); `--profile`
-    // accepts the documented spellings.
     let mut child = Command::new(wright())
         .args(["serve", "--kind", "ws", "--profile", "compat"])
         .arg(&input)
@@ -1241,8 +1177,6 @@ fn accepted_serve_kind_profile_and_transport_values_still_work() {
     );
     let stdout = String::from_utf8(output.stdout).unwrap();
     let response: serde_json::Value = serde_json::from_str(stdout.lines().next().unwrap()).unwrap();
-    // Omitted kind/profile retain auto/off: both sessions serve the same
-    // check envelope for this fixture.
     assert_eq!(response["result"], default[0]["result"]);
 }
 

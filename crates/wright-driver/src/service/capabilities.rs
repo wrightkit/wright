@@ -1,10 +1,3 @@
-//! The service's capability/version surface: `capabilities` reports the
-//! advertised operation set in contract order — the order the catalog client
-//! tool definitions are emitted from (#535) — the committed-schema
-//! `result_schemas` map (#532), the served languages and profiles, and the
-//! linked `athena` version that owns the `simulate` trace contract
-//! (ADR-0033).
-
 use serde::Serialize;
 
 use super::{AGENT_CONTRACT, SERVICE_NAME, SERVICE_VERSION, ToolService};
@@ -62,9 +55,6 @@ impl<'a> ToolService<'a> {
     /// The capability/version contract.
     pub fn capabilities(&self) -> Capabilities {
         let operations: Vec<String> = OPERATIONS.iter().map(|op| op.to_string()).collect();
-        // The committed schema names every operation's result definition
-        // `<Op>Result` — `capabilities` surfaces the map so a caller learns
-        // result shapes without a second document (#532).
         let result_schemas = operations
             .iter()
             .map(|op| {

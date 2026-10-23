@@ -1,8 +1,3 @@
-//! `simulate` (ADR-0033) through `wright serve`: the real `practice-range`
-//! program and the vendored `athena` probes, with the returned traces
-//! compared against the recorded client captures under `athena`'s own
-//! tolerances — the same comparison `athena`'s fixture suite runs.
-
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -53,9 +48,6 @@ fn run_lines(transport: &str, input: &Path, lines: &[&str]) -> Vec<serde_json::V
         .collect()
 }
 
-/// The response of one `simulate` request through one transport; the
-/// `inputIdentity` precondition is the digest of the input's text, the same
-/// value `project` reports.
 fn simulate(transport: &str, input: &Path, rest: Value) -> Value {
     let identity = wright_driver::input_identity(&std::fs::read_to_string(input).unwrap());
     let mut request = json!({"op": "simulate", "inputIdentity": identity});
@@ -74,7 +66,6 @@ fn simulate(transport: &str, input: &Path, rest: Value) -> Value {
     responses[0].clone()
 }
 
-/// The envelope's `result.trace` member.
 fn trace_of(response: &Value) -> &Value {
     assert!(
         response.get("error").is_none(),
@@ -86,8 +77,6 @@ fn trace_of(response: &Value) -> &Value {
 #[test]
 fn stdio_serves_simulate_on_the_real_practice_range() {
     let input = fixture("athena/practice-range.ow");
-    // A scenario-free run: `init` fires at tick 0 — the trace is `complete`
-    // and carries the HUD the rule created.
     let response = simulate("stdio", &input, json!({"seconds": 1.0}));
     let envelope = &response["result"];
     assert_eq!(envelope["command"], json!("simulate"));
@@ -103,8 +92,6 @@ fn stdio_serves_simulate_on_the_real_practice_range() {
 #[test]
 fn stdio_serves_simulate_scenario_and_missing_input() {
     let input = fixture("athena/practice-range.ow");
-    // `athena`'s own scenario for this program: one injected final blow
-    // takes `score` to 2 and `streak` to 3 — every `expect` passes.
     let scenario: Value = serde_json::from_str(
         &std::fs::read_to_string(fixture("athena/scenarios/practice-range.json")).unwrap(),
     )
@@ -117,8 +104,6 @@ fn stdio_serves_simulate_scenario_and_missing_input() {
         assert_eq!(expectation["status"], json!("pass"), "{expectation}");
     }
 
-    // The scenario that omits `eventPlayer`: `missing_input` is trace
-    // content, not a refusal (ADR-0033).
     let missing: Value = serde_json::from_str(
         &std::fs::read_to_string(fixture(
             "athena/scenarios/practice-range-missing-event-player.json",
@@ -144,8 +129,6 @@ fn jsonrpc_serves_simulate_and_reports_the_athena_version() {
     assert_eq!(trace["outcome"]["status"], json!("complete"));
     assert_eq!(trace["globals"]["score"]["value"], json!(2.0));
 
-    // `capabilities` names the `athena` release the trace contract belongs
-    // to (ADR-0033), on every transport.
     let caps = run_lines("stdio", &input, &[r#"{"op":"capabilities"}"#]);
     assert_eq!(caps[0]["result"]["athena_version"], json!("0.2.0"));
 }
@@ -161,8 +144,6 @@ fn stdio_simulate_stale_identity_refuses_before_running() {
     assert_eq!(responses[0]["error"]["code"], json!("edit-stale-source"));
 }
 
-// --- Recorded-capture comparison ----------------------------------------
-//
 // `athena`'s fixture tolerances and comparison, ported over the wire trace
 // `wright serve` returns (the driver suite runs the identical comparison
 // in-process).
@@ -309,9 +290,6 @@ fn compare_logs(trace: &Value, captured: &Capture) -> Result<(), String> {
     Ok(())
 }
 
-/// `simulate` a vendored probe through `wright serve` and compare the
-/// returned trace with every recorded capture — the scheduler behaviors
-/// the captures cover reach the caller unchanged.
 fn check_probe(id: &str) {
     let dir = fixture(&format!("athena/probes/{id}"));
     let program = dir.join("probe.workshop");
@@ -353,9 +331,6 @@ fn serve_probe_p3_driver_last_matches_recorded_captures() {
     check_probe("p3-same-tick-rule-order-driver-last");
 }
 
-/// An LPP fake provider whose `lpp/compile` returns the canned Workshop
-/// artifact — the provider-compiled output an OPY input loads as its
-/// program (the same staging `serve.rs`'s provider test uses).
 #[cfg(unix)]
 const PROVIDER: &str = r#"#!/usr/bin/env python3
 import json, os, sys
@@ -390,10 +365,6 @@ for line in sys.stdin:
 #[cfg(unix)]
 #[test]
 fn stdio_simulates_a_provider_loaded_opy_artifact() {
-    // ADR-0033: `simulate` runs a provider-loaded source-language project's
-    // compiled Workshop artifact — the staged provider's `basic-rule.ws`
-    // runs `Disable Inspector Recording`, which `athena` reports as
-    // `not_modeled` result content rather than a refusal.
     use std::io::{BufRead, BufReader};
     use std::os::unix::fs::PermissionsExt;
 

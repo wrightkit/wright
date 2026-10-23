@@ -1,12 +1,3 @@
-//! Selector and usage errors name the working command (#888): an extra
-//! positional names the flag that narrows the query, an unknown
-//! rule/symbol names the listing operation in the surface's own spelling
-//! (`wright inspect rules` on the CLI, the `rules` operation through
-//! `wright serve`), the refusal lists declared names bounded with the
-//! total, an ambiguous rule lists every candidate's `NAME#N` address and
-//! `path:line:column`, a `file` selector matches exact file spellings
-//! only, and an inapplicable flag combination names the applicable form.
-
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -93,8 +84,6 @@ fn serve(input: &Path, lines: &[String]) -> Vec<serde_json::Value> {
         .collect()
 }
 
-/// Two rules named `tick` — enough to exercise the ambiguous and the
-/// declared-name listing paths.
 const DUP_RULES: &str = r#"rule ("tick") {
     event {
         Ongoing - Global;
@@ -113,8 +102,6 @@ rule ("tick") {
 }
 "#;
 
-/// `N` rules named `rule01`… — a declared-name set beyond the ~20 bound,
-/// generated rather than checked in (#888).
 fn many_rules(count: usize) -> String {
     (1..=count)
         .map(|index| {
@@ -125,8 +112,6 @@ fn many_rules(count: usize) -> String {
         .collect()
 }
 
-// AC1: `inspect cost "<name>" <path>` refuses at usage level and names
-// the flag that narrows the query.
 #[test]
 fn extra_positional_names_the_narrowing_flag() {
     let path = temp_file("tick.ws", DUP_RULES);
@@ -140,13 +125,8 @@ fn extra_positional_names_the_narrowing_flag() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// AC2/AC3: an unknown `--rule` with no near match is `invalid-selection`
-// naming `wright inspect rules` — never the agent-surface operation
-// wording — and listing the declared names, bounded past ~20 with the
-// total and the unbounded spelling.
 #[test]
 fn unknown_rule_names_the_cli_list_command_and_declared_names() {
-    // Three declared names all fit the listing bound.
     let small = temp_file(
         "small.ws",
         r#"rule ("alpha") {
@@ -199,8 +179,6 @@ rule ("gamma") {
         "a complete listing needs no expansion hint: {message}"
     );
 
-    // Past the bound the list truncates, reports the total, and names
-    // the unbounded listing.
     let many = temp_file("many.ws", &many_rules(25));
     let output = run(&[
         "inspect",
@@ -237,8 +215,6 @@ rule ("gamma") {
     let _ = std::fs::remove_dir_all(many.parent().unwrap());
 }
 
-// AC4: the same unknown rule through `wright serve` names the `rules`
-// operation, not the CLI command — one driver result, two renderings.
 #[test]
 fn serve_names_the_operation_not_the_command() {
     let path = temp_file("tick.ws", DUP_RULES);
@@ -269,8 +245,6 @@ fn serve_names_the_operation_not_the_command() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// AC5: `inspect cost --help` and `inspect --help` each show one
-// narrowed-query example that takes no INPUT.
 #[test]
 fn help_shows_inputless_narrowed_examples() {
     for args in [vec!["inspect", "cost", "--help"], vec!["inspect", "--help"]] {
@@ -288,8 +262,6 @@ fn help_shows_inputless_narrowed_examples() {
     }
 }
 
-// AC6: duplicate rule names refuse with every candidate's `NAME#N`
-// address and `path:line:column` — a file index is not a path.
 #[test]
 fn ambiguous_rule_lists_candidates_with_locations() {
     let path = temp_file("dup.ws", DUP_RULES);
@@ -320,8 +292,6 @@ fn ambiguous_rule_lists_candidates_with_locations() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// AC7: a `file` selector naming no source of the loaded program is
-// `invalid-selection` listing the program's source files.
 #[test]
 fn unmatched_file_lists_project_sources() {
     let path = temp_file("main.ws", DUP_RULES);
@@ -345,8 +315,6 @@ fn unmatched_file_lists_project_sources() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// AC8: file matching is exact identity — a bare basename never
-// suffix-matches `src/lib.ws` under the project root.
 #[test]
 fn file_selector_has_no_suffix_matching() {
     let dir = std::env::temp_dir().join(format!("wright-wording-project-{}", std::process::id()));
@@ -377,7 +345,6 @@ fn file_selector_has_no_suffix_matching() {
         "invalid-selection"
     );
 
-    // The project-root-relative spelling names the same file exactly.
     let output = run(&[
         "inspect",
         "symbols",
@@ -398,8 +365,6 @@ fn file_selector_has_no_suffix_matching() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// AC9: `--rule` combined with finding selection is a usage error naming
-// the applicable forms.
 #[test]
 fn inapplicable_combination_names_the_applicable_form() {
     let path = temp_file("tick.ws", DUP_RULES);
@@ -414,8 +379,6 @@ fn inapplicable_combination_names_the_applicable_form() {
         "the usage error names the applicable forms: {stderr}"
     );
 
-    // The same `--file` without `--rule` keeps reporting the file's
-    // static findings — the combination, not the flag, is refused.
     let output = run(&["inspect", "cost", path, "--file", "tick.ws", "-f", "json"]);
     assert!(
         output.status.success(),
@@ -426,10 +389,6 @@ fn inapplicable_combination_names_the_applicable_form() {
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
 
-// Caller input reaches `message` verbatim (#888): diagnostics carry no
-// executable placeholders, so a `--file` value literally spelling
-// `{file:N}`/`{list:OP}` stays text — never a substitution, never a
-// rendered command.
 #[test]
 fn placeholder_spelling_file_argument_stays_literal() {
     let path = temp_file("main.ws", DUP_RULES);
@@ -459,10 +418,6 @@ fn placeholder_spelling_file_argument_stays_literal() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// The print-and-pass-back contract (ADR-0035, #888): a rule literally
-// named `a{list:rules}b` prints its `NAME#N` addresses verbatim — the
-// brace string inside the name never renders — and feeding a printed
-// address back selects that rule.
 #[test]
 fn brace_named_rule_round_trips_through_its_address() {
     let path = temp_file(
@@ -521,9 +476,6 @@ rule ("a{list:rules}b") {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// The refusal metadata is structured (#888): `message` is fully
-// rendered text and the candidates/listing operation live in sibling
-// fields a client can consume programmatically.
 #[test]
 fn refusal_fields_are_structured_metadata() {
     let path = temp_file("dup.ws", DUP_RULES);
@@ -567,9 +519,6 @@ fn refusal_fields_are_structured_metadata() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// `check --rule-id` reaches `report_error` rather than the envelope
-// pass (#888): caller text spelling a placeholder still prints
-// verbatim — no doubled braces, no rendered command.
 #[test]
 fn check_rule_id_placeholder_spelling_stays_literal() {
     let path = temp_file("tick.ws", DUP_RULES);
@@ -587,9 +536,6 @@ fn check_rule_id_placeholder_spelling_stays_literal() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// File identities spell like anything (#888): a source file literally
-// named `{list:rules}x.ws` or `w{{i}}d.ws` selects verbatim and lists
-// verbatim — the name never renders and never collapses.
 #[test]
 fn brace_spelling_source_files_stay_literal() {
     for name in ["{list:rules}x.ws", "w{{i}}d.ws"] {
@@ -620,10 +566,6 @@ fn brace_spelling_source_files_stay_literal() {
     }
 }
 
-// `editStatements` resolves its rule addresses against the caller's
-// `sources` program, not the served snapshot (#888): a rule literally
-// named `a{file:0}b` prints its `NAME#N` candidates verbatim — the
-// placeholder spelling is text, never a file substitution.
 #[test]
 fn edit_statements_resolves_candidates_against_supplied_sources() {
     let path = temp_file("main.ws", DUP_RULES);
@@ -644,8 +586,6 @@ rule ("a{file:0}b") {
     }
 }
 "#;
-    // `inputIdentity` is the freshness precondition on the program the
-    // addresses name — the supplied `sources` text's own identity here.
     let identity = wright_driver::input_identity(supplied);
     let responses = serve(
         &path,

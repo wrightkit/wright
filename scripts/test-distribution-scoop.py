@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Exercise the native Scoop channel against a local release artifact."""
 
 from __future__ import annotations
 

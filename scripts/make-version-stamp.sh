@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Usage: scripts/make-version-stamp.sh <version> <output.json>
 
 set -euo pipefail
 

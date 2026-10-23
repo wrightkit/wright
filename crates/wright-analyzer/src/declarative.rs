@@ -208,7 +208,6 @@ impl RuleDefinition {
     }
 }
 
-/// Which rule-ID contract a declarative rule definition must satisfy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RuleIdentity {
     /// External rule: exactly `namespace/rule-id` outside the reserved
@@ -782,9 +781,6 @@ fn validate_identity(id: &str) -> Result<(), RuleError> {
     Ok(())
 }
 
-/// The first-party package keeps the built-ins' bare IDs and may use the
-/// reserved `wright` namespace; any other namespace is a community ID
-/// (issue #843).
 fn validate_first_party_identity(id: &str) -> Result<(), RuleError> {
     let valid = match id.split_once('/') {
         None => !id.is_empty(),

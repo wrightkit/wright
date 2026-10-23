@@ -28,8 +28,6 @@ pub(crate) struct Cli {
     pub(crate) version: bool,
 }
 
-/// A command whose clean verdict is its own name — the read-only query
-/// commands, not a judging word (ADR-0030 decision 4).
 pub(crate) fn is_query_command(command: &str) -> bool {
     const QUERIES: &str = "inspect rules symbols refs cfg callgraph cost lookup package-search package-list package-outdated";
     QUERIES.split(' ').any(|query| query == command)

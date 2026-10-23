@@ -202,10 +202,6 @@ fn write_line(writer: &mut dyn Write, line: &str) -> std::io::Result<()> {
     writer.flush()
 }
 
-/// One provider line, bounded so an overlong line is detected against
-/// the bound rather than by the allocation it caused. The cap leaves
-/// room for a CRLF terminator past the bound, so a line of exactly
-/// `MAX_PROVIDER_LINE_BYTES` still reads as terminated.
 fn read_provider_line(reader: &mut impl BufRead, buf: &mut Vec<u8>) -> std::io::Result<usize> {
     reader
         .by_ref()

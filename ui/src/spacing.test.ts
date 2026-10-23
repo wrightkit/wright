@@ -1,9 +1,3 @@
-/**
- * #914: `docs/ui/visual-system.md` § Spacing and sizes applies as written —
- * every px value in the spec table is a `:root` custom property consumed by
- * the components, and no rem multiples replace them. The test parses the
- * spec table itself so the property set cannot drift from the document.
- */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import process from 'node:process'
@@ -13,7 +7,6 @@ const root = process.cwd()
 const spec = readFileSync(join(root, '..', 'docs', 'ui', 'visual-system.md'), 'utf8')
 const css = readFileSync(join(root, 'src', 'app.css'), 'utf8')
 
-/** The spec table's rows: name → the px numbers its cell lists, in order. */
 function specRows(): Map<string, number[]> {
   const section = spec.split('## Spacing and sizes')[1]
   expect(section, 'the spec keeps a Spacing and sizes section').toBeTruthy()
@@ -23,7 +16,6 @@ function specRows(): Map<string, number[]> {
     if (cells.length < 4 || cells[1] === '' || cells[1] === 'Element' || cells[1].startsWith('-')) {
       continue
     }
-    // "8 14 px" lists two measurements — capture the whole run before `px`.
     const values = [...cells[2].matchAll(/(\d+(?:\s+\d+)*)\s*px/g)].flatMap((m) =>
       m[1].split(/\s+/).map(Number)
     )
@@ -32,7 +24,6 @@ function specRows(): Map<string, number[]> {
   return rows
 }
 
-/** `--name` declarations on `:root` → their declared value text. */
 function rootProps(): Map<string, string> {
   const props = new Map<string, string>()
   const block = css.match(/:root\s*\{([\s\S]*?)\n\}/)?.[1]
@@ -43,7 +34,6 @@ function rootProps(): Map<string, string> {
   return props
 }
 
-// Spec row → the custom properties that carry its values.
 const ROW_PROPS: Record<string, string[]> = {
   'Page padding': ['--page-pad'],
   Title: ['--title-size', '--title-track', '--file-name-size'],
@@ -139,7 +129,6 @@ describe('spacing custom properties (#914)', () => {
       expect(rule, `${selector} rule exists`).toBeTruthy()
       expect(rule![1], `${selector} consumes ${needle}`).toContain(needle)
     }
-    // No rem multiples remain on the selectors the table covers.
     for (const selector of [
       '.page',
       '.title-row h1',

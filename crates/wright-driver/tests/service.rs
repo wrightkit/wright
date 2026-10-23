@@ -131,8 +131,6 @@ fn tool_service_lint_queries_keep_the_session_configuration() {
     assert_eq!(default_finding["severity"], "warning");
 }
 
-/// A compile request whose program lands in the cargo-owned test directory,
-/// so no test writes into the crate or the working directory.
 fn compile_request(name: &str) -> ToolRequest {
     ToolRequest::Compile {
         output: Some(std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name)),
@@ -175,8 +173,6 @@ fn tool_service_routes_workflows_through_the_agent_request_contract() {
 
 #[test]
 fn agent_finding_selection_filters_and_truncates_without_touching_defaults() {
-    // #430: `real-world/overpy-cake.ws` produces 10 findings — 9 identical
-    // `repeated-value` warnings and one `min-wait-loop` warning.
     let input = workspace_root().join("tests/fixtures/workshop/real-world/overpy-cake.ws");
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(input),
@@ -194,7 +190,6 @@ fn agent_finding_selection_filters_and_truncates_without_touching_defaults() {
         selection: FindingSelection::default(),
         all: true,
     });
-    // #595: the findings list carries its issuing generation alongside.
     assert_eq!(plain["snapshot"], 1, "{plain}");
     assert_eq!(plain["findings"].as_array().unwrap().len(), 10);
 
@@ -291,10 +286,6 @@ fn an_unknown_rule_id_is_a_service_error_not_an_empty_result() {
 
 #[test]
 fn an_unknown_rule_id_in_the_lint_policy_is_a_usage_error() {
-    // `--disable-rule`, `--rule-severity`, and lint-config `rules:` keys all
-    // land in `config.lint.rules`; session construction validates every key
-    // against the registry so a typo never silently leaves a rule enabled
-    // (#640).
     for mut lint in [
         {
             let mut lint = wright_driver::config::LintConfig::default();
@@ -328,8 +319,6 @@ fn an_unknown_rule_id_in_the_lint_policy_is_a_usage_error() {
         );
     }
 
-    // Known ids — including a declarative rule loaded through `--rule` —
-    // behave as before.
     let dir = std::env::temp_dir().join(format!("wright-policy-640-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let rule_file = dir.join("smoke.yaml");
@@ -354,11 +343,6 @@ fn an_unknown_rule_id_in_the_lint_policy_is_a_usage_error() {
 
 #[test]
 fn analyze_selection_narrows_risks_and_reports_the_outcome() {
-    // #635: `severity`/`rule`/`file`/`max` narrow `facts.risks` like lint
-    // findings, and `result.selection` reports the true total — never a
-    // 0/0 beside non-empty risks. `real-world/overpy-cake.ws` produces 10
-    // risk findings: 9 `repeated-value` warnings and 1 `min-wait-loop`
-    // warning.
     let input = workspace_root().join("tests/fixtures/workshop/real-world/overpy-cake.ws");
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(input.clone()),
@@ -404,15 +388,11 @@ fn analyze_selection_narrows_risks_and_reports_the_outcome() {
         serde_json::json!({"total": 10, "withheld": 7, "byCode": {"repeated-value": 9}})
     );
 
-    // `file` selects by resolved `span.path` identity: the input path as
-    // passed resolves to the reported root-relative spelling.
     let here = analyze(FindingSelection {
         file: Some(input.to_str().unwrap().to_string()),
         ..FindingSelection::default()
     });
     assert_eq!(here["result"]["risks"].as_array().unwrap().len(), 10);
-    // ADR-0035: a `file` matching no source file refuses
-    // `invalid-selection`; a matched file with no results still succeeds.
     let code = refusal_code(
         &mut service,
         &ToolRequest::Analyze {
@@ -465,8 +445,6 @@ fn analyze_selection_narrows_risks_and_reports_the_outcome() {
 
 #[test]
 fn inspect_results_resolve_span_paths() {
-    // #635: `inspect` spans resolve `path` like `analyze`/`lint` findings —
-    // a bare `{file: <index>}` is unusable outside the session.
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(declarations_path()),
         kind: SourceKind::Workshop,
@@ -504,10 +482,6 @@ fn inspect_results_resolve_span_paths() {
 
 #[test]
 fn check_reports_the_program_summary_and_follow_ups() {
-    // #792: `check` exposes the program summary `analyze` already computes
-    // — the same members, byte-identical — plus the shared follow-up
-    // command list every result carries for renderers to print as `next:`
-    // records.
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(workshop_path()),
         kind: SourceKind::Workshop,
@@ -543,9 +517,6 @@ fn check_reports_the_program_summary_and_follow_ups() {
 
 #[test]
 fn references_carry_their_owning_rule_identity() {
-    // #792: each reference names its owning rule — id, name, and the rule's
-    // span — so a renderer attributes it without a `rules` lookup; a
-    // reference with no owning rule reports null.
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(declarations_path()),
         kind: SourceKind::Workshop,
@@ -583,10 +554,6 @@ fn references_carry_their_owning_rule_identity() {
 
 #[test]
 fn cost_estimate_file_selection_narrows_findings_like_lint() {
-    // #722: cost findings now carry resolved span paths, so `file`
-    // applies exactly like `lint` — it narrows the reported set and the
-    // selection outcome records the withheld count. A matching file
-    // keeps its finding; a non-matching one reports an empty set.
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(workshop_path()),
         kind: SourceKind::Workshop,
@@ -609,8 +576,6 @@ fn cost_estimate_file_selection_narrows_findings_like_lint() {
     assert_eq!(cost["selection"]["total"].as_u64().unwrap(), 1);
     assert_eq!(cost["selection"]["withheld"].as_u64().unwrap(), 0);
 
-    // ADR-0035: a `file` matching no source file of the loaded program
-    // refuses `invalid-selection` rather than reporting an empty set.
     let code = refusal_code(
         &mut service,
         &ToolRequest::CostEstimate {
@@ -641,11 +606,6 @@ fn cost_estimate_file_selection_narrows_findings_like_lint() {
     assert!(cost["selection"]["total"].as_u64().unwrap() > 0);
 }
 
-/// #691: `costEstimate` reports the canonical element count — the
-/// `workshop-rs`-owned computation — against the client element budget,
-/// with each rule's share ranked by count, largest first. The expected
-/// numbers come from reparsing the fixture through `workshop-rs` itself,
-/// not from the service under test.
 #[test]
 fn cost_estimate_reports_the_canonical_element_count() {
     let source = std::fs::read_to_string(workshop_path()).unwrap();
@@ -705,15 +665,8 @@ fn cost_estimate_reports_the_canonical_element_count() {
     );
 }
 
-/// #790 (ADR-0030 decision 3): when the canonical count cannot run the
-/// `elementCount` member carries only the known client `budget` —
-/// `elementCountUnavailable` names the reason and the count is never a
-/// zero — and a failed emission reports `emittedBytes: null` plus
-/// `emittedBytesUnavailable`.
 #[test]
 fn cost_estimate_reports_unavailable_count_with_budget_and_reason() {
-    // A stray `End;` is preserved as an opaque `rawWorkshopAction`, so the
-    // program loads but the emitter and element counter cannot model it.
     let path = temp_workshop(
         "opaque.ws",
         "variables {\n    global:\n        0: x\n}\nrule (\"test\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Wait(1);\n        End;\n    }\n}\n",
@@ -762,8 +715,6 @@ fn cost_estimate_reports_unavailable_count_with_budget_and_reason() {
 
 #[test]
 fn session_cost_keeps_the_selection_outcome_for_the_verdict() {
-    // #635: the in-process `CostResult` keeps the full set's outcome so the
-    // verdict reflects the unselected maximum severity.
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(workshop_path()),
         kind: SourceKind::Workshop,
@@ -790,8 +741,6 @@ fn session_cost_keeps_the_selection_outcome_for_the_verdict() {
 
 #[test]
 fn an_empty_selection_serializes_identically_to_no_selection() {
-    // Omitting every selection option reproduces the previous JSON output
-    // byte-for-byte (#430).
     let config = SessionConfig {
         input: InputSpec::Path(workshop_path()),
         kind: SourceKind::Workshop,
@@ -865,7 +814,6 @@ fn essential_forms_report_actions_without_fact_dumps() {
 
 #[test]
 fn essential_lint_applies_selection_before_summarizing() {
-    // The selected set and selection summary survive presentation.
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(workshop_path()),
         kind: SourceKind::Workshop,
@@ -1091,8 +1039,6 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
             "reference spans resolve to the root-relative path: {reference}"
         );
     }
-    // Symbols whose model carries a span (rules, subroutine symbols) resolve
-    // the same path; declaration-less spans stay `null`.
     let spanned: Vec<_> = symbols["symbols"]
         .as_array()
         .unwrap()
@@ -1107,10 +1053,6 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
 
 #[test]
 fn semantic_query_selection_wraps_filters_and_bounds() {
-    // #531: a request with any selection field returns `{<key>: [...],
-    // "selection": {total, withheld}}`; `total` counts the set before
-    // selection and `withheld` only what `max` dropped. Requests without
-    // selection fields keep the bare shapes.
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(declarations_path()),
         kind: SourceKind::Workshop,
@@ -1128,12 +1070,9 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             all: true,
         },
     );
-    // #595: the listing carries its issuing generation beside the list.
     assert_eq!(all["snapshot"], 1, "{all}");
     let total = all["symbols"].as_array().unwrap().len();
 
-    // `kind` predates #531: alone it keeps the filtered list; combined with
-    // `file`/`max` it joins the selection members.
     let rules_only = result_of(
         &mut service,
         &ToolRequest::Symbols {
@@ -1185,8 +1124,6 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
         },
     );
     assert_eq!(in_file["symbols"].as_array().unwrap().len(), total);
-    // ADR-0035: a `file` matching no source file refuses
-    // `invalid-selection` — it can never read as an empty result.
     assert_eq!(
         refusal_code(
             &mut service,
@@ -1420,9 +1357,6 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
 
 #[test]
 fn disabled_statements_and_rules_reach_neither_cost_nor_call_graph() {
-    // #633: a `disabled` statement and a `disabled rule` are not live — the
-    // call graph reports no edges for them, and the cost counts agree with
-    // each other instead of disagreeing on the disabled `Wait`.
     let text = r#"subroutines {
     0: reset
 }
@@ -1481,9 +1415,6 @@ disabled rule ("disabled caller") {
         serde_json::json!({
             "emittedBytes": cost["exact"]["emittedBytes"],
             "programActions": 0,
-            // `programRules` counts the declared inventory — the disabled
-            // rule included — like `program.rules`/`elementCount.rules`
-            // (#788); actions and waits stay live-only.
             "programRules": 2,
             "waitActions": 0,
         })
@@ -1504,8 +1435,6 @@ disabled rule ("disabled caller") {
         "analyze counts agree with costEstimate: {analyze:?}"
     );
 
-    // `references` stays an authored-occurrence index: it still reports
-    // both call sites, so callGraph is exactly its live-call subset.
     let references = result_of(ToolRequest::References {
         snapshot: None,
         symbol: "reset".into(),
@@ -1521,8 +1450,6 @@ disabled rule ("disabled caller") {
 
 #[test]
 fn call_graph_edges_come_from_subroutine_calls_not_builtin_names() {
-    // #634: `Start Rule(sub)` is a real call and produces an edge; a
-    // builtin `Call` that merely shares a subroutine's name produces none.
     let text = r#"subroutines {
     0: reset
     1: bigMessage
@@ -1569,8 +1496,6 @@ rule ("caller") {
 
 #[test]
 fn semantic_query_selection_refuses_unknown_filter_values() {
-    // #531: an unknown filter value is a structured `invalid-selection`
-    // error, never a silently empty result.
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(declarations_path()),
         kind: SourceKind::Workshop,
@@ -1579,8 +1504,6 @@ fn semantic_query_selection_refuses_unknown_filter_values() {
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
 
-    // ADR-0035: `rules` `rule` is a subject — `unknown-rule`, not a filter
-    // refusal like the rest of this loop.
     assert_eq!(
         refusal_code(
             &mut service,
@@ -1704,8 +1627,6 @@ fn semantic_query_selection_refuses_unknown_filter_values() {
 
 #[test]
 fn session_query_workflows_return_the_agent_operation_payloads() {
-    // The CLI's `symbols`/`refs`/`cfg`/`callgraph`/`cost` results are the
-    // same payloads the agent operations serve, by construction (#429).
     let input = || SessionConfig {
         input: InputSpec::Path(declarations_path()),
         kind: SourceKind::Workshop,
@@ -1828,9 +1749,6 @@ rule ("effect") {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-/// `facts` carries the #445 layers: canonical element cost, per-rule
-/// attribution with condition trees, performance/stability risk indicators,
-/// and persistent-object facts — all with resolved locations.
 #[test]
 fn analyze_reports_cost_complexity_and_risk_facts() {
     let source = r#"
@@ -1906,9 +1824,6 @@ rule ("hot path") {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-/// Correctness findings (e.g. `duplicate-condition`) are not performance or
-/// stability risks, so they remain visible through `lint`/`findings` but do
-/// not enter `facts.risks` (#445, #209).
 #[test]
 fn analyze_risks_exclude_correctness_findings() {
     let source = r#"
@@ -1961,7 +1876,6 @@ rule ("dup") {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-/// `score` is symbol id 0 and `"setup"` rule index 0.
 const FRESHNESS_V1: &str = r#"
 variables {
     global:
@@ -1977,9 +1891,6 @@ rule ("setup") {
 }
 "#;
 
-/// The same input after an edit: `score` was renamed to `points`, `"extra"`
-/// was added as rule index 1, `sqrt` is an unknown value `check` reports,
-/// and the `While`/`Wait(0.016)` loop triggers `min-wait-loop`.
 const FRESHNESS_V2: &str = r#"
 variables {
     global:
@@ -2006,10 +1917,6 @@ rule ("extra") {
 }
 "#;
 
-/// A second variant with deliberately duplicated names for the
-/// `ambiguous-*` recovery path.
-// `dup` is ambiguous as a symbol (globalVariable + subroutine, ADR-0035:
-// rules no longer join symbol resolution) and as a rule (two declarations).
 const FRESHNESS_AMBIGUOUS: &str = r#"
 variables {
     global:
@@ -2118,7 +2025,6 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
         {
             let mut expected = serde_json::to_value(service.analyze()).unwrap();
             expected["result"] = wright_driver::essential::analyze(&expected["result"], true);
-            // #595: the operation result reports the serving generation.
             expected["snapshot"] = serde_json::json!(service.snapshot_generation().unwrap());
             expected
         },
@@ -2175,7 +2081,6 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
         "lint reports the new program's findings: {lint}"
     );
 
-    // The reloaded input is stable: repeat requests never reparse.
     result_of(&mut service, &ToolRequest::Project);
     result_of(
         &mut service,
@@ -2232,7 +2137,6 @@ fn an_unchanged_input_is_never_reloaded() {
     }
     assert_eq!(service.reload_count(), 0);
 
-    // Rewriting identical bytes is still the same input.
     std::fs::write(&input, FRESHNESS_V1).unwrap();
     result_of(
         &mut service,
@@ -2305,7 +2209,6 @@ fn directory_inputs_observe_added_and_removed_sources() {
     };
     assert_eq!(rules(&mut service), 1);
 
-    // Editing a member file is observed.
     std::fs::write(dir.join("program.ws"), FRESHNESS_V2).unwrap();
     assert_eq!(rules(&mut service), 2);
     assert_eq!(service.reload_count(), 1);
@@ -2334,12 +2237,6 @@ fn directory_inputs_observe_added_and_removed_sources() {
     );
 
     std::fs::remove_file(dir.join("other.ws")).unwrap();
-    // The failed refresh invalidated the served snapshot (#512): restoring
-    // the exact previous disk state still reloads a fresh program — the
-    // fingerprint-identical bytes do not resurrect it — and the dropped
-    // program's generation stays refused (#595): the recovered program is
-    // a new generation, so the request that triggers the recovery still
-    // carries the old one.
     assert_eq!(
         service.snapshot_generation(),
         None,
@@ -2421,8 +2318,6 @@ fn a_failed_reload_refuses_requests_until_the_input_heals() {
         let code = refusal_code(&mut service, &request);
         assert_eq!(code, "parse-error", "{request:?}");
     }
-    // `check` is a workflow (#591): its own load surfaces the same
-    // `parse-error` inside the envelope, not as a `ToolResponse` refusal.
     let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check { all: true }) else {
         panic!("check returns the workflow envelope")
     };
@@ -2459,11 +2354,6 @@ fn a_failed_reload_refuses_requests_until_the_input_heals() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// #595: numeric `symbol`/`rule` addresses are scoped to the snapshot
-/// generation that issued them. A request carrying a numeric address must
-/// send `snapshot` back; a missing token or a different generation refuses
-/// `stale-id`, no listing ever "unlocks" a space, and `symbols {max:0}`
-/// has no side effect beyond reporting the generation.
 #[test]
 fn numeric_ids_are_scoped_to_the_issuing_snapshot() {
     let dir = freshness_dir("stale");
@@ -2480,7 +2370,6 @@ fn numeric_ids_are_scoped_to_the_issuing_snapshot() {
         .snapshot_generation()
         .expect("the initial load adopts");
 
-    // The token — not a prior listing — is what a numeric address needs.
     result_of(
         &mut service,
         &ToolRequest::References {
@@ -2504,8 +2393,6 @@ fn numeric_ids_are_scoped_to_the_issuing_snapshot() {
         },
     );
 
-    // A numeric address without `snapshot` refuses — a listing just before
-    // it changes nothing.
     let capped = result_of(
         &mut service,
         &ToolRequest::Symbols {
@@ -2548,8 +2435,6 @@ fn numeric_ids_are_scoped_to_the_issuing_snapshot() {
 
     std::fs::write(&input, FRESHNESS_V2).unwrap();
 
-    // After the content-changing reload the served generation is new: ids
-    // scoped to generation `v1` refuse even though `0` is still in range.
     for request in [
         ToolRequest::References {
             snapshot: Some(v1),
@@ -2588,8 +2473,6 @@ fn numeric_ids_are_scoped_to_the_issuing_snapshot() {
         );
     }
 
-    // A listing reports the new generation but does not rescue ids scoped
-    // to the old one — the stale request keeps refusing.
     let symbols = result_of(
         &mut service,
         &ToolRequest::Symbols {
@@ -2616,8 +2499,6 @@ fn numeric_ids_are_scoped_to_the_issuing_snapshot() {
         "re-observing the listing does not make generation {v1} current"
     );
 
-    // Ids re-issued under the current generation work; names resolve
-    // against the current program and ignore `snapshot` entirely.
     let usage = result_of(
         &mut service,
         &ToolRequest::Usage {
@@ -2667,9 +2548,6 @@ fn numeric_ids_are_scoped_to_the_issuing_snapshot() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// #592: a numeric `references` `rule` filter is a rule-space address under
-/// the same freshness contract as `cfg` — an index issued before a reload
-/// refuses `stale-id` even when it still names a (different) valid rule.
 const REORDER_V1: &str = r#"
 variables {
     global:
@@ -2693,7 +2571,6 @@ rule ("second") {
 }
 "#;
 
-/// The same program with the rules swapped: index 0 is now "second".
 const REORDER_V2: &str = r#"
 variables {
     global:
@@ -2752,9 +2629,6 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
         "a numeric rule filter issued before the reload is stale"
     );
 
-    // Name-addressed rule filters resolve against the current snapshot —
-    // no observation is owed. Any filter field wraps the result in a
-    // `{"references": [...], "selection": {...}}` object (#531).
     let filtered = result_of(
         &mut service,
         &ToolRequest::References {
@@ -2813,8 +2687,6 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
         );
     }
 
-    // Re-observing `symbols` reports the new generation; the old one stays
-    // refused — listings carry the token, they do not unlock anything.
     let symbols = result_of(
         &mut service,
         &ToolRequest::Symbols {
@@ -2880,9 +2752,6 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// #595: an `ambiguous-*` refusal reports the current candidates but is not
-/// an id-space observation — it changes nothing about the generation, and
-/// numeric addresses still need the served `snapshot`.
 #[test]
 fn ambiguous_refusals_do_not_unlock_numeric_ids() {
     let dir = freshness_dir("ambiguous");
@@ -2925,8 +2794,6 @@ fn ambiguous_refusals_do_not_unlock_numeric_ids() {
         ),
         "ambiguous-symbol"
     );
-    // The refusal observed the reloaded program — generation `v1` ids stay
-    // refused; only the new token resolves.
     let v2 = service
         .snapshot_generation()
         .expect("a snapshot is adopted");
@@ -2984,10 +2851,6 @@ fn ambiguous_refusals_do_not_unlock_numeric_ids() {
 
 #[test]
 fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
-    // #471 enumerates the whole request surface: operations consuming a
-    // numeric address refuse `stale-id`; every other program-reading
-    // operation reports the reloaded program, and metadata/provider
-    // operations are unaffected either way.
     let dir = freshness_dir("enumerate");
     let input = dir.join("program.ws");
     std::fs::write(&input, FRESHNESS_V1).unwrap();
@@ -3054,7 +2917,6 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
     assert_eq!(project["symbols"], 3);
     let v2 = service.snapshot_generation().expect("the reload adopted");
     assert_ne!(v2, v1);
-    // Every response that issues numeric ids reports that generation (#595).
     assert_eq!(project["snapshot"], v2, "{project}");
     let symbols = result_of(
         &mut service,
@@ -3272,20 +3134,12 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
         );
     }
 
-    // `check`/`compile` are workflows (#591): the same loader diagnostic
-    // rides the `wright-result/v1` envelope instead of a `ToolResponse`
-    // refusal, matching the embedding `check`/`compile` methods exactly.
     let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check { all: true }) else {
         panic!("check returns the workflow envelope")
     };
     assert_eq!(result["ok"], false, "{result}");
     assert_eq!(result["diagnostics"][0]["code"], "input-io");
 
-    // A provider mutation carrying its own documents does not trigger the
-    // load: an unconfigured language is the provider refusal result, not the
-    // load failure. One that omits `documents` derives the set from the
-    // loaded project (#548) and so surfaces the same `input-io` refusal the
-    // program-reading requests do.
     let mutation = result_of(
         &mut service,
         &ToolRequest::ProviderValidateEdit {
@@ -3339,7 +3193,6 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
         "{symbols}"
     );
     assert!(service.loaded().is_some());
-    // The deferred initial load is not a disk-change reload.
     assert_eq!(service.reload_count(), 0);
 
     std::fs::remove_file(&input).unwrap();
@@ -3413,10 +3266,6 @@ fn a_malformed_input_defers_the_load_and_recovers_in_place() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Ids issued before a failed refresh must not silently validate against
-/// the repaired program (#512 + #595): a failed load drops the served
-/// snapshot, the recovered program adopts a fresh generation, and numeric
-/// addresses carrying the old `snapshot` keep refusing `stale-id`.
 #[test]
 fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
     let dir = freshness_dir("stale-recovery");
@@ -3477,8 +3326,6 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
     );
 
     std::fs::write(&input, FRESHNESS_V2).unwrap();
-    // The recovery adopts a new generation: every numeric address scoped to
-    // `v1` stays refused even after the healed program is fully served.
     assert_eq!(
         refusal_code(
             &mut service,
@@ -3541,11 +3388,6 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A failed refresh invalidates the served snapshot even when the input is
-/// restored to byte-identical content (#512): recovery reloads a fresh
-/// program instead of fingerprint-matching the pre-failure snapshot back to
-/// life — `adopt` mints a new generation even for identical bytes (#595),
-/// so ids carrying the old `snapshot` stay refused.
 #[test]
 fn a_failed_refresh_invalidates_the_snapshot_even_when_bytes_return() {
     let dir = freshness_dir("invalidate");
@@ -3688,9 +3530,6 @@ fn edit_operations_default_sources_to_the_on_disk_text() {
 
 #[test]
 fn edits_accept_percent_encoded_file_uri_sources() {
-    // #636: an edit `source` spelled `file:///…/my%20dir/main.ws` binds the
-    // member whose path contains a space — the validation succeeds exactly
-    // as with the plain spelling.
     use std::sync::atomic::{AtomicUsize, Ordering};
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
@@ -3787,9 +3626,6 @@ fn edit_operations_keep_supplied_source_and_project_boundaries() {
         );
     }
 
-    // The default reads disk, not a stale snapshot: rewriting the input is
-    // observed by the service's freshness check (#471), so the unsourced
-    // validation resolves against the reloaded program.
     std::fs::write(&path, on_disk.replace("score", "other")).unwrap();
     let reloaded = std::fs::read_to_string(&path).unwrap();
     let validation = result_of(
@@ -4048,8 +3884,6 @@ fn rules_content_serves_bounded_canonical_call_trees() {
     let mut service = ToolService::new(&mut session).unwrap();
     let generation = service.snapshot_generation().expect("loaded");
     let request = |rule: Option<Address>, max: Option<usize>| ToolRequest::Rules {
-        // #595: numeric `rule` addresses carry the generation; names and
-        // `None` ignore the field.
         snapshot: Some(generation),
         name: None,
         rule,
@@ -4068,7 +3902,6 @@ fn rules_content_serves_bounded_canonical_call_trees() {
             .iter()
             .all(|rule| rule["content"]["format"] == "workshop-rs/rule-content-v1")
     );
-    // A raw Workshop result carries neither `names` nor `unavailable`.
     assert!(all.get("names").is_none() && all.get("unavailable").is_none());
 
     let one = result_of(
@@ -4113,9 +3946,6 @@ fn rules_content_serves_bounded_canonical_call_trees() {
     assert_eq!(bounded["rules"].as_array().unwrap().len(), 1);
     assert_eq!(bounded["selection"]["withheld"], rules.len() - 1);
 
-    // `rules` `rule` is the operation's subject (ADR-0035): a name address
-    // keeps its `unknown-rule` refusal; an out-of-range numeric index is a
-    // selection error.
     assert_eq!(
         refusal_code(
             &mut service,
@@ -4140,14 +3970,10 @@ fn rules_content_serves_bounded_canonical_call_trees() {
             all: true,
         },
     );
-    // #595: the bare listing wraps under `rules` beside `snapshot`.
     assert!(plain["rules"][0].get("content").is_none());
     assert_eq!(plain["snapshot"], generation);
 }
 
-/// A `content` request without `max` applies the default bound of 20 rules
-/// (ADR-0024): the selection reports every withheld rule. A `rule` name
-/// shared by two rules refuses `ambiguous-rule`, the refusal `cfg` gives.
 #[test]
 fn rules_content_defaults_to_twenty_rules_and_names_ambiguity() {
     let dir = freshness_dir("rules-content-bound");
@@ -4218,9 +4044,6 @@ fn rules_content_defaults_to_twenty_rules_and_names_ambiguity() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// #639: a fold that would produce a non-finite number must not turn a
-/// valid program invalid — `Divide(1, 0)` keeps the same pass/fail result
-/// under `compat` as under `off`.
 #[test]
 fn a_fold_that_would_be_non_finite_keeps_the_off_profile_verdict() {
     let path = temp_workshop(
@@ -4246,9 +4069,6 @@ fn a_fold_that_would_be_non_finite_keeps_the_off_profile_verdict() {
     );
 }
 
-/// #639: the `Or(True, X)`/`And(False, X)` short-circuit folds discard X —
-/// an identifier-bearing operand must survive, so `references` for `g`
-/// returns the same result under `compat` as under `off`.
 #[test]
 fn short_circuit_folds_preserve_occurrences_for_references() {
     let path = temp_workshop(
@@ -4295,8 +4115,6 @@ fn short_circuit_folds_preserve_occurrences_for_references() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-/// ADR-0025: the agent `compile` operation writes the program to a file and
-/// answers with status, path and digest only; an existing file needs `force`.
 #[test]
 fn agent_compile_writes_a_file_and_returns_no_program_text() {
     let out = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("agent-compile.ow");

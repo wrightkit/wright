@@ -1,15 +1,8 @@
-//! The `callGraph` operation: caller rules → callee subroutines.
-
 use serde_json::json;
 
 use super::{ToolResponse, ToolService, invalid_selection, invalid_selection_fields};
 
 impl<'a> ToolService<'a> {
-    /// `callGraph`: caller rules → callee subroutines. The selection fields
-    /// are `caller` (one rule address, ADR-0035), `callee` (a declared
-    /// subroutine name), and `max` (#531). `caller` is a filter: an
-    /// unmatched or ambiguous address is `invalid-selection` carrying the
-    /// shared resolver's candidate list, never a merge of same-name rules.
     pub(crate) fn call_graph(
         &self,
         caller: Option<&str>,

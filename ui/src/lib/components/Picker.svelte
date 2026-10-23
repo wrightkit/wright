@@ -39,8 +39,6 @@
     void tick().then(() => inputEl?.focus())
   })
 
-  // Bits only invokes onOpenChange when its own open setter runs; our
-  // onValueChange close (same-value keyboard reselect) bypasses it.
   let wasOpen = false
   $effect(() => {
     const isOpen = open

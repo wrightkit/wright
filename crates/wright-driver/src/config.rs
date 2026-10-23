@@ -151,8 +151,6 @@ pub struct LintPackageConfig {
 }
 
 impl LintPackageConfig {
-    /// The store this configuration describes: default endpoints unless a
-    /// field overrides one.
     pub(crate) fn store(&self) -> LintPackageStore {
         let mut store = LintPackageStore::new(
             self.store_dir
@@ -177,8 +175,6 @@ impl SessionConfig {
         }
     }
 
-    /// The fields that differ from `other`, named for diagnostics (#511);
-    /// an empty list means the two configurations are identical.
     pub(crate) fn changed_fields(&self, other: &SessionConfig) -> Vec<&'static str> {
         let mut changed = Vec::new();
         if self.input != other.input {

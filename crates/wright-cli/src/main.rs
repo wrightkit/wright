@@ -119,8 +119,6 @@ fn main() -> ExitCode {
                 }
             },
         },
-        // `update` streams its operation lines; the terminal report's
-        // verdict tag closes them instead of leading (ADR-0030 decision 4).
         Some(Command::Update(args)) => {
             let pres = present::Presentation::from_output(
                 cli::OutputFormatArg::Text,
@@ -128,8 +126,6 @@ fn main() -> ExitCode {
                 args.color,
             );
             match update::run(&args, pres) {
-                // A nonzero code was already reported at its source; only a
-                // clean operation closes with the PASS tag.
                 Ok(code) => {
                     if code == exit::SUCCESS {
                         present::terminal::report_close(pres, "update", "PASS");
@@ -288,8 +284,6 @@ fn run_workflow(command: Command) -> ExitCode {
                 )
             }
             Some(cli::InspectQuery::Cfg(query)) => {
-                // The cfg payload carries blocks only; the addressed rule
-                // name is the result's identity in text output (#446).
                 let subject = query.rule.clone();
                 let kind = query.only.map(|kind| kind.as_str().to_string());
                 run_configured(
@@ -326,10 +320,6 @@ fn run_workflow(command: Command) -> ExitCode {
                 },
             ),
             Some(cli::InspectQuery::Cost(query)) => {
-                // The drill-down selector conflicts with the finding
-                // selection: a selected rule's statements and node shares
-                // are not findings, so `--severity`/`--rule-id`/`--max` have
-                // nothing to select.
                 if query.rule.is_some()
                     && (query.select.severity.is_some()
                         || query.select.rule_id.is_some()
@@ -380,7 +370,6 @@ fn run_workflow(command: Command) -> ExitCode {
     }
 }
 
-/// Apply the same essential result projection as the agent service.
 pub(crate) fn essential_envelope<T: serde::Serialize>(
     envelope: wright_driver::Envelope<T>,
     form: impl FnOnce(&serde_json::Value) -> serde_json::Value,
@@ -422,8 +411,6 @@ pub(crate) fn run_configured<
     ))
 }
 
-/// Run `wright compile` (ADR-0025): the program goes to a file (or stdout
-/// with `-o -`); the report carries status, diagnostics, path and digest.
 fn run_compile(args: &cli::CompileArgs) -> ExitCode {
     let to_stdout = args.output.as_deref().is_some_and(|p| p.as_os_str() == "-");
     if to_stdout && args.common.format == OutputFormatArg::Json {
@@ -497,7 +484,6 @@ fn run_compile(args: &cli::CompileArgs) -> ExitCode {
     )
 }
 
-/// Ask `Overwrite <path>? [y/N]`; only `y`/`yes` replaces the file.
 fn confirm_overwrite(
     path: &std::path::Path,
     input: &mut impl std::io::BufRead,
@@ -518,14 +504,6 @@ fn copy_to_clipboard(text: &str) -> Result<(), arboard::Error> {
     arboard::Clipboard::new()?.set_text(text)
 }
 
-/// Run `wright lookup` (#529): the same `ToolRequest::Lookup` the agent
-/// contract serves, over a session that never loads a project. The
-/// anonymous text input gives the service's warm load nothing to read —
-/// the `InputSpec::Stdin` default would block on a terminal's stdin to
-/// EOF before the lookup ever runs. Text mode prints one line per entry —
-/// the rendered signature for a callable, else the accepted spelling —
-/// with its kind and identity; JSON mode prints the result `wright serve`
-/// returns for the same request.
 fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
     let pres = present::Presentation::from_output(args.format, args.renderer, args.color);
     let config = SessionConfig {
@@ -569,9 +547,6 @@ fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
                     serde_json::to_string(&result).expect("result serializes")
                 ),
                 OutputFormatArg::Text if pres.is_terminal() => {
-                    // An unavailable or empty answer reports on the
-                    // diagnostic stream; `lookup` renders on stdout only
-                    // when there are entries to list.
                     if result.get("unavailable").is_some()
                         || result["entries"]
                             .as_array()
@@ -620,8 +595,6 @@ fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
                             &error.message,
                         );
                     } else {
-                        // `invalid-*` request errors are the CLI's usage
-                        // failures; anything else is a source error.
                         let word = if error.code.starts_with("invalid-") {
                             "USAGE"
                         } else {
@@ -648,13 +621,6 @@ fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
     }
 }
 
-/// Lookup's text output is the line-record surface (#793): the verdict
-/// names the command (`LOOKUP` on success, `UNSUPPORTED` when the owner
-/// cannot answer, `ERROR` on an empty result), `summary:` reports the entry
-/// count, and one `entry:` record per match carries the rendered signature
-/// for a callable, else the accepted spelling, with its kind, the owner
-/// identity when it differs from the spelling, and the display name when
-/// that adds information.
 fn print_lookup_text(result: &serde_json::Value, language: &str) {
     if let Some(unavailable) = result.get("unavailable") {
         println!("UNSUPPORTED lookup {}", plain::field("language", language));
@@ -775,14 +741,10 @@ pub(crate) fn config_from_common(common: &CommonArgs) -> SessionConfig {
     }
 }
 
-/// `--fail-on` (ADR-0030 decision 13): the CLI gating threshold applied to
-/// the finished envelope — `None` leaves the default exit codes untouched.
 pub(crate) fn fail_on(common: &CommonArgs) -> Option<wright_driver::Severity> {
     common.fail_on.map(cli::SeverityArg::as_severity)
 }
 
-/// Map the CLI finding-selection flags onto the shared driver selection
-/// model; the driver applies it to diagnostics and lint findings alike (#430).
 pub(crate) fn selection_from_args(select: &cli::SelectArgs) -> wright_driver::FindingSelection {
     wright_driver::FindingSelection {
         severity: select.severity.map(cli::SeverityArg::as_severity),
@@ -814,7 +776,6 @@ fn is_directory_input(common: &CommonArgs) -> bool {
     }
 }
 
-/// Run one driver workflow and render its envelope in the CLI presentation.
 fn run_command<
     T: serde::Serialize
         + present::ResultPresentation
@@ -833,16 +794,8 @@ fn run_command<
     let mut envelope = run(session);
     let elapsed = started.elapsed();
     session.clear_progress_observer();
-    // Name-resolution refusals carry a neutral listing-operation field
-    // (#888); the CLI renders it as its own `wright inspect` command —
-    // `wright serve` renders the operation name on the same result.
     usage_hint::render_inspect_diagnostics(&mut envelope);
-    // The transient activity line is fully cleared before the final result
-    // renders, so progress text never competes with the verdict (#443).
     drop(activity);
-    // `--fail-on` raises the verdict on the finished envelope, after the
-    // result is fixed on the complete finding/diagnostic set (ADR-0030
-    // decision 13); every renderer and JSON then read the raised verdict.
     if let Some(threshold) = fail_on {
         present::gate(&mut envelope, threshold);
     }

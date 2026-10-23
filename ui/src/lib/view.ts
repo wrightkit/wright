@@ -1,9 +1,3 @@
-/**
- * The page's view model: `rules?rule&content` returns the owner's
- * `workshop-rs/rule-content-v1` document with Wright's statement spans
- * added — the generated `Condition`/`Action` types do not declare `span`,
- * so the spanned forms live here.
- */
 import type {
   Action,
   Condition,

@@ -1,8 +1,3 @@
-//! Test support for the `lint package` integration suites: the
-//! recorded-response localhost server, tarball builder, temp dirs, and
-//! `wright` process runner shared by `lint_package.rs` and
-//! `lint_package_lifecycle.rs`.
-
 #![allow(dead_code)]
 
 use std::io::{Read, Write};
@@ -88,7 +83,6 @@ impl Response {
     }
 }
 
-/// A localhost HTTP server replaying the handler's recorded responses.
 pub(crate) struct TestServer {
     pub(crate) addr: SocketAddr,
     pub(crate) stop: Arc<AtomicBool>,
@@ -184,7 +178,6 @@ pub(crate) fn write_response(stream: &mut TcpStream, response: &Response) {
     let _ = stream.write_all(&response.body);
 }
 
-/// A temp dir as the store root plus a scratch cwd, both per-test.
 pub(crate) struct TestDirs {
     pub(crate) root: PathBuf,
     pub(crate) cwd: PathBuf,
@@ -210,8 +203,6 @@ impl Drop for TestDirs {
     }
 }
 
-/// Run the CLI in the test cwd with the store and the server's endpoints
-/// wired through the `WRIGHT_LINT_PACKAGE_*` environment overrides.
 pub(crate) fn run(dirs: &TestDirs, server: Option<&TestServer>, args: &[&str]) -> Output {
     let mut command = Command::new(wright());
     command
@@ -233,8 +224,6 @@ pub(crate) fn run(dirs: &TestDirs, server: Option<&TestServer>, args: &[&str]) -
     command.output().expect("wright runs")
 }
 
-/// The transcript with the temp store root normalized to `<store>` so the
-/// records stay byte-deterministic across runs.
 pub(crate) fn transcript(dirs: &TestDirs, output: &Output) -> String {
     let text = format!(
         "exit {}\n== stdout\n{}\n== stderr\n{}",
@@ -245,7 +234,6 @@ pub(crate) fn transcript(dirs: &TestDirs, output: &Output) -> String {
     text.replace(&dirs.root.display().to_string(), "<store>")
 }
 
-/// Write a store entry directly: `<root>/<owner>/<repo>/<sha>/rules/<file>`.
 pub(crate) fn write_entry(root: &Path, owner: &str, repo: &str, sha: &str, rule: &str) -> PathBuf {
     let dir = root.join(owner).join(repo).join(sha);
     std::fs::create_dir_all(dir.join("rules")).unwrap();
@@ -273,8 +261,6 @@ pub(crate) fn search_page(items: &[(&str, Option<&str>)], total: u64) -> String 
     )
 }
 
-/// The commits-API + codeload answers one package needs: `sha` as the
-/// default head and as `v1`'s target, `archive` at `<sha>`.
 pub(crate) fn package_server(
     owner: &'static str,
     repo: &'static str,

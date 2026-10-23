@@ -4,9 +4,6 @@ use wright_language::document::{Document, Position, line_col_position, uri_to_pa
 use wright_language::{LanguageService, Range};
 
 fn service() -> LanguageService {
-    // An isolated provider store keeps a developer machine's installed
-    // OPY provider from leaking in: `.opy` documents must reach the
-    // structured boundary deterministically (#738).
     LanguageService::with_config(
         PathBuf::from("."),
         wright_language::SessionConfig {
@@ -96,8 +93,6 @@ fn source_documents_report_provider_boundary_without_static_fallback() {
 
 #[test]
 fn workshop_diagnostics_match_check_for_the_same_text() {
-    // The reference is the same text through the `Path` input — the
-    // pipeline `wright check` itself runs.
     let text = concat!(
         "variables {\n",
         "    global:\n",
@@ -173,8 +168,6 @@ fn workshop_semantic_queries_match_inspect_for_the_same_text() {
     let mut service = service();
     let uri = open_workshop(&mut service, WORKSHOP_SOURCE);
 
-    // `wright inspect` over the same buffer text is the reference every
-    // query resolves against.
     let mut session = wright_driver::CompilerSession::new(wright_driver::SessionConfig {
         input: wright_driver::InputSpec::Text {
             text: WORKSHOP_SOURCE.to_string(),
@@ -316,9 +309,6 @@ fn workshop_semantic_queries_match_inspect_for_the_same_text() {
 
 #[test]
 fn non_workshop_documents_keep_their_boundaries() {
-    // A `.txt` buffer a host tags as plaintext stays quiet even though the
-    // extension is a Workshop spelling; an untagged `.md` file is not a
-    // Workshop document either.
     let mut service = service();
     for (name, language_id) in [("notes.txt", Some("plaintext")), ("notes.md", None)] {
         let uri = format!("file:///workspace/{name}");
@@ -342,8 +332,6 @@ fn non_workshop_documents_keep_their_boundaries() {
         );
     }
 
-    // Source-language documents keep the provider boundary even when a
-    // client mistags the language id.
     let uri = "file:///workspace/main.opy";
     service.store.open(
         Document::new(uri.to_string(), WORKSHOP_SOURCE, PathBuf::from("."))

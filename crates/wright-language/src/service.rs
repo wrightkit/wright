@@ -1,5 +1,3 @@
-//! The editor-neutral language service (#63, #65, #66, #555, #738).
-
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -89,10 +87,6 @@ pub struct HoverInfo {
     pub range: Range,
 }
 
-/// The resolved OPY provider session (#738): `Pending` until the first
-/// consult — the LSP `initialize` handler forces negotiation so its
-/// capability answer is truthful — and `Unavailable` latches a failed
-/// connection so a dead provider is never retried per request.
 enum OpyProviderState {
     Pending,
     Ready(Box<dyn LanguageProvider>),
@@ -178,9 +172,6 @@ impl LanguageService {
         }]
     }
 
-    /// Raw Workshop diagnostics run the session's check pipeline over the
-    /// open buffer's text — the same diagnostics `wright check` reports
-    /// for that text (#555), including the empty set for a clean buffer.
     fn workshop_diagnostics(&self, uri: &str) -> Vec<SourceDiagnostic> {
         let Some(document) = self.store.document(uri) else {
             return Vec::new();
@@ -199,16 +190,6 @@ impl LanguageService {
         }
     }
 
-    /// OPY diagnostics come from `lpp/check` over the open-buffer overlay
-    /// (#738): every open `.opy` document with the text the editor holds,
-    /// keyed by the URI the client opened it under. The provider's ranges
-    /// are UTF-16 over that exact text — the document store's own
-    /// coordinates — so they carry through unchanged and authored source
-    /// positions survive.
-    ///
-    /// A provider that cannot be negotiated or does not serve `lpp/check`
-    /// reports the structured boundary on the requesting document; a
-    /// failed check reports the provider's structured error the same way.
     fn opy_diagnostics(&mut self, uri: &str) -> Vec<SourceDiagnostic> {
         let documents = self.source_document_set(OPY_LANGUAGE_ID);
         let root = self.project_root_uri();
@@ -421,12 +402,6 @@ impl LanguageService {
             };
         };
 
-        // The document set stays language-wide: only the provider can
-        // compute project membership, and `lpp/rename` needs every open
-        // document as a potential include or rename site. `semantic_rename`
-        // scopes the post-edit check verdict to the documents the provider
-        // actually edited (plus the position document), so an unrelated
-        // broken open document cannot block a valid rename.
         let documents = self.source_document_set(&language_id);
         let sources = documents
             .iter()
@@ -487,9 +462,6 @@ impl LanguageService {
             .unwrap_or_default();
         let mut applied = Vec::with_capacity(edits.len());
         for edit in edits {
-            // `finish_transaction` refuses edits outside the document set, so
-            // every source is an open document; a partial `Applied` set must
-            // never escape.
             let Some(doc) = self.store.document(&edit.source) else {
                 return RenameOutcome::Refused {
                     code: "rename-edit-outside-open-documents".to_string(),
@@ -503,9 +475,6 @@ impl LanguageService {
                 uri: edit.source,
                 range: edit_range(&doc.text, &edit.range),
                 new_text: edit.new_text,
-                // `semantic_rename` verified the provider's edits against
-                // this exact version; the caller uses it to reject stale
-                // edits.
                 version: doc.version,
             });
         }
@@ -520,11 +489,6 @@ impl LanguageService {
         Some(document)
     }
 
-    /// A driver session over the document's current buffer text
-    /// (#555): `InputSpec::Text` resolves the text in place of a disk read
-    /// under the document's file identity, so `check` and `load` run the
-    /// same pipeline `wright check` and `wright inspect` run for the same
-    /// text.
     fn workshop_session(
         &self,
         document: &Document,
@@ -546,11 +510,6 @@ impl LanguageService {
         Some(SemanticIndex::build(&loaded.program))
     }
 
-    /// The negotiated OPY provider session (#738), connecting on first
-    /// use and retained thereafter: `initialize`-time negotiation and
-    /// every later request share one provider process. A failed
-    /// connection latches in `Unavailable` and replays its structured
-    /// error — the session keeps running without OPY backing.
     fn opy_provider(&mut self) -> Result<&mut dyn LanguageProvider, ProviderError> {
         if matches!(self.opy, OpyProviderState::Pending) {
             self.opy = match connect_opy_provider(&self.config) {
@@ -565,9 +524,6 @@ impl LanguageService {
         }
     }
 
-    /// The open `.opy` buffer at `uri` as an LPP document — the client's
-    /// URI spelling, the buffer version, and the unsaved text as the
-    /// editor holds it (#738).
     fn opy_document(&self, uri: &str) -> Option<wright_lpp::Document> {
         let document = self.store.document(uri)?;
         if source_language_id(uri).as_deref() != Some(OPY_LANGUAGE_ID) {
@@ -581,12 +537,6 @@ impl LanguageService {
         })
     }
 
-    /// The provider overlay for `language_id`: every open document of
-    /// that language keyed by the URI the client opened it under. Only
-    /// the provider can compute project membership, so `lpp/check`,
-    /// `lpp/symbols`, and `lpp/rename` all see the full set — an
-    /// `#!include`d file stays current only while it is open, and its
-    /// open buffer text wins over the disk.
     fn source_document_set(&self, language_id: &str) -> wright_lpp::DocumentSet {
         let mut documents = wright_lpp::DocumentSet::new();
         for uri in self.store.uris() {
@@ -614,20 +564,8 @@ impl LanguageService {
     }
 }
 
-/// The per-request bound the provider registry applies elsewhere —
-/// `StdioLanguageProvider` takes it explicitly.
 const PROVIDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Resolve and negotiate the OPY provider for this session (#738).
-///
-/// Resolution stays purely local — an explicit `--opy-provider`
-/// executable is stat-validated, otherwise the already-installed
-/// provider store is consulted. Editor startup never downloads a
-/// provider. Negotiation follows LPP §19.2 like
-/// `CompilerSession`'s source-provider path (#638): `lpp/initialize` at
-/// the client's base version, then — after a `protocolVersionMismatch`,
-/// which invalidates the session — a restart on a fresh process at the
-/// highest mutually supported version.
 fn connect_opy_provider(
     config: &SessionConfig,
 ) -> Result<Box<dyn LanguageProvider>, ProviderError> {
@@ -676,9 +614,6 @@ fn connect_opy_provider(
     initialize.map(|_| Box::new(provider) as Box<dyn LanguageProvider>)
 }
 
-/// The highest protocol version both this client and the provider
-/// declared — `LPP_SUPPORTED_PROTOCOL_VERSIONS` lists them in ascending
-/// order, so the last intersection wins (LPP §19.2, #638).
 fn mutual_protocol_version(supported: &[String]) -> Option<&'static str> {
     wright_lpp::LPP_SUPPORTED_PROTOCOL_VERSIONS
         .iter()
@@ -687,8 +622,6 @@ fn mutual_protocol_version(supported: &[String]) -> Option<&'static str> {
         .find(|version| supported.iter().any(|s| s == version))
 }
 
-/// The negotiated capability check — `false` when the provider never
-/// initialized far enough to answer.
 fn provider_supports(provider: &dyn LanguageProvider, capability: Capability) -> bool {
     provider
         .capabilities()
@@ -696,16 +629,10 @@ fn provider_supports(provider: &dyn LanguageProvider, capability: Capability) ->
         .unwrap_or(false)
 }
 
-/// The diagnostic code a failed provider request reports under: the
-/// provider's refusal code when it sent one, else the structured error
-/// code — never a fabricated identity.
 fn provider_failure_code(error: &ProviderError) -> &str {
     error.refusal_code().unwrap_or_else(|| error.code())
 }
 
-/// LPP positions and ranges are UTF-16 over the text the client sent —
-/// the document store's own coordinate space — so they pass through
-/// unchanged (#738).
 fn lpp_position(position: Position) -> wright_lpp::Position {
     wright_lpp::Position {
         line: position.line,
@@ -786,11 +713,6 @@ fn is_workshop_document(document: &Document) -> bool {
         })
 }
 
-/// The symbol whose identifier occurrence covers `position`, and that
-/// occurrence — resolved through the index's shared `symbol_at` rule, the
-/// same addressability editor rename applies (#434, #555). A miss and an
-/// ambiguous position both map to `None`: the editor surfaces only a
-/// resolved symbol.
 fn symbol_at<'index>(
     index: &'index SemanticIndex,
     document: &Document,
@@ -824,8 +746,6 @@ fn source_diagnostic(
     }
 }
 
-/// Convert a driver [`wright_driver::edit::EditRange`] (1-based line and
-/// character column, half-open) back into UTF-16 document coordinates.
 fn edit_range(text: &str, range: &wright_driver::edit::EditRange) -> Range {
     Range {
         start: line_col_position(text, range.start_line, range.start_col),
@@ -905,9 +825,6 @@ mod tests {
 
     #[test]
     fn rename_on_a_source_document_without_a_provider_refuses() {
-        // No DEL provider exists, so `.del` deterministically reaches the
-        // unconfigured-provider refusal — the explicit contract, not a
-        // textual fallback.
         let mut service = service();
         let uri = open(&mut service, "main.del", "x\n");
         let (code, message) = refused(service.rename(
@@ -940,14 +857,11 @@ mod tests {
             },
             "renamed",
         ));
-        // The explicit executable fails validation before any spawn.
         assert_ne!(code, "rename-refused", "a structured code must surface");
     }
 
     #[test]
     fn utf16_edit_ranges_convert_from_driver_columns() {
-        // EditRange cols are 1-based character columns over a line whose
-        // first char is 🎯 (two UTF-16 units).
         let text = "🎯 = 1\ny = 🎯 + 2\n";
         let range = wright_driver::edit::EditRange {
             start_line: 2,
@@ -957,16 +871,12 @@ mod tests {
         };
         let converted = edit_range(text, &range);
         assert_eq!(converted.start.line, 1);
-        // Char col 5 is 🎯 itself, starting at utf16 offset 4 (y, space, =,
-        // space before it); the end col 6 lands after it at utf16 offset 6.
         assert_eq!(converted.start.character, 4);
         assert_eq!(converted.end.character, 6);
     }
 
     #[test]
     fn edit_range_on_crlf_does_not_count_the_carriage_return() {
-        // str::lines drops the \r: a column past it must land on the last
-        // real char, matching span_to_range's line split.
         let text = "a = 1\r\nb = 2\r\n";
         let range = wright_driver::edit::EditRange {
             start_line: 2,

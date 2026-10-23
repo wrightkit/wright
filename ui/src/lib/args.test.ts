@@ -131,8 +131,6 @@ describe('node constructors', () => {
   })
 
   it('reads a call-id default on a non-String parameter as a call node', () => {
-    // `isButtonHeld.player` declares `default: 'eventPlayer'` — the
-    // default is the zero-arg call, not a string literal.
     expect(defaultNode('eventPlayer', { type: 'Player' })).toEqual({
       call: 'eventPlayer',
       args: [],
@@ -141,7 +139,6 @@ describe('node constructors', () => {
       call: 'allPlayers',
       args: [],
     })
-    // A `String` slot keeps the string reading (`customString`'s `Hello`).
     expect(defaultNode('Hello', { type: 'String' })).toEqual({ string: 'Hello' })
   })
 })
@@ -200,17 +197,12 @@ describe('literal controls', () => {
       ],
       { call: 'demo', args: [] },
     )
-    // Writing the third slot fills the defaulted `waitBehavior` gap but
-    // leaves no trailing extras beyond it.
     const filled = fillGaps({ call: 'demo', args: [] }, fields, [2])
     expect(filled.args).toEqual([null, { enum: 'Wait', member: 'IGNORE_CONDITION' }])
-    // Editing only the first slot materializes nothing after it.
     expect(fillGaps({ call: 'demo', args: [] }, fields, [0]).args).toEqual([])
   })
 
   it('fills a crossed gap with the call node a call-id default declares', () => {
-    // `isButtonHeld`'s `player` defaults to the `eventPlayer` call;
-    // crossing the slot stages that node, never `{"string":"eventPlayer"}`.
     const fields = argFields(
       [
         { name: 'player', displayName: 'Player', type: 'Player', default: 'eventPlayer' },
@@ -238,7 +230,6 @@ describe('literal controls', () => {
     )
     expect(unsetRequired({ call: 'wait', args: [] }, fields)).toHaveLength(1)
     expect(slotSet({ call: 'wait', args: [1] }, fields[0])).toBe(true)
-    // A defaulted optional slot never blocks OK even while unwritten.
     expect(slotSet({ call: 'wait', args: [1] }, fields[1])).toBe(false)
     expect(unsetRequired({ call: 'wait', args: [1] }, fields)).toHaveLength(0)
   })
@@ -270,8 +261,6 @@ describe('conditionFields', () => {
   })
 
   it('carries the value node on a bare variable-access condition row', () => {
-    // A `Global.score` condition's single `call` row keeps its node so
-    // the label renders `Global.score`, not the raw `globalVariable` id.
     const value = { call: 'globalVariable', args: [{ variable: 'score' }] }
     const fields = conditionFields([], compare, value)
     expect(fields).toHaveLength(1)
@@ -280,9 +269,6 @@ describe('conditionFields', () => {
   })
 
   it('carries the value node on the operator row of a two-arg reserved call', () => {
-    // `playerVariable`/`memberAccess` take the compare-shaped branch;
-    // their operator row keeps the value node so the label renders
-    // `Event Player.aim`/`Global.m`, not the raw call id.
     for (const value of [
       {
         call: 'playerVariable',
@@ -351,8 +337,6 @@ describe('stageStatement', () => {
   })
 
   it('re-saving the staged statement keeps the pending change', () => {
-    // A reopened editor seeds its args from the staged change; an
-    // unchanged save must re-stage it, not drop it.
     const map = new Map<string, PendingChange>()
     const staged = {
       ...modify,

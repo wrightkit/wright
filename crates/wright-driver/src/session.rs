@@ -1,8 +1,3 @@
-//! Frontends are selected by [`SourceKind`] behind one contract, so
-//! the provider-backed `.opy` workflow can replace the retired adapter bridge
-//! without changing callers. Every workflow returns a typed [`Envelope`]
-//! whose JSON serialization is the machine-readable CLI contract.
-
 mod edit;
 mod protocol;
 mod registry;
@@ -48,16 +43,8 @@ pub struct Loaded {
     pub input: ResolvedInput,
     /// Whether semantic spans can be mapped to authored source files.
     pub provenance: Provenance,
-    /// Source identities retained by the frontend in canonical file-id order.
     pub(crate) source_files: Arc<Vec<String>>,
-    /// Completeness residuals captured before a transform profile rewrote the
-    /// program, when one ran. `None` when the loaded program is the authored
-    /// parse and `semantic_issues` can run on it directly (#442).
     pub(crate) completeness_issues: Option<Vec<workshop_rs::rules::SemanticIssue>>,
-    /// Diagnostics the load itself produced — a provider's own diagnostics
-    /// and source-map warnings — replayed whenever this cached snapshot
-    /// serves a request so a repeated `check`/`compile` reports the same
-    /// provider diagnostics as the first (#638).
     pub(crate) load_diagnostics: Arc<Vec<Diagnostic>>,
 }
 
@@ -110,18 +97,12 @@ pub struct CompilerSession {
     /// refused `session-config-changed` — changing configuration means
     /// constructing a new session.
     pub config: SessionConfig,
-    /// The construction-time snapshot `config` is verified against before
-    /// every workflow (#511).
     fixed_config: SessionConfig,
     catalog: &'static workshop_rs::catalog::Catalog,
     lint_registry: Arc<LintRegistry>,
     loaded: Option<Loaded>,
     loaded_operation: Option<ProviderOperation>,
-    /// The semantic service shared by every semantic workflow over the
-    /// current `loaded` snapshot (#513).
     semantic: Option<SessionSemantic>,
-    /// Full semantic-service constructions — the observable hook proving an
-    /// unchanged loaded snapshot is not rebuilt (#513).
     semantic_builds: usize,
     diagnostics: Vec<Diagnostic>,
     progress_observer: Option<Arc<dyn ProgressObserver>>,
@@ -183,9 +164,6 @@ impl CompilerSession {
         self.progress_observer = None;
     }
 
-    /// Refuse `session-config-changed` when `config` diverged from the
-    /// construction-time snapshot (#511): nothing derived from the earlier
-    /// configuration may serve the next result.
     pub(crate) fn verify_fixed_config(&self) -> Result<(), Diagnostic> {
         let changed = self.config.changed_fields(&self.fixed_config);
         if changed.is_empty() {
@@ -236,34 +214,16 @@ impl CompilerSession {
         self.load_with_operation(ProviderOperation::Compile)
     }
 
-    /// Drop the cached program and resolve the input from disk again (#471):
-    /// `ToolService` calls this when the input's disk fingerprint changed, so
-    /// a long-lived session reflects the current project. A failed reload
-    /// leaves the cache empty — the next `load` retries the same resolution
-    /// rather than resurrecting the stale program.
     pub(crate) fn reload(&mut self) -> Result<Loaded, Diagnostic> {
         self.drop_loaded();
         self.load()
     }
 
-    /// Drop the cached program without reloading it (#591): `ToolService`
-    /// calls this when the disk fingerprint changed ahead of a `check` or
-    /// `compile` workflow, whose own operation-aware load must re-resolve
-    /// rather than serve the stale snapshot — including a provider-backed
-    /// `check`, which compiles to produce its canonical snapshot (#617).
-    /// `loaded_operation` survives: it records the provider operation that
-    /// last produced a canonical snapshot, so a compile-capable provider
-    /// still recompiles on the next `load` where a check-only one refuses.
     pub(crate) fn drop_loaded(&mut self) {
         self.loaded = None;
         self.semantic = None;
     }
 
-    /// The session's cached canonical snapshot, when the last load produced
-    /// one — `None` for a check-only provider `check`, an unloadable input,
-    /// or after [`Self::drop_loaded`]. `ToolService` adopts this snapshot
-    /// after a successful workflow load (#591); it cannot call `load()` for
-    /// it because a check-only provider backend refuses `load()` outright.
     pub(crate) fn cached_loaded(&self) -> Option<Loaded> {
         self.loaded.clone()
     }
@@ -283,9 +243,6 @@ impl CompilerSession {
                 || (self.loaded_operation == Some(ProviderOperation::Compile)
                     && provider_operation == ProviderOperation::Check)
             {
-                // The cached snapshot still reports the diagnostics its
-                // own load produced — a repeated `check`/`compile` must not
-                // silently return an empty provider-diagnostic set (#638).
                 self.diagnostics
                     .extend(loaded.load_diagnostics.iter().cloned());
                 return Ok(loaded.clone());
@@ -302,11 +259,6 @@ impl CompilerSession {
         self.progress(ProgressEvent::new(ProgressPhase::InputResolution));
         let mut resolved =
             hotpath::measure_block!("load::resolve_input", input::resolve(&self.config))?;
-        // ADR-0028: profiles apply to raw Workshop input only. With an
-        // explicitly non-Workshop `--kind` the serve surface already rejects
-        // the combination at startup; here the kind may have been resolved
-        // from the input, so an OPY/OSTW source with a profile is rejected
-        // as a usage error before any load work runs.
         if self.config.profile != wright_transform::Profile::Off
             && resolved.kind != SourceKind::Workshop
         {
@@ -322,8 +274,6 @@ impl CompilerSession {
         let provider_backend = match self.config.source_backend {
             SourceBackend::Native => false,
             SourceBackend::Provider => true,
-            // A caller-held text is not a provider input: the provider would
-            // resolve the entry from disk and answer for different bytes.
             SourceBackend::Auto => {
                 resolved.kind == SourceKind::Opy
                     && !matches!(self.config.input, InputSpec::Text { .. })
@@ -370,9 +320,6 @@ impl CompilerSession {
             }
             SourceKind::Ostw => unreachable!(),
         };
-        // Completeness residuals describe the authored source; profile passes
-        // can fold flagged constructs away, so capture them before transforms
-        // run (#442).
         let completeness_issues = (resolved.kind == SourceKind::Workshop
             && self.config.profile != wright_transform::Profile::Off)
             .then(|| {
@@ -409,9 +356,6 @@ impl CompilerSession {
             ..SourceTarget::new(language, entry, resolved.cwd.clone())
         }
         .with_project_root(resolved.root.clone());
-        // Diagnostics appended from here belong to the loaded snapshot:
-        // they are captured onto `Loaded` so a later cache hit replays the
-        // same provider diagnostics (#638).
         let diagnostics_start = self.diagnostics.len();
         if self.source_provider.is_none() {
             let spawn = |session: &Self| {
@@ -430,10 +374,6 @@ impl CompilerSession {
                 name: wright_lpp::LPP_CLIENT_NAME.to_string(),
                 version: crate::result::DRIVER_VERSION.to_string(),
             };
-            // LPP 1.4 lets the provider return a source-mapped artifact. A
-            // provider without it keeps the unmapped LPP 1.1/1.2 session on a
-            // restarted process, as the protocol requires after a version
-            // mismatch.
             let mut initialize = provider.initialize_artifact_negotiation(Some(&client_info));
             if initialize
                 .as_ref()
@@ -511,11 +451,6 @@ impl CompilerSession {
                 let check = provider
                     .check(&target)
                     .map_err(|error| error.diagnostic())?;
-                // A compile-capable provider also produces the canonical
-                // artifact, so `check` runs the same canonical validation
-                // `compile` surfaces — an agent that gates on `check` must see
-                // every error `compile` would report (#617). A provider
-                // without compile capability keeps the check-only path.
                 match provider.compile(&target) {
                     Ok(mut compilation) => {
                         for diagnostic in check.diagnostics {
@@ -525,10 +460,6 @@ impl CompilerSession {
                         }
                         compilation
                     }
-                    // A provider without the compile capability keeps the
-                    // check-only path: `Unsupported` covers non-LPP
-                    // providers, while an LPP provider declines through
-                    // `capability-unavailable` (#638).
                     Err(error)
                         if matches!(error, SourceProviderError::Unsupported { .. })
                             || error.code() == "capability-unavailable" =>
@@ -543,9 +474,6 @@ impl CompilerSession {
             }
             ProviderOperation::Compile => provider.compile(&target).map_err(|e| e.diagnostic())?,
         };
-        // A canonical artifact needs the provider's source identity for a
-        // directory target — whatever operation produced it, including a
-        // `check` that compiled to validate (#617).
         if (operation == ProviderOperation::Compile || compilation.workshop_text.is_some())
             && resolved.target == InputTarget::Directory
         {
@@ -585,10 +513,6 @@ impl CompilerSession {
             .or_else(|| resolved.origin.locale.clone())
             .unwrap_or_else(|| "en-US".to_string());
         let locale = workshop_rs::catalog::Locale::new(&locale_name);
-        // The check-only provider path: `provider.check` answered and the
-        // provider declined to compile, so no canonical artifact exists to
-        // validate. `check` then reports only the provider's own diagnostics —
-        // the documented difference from `compile` (#617).
         if operation == ProviderOperation::Check && compilation.workshop_text.is_none() {
             return Ok(Loaded {
                 program: Arc::new(Program::default()),
@@ -622,12 +546,6 @@ impl CompilerSession {
                 Ok(()) => {
                     provenance = Provenance::Mapped;
                     source_files = map.files().iter().map(|f| provider_uri_path(f)).collect();
-                    // Retain each mapped member's authored text so source
-                    // extents (lint fixes, previews) derive against what was
-                    // actually written — the map alone carries only paths
-                    // (#583). Relative member spellings resolve against the
-                    // session's project root, not the process working
-                    // directory.
                     let mut unreadable = Vec::new();
                     for (index, member) in source_files.iter().enumerate() {
                         let member_path = Path::new(member);
@@ -684,9 +602,6 @@ impl CompilerSession {
                 },
             )
         })?;
-        // Provider artifacts are OPY/OSTW output; profiles apply to raw
-        // Workshop input only (ADR-0028), so no pass runs here — and the
-        // session rejects `--profile` with a non-Workshop input upstream.
         resolved.origin.locale = Some(locale.to_string());
         let loaded = Loaded {
             program: Arc::new(program),
@@ -698,9 +613,6 @@ impl CompilerSession {
             load_diagnostics: Arc::new(self.diagnostics[diagnostics_start..].to_vec()),
         };
         self.loaded = Some(loaded.clone());
-        // Reaching here means a canonical artifact was parsed and validated;
-        // the snapshot serves every later operation — including a `check`
-        // that compiled to validate (#617) — as a compile product.
         self.loaded_operation = Some(ProviderOperation::Compile);
         Ok(loaded)
     }
@@ -724,9 +636,6 @@ impl CompilerSession {
         &self,
         id: &str,
     ) -> Result<Box<dyn wright_lpp::LanguageProvider>, wright_lpp::ProviderError> {
-        // Provider workflows consume `config.providers`/`config.opy_provider`
-        // live; a changed configuration refuses through the provider refusal
-        // channel carrying `session-config-changed` (#511).
         if let Err(diagnostic) = self.verify_fixed_config() {
             return Err(wright_lpp::ProviderError::lpp(
                 wright_lpp::LppErrorKind::Refusal,
@@ -797,9 +706,6 @@ impl CompilerSession {
         self.loaded.as_ref().map(|loaded| loaded.input.root.clone())
     }
 
-    /// The element-cost snapshot of the currently loaded program, for the
-    /// project run cache (ADR-0027, #723): the canonical total plus each
-    /// rule's share, in canonical order. `None` when the count cannot run.
     pub(crate) fn cost_snapshot(&self, loaded: &Loaded) -> Option<cache::CostSnapshot> {
         let report = loaded.program.element_count(self.catalog).ok()?;
         Some(cache::CostSnapshot {
@@ -814,9 +720,6 @@ impl CompilerSession {
         })
     }
 
-    /// The `CostRun` key material for the loaded input: the resolved input
-    /// file, kind, locale, and profile — so runs differing only in those
-    /// never compare with each other (ADR-0027 decision 12).
     pub(crate) fn cost_run(&self, loaded: &Loaded) -> cache::CostRun {
         let run = &self.config.run;
         cache::CostRun {
@@ -831,12 +734,6 @@ impl CompilerSession {
         }
     }
 
-    /// Compare the current run's element cost against the stored reference
-    /// and record it as the new previous run (plus the named baseline when
-    /// `--save-baseline` is given). Returns the comparison when one was
-    /// available; every cache failure is swallowed (ADR-0027 decision 10).
-    /// An explicitly named but unusable baseline is a usage error outside
-    /// CI and degrades to no comparison under it (ADR-0030 decision 14).
     pub(crate) fn run_cost_comparison(&self) -> Option<cache::Comparison> {
         let loaded = self.loaded.as_ref()?;
         let run = self.cost_run(loaded);
@@ -848,10 +745,6 @@ impl CompilerSession {
         cache::compare_and_record_in(&run, &snapshot, environment)
     }
 
-    /// Whether the explicitly named `--baseline` exists — `compile` turns a
-    /// missing one into a usage error like `inspect cost` does (#723).
-    /// Under CI an unusable baseline degrades silently instead (ADR-0030
-    /// decision 14).
     pub(crate) fn named_baseline_missing(&self) -> Option<String> {
         let run = self.cost_run(self.loaded.as_ref()?);
         let name = run.baseline.as_deref()?;
@@ -970,9 +863,6 @@ impl CompilerSession {
                     written_to,
                     ..output
                 });
-                // A successful run becomes the new reference; the change
-                // against the previous run rides the envelope (in-process
-                // only — never the default JSON, ADR-0027 decision 3).
                 missing_baseline = self.named_baseline_missing();
                 if missing_baseline.is_none() {
                     comparison = self.run_cost_comparison();
@@ -982,9 +872,6 @@ impl CompilerSession {
         }
         let mut envelope = self.finish("compile", result);
         envelope.comparison = comparison.map(|c| c.to_json());
-        // An explicitly named baseline that does not exist is a usage
-        // error, reported like the gate diagnostics — but it must not
-        // change the compiled bytes, so it lands after the write above.
         if let Some(name) = missing_baseline {
             envelope.diagnostics.push(Diagnostic::error(
                 "invalid-selection",
@@ -1002,10 +889,6 @@ impl CompilerSession {
         &mut self,
         to: Option<&str>,
     ) -> Result<(CompiledOutput, Option<PathBuf>), Diagnostic> {
-        // An output locale the catalog does not declare is a usage
-        // error (#759) and needs nothing from the project: report it
-        // before loading. The emitter's missing-mapping contract covers
-        // undeclared spellings per identity, not an unknown locale itself.
         let named = match to {
             Some(name) => {
                 let locale = workshop_rs::catalog::Locale::new(name);
@@ -1057,9 +940,6 @@ impl CompilerSession {
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
                 session.attach_workshop_completeness(&loaded);
                 CheckResult {
-                    // #792: `check` reports the program summary `analyze`
-                    // computes and the shared follow-up commands, so
-                    // renderers and agents get both without a second call.
                     program: Some(semantic::check_program_summary(&loaded)),
                     next: crate::result::next::list(crate::result::next::CHECK),
                 }
@@ -1149,13 +1029,6 @@ impl CompilerSession {
             .unwrap_or_else(|| workshop_rs::catalog::Locale::new("en-US"))
     }
 
-    /// The semantic service over `loaded`, shared by every semantic workflow
-    /// serving that snapshot (#513): the index and default lint pass are
-    /// built once per loaded program rather than per request. Reuse is
-    /// keyed on the program's `Arc` identity — a reload or a provider
-    /// re-resolution produces a fresh `Arc`, which rebuilds instead of
-    /// serving a stale index. Configured consumers derive their view through
-    /// [`SemanticService::with_lint_config`], which shares the same index.
     pub(crate) fn shared_semantic(&mut self, loaded: &Loaded) -> Arc<SemanticService<'static>> {
         if self
             .semantic
@@ -1195,16 +1068,6 @@ impl CompilerSession {
         )
     }
 
-    /// Known exact Overwatch client import constraints, measured on the
-    /// emitted program during `compile` (#488).
-    ///
-    /// `workshop-rs` owns the canonical measurement; Wright owns the limit
-    /// policy and reports a violated import budget as a warning — a program
-    /// over the budget still emits its artifact, matching upstream
-    /// `w_element_limit`. New exact constraints attach to this path as
-    /// `workshop-rs` exposes them (`wrightkit/workshop-rs#346`), so target
-    /// diagnostics stay free of source-language logic. `check` does not run
-    /// this: it is a source-correctness workflow, not a client-import gate.
     #[allow(unsafe_code)] // hotpath 0.28 emits `#[unsafe(export_name)]` statics
     fn attach_target_limits(&mut self, loaded: &Loaded) {
         let report = match hotpath::measure_block!("compile::element_count", {
@@ -1259,14 +1122,6 @@ impl CompilerSession {
         self.diagnostics.push(diagnostic);
     }
 
-    /// Structural validation permits source-preserving Workshop fallbacks.
-    /// Surface those nodes as blocking semantic diagnostics before presenting
-    /// check/lint output as definitive. The catalog remains owned by
-    /// workshop-rs; this is only the consumer-side diagnostic projection.
-    ///
-    /// Residuals come from the loaded canonical `Program` — pre-captured when
-    /// a transform profile ran — so check/lint never reparse or revalidate
-    /// the source (#442).
     fn attach_workshop_completeness(&mut self, loaded: &Loaded) {
         if loaded.input.kind != SourceKind::Workshop {
             return;
@@ -1290,8 +1145,6 @@ impl CompilerSession {
         }
     }
 
-    /// The lint registry backing this session, for finding-selection
-    /// validation (#430).
     pub(crate) fn lint_registry(&self) -> &LintRegistry {
         &self.lint_registry
     }
@@ -1371,10 +1224,6 @@ fn provider_artifact_origin(resolved: &ResolvedInput) -> Origin {
     }
 }
 
-/// Map a Workshop error on a provider artifact to a driver diagnostic.
-///
-/// `mapped_files` is the applied source map's file table: a span into it is an
-/// authored location. Without one, the span points into the provider artifact.
 fn workshop_diag_for_provider_artifact(
     error: workshop_rs::WorkshopError,
     resolved: &ResolvedInput,
@@ -1401,10 +1250,6 @@ fn workshop_diag_for_provider_artifact(
     diagnostic
 }
 
-/// One provider failure on the `convert` reconstruction path (#569): the
-/// same classification the source-provider seam applies, naming the failed
-/// operation. The refusal code survives in the diagnostic code
-/// (`provider-refusal-<refusalCode>`) so consumers can classify it.
 fn provider_error_diagnostic(error: wright_lpp::ProviderError, operation: &str) -> Diagnostic {
     Diagnostic::carried_error(
         crate::source_provider::provider_failure_code(&error),
@@ -1416,9 +1261,6 @@ fn provider_error_diagnostic(error: wright_lpp::ProviderError, operation: &str) 
     )
 }
 
-/// One completeness residual as a session diagnostic: the owner-classified
-/// construct maps onto the `status` output contract, and the owner's spelling
-/// suggestion survives as a did-you-mean.
 fn map_issue(
     issue: &workshop_rs::rules::SemanticIssue,
     path: &Path,
@@ -1513,16 +1355,11 @@ fn issue_span(span: Option<workshop_rs::source::Span>, path: &Path) -> SourceSpa
 mod tests {
     use super::*;
 
-    /// #638: the highest-mutual retry applies the target's negotiation
-    /// floor — entry requests cannot drop below LPP 1.1 project loading,
-    /// and a directory target cannot drop below the 1.3 source-identity
-    /// contract.
     #[test]
     fn mutual_protocol_version_honors_the_target_floor() {
         let supported =
             |versions: &[&str]| versions.iter().map(|v| v.to_string()).collect::<Vec<_>>();
 
-        // Highest mutual wins over the nearest advertised version.
         assert_eq!(
             mutual_protocol_version(&supported(&["1.0", "1.1", "1.3"]), InputTarget::File),
             Some("1.3")
@@ -1532,8 +1369,6 @@ mod tests {
             Some("1.4")
         );
 
-        // A file entry cannot negotiate below the 1.1 project-loading
-        // contract its `check_entry`/`compile_entry` calls require.
         assert_eq!(
             mutual_protocol_version(&supported(&["1.0"]), InputTarget::File),
             None
@@ -1543,8 +1378,6 @@ mod tests {
             Some("1.1")
         );
 
-        // A directory target cannot negotiate below the 1.3
-        // source-identity contract.
         assert_eq!(
             mutual_protocol_version(&supported(&["1.1", "1.2"]), InputTarget::Directory),
             None
@@ -1554,17 +1387,12 @@ mod tests {
             Some("1.3")
         );
 
-        // LPP 1.6 (`resolveIds`) parses but is not negotiated: the client
-        // has no `lpp/resolveIds` implementation.
         assert_eq!(
             mutual_protocol_version(&supported(&["1.6"]), InputTarget::File),
             None
         );
     }
 
-    /// Residual classifications map fail-closed onto the `status` contract:
-    /// project-shaped constructs report partial support and every other
-    /// residual reports unsupported.
     #[test]
     fn residual_classifications_map_fail_closed() {
         use workshop_rs::rules::ResidualClassification as C;

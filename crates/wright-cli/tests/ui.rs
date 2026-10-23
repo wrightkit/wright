@@ -1,9 +1,3 @@
-//! `wright ui` (ADR-0032): the loopback endpoint carries `wright-agent/v1`
-//! bodies to `ToolService` unchanged, gated by the session token and the
-//! loopback `Host`/`Origin` checks. These tests spawn the built `wright`
-//! binary like `tests/serve.rs`; the endpoint tests compile only with the
-//! `ui` feature, which enables the embedded-assets server.
-
 #[cfg(feature = "ui")]
 use std::io::{BufRead, BufReader, Read, Write};
 #[cfg(feature = "ui")]
@@ -37,9 +31,6 @@ struct UiSession {
 
 #[cfg(feature = "ui")]
 impl UiSession {
-    /// `wright ui --no-open` prints the session URL — the loopback origin
-    /// plus the per-session token in the fragment — as its first stdout
-    /// line, then serves until killed.
     fn start(input: &Path) -> Self {
         let mut child = Command::new(wright())
             .args(["ui", "--no-open"])
@@ -67,9 +58,6 @@ impl UiSession {
         }
     }
 
-    /// One HTTP/1.0 request against the bound loopback address, returning
-    /// `(status, body)`. Hand-rolled so the test controls `Host`/`Origin`
-    /// exactly and no proxy configuration can intercept loopback traffic.
     fn request(
         &self,
         method: &str,
@@ -189,9 +177,6 @@ fn serve_stdio(input: &Path, lines: &[&str]) -> Vec<String> {
         .collect()
 }
 
-/// The endpoint answers exactly what `wright serve` writes for the same
-/// request and project — the transport adds no envelope (ADR-0032
-/// decision 3).
 #[cfg(feature = "ui")]
 #[test]
 fn endpoint_bodies_match_the_stdio_transport() {
@@ -208,14 +193,10 @@ fn endpoint_bodies_match_the_stdio_transport() {
     for (request, expected) in requests.iter().zip(expected.iter()) {
         let (status, body) = session.api(request);
         assert_eq!(status, 200, "{request}");
-        // The stdio transport writes each response as one line; the
-        // endpoint returns the same bytes, terminator included.
         assert_eq!(body, format!("{expected}\n"), "{request}");
     }
 }
 
-/// `project` lists the loaded sources through `sourceFiles`, entry file
-/// first — the page title shows its base name (#879).
 #[cfg(feature = "ui")]
 #[test]
 fn project_lists_source_files_entry_first() {
@@ -233,9 +214,6 @@ fn project_lists_source_files_entry_first() {
     );
 }
 
-/// Every refusal below is answered before the request can reach
-/// `ToolService`: a missing or wrong token, a foreign `Host`, or a foreign
-/// `Origin` (ADR-0032 decision 4).
 #[cfg(feature = "ui")]
 #[test]
 fn endpoint_refuses_foreign_or_unauthenticated_requests() {
@@ -283,8 +261,6 @@ fn endpoint_refuses_foreign_or_unauthenticated_requests() {
     }
 }
 
-/// A request that passes the checks answers with no CORS headers, and the
-/// loopback page is served.
 #[cfg(feature = "ui")]
 #[test]
 fn serves_the_embedded_page_without_cors_headers() {
@@ -314,8 +290,6 @@ fn serves_the_embedded_page_without_cors_headers() {
     );
 }
 
-/// The URL's host is always a loopback literal — the server binds
-/// `127.0.0.1` only (ADR-0032 decision 4).
 #[cfg(feature = "ui")]
 #[test]
 fn the_session_url_is_a_loopback_url() {
@@ -344,7 +318,6 @@ fn refuses_non_workshop_input_naming_the_owner() {
     }
     #[cfg(not(feature = "ui"))]
     {
-        // Without the feature the no-UI message wins over input handling.
         assert_eq!(output.status.code(), Some(2));
     }
 
@@ -393,8 +366,6 @@ impl UiSession {
     }
 }
 
-/// A writable copy of the control-flow fixture: apply tests edit the
-/// file, so they never run against the committed source.
 #[cfg(feature = "ui")]
 fn editable_input(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("wright-ui-apply-{}", std::process::id()));
@@ -404,9 +375,6 @@ fn editable_input(name: &str) -> PathBuf {
     path
 }
 
-/// Stage a `disabled` toggle on rule 0's `Wait` action through
-/// `editStatements` — the same replace a checkbox in the page produces —
-/// and return the transaction the result carries.
 #[cfg(feature = "ui")]
 fn staged_transaction(session: &UiSession) -> serde_json::Value {
     let (_, project) = session.api(r#"{"op":"project"}"#);
@@ -415,7 +383,6 @@ fn staged_transaction(session: &UiSession) -> serde_json::Value {
     let (_, rules) = session.api(r#"{"op":"rules","all":true,"content":true}"#);
     let rules: serde_json::Value = serde_json::from_str(&rules).unwrap();
     let snapshot = &rules["result"]["snapshot"];
-    // `span` is output-only; the caller drops it before reusing the node.
     let mut node = rules["result"]["rules"][0]["content"]["actions"][1].clone();
     let object = node.as_object_mut().unwrap();
     object.remove("span");
@@ -439,16 +406,12 @@ fn staged_transaction(session: &UiSession) -> serde_json::Value {
     response["result"]["transaction"].clone()
 }
 
-/// `POST /apply` (ADR-0032 decision 5): the host re-validates the
-/// transaction against the files on disk, writes atomically, and serves
-/// the edited program under a new generation.
 #[cfg(feature = "ui")]
 #[test]
 fn apply_writes_the_transaction_and_serves_the_edit() {
     let path = editable_input("apply-ok.ws");
     let session = UiSession::start(&path);
     let transaction = staged_transaction(&session);
-    // The pre-write generation the listing issued.
     let (_, before) = session.api(r#"{"op":"rules","all":true}"#);
     let before: serde_json::Value = serde_json::from_str(&before).unwrap();
     let generation = before["result"]["snapshot"].as_u64().unwrap();
@@ -467,8 +430,6 @@ fn apply_writes_the_transaction_and_serves_the_edit() {
         serde_json::json!(true),
         "{rules}"
     );
-    // The write adopted a fresh generation: a numeric address the old
-    // program issued is now stale.
     let request =
         serde_json::json!({"op": "rules", "rule": 0, "snapshot": generation, "content": true});
     let (_, stale) = session.api(&request.to_string());
@@ -478,8 +439,6 @@ fn apply_writes_the_transaction_and_serves_the_edit() {
     );
 }
 
-/// A transaction whose `source_identity` no longer matches the file is
-/// refused `edit-stale-source` and writes nothing.
 #[cfg(feature = "ui")]
 #[test]
 fn apply_refuses_a_stale_transaction_and_writes_nothing() {
@@ -502,8 +461,6 @@ fn apply_refuses_a_stale_transaction_and_writes_nothing() {
     assert_eq!(std::fs::read_to_string(&path).unwrap(), drifted);
 }
 
-/// `/apply` gates like `/api`: the session token is required, and the
-/// body must deserialize as an edit transaction.
 #[cfg(feature = "ui")]
 #[test]
 fn apply_requires_the_session_token_and_a_transaction_body() {
@@ -515,8 +472,6 @@ fn apply_requires_the_session_token_and_a_transaction_body() {
     assert_eq!(status, 400, "{body}");
     assert!(body.contains("malformed-request"), "{body}");
 
-    // A transaction that cannot validate answers the refusal shape, not a
-    // transport error.
     let (status, body) = session.apply(r#"{"edits":[]}"#);
     assert_eq!(status, 200, "{body}");
     let applied: serde_json::Value = serde_json::from_str(&body).unwrap();
@@ -528,8 +483,6 @@ fn apply_requires_the_session_token_and_a_transaction_body() {
     );
 }
 
-/// Builds without the `ui` feature report the no-UI build and exit 2 —
-/// `cargo test` needs no Node toolchain (ADR-0032 decision 9).
 #[cfg(not(feature = "ui"))]
 #[test]
 fn reports_a_build_without_ui() {

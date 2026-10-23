@@ -1,7 +1,3 @@
-//! Test support for the lint package suites: the recorded-response
-//! localhost server, tarball builder, and temp store dir shared by
-//! `lint_package.rs` and `lint_package_lifecycle.rs`.
-
 #![allow(dead_code)]
 
 use std::io::{Read, Write};
@@ -101,7 +97,6 @@ impl Response {
     }
 }
 
-/// A localhost HTTP server replaying the handler's recorded responses.
 pub(crate) struct TestServer {
     pub(crate) addr: SocketAddr,
     pub(crate) stop: Arc<AtomicBool>,
@@ -121,8 +116,6 @@ impl TestServer {
             loop {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
-                        // Accepted sockets inherit the listener's nonblocking
-                        // flag on some platforms; request reads must block.
                         let _ = stream.set_nonblocking(false);
                         let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
                         let request = read_request(&mut stream);

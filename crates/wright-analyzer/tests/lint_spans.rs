@@ -1,9 +1,3 @@
-//! Findings locate themselves even when provenance is coarse: provider-backed
-//! programs (OPy compilation) carry rule/condition/action-level spans but no
-//! nested value provenance, so a finding over a value inside a condition or
-//! action argument falls back to the nearest recorded ancestor rather than
-//! reporting `null`.
-
 use serde_json::Value;
 use workshop_rs::catalog::Locale;
 use workshop_rs::{MappedText, Program, SourceMap, parser};
@@ -16,8 +10,6 @@ fn parse(source: &str) -> Program {
         .unwrap_or_else(|error| panic!("Workshop source must parse: {error}"))
 }
 
-/// A program carrying only rule/condition/action-argument provenance — the
-/// shape a source provider emits: every recorded value's `children` cleared.
 fn shallowly_mapped(source: &str) -> Program {
     let program = parse(source);
     let mut artifact: Value =
@@ -107,10 +99,6 @@ fn loop_body_finding_falls_back_to_the_argument_span() {
     let [finding] = coded(&findings, "expensive-loop-check")[..] else {
         panic!("one expensive-loop-check finding: {findings:?}")
     };
-    // The expensive call is the `Set Global Variable` value argument: with no
-    // nested provenance the finding reports the argument's own span — the
-    // tightest recorded ancestor that still encloses it. The variable slot is
-    // an identifier, not a value argument, so the call is argument 0.
     assert_eq!(
         finding.span,
         program.action_argument_span(0, 1, 0),
@@ -118,9 +106,6 @@ fn loop_body_finding_falls_back_to_the_argument_span() {
     );
 }
 
-/// Two distinct duplicated shapes in one loop: each `repeated-value` finding
-/// names its expression in canonical spelling, so the findings are
-/// distinguishable from the message alone (#735).
 const TWO_REPEATED: &str = r#"variables {
     global:
         0: index
@@ -158,15 +143,11 @@ fn repeated_value_names_each_repeated_expression() {
         towards.message,
         "`vectorTowards(getPosition(eventPlayer), vector(1, 1, 1))` is evaluated 2 times within the same loop scope"
     );
-    // Fully spanned Workshop provenance locates each finding on an occurrence
-    // of its expression — never on the enclosing loop header.
     assert_ne!(distance.span, towards.span);
     assert!(
         ![distance.span, towards.span].contains(&program.action_span(0, 0)),
         "the findings carry expression spans, not the loop action's: {distance:?} {towards:?}"
     );
-    // #791: the same facts the message states are structured fields, so
-    // renderers consume them instead of parsing prose.
     let distance = distance.repeated.as_ref().expect("repeated facts");
     assert_eq!(
         distance.expression,
@@ -179,9 +160,6 @@ fn repeated_value_names_each_repeated_expression() {
     );
 }
 
-/// The provider shape — rule/action-level provenance with no nested value
-/// spans — still names the expression and says the location is the enclosing
-/// loop rather than the expression's own (#735).
 #[test]
 fn repeated_value_without_value_spans_says_the_location_is_the_loop() {
     let source = r#"variables {

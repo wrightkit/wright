@@ -1,15 +1,3 @@
-//! `wright lint package <subcommand>` (#844): GitHub lint rule package
-//! discovery and lifecycle over the wright-driver store (#842). Each
-//! subcommand builds a [`LintPackageResult`] and renders it through the
-//! shared `wright-result/v1` envelope (ADR-0030), so the plain records,
-//! terminal report, GitHub Actions output, and JSON all read the same rows.
-//!
-//! `search`/`list`/`outdated` are read-only queries — their verdict word is
-//! the command's own name. `install`/`update`/`remove` are lifecycle
-//! operations: a row-level failure turns the envelope into a gated FAIL —
-//! the verdict fails, the per-package report still renders, and every failed
-//! package reports its own `lint-package-*` diagnostic.
-
 use std::path::Path;
 use std::process::ExitCode;
 use std::time::Instant;
@@ -23,14 +11,9 @@ use wright_driver::{
 use crate::cli;
 use crate::present::{self, Presentation};
 
-/// The GitHub API base override for recorded-response tests;
-/// `WRIGHT_LINT_PACKAGE_DIR` already relocates the store root itself.
 const API_BASE_ENV: &str = "WRIGHT_LINT_PACKAGE_API_BASE";
-/// The codeload tarball base override for recorded-response tests.
 const CODELOAD_BASE_ENV: &str = "WRIGHT_LINT_PACKAGE_CODELOAD_BASE";
 
-/// The store the command operates on: the default root (or
-/// `WRIGHT_LINT_PACKAGE_DIR`) plus the test endpoint overrides.
 fn store() -> LintPackageStore {
     let mut store = LintPackageStore::new(LintPackageStore::default_root());
     if let Some(base) = env_nonempty(API_BASE_ENV) {
@@ -46,11 +29,8 @@ fn env_nonempty(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|value| !value.is_empty())
 }
 
-/// A subcommand's report: the result rows plus each failed row's diagnostic
-/// and exit code — `update`/`remove` use it for per-package failures.
 type Built = Result<(LintPackageResult, Vec<(Diagnostic, u8)>), LintPackageError>;
 
-/// Dispatch one `lint package` subcommand.
 pub(crate) fn run(args: &cli::PackageArgs) -> ExitCode {
     match &args.command {
         cli::LintPackageCommand::Search(args) => {
@@ -72,11 +52,6 @@ pub(crate) fn run(args: &cli::PackageArgs) -> ExitCode {
     }
 }
 
-/// Run one subcommand against the store, wrap its rows in the shared
-/// envelope, and render it. A `LintPackageError` becomes an error envelope —
-/// the verdict word follows the error's exit code (`USAGE` for a bad source,
-/// `ERROR` for the rest) — and per-row failures become a gated FAIL whose
-/// diagnostics name the packages that failed.
 fn run_report(
     command: &'static str,
     output: &cli::PackageOutputArgs,
@@ -108,9 +83,6 @@ fn run_report(
     ExitCode::from(code)
 }
 
-/// A command-level failure: the envelope carries the error as its one
-/// diagnostic and an empty result — the store root still reports so JSON
-/// shows which store the command ran against.
 fn error_envelope(
     command: &str,
     store: &LintPackageStore,
@@ -140,10 +112,6 @@ fn root(store: &LintPackageStore) -> String {
     store.root().display().to_string()
 }
 
-/// The pipeline stage a package error reports: source/ref spellings and
-/// not-installed lookups are discovery, package-content validation is
-/// validation, and everything else — network, rate limit, store I/O — is
-/// internal/environment.
 fn stage_of(error: &LintPackageError) -> Stage {
     match error {
         LintPackageError::Source(_) | LintPackageError::NotFound(_) => Stage::Discovery,
@@ -152,12 +120,10 @@ fn stage_of(error: &LintPackageError) -> Stage {
     }
 }
 
-/// A report with no row-level failures.
 fn ok(result: LintPackageResult) -> Built {
     Ok((result, Vec::new()))
 }
 
-/// `package search`: repositories carrying the `wrightkit-lint` topic.
 fn search(store: &LintPackageStore, args: &cli::PackageSearchArgs) -> Built {
     let page = store.search(args.query.as_deref())?;
     ok(LintPackageResult {
@@ -178,8 +144,6 @@ fn search(store: &LintPackageStore, args: &cli::PackageSearchArgs) -> Built {
     })
 }
 
-/// `package install`: fetch `SOURCE` at its resolved SHA into the store.
-/// Installing never activates the package — project configuration pins it.
 fn install(store: &LintPackageStore, args: &cli::PackageInstallArgs) -> Built {
     let (source, reference) = parse_source(&args.source, args.reference.as_deref())?;
     let package = store.install(&source, reference.as_deref())?;
@@ -201,8 +165,6 @@ fn install(store: &LintPackageStore, args: &cli::PackageInstallArgs) -> Built {
     })
 }
 
-/// `package list`: every store entry — intact packages report their rules;
-/// a damaged entry reports `damaged` with the reason it does not validate.
 fn list(store: &LintPackageStore) -> Built {
     let mut packages = Vec::new();
     for entry in store.entries()? {
@@ -234,10 +196,6 @@ fn list(store: &LintPackageStore) -> Built {
     })
 }
 
-/// `package outdated`: check each entry against the remote default-branch
-/// head — read-only; the rows carry `unchanged`/`updated`/`unavailable`/
-/// `error` and nothing applies to the store. A damaged entry is an `error`
-/// row and is never checked.
 fn outdated(store: &LintPackageStore) -> Built {
     let packages = store
         .entries()?
@@ -252,10 +210,6 @@ fn outdated(store: &LintPackageStore) -> Built {
     })
 }
 
-/// `package update [SOURCE]`: install the current default-branch head for
-/// each selected entry. An `unchanged` entry is not re-fetched; an `updated`
-/// row keeps the previous `sha` next to the new `remote` head and `dir`.
-/// `unavailable`/`error` rows fail the command.
 fn update(store: &LintPackageStore, args: &cli::PackageUpdateArgs) -> Built {
     let entries = select_entries(store, args.source.as_deref())?;
     let mut packages = Vec::new();
@@ -278,9 +232,6 @@ fn update(store: &LintPackageStore, args: &cli::PackageUpdateArgs) -> Built {
     ))
 }
 
-/// `package remove SOURCE`: delete the selected entries' managed `rules/`
-/// trees. `removed` means the entry directory went too; `pruned` means
-/// unrelated files beside `rules/` keep it. Failures fail the command.
 fn remove(store: &LintPackageStore, args: &cli::PackageRemoveArgs) -> Built {
     let entries = select_entries(store, Some(args.source.as_str()))?;
     let mut packages = Vec::new();
@@ -344,9 +295,6 @@ fn installed_row(
     }
 }
 
-/// The remote-check row `outdated` and `update` share before `update`
-/// applies its `updated` case. A damaged entry reports `error` and is never
-/// checked against the remote.
 fn check_row(store: &LintPackageStore, entry: &StoreEntry) -> LintPackageRow {
     let mut row = LintPackageRow {
         source: entry.source.slug(),
@@ -383,8 +331,6 @@ fn check_row(store: &LintPackageStore, entry: &StoreEntry) -> LintPackageRow {
     row
 }
 
-/// One `update` row: an `updated` check installs the new head into the
-/// store; everything else reports like `outdated`.
 fn update_row(store: &LintPackageStore, entry: &StoreEntry) -> LintPackageRow {
     let row = check_row(store, entry);
     if row.status != "updated" {
@@ -408,10 +354,6 @@ fn update_row(store: &LintPackageStore, entry: &StoreEntry) -> LintPackageRow {
     }
 }
 
-/// The entries `update`/`remove` act on: every installed entry, one
-/// repository's entries for `owner/repo`, or the single entry
-/// `owner/repo@<ref>` resolves to. No match is a `lint-package-not-found`
-/// command error.
 fn select_entries(
     store: &LintPackageStore,
     source: Option<&str>,
@@ -439,8 +381,6 @@ fn select_entries(
     Ok(selected)
 }
 
-/// A failed `update`/`remove` row as its diagnostic and exit code: the
-/// message names the package so a multi-package failure stays attributable.
 fn row_failure(row: &LintPackageRow) -> Option<(Diagnostic, u8)> {
     if !matches!(row.status.as_str(), "unavailable" | "error") {
         return None;
@@ -464,9 +404,6 @@ fn row_failure(row: &LintPackageRow) -> Option<(Diagnostic, u8)> {
     Some((Diagnostic::error(code, stage, message), exit))
 }
 
-/// Parse a `SOURCE` argument: `owner/repo`, a github.com URL, or
-/// `owner/repo@<ref>`, plus an optional `--ref` flag. When more than one
-/// spelling carries a ref they must agree — a conflict is a usage error.
 fn parse_source(
     input: &str,
     flag: Option<&str>,
@@ -492,8 +429,6 @@ fn parse_source(
     Ok((source, refs.into_iter().next()))
 }
 
-/// Split the `owner/repo@<ref>` spelling: only a bare `owner/repo` base
-/// takes an `@` suffix — URL and `git@` spellings keep their `@`.
 fn split_at_ref(input: &str) -> (&str, Option<&str>) {
     let Some((base, reference)) = input.rsplit_once('@') else {
         return (input, None);

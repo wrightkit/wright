@@ -1,7 +1,3 @@
-//! #787: a `postCompileHook` can introduce an enum member spelling the active
-//! locale never produced. `check` must reject what `compile` rejects.
-//! Runs against the installed OPY provider (opy-provider >= 0.3.21).
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -11,8 +7,6 @@ fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
 }
 
-/// The installed provider, or `None` where none is installed locally. CI
-/// installs one before this suite, so a missing provider there is a failure.
 fn provider() -> Option<PathBuf> {
     let installed = wright_driver::OpyProviderConfig::default()
         .installed()

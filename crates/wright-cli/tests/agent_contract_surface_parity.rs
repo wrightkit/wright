@@ -1,6 +1,3 @@
-//! CLI/agent default-surface parity checks: each agent request and its CLI
-//! spelling return the same payload on the same input.
-
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -163,10 +160,6 @@ fn assert_default_surface_parity_on_input(
     };
     let output = run(true);
     let cli: Value = serde_json::from_slice(&output.stdout).unwrap();
-    // #595: `snapshot` scopes a long-lived service's generation; the
-    // one-shot `lint` command builds its own payload without a session, so
-    // its result carries none. The CLI query subcommands do carry it — they
-    // run `ToolService` internally, so the member compares equal there.
     if operation == "lint" {
         result.as_object_mut().unwrap().remove("snapshot");
     }

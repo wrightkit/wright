@@ -69,9 +69,6 @@ pub fn semantic_rename(
     )
 }
 
-/// A deliberate provider decline (`kind: "refusal"`) is reported through
-/// the refusal channel; any other error is a provider failure on its own
-/// contract.
 fn is_refusal(error: &wright_lpp::ProviderError) -> bool {
     matches!(
         error,
@@ -79,11 +76,6 @@ fn is_refusal(error: &wright_lpp::ProviderError) -> bool {
     )
 }
 
-/// Everything after `lpp/rename` answers: the provider's edit set becomes
-/// the Wright transaction — every edit inside the request document set and
-/// on the served document version, UTF-16 ranges converted to columns —
-/// then `lpp/validateEdits` per edited document and a project `lpp/check`
-/// scoped to the edit sites plus the position document decide the mutation.
 fn rename_result(
     provider: &mut dyn wright_lpp::LanguageProvider,
     documents: &wright_lpp::DocumentSet,
@@ -135,15 +127,6 @@ fn rename_result(
         Err(diag) => return refusal(vec![diag]),
     };
 
-    // The supplied document set is deliberately wider than the target
-    // project: only the provider can compute project membership (include
-    // resolution, entry selection), and `lpp/rename` needs every open
-    // document to spot references the project must account for. The
-    // post-edit check verdict is therefore scoped to the mutation the
-    // provider actually produced — the edit sites plus the position
-    // document — so an unrelated open document cannot block a valid
-    // rename. Diagnostics in member files never supplied still attribute
-    // to the entry document's check view and remain blocking.
     let mut blocking_scope: BTreeSet<String> = transaction
         .edits
         .iter()
@@ -573,8 +556,6 @@ mod tests {
 
     #[test]
     fn utf16_ranges_convert_to_wright_columns_and_back() {
-        // "puzzle αβ {": α and β are 2-byte/1-UTF-16-unit characters. The
-        // mock provider's own unit tests pin UTF-16 offsets 7 (α) and 8 (β).
         let text = "puzzle αβ {\n  target = 40\n}";
         let lpp = wright_lpp::Range {
             start: wright_lpp::Position {
@@ -612,8 +593,6 @@ mod tests {
 
     #[test]
     fn utf16_offset_inside_a_supplementary_character_refuses() {
-        // "𝕏" is one character but two UTF-16 code units; offset 1 is
-        // inside it.
         let text = "puzzle 𝕏 {";
         let error = to_edit_range(
             text,
@@ -774,10 +753,6 @@ mod tests {
         assert!(mutation.preview.is_none());
     }
 
-    /// #570: every provider execution failure class keeps its typed code at
-    /// the internal stage — a consumer can tell a broken provider from a
-    /// deliberate refusal or a source-level edit rejection without parsing
-    /// the message.
     #[test]
     fn provider_transport_failures_keep_their_typed_classification() {
         for (error, code) in [
@@ -822,8 +797,6 @@ mod tests {
         }
     }
 
-    /// #570: a `refusal` kind whose details carry no `refusalCode` is still
-    /// a deliberate decline (frontend), never an internal provider fault.
     #[test]
     fn a_refusal_without_a_code_is_not_a_process_failure() {
         let mutation = provider_failure(&ProviderError::lpp(
@@ -964,9 +937,6 @@ mod tests {
 
     #[test]
     fn rename_post_edit_check_drops_unrelated_open_document_errors() {
-        // The rename document set is language-wide because only the
-        // provider can compute project membership; a supplied document the
-        // mutation never touched must not block it.
         let mut request = rename_request();
         request.documents.insert(
             UNRELATED_URI.to_string(),
