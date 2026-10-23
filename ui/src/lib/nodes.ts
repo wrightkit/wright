@@ -66,7 +66,7 @@ export function nodeClass(node: Node, kind?: string): SyntaxClass {
  * openers and `End`). `elseIf`/`else` continue the enclosing block at its
  * own depth.
  */
-const OPENERS = new Set(['if', 'while', 'forGlobalVariable', 'forPlayerVariable'])
+export const OPENERS = new Set(['if', 'while', 'forGlobalVariable', 'forPlayerVariable'])
 const BRANCHES = new Set(['elseIf', 'else'])
 
 /**
@@ -154,6 +154,48 @@ export function statementText(node: Node, names: PeekNames, kinds: string[]): st
   }
   if (node.args.length === 0) return name
   return `${name}(${node.args.map(text).join(', ')})`
+}
+
+/**
+ * The flat-stream indices of every action whose call id equals the one at
+ * `index` — the row context menu's "Select same action" set
+ * (docs/ui/selection.md § Structural selection). `end` markers are real
+ * actions too, so they match each other like any other call.
+ */
+export function sameCallIndices(nodes: Node[], index: number): number[] {
+  const target = nodes[index]
+  if (target === null || target === undefined || typeof target !== 'object' || !('call' in target)) {
+    return []
+  }
+  return nodes.flatMap((node, i) =>
+    node !== null && typeof node === 'object' && 'call' in node && node.call === target.call
+      ? [i]
+      : [],
+  )
+}
+
+/**
+ * The flat-stream range of the block the opener at `index` opens: the
+ * opener itself through its `end` marker inclusive — an `else if`/`else`
+ * branch inside it counts as the block's own. The open call is the
+ * exported `OPENERS` set's; anything else answers `null` so the menu can
+ * disable the entry.
+ */
+export function blockRange(actions: Action[], index: number): [number, number] | null {
+  const call = actions[index]?.call
+  if (call === undefined || !OPENERS.has(call)) return null
+  let depth = 0
+  for (let i = index; i < actions.length; i++) {
+    const at = actions[i].call
+    if (OPENERS.has(at)) depth += 1
+    else if (at === 'end') {
+      depth -= 1
+      if (depth === 0) return [index, i]
+    }
+  }
+  // A truncated block (no closing `end` left in the stream) reaches the
+  // column's end rather than disabling the entry.
+  return [index, actions.length - 1]
 }
 
 export function statementMatches(

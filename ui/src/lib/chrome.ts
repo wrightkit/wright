@@ -68,6 +68,10 @@ export interface ChromeStrings {
   enable: string
   delete: string
   clear: string
+  /** A statement row's context menu and its entries. */
+  statementMenu: (noun: string, index: number) => string
+  selectSameAction: string
+  selectBlock: string
   /** The rule-bar chevron tooltips. */
   expandRule: string
   collapseRule: string
@@ -171,6 +175,9 @@ const enUS: ChromeStrings = {
   enable: 'Enable',
   delete: 'Delete',
   clear: 'Clear',
+  statementMenu: (noun, index) => `${noun} ${index} menu`,
+  selectSameAction: 'Select same action',
+  selectBlock: 'Select block',
   expandRule: 'Expand rule',
   collapseRule: 'Collapse rule',
   expandRuleLabel: (name) => `Expand ${name}`,
@@ -249,6 +256,9 @@ const zhCN: ChromeStrings = {
   enable: '启用',
   delete: '删除',
   clear: '清除',
+  statementMenu: (noun, index) => `${noun} ${index} 菜单`,
+  selectSameAction: '选择相同动作',
+  selectBlock: '选择块',
   expandRule: '展开规则',
   collapseRule: '折叠规则',
   expandRuleLabel: (name) => `展开 ${name}`,
