@@ -547,6 +547,7 @@ jobs:
     needs:
       - release-identity
       - core-package
+      - publish-release
     if: needs.release-identity.outputs.channel == 'stable'
     runs-on: ubuntu-latest
     environment: release

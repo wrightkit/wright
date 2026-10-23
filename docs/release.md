@@ -300,8 +300,9 @@ commit, regenerates the shipped types — refusing to pack when the
 committed generated file differs from a fresh generation — packs the
 tarball, and smoke-checks it by installing it in a clean directory,
 type-checking a `request` call against the shipped types, and running it
-in Node. Only stable releases publish: `publish-npm` uploads the
-checksum-verified tarball to npm with the `NPM_TOKEN` secret.
+in Node. Only stable releases publish: after the canonical GitHub Release
+is public, `publish-npm` uploads the checksum-verified tarball to npm
+with the `NPM_TOKEN` secret.
 
 Consumers pin the exact release version:
 
