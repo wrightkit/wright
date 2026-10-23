@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import process from 'node:process'
 import { describe, expect, it } from 'vitest'
@@ -6,18 +6,19 @@ import { describe, expect, it } from 'vitest'
 const root = process.cwd()
 const spec = readFileSync(join(root, '..', 'docs', 'ui', 'visual-system.md'), 'utf8')
 // Rules live in app.css (tokens/backdrop/base) and each component's
-// scoped <style> block (#928). Concatenate them and unwrap the
-// `:global(...)` escapes the wrapper components use for Bits UI markup
-// so a selector still reads as its rendered form.
-const css = [
-  'src/app.css',
-  'src/App.svelte',
-  'src/lib/RuleView.svelte',
-  'src/lib/RuleBar.svelte',
-  'src/lib/StatementEditor.svelte',
-  'src/lib/components/Dialog.svelte',
-]
-  .map((file) => readFileSync(join(root, file), 'utf8'))
+// scoped <style> block (#928). Concatenate every file that carries a
+// style block and unwrap the `:global(...)` escapes the wrapper
+// components use for Bits UI markup so a selector still reads as its
+// rendered form.
+function* styleFiles(dir: string): Generator<string> {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name)
+    if (entry.isDirectory()) yield* styleFiles(path)
+    else if (entry.name.endsWith('.svelte')) yield path
+  }
+}
+const css = ['src/app.css', ...styleFiles(join(root, 'src'))]
+  .map((file) => readFileSync(file, 'utf8'))
   .join('\n')
   .replace(/:global\(([^)]*)\)/g, '$1')
 
@@ -169,6 +170,18 @@ describe('spacing custom properties (#914)', () => {
       )
       expect(rule, `${selector} rule exists`).toBeTruthy()
       expect(rule![1], `${selector} holds no rem multiple`).not.toMatch(/\drem/)
+    }
+  })
+
+  it('no declared spec property is dead: each one is consumed by a selector', () => {
+    // A property the table names but no rule consumes does not apply the
+    // spec value, so this guards requirement 1 end to end.
+    const bodies = [...css.matchAll(/\{([^{}]*)\}/g)].map((m) => m[1])
+    for (const names of Object.values(ROW_PROPS)) {
+      for (const name of names) {
+        const used = bodies.some((body) => body.includes(`var(${name})`))
+        expect(used, `${name} is consumed`).toBe(true)
+      }
     }
   })
 })
