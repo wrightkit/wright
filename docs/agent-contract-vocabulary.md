@@ -70,9 +70,13 @@ tool output small (ADR-0021).
 
 - `language` is `workshop`; `opy` answers `unavailable` naming `opy-rs` and
   the `listEntries` capability.
-- `kind` is `action`, `value`, `event`, `enum`, or `enumMember`. `within`
-  names an enum domain identity as `lookup` returns it, and is required for
-  `enumMember` and refused for every other kind (`malformed-request`).
+- `kind` is `action`, `value`, `event`, `enum`, `enumMember`, or
+  `structural`. `within` names an enum domain identity as `lookup`
+  returns it, and is required for `enumMember` and refused for every
+  other kind (`malformed-request`). `structural` lists the callable
+  structural forms `lookup` resolves — the signature-bearing entries
+  such as `setGlobalVariable` or `if`, not the section/suffix
+  keywords — added for the statement editor's Action row (#919).
 - `pageSize` is 1..=500 (default 100); a value outside it is refused as
   `malformed-request`. The request has no `query`: entries are listed, never
   matched or ranked.

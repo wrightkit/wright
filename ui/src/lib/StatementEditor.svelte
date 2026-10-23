@@ -283,11 +283,18 @@
       // calls `listEntries` serves — `setGlobalVariable`,
       // `setPlayerVariable`, `startRule` and friends are callable
       // statement calls even though the owner kinds them `structural`,
-      // so the "all actions" picker includes them (issue #919).
+      // so the "all actions" picker includes them (issue #919). An id
+      // both catalogs carry (`modifyGlobalVariable`) lists once, under
+      // its `action` entry.
       void Promise.all([listAll('action', requestLocale), listAll('structural', requestLocale)])
         .then(([actions, structural]) => {
-          if (requestLocale === optionsLocale) actionEntries = [...actions, ...structural]
-          else actionEntries = []
+          if (requestLocale === optionsLocale) {
+            const listed = new Set(actions.map((entry) => entry.identity))
+            actionEntries = [
+              ...actions,
+              ...structural.filter((entry) => !listed.has(entry.identity)),
+            ]
+          } else actionEntries = []
         })
         .finally(() => {
           actionLoading = false
