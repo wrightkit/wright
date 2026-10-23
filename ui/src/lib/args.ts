@@ -65,9 +65,10 @@ export interface ArgField {
   call?: string
   /**
    * The value node a `call` pseudo-field with no arg position names — a
-   * condition's single `call` row carries the whole `value` so a
-   * reserved call (`globalVariable`/`playerVariable`/`memberAccess`)
-   * still renders its variable-access text.
+   * condition's single `call` row and a compare-shaped operator row both
+   * carry the whole `value` so a reserved call
+   * (`globalVariable`/`playerVariable`/`memberAccess`) still renders its
+   * variable-access text.
    */
   node?: Node
   /**
@@ -270,6 +271,10 @@ export function conditionFields(
         kind: 'call',
         required: true,
         call: value.call as string,
+        // The operator row has no arg position; the value node rides on
+        // the field so a two-arg reserved call (`playerVariable`,
+        // `memberAccess`) renders its statement text, not the raw id.
+        node: value,
       }
       attachNested(left, value.args[0], nestedFacts)
       attachNested(right, value.args[1], nestedFacts)

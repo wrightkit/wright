@@ -168,6 +168,8 @@ const LOOKUP: Record<string, object[]> = {
   '>=': [{ identity: '>=', kind: 'operator', displayName: '>=' }],
   global: [{ identity: 'global', kind: 'structural', displayName: 'Global' }],
   globalVariable: [],
+  playerVariable: [],
+  memberAccess: [],
   eventPlayer: [{ identity: 'eventPlayer', kind: 'value', displayName: 'Event Player' }],
 }
 
@@ -535,5 +537,51 @@ describe('the statement editor form (#918)', () => {
     // The single call row shows the variable-access text, not the raw id.
     const row = editor().querySelector<HTMLElement>('[data-arg-control=""]')!
     expect(row.querySelector('.editor-arg-value')!.textContent).toBe('Global.score')
+  })
+
+  it('renders a two-arg reserved call condition as its statement text', async () => {
+    // `playerVariable`/`memberAccess` take the compare-shaped three-row
+    // form; the operator row still shows the statement text, not the id.
+    api.handler = handlerFor([
+      summaryFor(
+        1,
+        'setup',
+        contentFor(
+          [],
+          [
+            {
+              value: {
+                call: 'playerVariable',
+                args: [{ call: 'eventPlayer', args: [] }, { variable: 'aim' }],
+              },
+            },
+            {
+              value: {
+                call: 'memberAccess',
+                args: [
+                  { call: 'globalVariable', args: [{ variable: 'm' }] },
+                  { string: 'x' },
+                ],
+              },
+            },
+          ],
+        ),
+      ),
+    ])
+    mountApp()
+    await settle()
+    await openRule(1)
+
+    click(rows()[0])
+    await settle()
+    let middle = editor().querySelector<HTMLElement>('[data-arg-control=""]')!
+    expect(middle.querySelector('.editor-arg-value')!.textContent).toBe('Event Player.aim')
+    click(editor().querySelector<HTMLElement>('.cancel')!)
+    await settle()
+
+    click(rows()[1])
+    await settle()
+    middle = editor().querySelector<HTMLElement>('[data-arg-control=""]')!
+    expect(middle.querySelector('.editor-arg-value')!.textContent).toBe('Global.m.x')
   })
 })

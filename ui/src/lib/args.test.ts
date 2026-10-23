@@ -279,6 +279,30 @@ describe('conditionFields', () => {
     expect(fields[0].node).toEqual(value)
   })
 
+  it('carries the value node on the operator row of a two-arg reserved call', () => {
+    // `playerVariable`/`memberAccess` take the compare-shaped branch;
+    // their operator row keeps the value node so the label renders
+    // `Event Player.aim`/`Global.m`, not the raw call id.
+    for (const value of [
+      {
+        call: 'playerVariable',
+        args: [{ call: 'eventPlayer', args: [] }, { variable: 'aim' }],
+      },
+      {
+        call: 'memberAccess',
+        args: [
+          { call: 'globalVariable', args: [{ variable: 'm' }] },
+          { string: 'x' },
+        ],
+      },
+    ]) {
+      const fields = conditionFields([], compare, value)
+      expect(fields).toHaveLength(3)
+      expect(fields[1]).toMatchObject({ kind: 'call', call: value.call, path: [] })
+      expect(fields[1].node).toEqual(value)
+    }
+  })
+
   it('uses the value call\'s own parameters when lookup declares them', () => {
     const fields = conditionFields(
       [{ name: 'array', displayName: 'Array', type: 'Array', required: true }],
