@@ -423,6 +423,34 @@ describe('column selection', () => {
     expect(host.querySelector('.toolbar .sq-badge')?.textContent).toBe('2')
   })
 
+  it.each([false, true])('a range fully containing a block selects only rendered rows, never its hidden End (reverse=%s)', async (reverse) => {
+    await setup()
+    const first = checks()[reverse ? 3 : 0]!
+    const last = checks()[reverse ? 0 : 3]!
+    click(first)
+    last.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }))
+    flushSync()
+    expect(selected()).toEqual([true, true, true, true])
+    expect(column().querySelector('.sel-count')?.textContent).toBe('4 selected')
+    key('Delete')
+    expect(column().querySelectorAll('.pending-delete')).toHaveLength(4)
+    expect(host.querySelector('.toolbar .sq-badge')?.textContent).toBe('4')
+  })
+
+  it('sel-all checks every rendered row, stays checked, and stages no hidden End', async () => {
+    await setup()
+    const selectAllBox = column().querySelector<HTMLInputElement>('input.sel-all')!
+    expect(selectAllBox.checked).toBe(false)
+    selectAllBox.click()
+    flushSync()
+    expect(selected()).toEqual([true, true, true, true])
+    expect(column().querySelector('.sel-count')?.textContent).toBe('4 selected')
+    expect(column().querySelector<HTMLInputElement>('input.sel-all')!.checked).toBe(true)
+    key('Delete')
+    expect(column().querySelectorAll('.pending-delete')).toHaveLength(4)
+    expect(host.querySelector('.toolbar .sq-badge')?.textContent).toBe('4')
+  })
+
   it('extends by visible rows with Shift+Arrow, including across hidden End markers and at column boundaries', async () => {
     await setup()
     hover()
