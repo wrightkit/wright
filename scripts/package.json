@@ -1,0 +1,15 @@
+{
+  "name": "wright-release-tooling",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Node dependencies for the wright release tooling in this directory.",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "json-schema-to-typescript": "^16.0.0",
+    "typescript": "~6.0.3"
+  }
+}
