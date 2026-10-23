@@ -37,7 +37,7 @@
     type Severity,
   } from './lib/findings'
   import { Names } from './lib/names'
-  import { collectUsed } from './lib/nodes'
+  import { collectUsed, OPENERS } from './lib/nodes'
   import RuleView from './lib/RuleView.svelte'
   import SimulatePanel from './lib/SimulatePanel.svelte'
   import SqButton from './lib/SqButton.svelte'
@@ -488,13 +488,20 @@
     }
     if (disabled) statement.disabled = true
     if (editTarget.insert) {
+      // A block opener stages with its matching `end` in the same edit —
+      // `editStatements` refuses a result whose action stream leaves an
+      // opener unclosed (`unbalanced-block`).
+      const statements =
+        editTarget.list === 'actions' && OPENERS.has((statement as { call?: string }).call ?? '')
+          ? [statement, { call: 'end', args: [] }]
+          : [statement]
       stageInsert(
         pending,
         editEntry.summary.id,
         editEntry.summary.name,
         editTarget.list,
         editTarget.insert.index,
-        [statement],
+        statements,
       )
       return
     }

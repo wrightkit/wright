@@ -180,6 +180,18 @@ export const LOOKUP: Record<string, object[]> = {
       },
     },
   ],
+  if: [
+    {
+      identity: 'if',
+      kind: 'structural',
+      displayName: 'If',
+      callable: {
+        parameters: [
+          { name: 'condition', displayName: 'Condition', type: 'Boolean', required: true },
+        ],
+      },
+    },
+  ],
   '==': [{ identity: '==', kind: 'operator', displayName: '==' }],
   '>=': [{ identity: '>=', kind: 'operator', displayName: '>=' }],
   global: [{ identity: 'global', kind: 'structural', displayName: 'Global' }],
@@ -245,6 +257,16 @@ export const LISTINGS: Record<string, object[]> = {
         parameters: [
           { name: 'variable', displayName: 'Variable', type: 'Variable', required: true },
           { name: 'value', displayName: 'Value', type: 'Any', required: true },
+        ],
+      },
+    },
+    {
+      identity: 'if',
+      kind: 'structural',
+      displayName: 'If',
+      callable: {
+        parameters: [
+          { name: 'condition', displayName: 'Condition', type: 'Boolean', required: true },
         ],
       },
     },

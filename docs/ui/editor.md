@@ -31,6 +31,7 @@ Context: part of the [`wright ui` design](README.md). This document covers editi
 - **Insert.**
   - The column heading's `+` opens the same editor with an empty action (or condition).
   - OK stages an `insert` at the end of the column, or after the selected row when exactly one row is selected.
+  - A block opener (`If`, `While`, `For …`) stages with its matching `End` in the same insert edit — `editStatements` refuses a result whose action stream leaves an opener unclosed.
 - **Debug.** The node JSON preview appears under the form only with `?debug`.
 
 ## Pickers

@@ -156,6 +156,27 @@ impl<'a> ToolService<'a> {
             };
             source_edits.push(source_edit);
         }
+        // Block balance is judged on the *result* of the whole request —
+        // one rule's `actions` list after every edit in the transaction —
+        // so a balanced pair staged across edits is accepted while a lone
+        // `End`, `Else`, `Else If`, or opener refuses uniformly (#962).
+        let mut block_edits: std::collections::BTreeMap<usize, Vec<&StatementEditRequest>> =
+            std::collections::BTreeMap::new();
+        for (rule, edit) in &resolved_edits {
+            if edit.list == crate::request::StatementList::Actions {
+                block_edits.entry(*rule).or_default().push(*edit);
+            }
+        }
+        for (rule, edits) in block_edits {
+            if let Some(diagnostic) = se::balance_violation(
+                self.session.catalog(),
+                &effective.program.rules[rule],
+                rule,
+                &edits,
+            ) {
+                return refuse(vec![diagnostic]);
+            }
+        }
         let transaction = match crate::edit::EditTransaction::new(source_edits) {
             Ok(transaction) => transaction,
             Err(diagnostic) => return refuse(vec![diagnostic]),
