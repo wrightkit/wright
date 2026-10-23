@@ -30,9 +30,20 @@ export interface ArgField {
   label: string
   kind: ArgFieldKind
   required: boolean
+  /**
+   * `false` when the slot's accepted node is a tagged shape the `+`
+   * form's literal/enum controls cannot write — a `{"variable"}`,
+   * `{"subroutine"}` (no declared subroutines), or `content.operations`
+   * position — until #919's pickers fill it. OK stays disabled while a
+   * `+` form holds one; a slot already holding the node it accepts is
+   * not flagged.
+   */
+  insertable?: boolean
   scope?: 'globalVariable' | 'playerVariable'
   domain?: string
   operations?: string[]
+  /** The parameter's declared `type` (`Subroutine`, `Any`, `Number`, …). */
+  type?: string
   call?: string
   node?: Node
   default?: Node
@@ -47,6 +58,50 @@ export function paramFacts(entry: LookupEntry | null | undefined): ParamFact[] {
 
 function isObject(node: unknown): node is Record<string, unknown> {
   return typeof node === 'object' && node !== null && !Array.isArray(node)
+}
+
+/**
+ * Whether the slot the parameter names needs a `rule-content-v1` node
+ * the `+` form's literal/enum controls cannot produce — derived from
+ * the param's declared `type` and `content` facts, not the node shape:
+ *
+ * - `content.operations`: the position takes a zero-argument modify
+ *   operation call (`{"call":"add","args":[]}`) whose id is one of the
+ *   declared ids;
+ * - a `Variable`/`Global Variable`/`Player Variable` type, or a fold
+ *   member occupying the variable position of its folded
+ *   `globalVariable`/`playerVariable` call: the position takes a
+ *   `{"variable": name}` node bound to a declared symbol;
+ * - `Subroutine`: the position takes a `{"subroutine": name}` node bound
+ *   to a declared subroutine (`startRule`) — insertable only when the
+ *   program declares one (`hasSubroutines`).
+ *
+ * A slot already holding the node it accepts is not flagged — a
+ * re-staged form or a default-seeded folded call shell may carry it.
+ */
+export function needsPicker(
+  param: ParamFact,
+  node: Node | undefined,
+  hasSubroutines = false,
+): boolean {
+  const operations = param.content?.operations ?? []
+  if (operations.length > 0) {
+    return !(
+      isObject(node) && 'call' in node && operations.includes(node.call as string)
+    )
+  }
+  if (param.type === 'Subroutine') {
+    if (isObject(node) && 'subroutine' in node) return false
+    return !hasSubroutines
+  }
+  const fold = param.content?.fold
+  const foldsVariable =
+    /^(Global |Player )?Variable$/.test(param.type ?? '') ||
+    (fold !== undefined &&
+      ((fold.call === 'globalVariable' && fold.arg === 0) ||
+        (fold.call === 'playerVariable' && fold.arg === 1)))
+  if (!foldsVariable) return false
+  return !(isObject(node) && 'variable' in node)
 }
 
 /** The node at `path`, descending into call args; `[]` reads the root. */
@@ -103,6 +158,7 @@ function fieldFor(
   path: number[],
   node: Node | undefined,
   foldCall: string | undefined,
+  hasSubroutines = false,
 ): ArgField {
   const field: ArgField = {
     path,
@@ -111,6 +167,7 @@ function fieldFor(
     required: param.required !== false && param.default === undefined,
   }
   field.kind = fieldKind(param, node)
+  field.type = param.type
   if (param.default !== undefined) field.default = defaultNode(param.default, param)
   if (field.kind === 'variable') {
     field.scope = variableScope(foldCall, '')
@@ -121,6 +178,7 @@ function fieldFor(
       param.enum?.domain ??
       (isObject(node) && typeof node.enum === 'string' ? node.enum : undefined)
   }
+  if (needsPicker(param, node, hasSubroutines)) field.insertable = false
   return field
 }
 
@@ -129,7 +187,9 @@ function fieldFor(
  * arguments. Non-fold parameters advance one content position each; a
  * fold group's members share the position its first member takes and
  * address an argument inside the folded call. The row's kind follows the
- * node currently at that position and the choices the parameter declares.
+ * node currently at that position and the choices the parameter
+ * declares. `hasSubroutines` lets a `Subroutine` slot render its name
+ * picker instead of flagging it picker-bound.
  *
  * `nestedFacts` resolves a `call` field's own `lookup` parameters by the
  * nested call id so its rows render indented under it.
@@ -138,6 +198,7 @@ export function argFields(
   params: readonly ParamFact[],
   action: Action,
   nestedFacts?: (call: string) => ParamFact[] | null,
+  hasSubroutines = false,
 ): ArgField[] {
   const fields: ArgField[] = []
   let pos = 0
@@ -157,7 +218,7 @@ export function argFields(
       pos += 1
     }
     const node = argAt(action.args, path)
-    const field = fieldFor(param, path, node, foldFact?.call)
+    const field = fieldFor(param, path, node, foldFact?.call, hasSubroutines)
     if (field.kind === 'variable') {
       field.scope = variableScope(foldFact?.call, action.call)
     }
@@ -352,6 +413,54 @@ export function enumNode(identity: string): Node {
 /** The `{"string": text}` node the text input edits. */
 export function stringNode(text: string): Node {
   return { string: text }
+}
+
+/**
+ * The `{"subroutine": name}` node a `Subroutine` slot accepts —
+ * `editStatements` validates it against the program's declared
+ * subroutines.
+ */
+export function subroutineNode(name: string): Node {
+  return { subroutine: name }
+}
+
+/**
+ * The initial args for a call the form just picked (docs/ui/editor.md §
+ * Form: "a default from `lookup` is filled in when a call is chosen"):
+ * one position per non-fold parameter, holding its declared `default`
+ * node; a required slot with none stays empty (its `undefined` reads as
+ * unset, so OK stays disabled until it is filled). Optional slots past
+ * the first all-empty tail stay omitted — `Wait`'s optional
+ * `waitBehavior` materializes only when `lookup` defaults it. Fold-group
+ * members share their folded call's position, so a variable-target
+ * action seeds its `globalVariable`/`playerVariable` shell.
+ */
+export function defaultArgs(params: readonly ParamFact[]): Node[] {
+  const args: Node[] = []
+  let foldPos = -1
+  for (let i = 0; i < params.length; i += 1) {
+    const param = params[i]
+    const foldCall = param.content?.fold?.call
+    const foldArg = param.content?.fold?.arg
+    if (typeof foldCall === 'string' && typeof foldArg === 'number') {
+      if (params[i - 1]?.content?.fold?.call !== foldCall) {
+        foldPos = args.length
+        args.push({ call: foldCall, args: [] })
+      }
+      const node = defaultNode(param.default, param)
+      if (node === undefined) continue
+      const shell = args[foldPos]
+      if (isObject(shell) && 'call' in shell && Array.isArray(shell.args)) {
+        const inner = grow(shell.args as Node[], foldArg)
+        inner[foldArg] = node
+        shell.args = inner
+      }
+      continue
+    }
+    args.push(defaultNode(param.default, param) ?? (undefined as unknown as Node))
+  }
+  while (args.length > 0 && args[args.length - 1] === undefined) args.pop()
+  return args
 }
 
 /**

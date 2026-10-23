@@ -19,6 +19,7 @@
   import {
     blockRange,
     collectIdentities,
+    insertDepth,
     isEventPlayerMember,
     sameCallIndices,
     statementDepths,
@@ -51,6 +52,7 @@
     onedit: {
       open: (list: StatementList, index: number, argPath?: number[]) => void
       batch: (list: StatementList, indices: number[], action: BatchAction) => void
+      insert: (list: StatementList, selected: number[], length: number) => void
     }
   } = $props()
 
@@ -182,7 +184,10 @@
   const sel = (list: StatementList) => selection[list]
 
   function tagFor(list: StatementList, index: number) {
-    return pending.get(keyFor(summary.id, list, index))?.tag
+    const tag = pending.get(keyFor(summary.id, list, index))?.tag
+    // An `insert` lives under `insertKey`, not `keyFor`, so row N keeps
+    // its own mark; the placeholder renders the insert badge itself.
+    return tag === 'insert' ? undefined : tag
   }
 
   function selectRow(list: StatementList, index: number, event: MouseEvent) {
@@ -256,6 +261,30 @@
         list === 'conditions' ? content.conditions[index].value : content.actions[index]
       return statementMatches(node, names, kinds, query)
     })
+  }
+
+  /**
+   * The flat indices this rule's staged `insert` marks sit at,
+   * ascending — the `mark` pending entries, which are view state, not
+   * edits.
+   */
+  function insertMarks(list: StatementList): number[] {
+    return [...pending.values()]
+      .filter(
+        (change) => change.mark === true && change.rule === summary.id && change.list === list,
+      )
+      .map((change) => change.index)
+      .sort((a, b) => a - b)
+  }
+
+  /**
+   * The staged-insert marks landing in `(lo, hi]`. A mark renders after
+   * the nearest shown row below its index, so a hidden `end` tail or a
+   * filter-hidden anchor cannot swallow it; marks before the first shown
+   * row render at the column top.
+   */
+  function marksBetween(marks: number[], lo: number, hi: number): number[] {
+    return marks.filter((n) => n > lo && n <= hi)
   }
 
   function onkeydown(event: KeyboardEvent) {
@@ -423,6 +452,17 @@
   </RowMenu>
 {/snippet}
 
+{#snippet pendingInsertRow(depth: number)}
+  <!-- The placeholder a staged `insert` renders: the gold pending mark
+       (docs/ui/selection.md § Pending marks) and the tag, sitting where
+       the new row lands — after the nearest shown row at or before its
+       index, so a hidden `end` tail or a filter-hidden anchor still
+       shows it. Not a statement row: no checkbox, no click target. -->
+  <li class="statement pending-insert pending-change" data-insert-mark style="--depth: {depth};">
+    <span class="pending-tag insert">insert</span>
+  </li>
+{/snippet}
+
 {#snippet columnActions(list: StatementList, hidden: number)}
   {@const set = sel(list)}
   <span class="column-actions">
@@ -434,9 +474,17 @@
       <SqButton icon={Play} title={t.enable} onclick={() => onedit.batch(list, [...set], 'enable')} />
       <SqButton icon={Trash2} title={t.delete} onclick={() => onedit.batch(list, [...set], 'delete')} />
       <SqButton icon={X} title={t.clear} onclick={() => clearSelection(list)} />
-    {:else}
-      <SqButton icon={Plus} title={t.addStatementTitle(noun(list))} label={t.addStatement(noun(list))} disabled />
     {/if}
+    <!-- docs/ui/selection.md: with no selection the right side is the
+         `+` alone; a selection brings the batch row in beside it — the
+         `+` stays so one selected row can still take an insert after it
+         (docs/ui/editor.md § Form · Insert). -->
+    <SqButton
+      icon={Plus}
+      title={t.addStatementTitle(noun(list))}
+      label={t.addStatement(noun(list))}
+      onclick={() => onedit.insert(list, [...set], rowNodes(list).length)}
+    />
   </span>
 {/snippet}
 
@@ -469,6 +517,7 @@
     {@const actDepths = statementDepths(content.actions)}
     {@const actVisible = actDepths.flatMap((depth, i) => (depth === null ? [] : [i]))}
     {@const actShown = shownIndices('actions', actVisible)}
+    {@const actMarks = insertMarks('actions')}
     {@const actShownSet = new Set(actShown)}
     {@const actVisibleSet = new Set(actVisible)}
     {@const actHiddenSel = [...actSel].filter(
@@ -477,6 +526,7 @@
     {@const condSel = selection.conditions}
     {@const condVisible = content.conditions.map((_, i) => i)}
     {@const condShown = shownIndices('conditions', condVisible)}
+    {@const condMarks = insertMarks('conditions')}
     {@const condShownSet = new Set(condShown)}
     {@const condVisibleSet = new Set(condVisible)}
     {@const condHiddenSel = [...condSel].filter(
@@ -516,7 +566,10 @@
           />
         {/if}
         <ol class="statements" class:has-selection={condSel.size > 0}>
-          {#each condShown as i (i)}
+          {#each marksBetween(condMarks, -1, condShown[0] ?? Infinity) as n (n)}
+            {@render pendingInsertRow(0)}
+          {/each}
+          {#each condShown as i, p (i)}
             {@const condition = content.conditions[i]}
             {@render stmtRow(
               'conditions',
@@ -527,6 +580,9 @@
               condition.disabled,
               condition.span?.start.line ?? '?',
             )}
+            {#each marksBetween(condMarks, i, condShown.at(p + 1) ?? Infinity) as n (n)}
+              {@render pendingInsertRow(0)}
+            {/each}
           {/each}
           {#if content.conditions.length === 0}
             <li class="none">{t.none}</li>
@@ -566,7 +622,10 @@
           />
         {/if}
         <ol class="statements" class:has-selection={actSel.size > 0}>
-          {#each actShown as i (i)}
+          {#each marksBetween(actMarks, -1, actShown[0] ?? Infinity) as n (n)}
+            {@render pendingInsertRow(insertDepth(content.actions, n))}
+          {/each}
+          {#each actShown as i, p (i)}
             {@const action = content.actions[i]}
             {@render stmtRow(
               'actions',
@@ -577,6 +636,9 @@
               action.disabled,
               action.span?.start.line ?? '?',
             )}
+            {#each marksBetween(actMarks, i, actShown.at(p + 1) ?? Infinity) as n (n)}
+              {@render pendingInsertRow(insertDepth(content.actions, n))}
+            {/each}
           {/each}
           {#if actVisible.length === 0}
             <li class="none">{t.none}</li>

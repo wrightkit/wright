@@ -57,7 +57,7 @@
     {#each groups as [rule, group] (rule)}
       <h3 class="pending-rule">{group.name}</h3>
       <ul class="pending-list">
-        {#each group.items as change (`${change.list}:${change.index}`)}
+        {#each group.items as change (`${change.tag}:${change.list}:${change.index}`)}
           <li>
             <span class="pending-tag {change.tag}">{change.tag}</span>
             {change.list}[{change.index}]
