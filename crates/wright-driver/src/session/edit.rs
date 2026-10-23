@@ -80,14 +80,7 @@ impl CompilerSession {
     pub fn lint_fix(&mut self, write: bool) -> Envelope<LintResult> {
         let mut envelope = self.lint();
         if !write {
-            // stdin was already consumed by the lint pass; a second resolve
-            // would read EOF or block. Fixes still refuse directly: absent
-            // sources let `validate_transaction` answer `edit-input-stdin`.
-            let sources = if self.config.input.path().is_some() {
-                current_sources(&self.config)
-            } else {
-                None
-            };
+            let sources = current_path_sources_without_stdin(&self.config);
             let outcomes = self
                 .fix_outcomes(&envelope.result.findings, sources.as_ref())
                 .into_iter()
@@ -110,7 +103,7 @@ impl CompilerSession {
                 .count()
         });
         loop {
-            let sources = current_sources(&self.config);
+            let sources = current_path_sources_without_stdin(&self.config);
             let candidate = self
                 .fix_outcomes(&envelope.result.findings, sources.as_ref())
                 .into_iter()
@@ -169,7 +162,7 @@ impl CompilerSession {
                 }
             }
         }
-        let sources = current_sources(&self.config);
+        let sources = current_path_sources_without_stdin(&self.config);
         let mut seen: std::collections::HashSet<(String, String)> = applied
             .iter()
             .map(|outcome| (outcome.code.clone(), format!("{:?}", outcome.span)))
@@ -385,7 +378,10 @@ fn write_input_refusal(input: &InputSpec, operation: &str) -> Option<Diagnostic>
     ))
 }
 
-fn current_sources(config: &crate::config::SessionConfig) -> Option<BTreeMap<String, String>> {
+fn current_path_sources_without_stdin(
+    config: &crate::config::SessionConfig,
+) -> Option<BTreeMap<String, String>> {
+    config.input.path()?;
     input::resolve(config)
         .ok()
         .map(|resolved| BTreeMap::from([(resolved.display, resolved.text)]))

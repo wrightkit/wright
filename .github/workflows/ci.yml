@@ -30,6 +30,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check CI job coupling
+        run: |
+          python3 -m pip install PyYAML==6.0.3
+          python3 scripts/ci-jobs.py check
+          python3 scripts/test-ci-jobs.py
+
       - name: Filter paths
         id: filter
         uses: dorny/paths-filter@v4
@@ -314,14 +320,15 @@ jobs:
         run: cargo build --locked -p lpp-mock-provider
         working-directory: language-provider-protocol
 
-      # The LPP suites self-skip when this variable is unset — dropping it
-      # would turn the step green while running nothing.
       - name: Run LPP tests
         env:
           LPP_MOCK_PROVIDER: ${{ github.workspace }}/language-provider-protocol/target/debug/lpp-mock-provider
-        run: >-
-          cargo test --locked -p wright-lpp -p wright-driver
-          --test mock_provider --test lpp --test provider_edit
+        run: |
+          set -euo pipefail
+          mkdir -p target
+          cargo test --locked -p wright-lpp -p wright-driver \
+            --test mock_provider --test lpp --test provider_edit -- --ignored | tee target/lpp-tests.log
+          awk '/^test result: ok\./ { passed += $4 } END { print "Mock-provider tests passed:", passed; exit !(passed > 0) }' target/lpp-tests.log
 
   cli-behavior:
     name: CLI behavior
@@ -352,6 +359,7 @@ jobs:
 
   benchmark:
     name: Benchmarks
+    continue-on-error: true
     needs: [paths]
     if: needs.paths.outputs.opy == 'true'
     runs-on: ubuntu-latest
@@ -662,12 +670,6 @@ jobs:
         working-directory: ui
         run: npm run check:size
 
-  # Fails when any gating job failed or was cancelled, and when a job whose
-  # path condition selected it did not finish successfully — a skipped
-  # required job must never read as a pass.
-  # `benchmark` (Benchmarks) and `metrics-latency` (Metrics latency (trend))
-  # are deliberately NOT in `needs`: they are non-blocking evidence jobs.
-  # Every other job above must be listed here.
   ci-result:
     name: CI result
     if: always()
@@ -688,35 +690,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
       - name: Fail on failed, cancelled, or wrongly skipped jobs
         env:
           NEEDS: ${{ toJSON(needs) }}
           PATHS: ${{ toJSON(needs.paths.outputs) }}
         run: |
-          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          fail=0
-          echo "$NEEDS" | jq -e 'all(.[]; .result != "failure" and .result != "cancelled")' >/dev/null || fail=1
-          # Each job's required-when expression must mirror its own `if:` —
-          # change both together whenever a job's path condition changes.
-          required=$(jq -n --argjson p "$PATHS" '{
-            "rust-quality": ($p.rust_core == "true"),
-            "workshop-integration": ($p.rust_core == "true"),
-            "wright-cli-build": ($p.opy == "true" or $p.cli == "true"),
-            "opy-integration": ($p.opy == "true"),
-            "lpp-integration": ($p.lpp == "true"),
-            "cli-behavior": ($p.cli == "true"),
-            "metrics-shard": ($p.opy == "true"),
-            "metrics-drift": ($p.opy == "true"),
-            "dist-cli-build": ($p.dist == "true"),
-            "dist-validation": ($p.dist == "true"),
-            "agent-guide": ($p.agent_guide == "true"),
-            "ui": ($p.ui == "true")
-          }')
-          for job in $(jq -r 'keys[]' <<<"$required"); do
-            result=$(jq -r --arg job "$job" '.[$job].result // "missing"' <<<"$NEEDS")
-            if [[ "$(jq -r --arg job "$job" '.[$job]' <<<"$required")" == "true" && "$result" != "success" ]]; then
-              echo "::error::required job '$job' did not succeed for the changed paths: $result"
-              fail=1
-            fi
-          done
-          exit "$fail"
+          python3 -m pip install PyYAML==6.0.3
+          python3 scripts/ci-jobs.py result

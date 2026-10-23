@@ -17,6 +17,10 @@ export interface ChromeStrings {
   rulesCount: (count: number) => string
   /** The Diagnostics button tooltip and dialog title. */
   diagnostics: string
+  /** The "Only rules with findings" toolbar toggle's tooltip. */
+  onlyRulesWithFindings: string
+  /** A severity group's heading name in the Diagnostics dialog. */
+  severityName: (severity: 'error' | 'warning' | 'info') => string
   /** The Variables button tooltip and dialog title. */
   variables: string
   /** The pending-changes button tooltip and dialog title. */
@@ -70,8 +74,12 @@ export interface ChromeStrings {
   /** The rule-bar chevron aria labels. */
   expandRuleLabel: (name: string) => string
   collapseRuleLabel: (name: string) => string
+  /** A severity mark's aria label: the severity and the finding count. */
+  findingMarkLabel: (severity: string, count: number) => string
   /** The dialogs' loading state. */
   loading: string
+  /** The findings surfaces' unavailable state (a refusal or transport error). */
+  findingsUnavailable: string
   /** The Variables dialog's empty state. */
   noVariables: string
   /** The Diagnostics dialog's empty state. */
@@ -125,6 +133,9 @@ const enUS: ChromeStrings = {
   rulesRegion: 'Rules',
   rulesCount: (count) => `Rules (${count})`,
   diagnostics: 'Diagnostics',
+  onlyRulesWithFindings: 'Only rules with findings',
+  severityName: (severity) =>
+    severity === 'error' ? 'Errors' : severity === 'warning' ? 'Warnings' : 'Info',
   variables: 'Variables',
   pendingChanges: 'Pending changes',
   filterPlaceholder: 'Filter rules…',
@@ -159,7 +170,10 @@ const enUS: ChromeStrings = {
   collapseRule: 'Collapse rule',
   expandRuleLabel: (name) => `Expand ${name}`,
   collapseRuleLabel: (name) => `Collapse ${name}`,
+  findingMarkLabel: (severity, count) =>
+    `${severity}: ${count} ${count === 1 ? 'finding' : 'findings'}`,
   loading: 'Loading…',
+  findingsUnavailable: 'Diagnostics are unavailable:',
   noVariables: 'No variables or subroutines declared.',
   noDiagnostics: 'No diagnostics.',
   noPending: 'No pending changes.',
@@ -194,6 +208,9 @@ const zhCN: ChromeStrings = {
   rulesRegion: '规则',
   rulesCount: (count) => `规则（${count}）`,
   diagnostics: '诊断',
+  onlyRulesWithFindings: '仅有发现的规则',
+  severityName: (severity) =>
+    severity === 'error' ? '错误' : severity === 'warning' ? '警告' : '信息',
   variables: '变量',
   pendingChanges: '待定更改',
   filterPlaceholder: '筛选规则…',
@@ -228,7 +245,9 @@ const zhCN: ChromeStrings = {
   collapseRule: '折叠规则',
   expandRuleLabel: (name) => `展开 ${name}`,
   collapseRuleLabel: (name) => `折叠 ${name}`,
+  findingMarkLabel: (severity, count) => `${severity}：${count} 项发现`,
   loading: '正在加载…',
+  findingsUnavailable: '诊断不可用：',
   noVariables: '没有声明变量或子程序。',
   noDiagnostics: '没有诊断。',
   noPending: '没有待定更改。',

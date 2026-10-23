@@ -23,7 +23,7 @@
    * page never composes or writes Workshop text. A stale refusal clears
    * the staged edits and re-reads the program.
    */
-  import { Activity, FileText, List, Play, Plus } from '@lucide/svelte'
+  import { Activity, FileText, List, ListFilter, Play, Plus } from '@lucide/svelte'
   import { tick } from 'svelte'
   import { SvelteMap, SvelteSet } from 'svelte/reactivity'
   import { apply, call } from './lib/api'
@@ -46,6 +46,18 @@
     type StatementList,
     type StatementNode,
   } from './lib/edit'
+  import {
+    allFor,
+    badgeSeverities,
+    DEFAULT_GROUP_OPEN,
+    findingsFor,
+    hasFindingAtOrAbove,
+    lowestShownSeverity,
+    placeFinding,
+    placeFindings,
+    severityCounts,
+    type Severity,
+  } from './lib/findings'
   import { Names } from './lib/names'
   import RuleView from './lib/RuleView.svelte'
   import SimulatePanel from './lib/SimulatePanel.svelte'
@@ -55,12 +67,14 @@
     ruleStateFromError,
     ruleStateFromResponse,
     ruleStateFromSummary,
+    type RuleContent,
     type RuleState,
     type RuleSummary,
   } from './lib/view'
   import type {
     CostEstimateResult,
     EditStatementsResult,
+    Finding,
     LookupEntry,
     ProjectResult,
     TargetMetadataResult,
@@ -102,10 +116,30 @@
   // Open state is per rule, keyed by the listing id: any number of rules
   // stay open at once and a rule filtered out keeps its open state (#880).
   const openRules = new SvelteSet<number>()
+  // The row a finding reveal targets (§ In the dialog): the owning
+  // RuleView clears a column filter hiding it, scrolls it in, and
+  // flashes it once the statement rows have mounted; `nonce` re-arms
+  // each reveal.
+  let revealRow = $state<{
+    rule: number
+    list: StatementList
+    index: number
+    nonce: number
+  } | null>(null)
+  let revealNonce = 0
   let filter = $state('')
+  // The "Only rules with findings" toolbar toggle (#922, § In place ·
+  // Filter): off keeps every rule; on limits the list to rules with a
+  // finding at or above the lowest severity the button badges.
+  let onlyFindings = $state(false)
+  // The dialog's severity-heading state (§ In the dialog): error and
+  // warning open, info collapsed; the page holds it so the choice
+  // persists for the session across dialog opens.
+  const severityOpen = $state<Record<Severity, boolean>>({ ...DEFAULT_GROUP_OPEN })
   let fileName = $state<string | null>(null)
   let symbols = $state<unknown[] | null>(null)
-  let findings = $state<unknown[] | null>(null)
+  let findings = $state<Finding[] | null>(null)
+  let findingsError = $state<ToolErrorInfo | null>(null)
   let dialog = $state<'variables' | 'diagnostics' | 'pending' | 'simulate' | null>(null)
   // The loaded project and the simulation panel's hero options (#836):
   // `project` holds `inputIdentity` and the read-only settings tree the
@@ -140,10 +174,38 @@
   let costRequest: Promise<void> | null = null
   let pageEl: HTMLDivElement | undefined = $state()
 
+  const placedFindings = $derived.by(() => {
+    const contents = new Map<number, RuleContent>()
+    for (const entry of rules ?? []) {
+      if (entry.state.phase === 'ready') contents.set(entry.summary.id, entry.state.content)
+    }
+    return placeFindings(findings ?? [], contents)
+  })
+
+  // The Diagnostics button's badge set (§ In place · Toolbar): a count
+  // per badged severity, error first, info only alone.
+  const severityBadges = $derived.by(() => {
+    const counts = severityCounts(findings ?? [])
+    return badgeSeverities(findings ?? []).map((severity) => ({
+      severity,
+      count: counts[severity],
+    }))
+  })
+
+  // The toggle's floor: the lowest severity the button shows (§ Filter).
+  const shownFloor = $derived(lowestShownSeverity(findings ?? []))
+
   const filtered = $derived(
-    (rules ?? []).filter((entry) =>
-      entry.summary.name.toLowerCase().includes(filter.trim().toLowerCase()),
-    ),
+    (rules ?? [])
+      .filter(
+        (entry) =>
+          !onlyFindings ||
+          shownFloor === null ||
+          hasFindingAtOrAbove(findingsFor(placedFindings, entry.summary.id), shownFloor),
+      )
+      .filter((entry) =>
+        entry.summary.name.toLowerCase().includes(filter.trim().toLowerCase()),
+      ),
   )
 
   /** The rule the open statement editor's target belongs to. */
@@ -244,6 +306,7 @@
     // content cannot be expressed the call refuses wholesale, so the page
     // falls back to per-rule reads and keeps each refusal in place.
     if (debug) void loadElementCounts()
+    void loadFindings()
     const bulk = await call({ op: 'rules', all: true, content: true })
     if ('result' in bulk) {
       const result = bulk.result
@@ -314,6 +377,30 @@
     if (event.startsWith('subroutine:')) return event.slice('subroutine:'.length)
     if (namesVersion === 0) return ''
     return names.peek(event, ['event'])?.name ?? event
+  }
+
+  async function loadFindings() {
+    try {
+      const response = await call({ op: 'findings', all: true })
+      if ('result' in response) {
+        const result = response.result
+        findings = (
+          Array.isArray(result)
+            ? result
+            : ((result as { findings?: Finding[] }).findings ?? [])
+        ) as Finding[]
+        findingsError = null
+      } else {
+        findings = null
+        findingsError = response.error as ToolErrorInfo
+      }
+    } catch (error) {
+      findings = null
+      findingsError = {
+        code: 'endpoint-unreachable',
+        message: error instanceof Error ? error.message : String(error),
+      }
+    }
   }
 
   /**
@@ -429,33 +516,55 @@
   }
 
   function openDiagnostics() {
-    if (findings === null) {
-      void call({ op: 'findings', all: true }).then((response) => {
-        if ('result' in response) {
-          const result = response.result
-          findings = Array.isArray(result)
-            ? result
-            : ((result as { findings?: unknown[] }).findings ?? [])
-        }
-      })
-    }
+    if (findings === null) void loadFindings()
     void ensureCostEstimate()
     dialog = 'diagnostics'
   }
 
   /**
+   * A finding's row in its rule's body (§ In the dialog): the placed
+   * statement or null when the finding lands on the bar alone. The
+   * placement is recomputed against the open rule's loaded content — the
+   * reveal may run before `placedFindings` saw it ready.
+   */
+  function findingRow(finding: Finding): { list: StatementList; index: number } | null {
+    if (finding.rule === null) return null
+    const entry = (rules ?? []).find((item) => item.summary.id === finding.rule)
+    if (!entry || entry.state.phase !== 'ready') return null
+    const placement = placeFinding(finding, entry.state.content)
+    return placement.list === 'rule' ? null : { list: placement.list, index: placement.index }
+  }
+
+  /**
    * A dialog's reveal request (design.md § Dialogs): close the dialog,
    * open the rule's bar, and scroll it into view. A filter that would
-   * hide the target is dropped — the reveal has to land. `elementCount`
-   * indexes and `finding.rule` both name `rules` listing ids.
+   * hide the target is dropped — the reveal has to land — as is an
+   * "only findings" toggle the finding's severity does not reach.
+   * `elementCount` indexes and `finding.rule` both name `rules` listing
+   * ids. A located finding hands its row to the open RuleView, which
+   * drops a column filter hiding it, scrolls to it, and flashes it once
+   * (§ In the dialog).
    */
-  async function revealRule(id: number) {
+  async function revealFinding(finding?: Finding, id?: number) {
+    const target = finding?.rule ?? id
+    if (target === undefined || target === null) return
     dialog = null
-    if (!filtered.some((entry) => entry.summary.id === id)) filter = ''
-    openRules.add(id)
+    if (!filtered.some((entry) => entry.summary.id === target)) {
+      filter = ''
+      onlyFindings = false
+    }
+    openRules.add(target)
+    const row = finding !== undefined ? findingRow(finding) : null
+    // The slot scrolls at once; the row refines the position once the
+    // rule's body has mounted its statements (the name warm may still be
+    // out), and a column filter hiding it is dropped — the reveal has to
+    // land, like the rule-name filter above.
+    if (row !== null) {
+      revealRow = { rule: target, list: row.list, index: row.index, nonce: ++revealNonce }
+    }
     await tick()
     pageEl
-      ?.querySelector(`.rule-slot[data-rule-id="${id}"]`)
+      ?.querySelector<HTMLElement>(`.rule-slot[data-rule-id="${target}"]`)
       ?.scrollIntoView?.({ block: 'nearest' })
   }
 
@@ -573,7 +682,22 @@
 
   <div class="toolbar" role="toolbar" aria-label={t.rulesToolbar}>
     <span class="rule-count">{t.rulesCount(rules?.length ?? 0)}</span>
-    <SqButton title={t.diagnostics} icon={Activity} onclick={openDiagnostics} />
+    <SqButton title={t.diagnostics} icon={Activity} onclick={openDiagnostics}>
+      {#if severityBadges.length > 0}
+        <span class="severity-badges">
+          {#each severityBadges as badge (badge.severity)}
+            <span class="sev-badge severity-{badge.severity}">{badge.count}</span>
+          {/each}
+        </span>
+      {/if}
+    </SqButton>
+    <SqButton
+      title={t.onlyRulesWithFindings}
+      icon={ListFilter}
+      pressed={onlyFindings}
+      disabled={findings === null || findings.length === 0}
+      onclick={() => (onlyFindings = !onlyFindings)}
+    />
     <SqButton title={t.simulation} icon={Play} onclick={openSimulate} />
     <div class="end">
       <input
@@ -611,6 +735,12 @@
     </div>
   </div>
 
+  {#if findingsError}
+    <p class="refusal findings-refusal" role="alert">
+      {t.findingsUnavailable} <code>{findingsError.code}</code> {findingsError.message}
+    </p>
+  {/if}
+
   <section class="rule-list" aria-label={t.rulesRegion}>
     {#if loadError}
       <p class="refusal">{loadError}</p>
@@ -621,6 +751,7 @@
     {:else}
       {#each filtered as entry (entry.summary.id)}
         {@const isOpen = openRules.has(entry.summary.id)}
+        {@const ruleSlots = findingsFor(placedFindings, entry.summary.id)}
         <div class="rule-slot" data-rule-id={entry.summary.id}>
           <RuleBar
             name={entry.summary.name}
@@ -628,6 +759,7 @@
             disabled={entry.state.phase === 'ready' && entry.state.content.disabled}
             open={isOpen}
             elements={debug ? (elementCounts?.[entry.summary.id]) : undefined}
+            findings={allFor(ruleSlots)}
             {t}
             ontoggle={() => toggle(entry.summary.id)}
           />
@@ -639,6 +771,8 @@
                 {names}
                 {debug}
                 {pending}
+                ruleFindings={ruleSlots}
+                reveal={revealRow?.rule === entry.summary.id ? revealRow : null}
                 {t}
                 onedit={oneditFor(entry.summary.id)}
               />
@@ -653,11 +787,16 @@
     which={dialog === 'pending' || dialog === 'simulate' ? null : dialog}
     {symbols}
     {findings}
+    {findingsError}
     {costEstimate}
     {names}
     {t}
-    onreveal={(id) => void revealRule(id)}
+    onreveal={(rule, finding) => void revealFinding(finding, rule)}
     onclose={() => (dialog = null)}
+    groupOpen={severityOpen}
+    onGroupToggle={(severity, open) => {
+      severityOpen[severity] = open
+    }}
   />
 
   <SimulatePanel

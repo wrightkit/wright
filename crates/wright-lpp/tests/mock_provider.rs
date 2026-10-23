@@ -7,24 +7,6 @@
 //! opaque key, and a document tagged with an unserved language id is refused
 //! by the provider through the normal `invalidLanguage` error path.
 //!
-//! The provider binary is located through the `LPP_MOCK_PROVIDER`
-//! environment variable. When the variable is absent the tests are skipped
-//! with a clear reason; CI sets it (see `.github/workflows/ci.yml`) so the
-//! suite is REQUIRED there. Build the provider from the pinned
-//! `language-provider-protocol` commit with:
-//!
-//! ```text
-//! git clone https://github.com/wrightkit/language-provider-protocol
-//! git -C language-provider-protocol checkout 416b293e26e6fb2d29061608a493a7aecd2ce14f
-//! cargo build -p lpp-mock-provider
-//! ```
-//!
-//! then run:
-//!
-//! ```text
-//! LPP_MOCK_PROVIDER=language-provider-protocol/target/debug/lpp-mock-provider \
-//!   cargo test -p wright-lpp --test mock_provider
-//! ```
 
 #![allow(clippy::result_large_err)]
 
@@ -36,8 +18,6 @@ use wright_lpp::{
     TextEdit, WorkshopArtifact,
 };
 
-const PINNED_LPP_COMMIT: &str = "416b293e26e6fb2d29061608a493a7aecd2ce14f";
-
 const DEMO_LANGUAGE_ID: &str = "x-demo-lang";
 
 const DEMO_ARTIFACT_FORMAT: &str = "x-demo/puzzle-eval-v1";
@@ -47,18 +27,11 @@ const CLEAN_PUZZLE: &str = "puzzle clean {\n  target = 40\n  start = 10\n  ops {
 
 const BROKEN_PUZZLE: &str = "puzzle broken {\n  target = 40\n  start = 10\n  ops {\n    double: x => x * 2\n  }\n  solution = [ triple ]\n}";
 
-fn mock_provider_path() -> Option<PathBuf> {
-    match std::env::var("LPP_MOCK_PROVIDER") {
-        Ok(path) if !path.is_empty() => Some(PathBuf::from(path)),
-        _ => {
-            eprintln!(
-                "SKIPPED: LPP_MOCK_PROVIDER is not set; build the LPP mock provider \
-                 from the pinned language-provider-protocol commit {PINNED_LPP_COMMIT} \
-                 (cargo build -p lpp-mock-provider) and point LPP_MOCK_PROVIDER at it."
-            );
-            None
-        }
-    }
+fn mock_provider_path() -> PathBuf {
+    let path = std::env::var("LPP_MOCK_PROVIDER")
+        .expect("set LPP_MOCK_PROVIDER to the pinned LPP mock-provider binary");
+    assert!(!path.is_empty(), "LPP_MOCK_PROVIDER must not be empty");
+    PathBuf::from(path)
 }
 
 fn demo_document(uri: &str, text: &str) -> Document {
@@ -80,7 +53,7 @@ fn clean_document_set() -> DocumentSet {
 }
 
 fn provider() -> StdioLanguageProvider {
-    let path = mock_provider_path().expect("mock provider path");
+    let path = mock_provider_path();
     StdioLanguageProvider::spawn(&path, &[], std::time::Duration::from_secs(30))
         .expect("provider spawns")
 }
@@ -103,10 +76,8 @@ fn protocol_tuple(version: &str) -> (u32, u32) {
 }
 
 #[test]
+#[ignore = "requires LPP_MOCK_PROVIDER pointing to the pinned LPP mock provider"]
 fn initializes_and_negotiates_capabilities_with_x_demo_lang() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
     let (mut provider, result) = initialize();
     assert_eq!(result.protocol_version, "1.0");
     assert_eq!(result.server_info.name, "lpp-mock-provider");
@@ -132,10 +103,9 @@ fn initializes_and_negotiates_capabilities_with_x_demo_lang() {
 }
 
 #[test]
+#[ignore = "requires LPP_MOCK_PROVIDER pointing to the pinned LPP mock provider"]
 fn registry_lookup_is_by_opaque_language_id() {
-    let Some(path) = mock_provider_path() else {
-        return;
-    };
+    let path = mock_provider_path();
     let mut registry = ProviderRegistry::new();
     registry
         .register(ProviderConfig::new(DEMO_LANGUAGE_ID, path, Vec::new()))
@@ -167,10 +137,8 @@ fn registry_lookup_is_by_opaque_language_id() {
 }
 
 #[test]
+#[ignore = "requires LPP_MOCK_PROVIDER pointing to the pinned LPP mock provider"]
 fn check_reports_clean_and_broken_documents() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
     let (mut provider, _) = initialize();
 
     let clean = clean_document_set();
@@ -198,10 +166,8 @@ fn check_reports_clean_and_broken_documents() {
 }
 
 #[test]
+#[ignore = "requires LPP_MOCK_PROVIDER pointing to the pinned LPP mock provider"]
 fn compile_produces_an_opaque_artifact_and_refuses_on_errors() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
     let (mut provider, _) = initialize();
 
     let compiled = provider
@@ -243,10 +209,8 @@ fn compile_produces_an_opaque_artifact_and_refuses_on_errors() {
 }
 
 #[test]
+#[ignore = "requires LPP_MOCK_PROVIDER pointing to the pinned LPP mock provider"]
 fn reconstruct_roundtrips_an_artifact_and_refuses_unknown_formats() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
     let (mut provider, _) = initialize();
 
     let compiled = provider
@@ -284,10 +248,8 @@ fn reconstruct_roundtrips_an_artifact_and_refuses_unknown_formats() {
 }
 
 #[test]
+#[ignore = "requires LPP_MOCK_PROVIDER pointing to the pinned LPP mock provider"]
 fn symbols_definition_and_references_resolve_across_the_document() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
     let (mut provider, _) = initialize();
     let documents = clean_document_set();
 
@@ -353,10 +315,8 @@ fn symbols_definition_and_references_resolve_across_the_document() {
 }
 
 #[test]
+#[ignore = "requires LPP_MOCK_PROVIDER pointing to the pinned LPP mock provider"]
 fn rename_computes_source_edits_and_refuses_invalid_names_and_collisions() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
     let (mut provider, _) = initialize();
     let documents = clean_document_set();
     let uri = "file:///project/puzzle.xdl";
@@ -415,10 +375,8 @@ fn rename_computes_source_edits_and_refuses_invalid_names_and_collisions() {
 }
 
 #[test]
+#[ignore = "requires LPP_MOCK_PROVIDER pointing to the pinned LPP mock provider"]
 fn validate_edits_applies_the_normative_rules() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
     let (mut provider, _) = initialize();
     let document = demo_document("file:///project/puzzle.xdl", CLEAN_PUZZLE);
 
@@ -451,10 +409,8 @@ fn validate_edits_applies_the_normative_rules() {
 }
 
 #[test]
+#[ignore = "requires LPP_MOCK_PROVIDER pointing to the pinned LPP mock provider"]
 fn unserved_language_id_is_refused_by_the_provider() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
     let (mut provider, _) = initialize();
     let mut documents = DocumentSet::new();
     documents.insert(
@@ -478,10 +434,9 @@ fn unserved_language_id_is_refused_by_the_provider() {
 }
 
 #[test]
+#[ignore = "requires LPP_MOCK_PROVIDER pointing to the pinned LPP mock provider"]
 fn missing_capability_is_an_explicit_refusal_not_a_fallback() {
-    let Some(path) = mock_provider_path() else {
-        return;
-    };
+    let path = mock_provider_path();
     let mut registry = ProviderRegistry::new();
     registry
         .register(ProviderConfig::new(
@@ -517,10 +472,8 @@ fn missing_capability_is_an_explicit_refusal_not_a_fallback() {
 }
 
 #[test]
+#[ignore = "requires LPP_MOCK_PROVIDER pointing to the pinned LPP mock provider"]
 fn graceful_shutdown_exits_with_status_zero() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
     let mut provider = provider();
     provider.initialize(None).expect("initialize");
     provider.shutdown().expect("shutdown");
@@ -529,9 +482,6 @@ fn graceful_shutdown_exits_with_status_zero() {
 
 #[test]
 fn provider_crash_fails_requests_with_an_exit_status() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
     let (command, args): (&str, Vec<String>) = if cfg!(windows) {
         ("cmd", vec!["/C".to_string(), "exit 3".to_string()])
     } else {
@@ -565,10 +515,8 @@ fn spawn_failure_is_deterministic() {
 }
 
 #[test]
+#[ignore = "requires LPP_MOCK_PROVIDER pointing to the pinned LPP mock provider"]
 fn provider_without_shutdown_is_cleaned_up_on_drop() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
     let (provider, _) = initialize();
     drop(provider);
 }

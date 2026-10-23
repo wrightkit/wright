@@ -198,7 +198,7 @@ impl FindingSelection {
                     && self.rule.as_ref().is_none_or(|rule| rule == code)
                     && file_matcher
                         .as_ref()
-                        .is_none_or(|matcher| matcher.matches(path))
+                        .is_none_or(|matcher| matcher.matches_spelling_or_file_identity(path))
             })
             .collect();
         // #791: per-code counts describe the filtered set `max` is about
@@ -247,7 +247,7 @@ pub(crate) fn select_list<T>(
         .filter(|item| {
             matcher
                 .as_ref()
-                .is_none_or(|matcher| matcher.matches(path(item)))
+                .is_none_or(|matcher| matcher.matches_spelling_or_file_identity(path(item)))
                 && keep(item)
         })
         .collect();
@@ -338,7 +338,7 @@ pub(crate) fn file_error(
     let matcher = FileMatch::new(file, file_bases);
     if source_files
         .iter()
-        .any(|source| matcher.matches(Some(source.as_str())))
+        .any(|source| matcher.matches_spelling_or_file_identity(Some(source.as_str())))
     {
         return None;
     }
@@ -383,7 +383,7 @@ impl FileMatch {
         }
     }
 
-    fn matches(&self, path: Option<&str>) -> bool {
+    fn matches_spelling_or_file_identity(&self, path: Option<&str>) -> bool {
         let Some(path) = path else { return false };
         path == self.spelled
             || canonical_forms(Path::new(path), &self.bases)

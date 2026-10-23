@@ -402,10 +402,7 @@ fn self_update(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateEr
 
     let current = env!("CARGO_PKG_VERSION").to_string();
     let (target_version, client) = match requested {
-        Some(v) => {
-            parse_version(v)?;
-            (v.trim_start_matches('v').to_string(), None)
-        }
+        Some(v) => (v.to_string(), None),
         None => {
             let client = update_client()?;
             let version = resolve_latest(&client, &env_base_url())?;
@@ -413,12 +410,15 @@ fn self_update(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateEr
         }
     };
 
-    match compare_versions(&current, &target_version) {
-        Some(Ordering::Equal) => {
+    let current_version = parse_version(&current)?;
+    let parsed_target = parse_version(&target_version)?;
+    let target_version = target_version.trim_start_matches('v');
+    match current_version.cmp(&parsed_target) {
+        Ordering::Equal => {
             println!("wright {current} is already at version {target_version}");
             return Ok(exit::SUCCESS);
         }
-        Some(Ordering::Greater) => {
+        Ordering::Greater => {
             if check_only {
                 println!(
                     "installed wright {current} is newer than requested {target_version}; no update is needed"
@@ -429,15 +429,7 @@ fn self_update(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateEr
                 "requested version {target_version} is older than the installed version {current}; refusing to downgrade"
             )));
         }
-        Some(Ordering::Less) => {}
-        // `current` is `CARGO_PKG_VERSION` and `target_version` already
-        // parsed, so this arm is unreachable by construction — but a version
-        // outside the release grammar is a failure, never a panic (#641).
-        None => {
-            return Err(UpdateError::failed(format!(
-                "could not compare installed version '{current}' with '{target_version}'"
-            )));
-        }
+        Ordering::Less => {}
     }
 
     if check_only {
@@ -456,7 +448,7 @@ fn self_update(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateEr
     };
     install::install_version(
         &client,
-        &target_version,
+        target_version,
         platform,
         &env_base_url(),
         install_dir,

@@ -1,10 +1,13 @@
 <script lang="ts">
   import { ChevronDown, Plus, Square, Play, Trash2, X } from '@lucide/svelte'
+  import { tick } from 'svelte'
   import { SvelteSet } from 'svelte/reactivity'
   import SqButton from './SqButton.svelte'
   import Expr from './Expr.svelte'
+  import FindingMark from './FindingMark.svelte'
   import type { ChromeStrings } from './chrome'
   import type { Names } from './names'
+  import { mostSevere, SEVERITY_TOKEN, type RuleFindings } from './findings'
   import {
     keyFor,
     type BatchAction,
@@ -28,6 +31,8 @@
     names,
     debug,
     pending,
+    ruleFindings,
+    reveal,
     t,
     onedit,
   }: {
@@ -36,6 +41,14 @@
     names: Names
     debug: boolean
     pending: ReadonlyMap<string, PendingChange>
+    /** This rule's placed findings (`docs/ui/diagnostics.md § In place`). */
+    ruleFindings: RuleFindings
+    /**
+     * The row a finding reveal targets (§ In the dialog): a column
+     * filter hiding it is dropped, then the row scrolls in and flashes
+     * once; `nonce` re-arms each reveal.
+     */
+    reveal: { rule: number; list: StatementList; index: number; nonce: number } | null
     /** The session locale's chrome strings. */
     t: ChromeStrings
     onedit: {
@@ -130,6 +143,35 @@
     anchor = null
   }
 
+  /**
+   * A finding reveal (docs/ui/diagnostics.md § In the dialog): once the
+   * target row is rendered — the rule may still be warming its names
+   * when the click lands — a filter hiding it is dropped and it scrolls
+   * in and flashes once. The `nonce` re-arms the effect per reveal.
+   */
+  $effect(() => {
+    const target = reveal
+    if (target === null) return
+    void target.nonce
+    void namesReady
+    void tick().then(() => {
+      const el = root?.querySelector<HTMLElement>(
+        `.col[data-list="${target.list}"] .statement[data-index="${target.index}"]`,
+      )
+      if (!el) {
+        // Not rendered: either the names are still warming or the column
+        // filter hid it — clear the filter and let the flush retry.
+        if (filters[target.list] !== '') filters[target.list] = ''
+        return
+      }
+      el.scrollIntoView?.({ block: 'nearest' })
+      el.classList.remove('flash')
+      void el.offsetWidth
+      el.classList.add('flash')
+      el.addEventListener('animationend', () => el.classList.remove('flash'), { once: true })
+    })
+  })
+
   /** The flat-list indices that render as rows (`end` markers stay hidden). */
   function visibleIndices(list: StatementList): number[] {
     if (ruleState.phase !== 'ready') return []
@@ -163,16 +205,12 @@
       !el?.closest('input.sel, input.sel-all, input.col-filter')
     )
       return
-    // A column owns the gesture when the pointer is over it or the event's
-    // target sits inside it (the filter field keeps its own column's
-    // scope even when the pointer has moved off). The target must live in
-    // THIS rule's DOM — every open RuleView registers a window listener,
-    // so a `closest` hit in another instance would steal the gesture.
+    // Every open RuleView registers a window listener, so a column in a
+    // sibling rule's DOM leaves the gesture to that rule. The pointer
+    // column applies only when the event has no target column.
     const col = el?.closest('.col')
-    const list =
-      (col && root?.contains(col)
-        ? (col.getAttribute('data-list') as StatementList | null)
-        : null) ?? hoverCol
+    if (col && !root?.contains(col)) return
+    const list = (col?.getAttribute('data-list') as StatementList | null) ?? hoverCol
     if (!list) return
     const set = sel(list)
     const inFilter = el?.closest('input.col-filter') != null
@@ -191,6 +229,7 @@
       event.preventDefault()
       onedit.batch(list, [...set], 'delete')
     } else if (event.key === 'Escape') {
+      // Esc peels one layer at a time (docs/ui/selection.md § Keyboard).
       if (filters[list] !== '') {
         filters[list] = ''
         event.preventDefault()
@@ -241,8 +280,8 @@
 <svelte:window onkeydown={onkeydown} />
 
 <!-- The statement-row shell the two columns share: the checkbox, the
-     debug line number, the statement text, the pending tag, and the debug
-     node JSON. `depth` is the row's control-flow nesting level. -->
+     debug line number, the statement text, the pending tag, the findings
+     mark, and the debug node JSON. -->
 {#snippet stmtRow(
   list: StatementList,
   index: number,
@@ -254,14 +293,18 @@
 )}
   {@const set = sel(list)}
   {@const tag = tagFor(list, index)}
+  {@const rowFindings = ruleFindings[list].get(index) ?? []}
+  {@const rowSeverity = rowFindings.length > 0 ? mostSevere(rowFindings) : null}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
   <li
     class="statement"
+    data-index={index}
     class:disabled
     class:selected={set.has(index)}
     class:pending-change={tag === 'change'}
     class:pending-delete={tag === 'delete'}
-    style="--depth: {depth}"
+    class:has-findings={rowSeverity !== null}
+    style="--depth: {depth};{rowSeverity !== null ? ` --finding: var(--${SEVERITY_TOKEN[rowSeverity]})` : ''}"
     onclick={() => onedit.open(list, index)}
   >
     <input
@@ -277,6 +320,9 @@
     {#if debug}<span class="line-no" data-debug>{line}</span>{/if}
     <span class="statement-text"><Expr {node} {kinds} {names} /></span>
     {#if tag}<span class="pending-tag {tag}">{tag}</span>{/if}
+    {#if rowFindings.length > 0}
+      <FindingMark findings={rowFindings} {t} />
+    {/if}
     {#if debug}
       <details class="debug" data-debug>
         <summary>node</summary>

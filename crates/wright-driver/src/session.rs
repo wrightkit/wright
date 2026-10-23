@@ -840,11 +840,12 @@ impl CompilerSession {
     pub(crate) fn run_cost_comparison(&self) -> Option<cache::Comparison> {
         let loaded = self.loaded.as_ref()?;
         let run = self.cost_run(loaded);
-        if run.baseline.is_some() && !cache::baseline_exists(&run) {
+        let environment = cache::CacheEnvironment::from_env();
+        if run.baseline.is_some() && !cache::baseline_exists_in(&run, environment) {
             return None;
         }
         let snapshot = self.cost_snapshot(loaded)?;
-        cache::compare_and_record(&run, &snapshot)
+        cache::compare_and_record_in(&run, &snapshot, environment)
     }
 
     /// Whether the explicitly named `--baseline` exists — `compile` turns a
@@ -854,7 +855,8 @@ impl CompilerSession {
     pub(crate) fn named_baseline_missing(&self) -> Option<String> {
         let run = self.cost_run(self.loaded.as_ref()?);
         let name = run.baseline.as_deref()?;
-        (!cache::ci() && !cache::baseline_exists(&run)).then(|| name.to_string())
+        let environment = cache::CacheEnvironment::from_env();
+        (!environment.ci && !cache::baseline_exists_in(&run, environment)).then(|| name.to_string())
     }
 
     #[allow(unsafe_code)] // hotpath 0.28 emits `#[unsafe(export_name)]` statics
@@ -1351,15 +1353,12 @@ fn apply_profile(
 fn root_relative(path: Option<&Path>, root: &Path) -> Option<String> {
     let path = path?;
     let abs_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    // A single-component relative input (`loop.opy`) has an empty parent, so
-    // the resolved root is the empty path; canonicalizing it fails, so treat
-    // it as the cwd (its directory by definition).
-    let abs_root = match root.canonicalize() {
+    let canonical_root = match root.canonicalize() {
         Ok(root) => root,
         Err(_) if root.as_os_str().is_empty() => std::env::current_dir().ok()?,
         Err(_) => root.to_path_buf(),
     };
-    match abs_path.strip_prefix(&abs_root) {
+    match abs_path.strip_prefix(&canonical_root) {
         Ok(relative) if !relative.as_os_str().is_empty() => Some(relative.display().to_string()),
         _ => None,
     }

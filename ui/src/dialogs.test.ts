@@ -50,13 +50,15 @@ const finding = (
   severity: 'error' | 'warning' | 'info',
   rule: number | null,
   message = `${code} message`,
+  span: unknown = { file: 0, path: 'demo.ws', start: { line: 3, col: 5 }, end: { line: 3, col: 9 } },
+  action: number | null = null,
 ) => ({
   code,
   severity,
   message,
-  span: { file: 0, path: 'demo.ws', start: { line: 3, col: 5 }, end: { line: 3, col: 9 } },
+  span,
   rule,
-  action: null,
+  action,
   value: null,
   evidence: 'heuristic',
   boundedness: null,
@@ -306,6 +308,14 @@ describe('the Diagnostics dialog (#882)', () => {
     click(toolbarButton('Diagnostics'))
     await settle()
 
+    // One group per severity that has findings, most severe first; the
+    // heading carries the mark and the level count.
+    const groups = [...dialog().querySelectorAll('.severity-group')]
+    expect(groups).toHaveLength(2)
+    expect(groups[0].querySelector('.severity-heading.severity-error')).not.toBeNull()
+    expect(groups[1].querySelector('.severity-heading.severity-info')).not.toBeNull()
+    expect(groups[0].querySelector('.severity-count')?.textContent).toBe('(1)')
+
     const rows = [...dialog().querySelectorAll('.finding-list .finding')]
     expect(rows).toHaveLength(2)
     expect(rows[0].classList.contains('severity-error')).toBe(true)
@@ -432,5 +442,218 @@ describe('rule reveal (#882)', () => {
 
     expect(filter.value).toBe('')
     expect(isOpen(1)).toBe(true)
+  })
+})
+
+/**
+ * Severity levels (#922, docs/ui/diagnostics.md): the toolbar's badges
+ * and "Only rules with findings" toggle, and the dialog's grouped,
+ * toggling severity headings and row reveal.
+ */
+describe('severity levels (#922)', () => {
+  const toggle = () => toolbarButton('Only rules with findings')
+  const badges = () => [...host.querySelectorAll('.toolbar .sev-badge')]
+
+  it('badges the Diagnostics button per shown severity, error first', async () => {
+    api.handler = handlerFor(
+      {
+        findings: [
+          finding('an-error', 'error', 0),
+          finding('a-warning', 'warning', 1),
+          finding('info-one', 'info', 1),
+          finding('info-two', 'info', 1),
+        ],
+        costEstimate: costResult(),
+      },
+      [summaryFor(0, 'rule zero'), summaryFor(1, 'rule one')],
+    )
+
+    mountApp()
+    await settle()
+
+    // Info stays off the button while an error or warning is shown.
+    expect(badges().map((badge) => badge.textContent)).toEqual(['1', '1'])
+    expect(badges()[0].classList.contains('severity-error')).toBe(true)
+    expect(badges()[1].classList.contains('severity-warning')).toBe(true)
+  })
+
+  it('badges info only when no error or warning exists, and clears with no findings', async () => {
+    api.handler = handlerFor(
+      {
+        findings: [finding('info-one', 'info', 0), finding('info-two', 'info', 1)],
+        costEstimate: costResult(),
+      },
+      [summaryFor(0, 'rule zero'), summaryFor(1, 'rule one')],
+    )
+
+    mountApp()
+    await settle()
+    expect(badges()).toHaveLength(1)
+    expect(badges()[0].textContent).toBe('2')
+    expect(badges()[0].classList.contains('severity-info')).toBe(true)
+  })
+
+  it('shows no badge with no findings and none until findings load', async () => {
+    api.handler = handlerFor({ findings: [], costEstimate: costResult() }, [summaryFor(0, 'rule zero')])
+
+    mountApp()
+    await settle()
+    expect(badges()).toHaveLength(0)
+  })
+
+  it('groups findings by severity with error and warning open, info collapsed', async () => {
+    api.handler = handlerFor(
+      {
+        findings: [
+          finding('info-finding', 'info', 0),
+          finding('error-finding', 'error', 0),
+          finding('warning-finding', 'warning', 1),
+        ],
+        costEstimate: costResult(),
+      },
+      [summaryFor(0, 'rule zero'), summaryFor(1, 'rule one')],
+    )
+
+    mountApp()
+    await settle()
+    click(toolbarButton('Diagnostics'))
+    await settle()
+
+    const groups = [...dialog().querySelectorAll<HTMLDetailsElement>('.severity-group')]
+    expect(groups.map((group) => group.open)).toEqual([true, true, false])
+    const headings = groups.map((group) => group.querySelector('.severity-name')?.textContent)
+    expect(headings).toEqual(['Errors', 'Warnings', 'Info'])
+  })
+
+  it('keeps the heading toggle choice across dialog opens for the session', async () => {
+    api.handler = handlerFor(
+      {
+        findings: [finding('info-finding', 'info', 0), finding('error-finding', 'error', 0)],
+        costEstimate: costResult(),
+      },
+      [summaryFor(0, 'rule zero')],
+    )
+
+    mountApp()
+    await settle()
+    click(toolbarButton('Diagnostics'))
+    await settle()
+
+    // Open the collapsed info group, then close the dialog: the choice
+    // persists for the session.
+    const infoGroup = dialog().querySelector('.severity-heading.severity-info')!
+      .parentElement! as HTMLDetailsElement
+    infoGroup.querySelector('summary')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    // jsdom lacks the UA toggle; the component binds `open` one way, so
+    // emulate the toggle the browser would have run.
+    infoGroup.open = true
+    infoGroup.dispatchEvent(new Event('toggle'))
+    flushSync()
+    expect(infoGroup.open).toBe(true)
+
+    click(dialog().querySelector<HTMLButtonElement>('.dlg-foot .primary')!)
+    await settle()
+    click(toolbarButton('Diagnostics'))
+    await settle()
+
+    const reopened = [...dialog().querySelectorAll<HTMLDetailsElement>('.severity-group')]
+    expect(reopened.map((group) => group.open)).toEqual([true, true])
+  })
+
+  it('limits the rule list to findings at or above the lowest shown severity', async () => {
+    api.handler = handlerFor(
+      {
+        findings: [
+          finding('a-warning', 'warning', 1),
+          finding('an-info', 'info', 0),
+          finding('an-error', 'error', 2),
+        ],
+        costEstimate: costResult(),
+      },
+      [
+        summaryFor(0, 'info-only rule'),
+        summaryFor(1, 'warning rule'),
+        summaryFor(2, 'error rule'),
+        summaryFor(3, 'clean rule'),
+      ],
+    )
+
+    mountApp()
+    await settle()
+
+    expect(toggle().disabled).toBe(false)
+    click(toggle())
+    await settle()
+
+    // The lowest shown severity is warning — the info-only and clean
+    // rules leave the list.
+    expect(host.querySelectorAll('.rule-slot')).toHaveLength(2)
+    expect(slot(0)).toBeNull()
+    expect(slot(1)).not.toBeNull()
+    expect(slot(2)).not.toBeNull()
+    expect(slot(3)).toBeNull()
+    expect(toggle().getAttribute('aria-pressed')).toBe('true')
+
+    click(toggle())
+    await settle()
+    expect(host.querySelectorAll('.rule-slot')).toHaveLength(4)
+  })
+
+  it('keeps every rule under the toggle when info is the lowest shown severity', async () => {
+    api.handler = handlerFor(
+      {
+        findings: [finding('an-info', 'info', 0)],
+        costEstimate: costResult(),
+      },
+      [summaryFor(0, 'scored rule'), summaryFor(1, 'clean rule')],
+    )
+
+    mountApp()
+    await settle()
+    click(toggle())
+    await settle()
+
+    expect(slot(0)).not.toBeNull()
+    expect(slot(1)).toBeNull()
+  })
+
+  it('reveals a clicked finding\'s row and flashes it once', async () => {
+    const content = {
+      format: 'workshop-rs/rule-content-v1',
+      event: { id: 'ev.1' },
+      disabled: false,
+      conditions: [],
+      actions: [
+        { call: 'setGlobalVariable', args: [] },
+        { call: 'wait', args: [] },
+      ],
+    } as unknown as RuleContent
+    api.handler = handlerFor(
+      {
+        findings: [finding('while-without-wait', 'error', 1, 'a message', null, 1)],
+        costEstimate: costResult(),
+      },
+      [
+        summaryFor(0, 'rule zero'),
+        { id: 1, name: 'rule one', event: 'ev.1', span: null, content } as unknown as RuleSummary,
+      ],
+    )
+
+    mountApp()
+    await settle()
+    click(toolbarButton('Diagnostics'))
+    await settle()
+    click(dialog().querySelector<HTMLButtonElement>('button.finding')!)
+    await settle()
+
+    expect(dialog(), 'the dialog closed on reveal').toBeNull()
+    expect(isOpen(1)).toBe(true)
+
+    const row = slot(1)!.querySelector<HTMLElement>(
+      '.col[data-list="actions"] .statement[data-index="1"]',
+    )!
+    expect(row).not.toBeNull()
+    expect(row.classList.contains('flash')).toBe(true)
+    expect(vi.mocked(Element.prototype.scrollIntoView).mock.instances).toContain(row)
   })
 })

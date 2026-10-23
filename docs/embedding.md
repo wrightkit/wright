@@ -13,7 +13,6 @@ safe source-edit contracts, and the transport adapters
 | `wright_driver::{Envelope, CompileResult, CheckResult, AnalyzeResult, InspectResult, LintResult, Diagnostic, CompiledOutput}` | **stable** | `wright-result/v1` machine contract ([`docs/cli.md`](cli.md)) |
 | `wright_driver::service::{ToolService, ToolRequest, ToolResponse, Capabilities}` | **stable** | Session-aware tool contract `wright-agent/v1` ([`docs/agent-contract.md`](agent-contract.md)); capability discovery, queries, workflows, and validated mutation |
 | `wright_driver::edit::{SourceEdit, EditRange, EditTransaction, SourcePreview, EditValidation, validate_transaction}` | **stable** | Source-edit transactions; validated through the correct owner-backed project semantics (#128); `EditTransaction::apply` applies ranges against one original source snapshot |
-| `wright_driver::edit::{RenameRequest, rename_symbol}` | **deprecated** | `wright-embedding/v1` compatibility helpers retained for source compatibility (#514): a whole-file textual whole-word proposal with no semantic-identity guarantee. Strings, comments, and unrelated same-named symbols are not distinguished. There is no Wright-side semantic rename on the tool surface; a rename is a caller-proposed `EditTransaction` validated through `validateEditTransaction` (see below). The helpers may be removed only with a breaking embedding-contract transition |
 | `wright_driver::{input_identity, EMBEDDING_CONTRACT}` | **stable** | `wright-embedding/v1` |
 | Internal HIR/WIR arenas, parser/CST, emitter internals | **internal** | Never part of the public contract |
 | `wright serve` stdio/JSON-RPC/MCP adapters | **stable** | Thin mappings over `ToolService` and `wright-agent/v1`; `wright-serve` remains a workspace binary alias |
@@ -174,11 +173,7 @@ caller-proposed `EditTransaction` over the identifier spans `symbols`/`refs`
 report, validated through `validateEditTransaction` (raw Workshop) or
 `providerValidateEdit` (provider-owned source). Provider-backed rename still
 exists for editors only, through the LSP `textDocument/rename` path
-(`wright_driver::provider_edit::semantic_rename`). The deprecated
-`rename_symbol` helper remains only for
-`wright-embedding/v1` source compatibility. It is a whole-word textual
-proposal with no semantic-identity guarantee and is never a fallback for a
-refused validation. Raw HIR/WIR mutation is never public, and
+(`wright_driver::provider_edit::semantic_rename`). Raw HIR/WIR mutation is never public, and
 application/writing stays an explicit caller responsibility.
 
 ## Transports
@@ -203,9 +198,6 @@ omitted.
 * `wright-agent/v1`, `wright-result/v1`, and `wright-embedding/v1` are
   additive within major version 1: new optional fields and operations are
   allowed; removed or renamed fields/ops require a major version.
-  Deprecated `wright-embedding/v1` compatibility helpers such as
-  `RenameRequest`/`rename_symbol` follow the same rule. They may be
-  deleted only with an embedding-contract breaking transition.
 * Envelope `wright.version` + `wright.contract` identify the result producer;
   `ToolService::capabilities()` identifies the service and agent contract.
 * The release tarball's `version.json` is the authoritative artifact stamp.

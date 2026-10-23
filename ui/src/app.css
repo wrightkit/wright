@@ -198,6 +198,48 @@ select {
   filter: brightness(0.93);
 }
 
+/* A pressed toggle keeps an orange edge — the on state is a state, not
+   a second colour. */
+.sq.pressed {
+  box-shadow: inset 0 0 0 2px var(--orange);
+}
+
+/* The Diagnostics button's severity badges (docs/ui/diagnostics.md § In
+   place · Toolbar): one count badge per shown severity in its colour,
+   error first, stacked on the button's corner. */
+.severity-badges {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: flex;
+  gap: 2px;
+}
+
+.sev-badge {
+  min-width: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
+.sev-badge.severity-error {
+  background: var(--error);
+  color: var(--on-white);
+}
+
+.sev-badge.severity-warning {
+  background: var(--warn);
+  color: var(--on-white);
+}
+
+.sev-badge.severity-info {
+  background: var(--muted);
+  color: var(--on-white);
+}
+
 .sq:disabled {
   opacity: 0.45;
   cursor: default;
@@ -739,8 +781,65 @@ details.debug pre {
   color: var(--muted);
 }
 
-/* Findings: one per row in alternating shades, severity coloured. A
-   located finding is a button that reveals its rule. */
+/* Findings: grouped by severity under toggling headings (§ In the
+   dialog). Each group lists its findings one per row in alternating
+   shades, severity coloured. A located finding is a button that reveals
+   its rule. */
+.dialog.view .severity-group {
+  margin-bottom: 0.4rem;
+}
+
+.dialog.view .severity-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  list-style: none;
+}
+
+.dialog.view .severity-heading::-webkit-details-marker {
+  display: none;
+}
+
+.dialog.view .severity-heading::before {
+  content: '';
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 6px solid var(--muted);
+  transform: rotate(-90deg);
+}
+
+.dialog.view .severity-group[open] > .severity-heading::before {
+  transform: rotate(0deg);
+}
+
+.dialog.view .severity-heading .severity-count {
+  color: var(--muted);
+}
+
+.dialog.view .severity-heading.severity-error .severity-name {
+  color: var(--error);
+}
+
+.dialog.view .severity-heading.severity-warning .severity-name {
+  color: var(--warn);
+}
+
+.dialog.view .severity-heading.severity-info .severity-name {
+  color: var(--muted);
+}
+
+.dialog.view .finding-list {
+  margin: 0.15rem 0 0.5rem;
+}
+
 .dialog.view .finding-list li:nth-child(even) {
   background: var(--card);
 }
@@ -859,8 +958,18 @@ details.debug pre {
   opacity: 1;
 }
 
+.statement.has-findings {
+  box-shadow: inset 3px 0 0 var(--finding);
+}
+
 .statement.selected {
   box-shadow: inset 0 0 0 1px var(--gold);
+}
+
+.statement.has-findings.selected {
+  box-shadow:
+    inset 3px 0 0 var(--finding),
+    inset 0 0 0 1px var(--gold);
 }
 
 .statement.pending-change {
@@ -868,9 +977,40 @@ details.debug pre {
   background: color-mix(in srgb, var(--gold) 7%, transparent);
 }
 
+/* docs/ui/selection.md § Pending marks: the pending state owns the left
+   bar, so a pending row keeps the bar even while selected. */
+.statement.has-findings.selected.pending-change {
+  box-shadow:
+    inset 3px 0 0 var(--gold),
+    inset 0 0 0 1px var(--gold);
+}
+
 .statement.pending-delete {
   box-shadow: inset 3px 0 0 var(--error);
   text-decoration: line-through;
+}
+
+.statement.has-findings.selected.pending-delete {
+  box-shadow:
+    inset 3px 0 0 var(--error),
+    inset 0 0 0 1px var(--gold);
+}
+
+/* A finding reveal's one flash (docs/ui/diagnostics.md § In the dialog):
+   a gold ring brightens the row once, then clears. */
+@keyframes row-flash {
+  0% {
+    box-shadow: inset 0 0 0 2px var(--gold);
+    background: color-mix(in srgb, var(--gold) 22%, var(--bar));
+  }
+  100% {
+    box-shadow: inset 0 0 0 0 transparent;
+    background: var(--bar);
+  }
+}
+
+.statement.flash {
+  animation: row-flash 1s ease-out 1;
 }
 
 .pending-tag {
@@ -891,6 +1031,107 @@ details.debug pre {
 .pending-tag.delete {
   color: var(--error);
   border: 1px solid var(--error);
+}
+
+.finding-mark {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  cursor: default;
+}
+
+.severity-mark {
+  display: block;
+  flex: none;
+  fill: var(--muted);
+  stroke: var(--muted);
+}
+
+.severity-mark.severity-error {
+  fill: var(--error);
+  stroke: var(--error);
+}
+
+.severity-mark.severity-warning {
+  fill: var(--warn);
+  stroke: var(--warn);
+}
+
+.finding-count {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.finding-mark.severity-error .finding-count {
+  color: var(--error);
+}
+
+.finding-mark.severity-warning .finding-count {
+  color: var(--warn);
+}
+
+.finding-mark.severity-info .finding-count {
+  color: var(--muted);
+}
+
+.finding-card {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 5;
+  display: none;
+  min-width: 16rem;
+  max-width: 26rem;
+  padding: 0.4rem 0;
+  border-radius: 3px;
+  background: var(--dlg);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.45);
+  font-weight: 400;
+  text-align: left;
+  white-space: normal;
+}
+
+.finding-mark:hover .finding-card {
+  display: block;
+}
+
+.finding-card .card-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 0.1rem 0.6rem;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+}
+
+.finding-card .card-sev {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.finding-card .card-row.severity-error .card-sev {
+  color: var(--error);
+}
+
+.finding-card .card-row.severity-warning .card-sev {
+  color: var(--warn);
+}
+
+.finding-card .card-row.severity-info .card-sev {
+  color: var(--muted);
+}
+
+.finding-card .card-code {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  color: var(--dim);
+}
+
+.finding-card .card-msg {
+  grid-column: 1 / -1;
+  color: var(--text);
 }
 
 .column-actions {
