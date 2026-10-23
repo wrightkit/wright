@@ -1,11 +1,10 @@
-use std::sync::Arc;
-
 use serde_json::json;
 
 use crate::diag::Diagnostic;
-use crate::input;
 use crate::result::{AnalyzeResult, CheckResult, CompileResult, Envelope, InspectResult};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::session::Provenance;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::source_provider::document_sources;
 use crate::{CompilerSession, Loaded};
 use wright_analyzer::canonical::{
@@ -25,6 +24,7 @@ mod refusal;
 pub(crate) mod settings;
 mod simulate;
 mod stale_ids;
+mod state;
 
 /// The tool-service name and version.
 pub const SERVICE_NAME: &str = "wright-tool-service";
@@ -45,12 +45,8 @@ pub use crate::request::{
     Address, StatementEditChange, StatementEditRequest, StatementList, ToolRequest,
 };
 
-struct Snapshot {
-    loaded: Loaded,
-    semantic: Arc<SemanticService<'static>>,
-    lint_semantic: Option<SemanticService<'static>>,
-    fingerprint: input::DiskFingerprint,
-}
+pub use state::ServiceState;
+use state::Snapshot;
 
 /// The session-aware tool service.
 pub struct ToolService<'a> {
@@ -166,93 +162,7 @@ impl<'a> ToolService<'a> {
         )
     }
 
-    fn refresh(&mut self) -> Result<(), ToolErrorInfo> {
-        let Some(snapshot) = &self.snapshot else {
-            let loaded = self.session.load().map_err(Self::loader_error)?;
-            self.adopt(loaded);
-            if self.invalidated {
-                self.reloads += 1;
-                self.invalidated = false;
-            }
-            return Ok(());
-        };
-        let fingerprint = input::disk_fingerprint(&self.session.config, &snapshot.loaded.input);
-        if snapshot.fingerprint == fingerprint {
-            return Ok(());
-        }
-        let loaded = match self.session.reload() {
-            Ok(loaded) => loaded,
-            Err(diagnostic) => {
-                self.invalidate();
-                return Err(Self::loader_error(diagnostic));
-            }
-        };
-        self.adopt(loaded);
-        self.reloads += 1;
-        Ok(())
-    }
-
-    fn invalidate(&mut self) {
-        self.clear_snapshot();
-        self.invalidated = true;
-    }
-
-    fn clear_snapshot(&mut self) {
-        self.snapshot = None;
-    }
-
-    fn refresh_workflow(&mut self) {
-        let Some(snapshot) = &self.snapshot else {
-            return;
-        };
-        let fingerprint = input::disk_fingerprint(&self.session.config, &snapshot.loaded.input);
-        if snapshot.fingerprint == fingerprint {
-            return;
-        }
-        self.session.drop_loaded();
-        self.clear_snapshot();
-        self.reloads += 1;
-    }
-
-    fn adopt_session_snapshot(&mut self) {
-        if self.snapshot.is_none()
-            && let Some(loaded) = self.session.cached_loaded()
-        {
-            self.adopt(loaded);
-        }
-    }
-
-    fn loader_error(diagnostic: Diagnostic) -> ToolErrorInfo {
-        let mut error = ToolErrorInfo::carried(diagnostic.code, diagnostic.message);
-        error.fields = diagnostic.fields;
-        error
-    }
-
-    fn adopt(&mut self, loaded: Loaded) {
-        let semantic = self.session.shared_semantic(&loaded);
-        let lint_semantic = (!self.session.config.lint.rules.is_empty())
-            .then(|| semantic.with_lint_config(self.session.config.lint.clone()));
-        let fingerprint = input::disk_fingerprint(&self.session.config, &loaded.input);
-        self.generation += 1;
-        self.snapshot = Some(Snapshot {
-            loaded,
-            semantic,
-            lint_semantic,
-            fingerprint,
-        });
-    }
-
-    fn snapshot(&self) -> &Snapshot {
-        self.snapshot
-            .as_ref()
-            .expect("the refresh gate guarantees a snapshot")
-    }
-
-    fn snapshot_and_semantic(&self) -> (Loaded, Arc<SemanticService<'static>>) {
-        let snapshot = self.snapshot();
-        (snapshot.loaded.clone(), Arc::clone(&snapshot.semantic))
-    }
-
+    #[cfg(not(target_arch = "wasm32"))]
     fn provider_documents(
         &self,
         language_id: &str,
@@ -308,6 +218,15 @@ impl<'a> ToolService<'a> {
             ToolRequest::Capabilities => ToolResponse::Ok {
                 result: serde_json::to_value(self.capabilities()).expect("capabilities serialize"),
             },
+            // `compile` writes the emitted program to an output file —
+            // the WebAssembly build has no filesystem to write one
+            // (#959); the refusal names the absent capability.
+            #[cfg(target_arch = "wasm32")]
+            ToolRequest::Compile { .. } => refusal(
+                "output-unavailable",
+                "the WebAssembly build cannot write compile output to a file — compile runs on the native surfaces",
+            ),
+            #[cfg(not(target_arch = "wasm32"))]
             ToolRequest::Compile { output, force, to } => {
                 let envelope = self.session.compile_to(crate::CompileWrite {
                     dest: output
@@ -407,6 +326,15 @@ impl<'a> ToolService<'a> {
                     .validate_edit_transaction(sources.as_ref(), transaction),
             )
             .expect("serializes")),
+            // `providerValidateEdit` needs an LPP provider transport —
+            // native-only (ADR-0037 decision 5); the wasm build refuses
+            // with the absent capability named.
+            #[cfg(target_arch = "wasm32")]
+            ToolRequest::ProviderValidateEdit { .. } => refusal(
+                "source-provider-unavailable",
+                "'providerValidateEdit' requires the LPP provider transport — the WebAssembly build carries none",
+            ),
+            #[cfg(not(target_arch = "wasm32"))]
             ToolRequest::ProviderValidateEdit {
                 language_id,
                 documents,
@@ -542,6 +470,7 @@ impl<'a> ToolService<'a> {
     /// `wright_lpp::LanguageProvider` seam; process and JSON-RPC details
     /// stay inside `wright-lpp`. Unconfigured languages and missing
     /// capabilities refuse explicitly.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn language_provider(
         &self,
         language_id: &str,
@@ -549,6 +478,7 @@ impl<'a> ToolService<'a> {
         self.session.language_provider(language_id)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn run_provider_flow(
         &self,
         language_id: &str,

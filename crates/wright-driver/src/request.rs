@@ -1,5 +1,31 @@
 use serde::{Deserialize, Serialize};
 
+/// The LPP provider document set `providerValidateEdit` carries on native
+/// builds. The WebAssembly core keeps the wire shape so request bodies
+/// still deserialize identically, while the operation itself is refused —
+/// the provider transport is not part of the wasm build (#959, ADR-0037).
+#[cfg(target_arch = "wasm32")]
+mod lpp_documents {
+    use serde::{Deserialize, Serialize};
+    use std::collections::BTreeMap;
+
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    pub(crate) struct Document {
+        pub(crate) uri: String,
+        #[serde(rename = "languageId")]
+        pub(crate) language_id: String,
+        pub(crate) version: i64,
+        pub(crate) text: String,
+    }
+
+    pub(crate) type DocumentSet = BTreeMap<String, Document>;
+}
+
+#[cfg(target_arch = "wasm32")]
+use lpp_documents::DocumentSet;
+#[cfg(not(target_arch = "wasm32"))]
+use wright_lpp::DocumentSet;
+
 /// A semantic query target on the agent contract (#429): a numeric id or a
 /// declared name.
 ///
@@ -40,6 +66,9 @@ impl From<&str> for Address {
 /// A tool request: the owned query surface plus agent-oriented operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
+// The wasm-only `lpp_documents` shim is crate-private while the variant
+// field it types is public — deserialization is the shim's only job.
+#[cfg_attr(target_arch = "wasm32", allow(private_interfaces))]
 pub enum ToolRequest {
     /// Service identity, contract, and supported operations.
     Capabilities,
@@ -257,7 +286,7 @@ pub enum ToolRequest {
         /// when omitted, the session's loaded project supplies it — every
         /// member file read from disk at `version` 0, keyed by `file://` URI.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        documents: Option<wright_lpp::DocumentSet>,
+        documents: Option<DocumentSet>,
         /// The caller-proposed transaction (Wright-owned edit contract).
         transaction: crate::edit::EditTransaction,
         /// The caller's current text for every edited source, keyed by

@@ -11,6 +11,21 @@ use crate::result::{
 };
 
 impl CompilerSession {
+    /// Swap the text of a caller-held `InputSpec::Text` input (#959,
+    /// ADR-0037 decision 3): the host write path applies a validated
+    /// transaction to the in-memory source, and both the live and the
+    /// fixed configuration move together — the swap is not a
+    /// `session-config-changed` mutation. The stale load is dropped; the
+    /// next `load` reparses the new text. Non-`Text` inputs are untouched.
+    pub(crate) fn set_text_input(&mut self, text: String) {
+        for input in [&mut self.config.input, &mut self.fixed_config.input] {
+            if let InputSpec::Text { text: held, .. } = input {
+                *held = text.clone();
+            }
+        }
+        self.drop_loaded();
+    }
+
     /// `validateEditTransaction` (#434): apply `transaction` to the supplied
     /// current sources and, on raw Workshop input, reparse and validate the
     /// edited result through `workshop-rs`. When `sources` is absent (#472)
@@ -179,13 +194,17 @@ impl CompilerSession {
         let Some(findings) = findings.as_array() else {
             return Vec::new();
         };
+        #[cfg(not(target_arch = "wasm32"))]
         let provider = self.provider_fix_context();
+        #[cfg(target_arch = "wasm32")]
+        let provider: Option<Result<ProviderFixContext, Diagnostic>> = None;
         findings
             .iter()
             .filter_map(|finding| self.fix_outcome(finding, sources, provider.as_ref()))
             .collect()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn provider_fix_context(&self) -> Option<Result<ProviderFixContext, Diagnostic>> {
         let loaded = self.loaded.as_ref()?;
         (loaded.provenance == Provenance::Mapped).then(|| {
@@ -208,6 +227,7 @@ impl CompilerSession {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn provider_fix_validation(
         &self,
         context: &ProviderFixContext,
@@ -273,9 +293,12 @@ impl CompilerSession {
             };
         let validated = match provider {
             Some(Err(diagnostic)) => Err(vec![diagnostic.clone()]),
+            #[cfg(not(target_arch = "wasm32"))]
             Some(Ok(context)) => self
                 .provider_fix_validation(context, &transaction)
                 .map(|(previews, diagnostics)| (previews, diagnostics, Some(&context.sources))),
+            #[cfg(target_arch = "wasm32")]
+            Some(Ok(context)) => match *context {},
             None => {
                 let validation = crate::edit::validate_transaction(
                     &self.config,
@@ -326,11 +349,18 @@ struct ResolvedFix {
     previews: Vec<crate::edit::SourcePreview>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 struct ProviderFixContext {
     documents: wright_lpp::DocumentSet,
     sources: BTreeMap<String, String>,
     project_root: Option<String>,
 }
+
+/// The WebAssembly core never resolves a provider fix context — the LPP
+/// transport is not part of the build (ADR-0037); `Infallible` keeps the
+/// `Option<Result<…>>` plumbing type-correct without a dummy payload.
+#[cfg(target_arch = "wasm32")]
+type ProviderFixContext = std::convert::Infallible;
 
 fn write_input_refusal(input: &InputSpec, operation: &str) -> Option<Diagnostic> {
     let reason = match input {

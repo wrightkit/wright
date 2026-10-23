@@ -1,8 +1,14 @@
+mod diagnostics;
 mod edit;
+#[cfg(not(target_arch = "wasm32"))]
 mod protocol;
 mod registry;
 mod semantic;
 
+#[cfg(not(target_arch = "wasm32"))]
+use diagnostics::provider_error_diagnostic;
+use diagnostics::workshop_diag_for_provider_artifact;
+#[cfg(not(target_arch = "wasm32"))]
 use protocol::mutual_protocol_version;
 pub(crate) use semantic::*;
 use std::path::{Path, PathBuf};
@@ -20,6 +26,7 @@ use crate::diag::{
 };
 use crate::input::{self, InputTarget, ResolvedInput};
 use crate::input_identity;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::opy_provider;
 use crate::output::{CompileWrite, OutputDest, Overwrite};
 use crate::progress::{ProgressEvent, ProgressObserver, ProgressPhase};
@@ -357,6 +364,10 @@ impl CompilerSession {
         }
         .with_project_root(resolved.root.clone());
         let diagnostics_start = self.diagnostics.len();
+        // The LPP provider spawn path is native-only (ADR-0037 decision 5):
+        // an injected `SourceProvider` still serves the compile below on
+        // WebAssembly, but no process transport exists to create one.
+        #[cfg(not(target_arch = "wasm32"))]
         if self.source_provider.is_none() {
             let spawn = |session: &Self| {
                 session
@@ -632,6 +643,7 @@ impl CompilerSession {
     /// in-process compiler semantics. A session whose configuration changed
     /// after construction refuses through the LPP refusal channel with
     /// `refusalCode` `session-config-changed` (#511).
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn language_provider(
         &self,
         id: &str,
@@ -672,6 +684,7 @@ impl CompilerSession {
     /// itself uses, so callers handle one refusal contract. The provider
     /// process never outlives the request: graceful shutdown when possible,
     /// and the provider's drop guard terminates it otherwise.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn run_provider_flow(
         &self,
         language_id: &str,
@@ -983,6 +996,13 @@ impl CompilerSession {
         )
     }
 
+    #[cfg(target_arch = "wasm32")]
+    fn convert_opy(&mut self, _loaded: &Loaded) -> Result<String, ()> {
+        self.diagnostics.push(source_provider_unavailable());
+        Err(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     fn convert_opy(&mut self, loaded: &Loaded) -> Result<String, ()> {
         let locale = Self::locale_for(loaded);
         let artifact =
@@ -1217,50 +1237,6 @@ fn root_relative(path: Option<&Path>, root: &Path) -> Option<String> {
     }
 }
 
-fn provider_artifact_origin(resolved: &ResolvedInput) -> Origin {
-    Origin {
-        kind: "provider-artifact".to_string(),
-        locale: resolved.origin.locale.clone(),
-    }
-}
-
-fn workshop_diag_for_provider_artifact(
-    error: workshop_rs::WorkshopError,
-    resolved: &ResolvedInput,
-    mapped_files: &[String],
-) -> Diagnostic {
-    let mut diagnostic = workshop_diag(error, resolved);
-    if mapped_files.is_empty() {
-        if let Some(span) = &mut diagnostic.span {
-            span.path = "<provider-artifact>".to_string();
-        }
-        diagnostic.source = Some(provider_artifact_origin(resolved));
-    } else if let Some(span) = &mut diagnostic.span {
-        match mapped_files.get(span.file) {
-            Some(path) => {
-                span.path = root_relative(Some(Path::new(path)), &resolved.root)
-                    .unwrap_or_else(|| path.clone());
-            }
-            None => diagnostic.span = None,
-        }
-    }
-    if diagnostic.span.is_none() {
-        diagnostic.source = Some(provider_artifact_origin(resolved));
-    }
-    diagnostic
-}
-
-fn provider_error_diagnostic(error: wright_lpp::ProviderError, operation: &str) -> Diagnostic {
-    Diagnostic::carried_error(
-        crate::source_provider::provider_failure_code(&error),
-        crate::source_provider::provider_failure_stage(&error),
-        format!(
-            "the provider could not {} the artifact: {}",
-            operation, error
-        ),
-    )
-}
-
 fn map_issue(
     issue: &workshop_rs::rules::SemanticIssue,
     path: &Path,
@@ -1356,6 +1332,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn mutual_protocol_version_honors_the_target_floor() {
         let supported =
             |versions: &[&str]| versions.iter().map(|v| v.to_string()).collect::<Vec<_>>();

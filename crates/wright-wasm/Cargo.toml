@@ -1,0 +1,23 @@
+[package]
+name = "wright-wasm"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Wright's WebAssembly core: the wright-agent/v1 ToolService over in-memory Workshop text (ADR-0037)."
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "wright-core-parity"
+path = "src/bin/wright_core_parity.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+wright-driver.workspace = true

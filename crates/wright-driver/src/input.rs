@@ -113,14 +113,28 @@ pub fn resolve(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
     }
 }
 
-fn resolve_path(path: &Path, config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
-    let cwd = std::env::current_dir().map_err(|e| {
+/// The working directory inputs resolve against. The WebAssembly build has
+/// no filesystem working directory, so caller-held text and caller-named
+/// paths resolve against a fixed virtual root — absolute virtual paths keep
+/// their meaning and the host names its own sources (#959, ADR-0037).
+#[cfg(not(target_arch = "wasm32"))]
+fn invocation_cwd() -> Result<PathBuf, Diagnostic> {
+    std::env::current_dir().map_err(|e| {
         Diagnostic::error(
             "cwd-io",
             Stage::Discovery,
             format!("cannot determine the invocation working directory: {e}"),
         )
-    })?;
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn invocation_cwd() -> Result<PathBuf, Diagnostic> {
+    Ok(PathBuf::from("/"))
+}
+
+fn resolve_path(path: &Path, config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
+    let cwd = invocation_cwd()?;
     let path = absolute_from(&cwd, path);
     let metadata = std::fs::metadata(&path).map_err(|e| {
         Diagnostic::error(
@@ -365,13 +379,7 @@ fn resolve_text(
     config: &SessionConfig,
 ) -> Result<ResolvedInput, Diagnostic> {
     let text = strip_bom(text);
-    let cwd = std::env::current_dir().map_err(|e| {
-        Diagnostic::error(
-            "cwd-io",
-            Stage::Discovery,
-            format!("cannot determine the invocation working directory: {e}"),
-        )
-    })?;
+    let cwd = invocation_cwd()?;
     let path = path.map(|path| absolute_from(&cwd, path));
     let kind = match config.kind {
         SourceKind::Auto => match &path {
@@ -395,9 +403,19 @@ fn resolve_text(
                 .and_then(|path| path.parent().map(Path::to_path_buf))
         })
         .unwrap_or_else(|| cwd.clone());
+    // Display paths strip the invocation cwd — resolved here, not via
+    // `display_path`, because `std::env::current_dir` has no answer on
+    // WebAssembly (#959).
     let display = path
         .as_deref()
-        .map(display_path)
+        .map(|path| {
+            path.strip_prefix(&cwd)
+                .ok()
+                .filter(|rel| !rel.as_os_str().is_empty())
+                .unwrap_or(path)
+                .display()
+                .to_string()
+        })
         .unwrap_or_else(|| "<document>".to_string());
     let origin = origin_for(kind, config.locale.as_deref());
     Ok(ResolvedInput {
