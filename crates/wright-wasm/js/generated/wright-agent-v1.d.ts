@@ -533,7 +533,7 @@ export interface EditStatementsRequest {
    */
   snapshot?: number
   /**
-   * The statement edits. Every `rule`+`list`+`index` address names a position in the program before any edit in this request applies; two edits at the same address refuse `edit-duplicate-address`.
+   * The statement edits. Every `rule`+`list`+`index` address names a position in the program before any edit in this request applies; two edits at the same address refuse `edit-duplicate-address`. An edit whose result leaves a rule's `actions` block structure unbalanced — an opener without its `end`, an `end` without an open block, or an `else`/`elseIf` outside an open `if` — refuses `unbalanced-block`.
    *
    * @minItems 1
    */
