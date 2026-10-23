@@ -651,3 +651,234 @@
     <ArgHoverCard statement={hoverStmt} path={hoverPath} anchor={hoverAnchor} {names} {t} />
   {/if}
 </section>
+
+<style>
+  .event-rows {
+    display: flex;
+    flex-direction: column;
+    gap: var(--event-row-gap);
+    margin-bottom: var(--event-rows-below);
+  }
+
+  .event-row {
+    display: grid;
+    grid-template-columns: 3fr 1fr;
+    gap: var(--event-row-gap);
+  }
+
+  .event-label {
+    display: flex;
+    align-items: center;
+    min-height: var(--event-row-height);
+    box-sizing: border-box;
+    padding: var(--event-label-pad);
+    background: var(--bar);
+    border-radius: 3px;
+  }
+
+  .event-value {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+    min-height: var(--event-row-height);
+    box-sizing: border-box;
+    padding: var(--event-label-pad);
+    background: var(--white);
+    color: var(--on-white);
+    border-radius: 3px;
+  }
+
+  .event-value :global(svg) {
+    flex: none;
+  }
+
+  .rule-cols {
+    display: grid;
+    align-items: start;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--cols-gap);
+  }
+
+  @media (max-width: 900px) {
+    .rule-cols {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .rule-view h3 {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--dlg);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+    margin: 0 0 var(--col-head-below);
+    padding-bottom: var(--col-head-below);
+    border-bottom: var(--col-head-line) solid
+      color-mix(in srgb, var(--text) 55%, transparent);
+    font-size: var(--col-head-size);
+    font-weight: 400;
+  }
+
+  .rule-view h3 .sel-all {
+    margin: 0 4px 0 0;
+    flex: none;
+  }
+
+  .rule-view h3 .col-count {
+    color: var(--muted);
+  }
+
+  .rule-view .col-filter {
+    box-sizing: border-box;
+    width: 100%;
+    height: var(--form-ctl-height);
+    margin: 0 0 var(--stmt-gap);
+    padding: 0 var(--stmt-pad-inline);
+    border: 0;
+    border-radius: 3px;
+    background: var(--white);
+    color: var(--on-white);
+    font-size: var(--stmt-text);
+  }
+
+  .rule-view .col-filter::placeholder {
+    color: var(--dim);
+  }
+
+  .statements {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .statement {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: var(--stmt-min-height);
+    box-sizing: border-box;
+    padding: var(--stmt-pad-block) var(--stmt-pad-inline) var(--stmt-pad-block)
+      calc(var(--stmt-pad-inline) + var(--depth, 0) * var(--stmt-indent));
+    border-radius: 3px;
+    background: var(--bar);
+    margin-bottom: var(--stmt-gap);
+    cursor: pointer;
+  }
+
+  .statement-text {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--stmt-text);
+    white-space: pre-wrap;
+  }
+
+  .statement.disabled {
+    opacity: 0.5;
+    text-decoration: line-through;
+  }
+
+  .line-no {
+    flex: none;
+    font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 0.75rem;
+    color: var(--dim);
+  }
+
+  .none {
+    color: var(--muted);
+    padding: 0.3rem 0.6rem;
+  }
+
+  .statement .sel {
+    opacity: 0;
+    margin: 0;
+    flex: none;
+  }
+
+  .statement :global(.pending-tag),
+  .statement :global(.debug) {
+    margin-left: 0;
+  }
+
+  .statement:hover .sel,
+  .statements.has-selection .sel {
+    opacity: 1;
+  }
+
+  .statement.has-findings {
+    box-shadow: inset 3px 0 0 var(--finding);
+  }
+
+  .statement.selected {
+    box-shadow: inset 0 0 0 1px var(--gold);
+  }
+
+  .statement.has-findings.selected {
+    box-shadow:
+      inset 3px 0 0 var(--finding),
+      inset 0 0 0 1px var(--gold);
+  }
+
+  .statement.pending-change {
+    box-shadow: inset 3px 0 0 var(--gold);
+    background: color-mix(in srgb, var(--gold) 7%, transparent);
+  }
+
+  /* The staged `+` insert placeholder (docs/ui/selection.md § Pending
+     marks): the gold left bar an inserted row carries, with no checkbox
+     or click target, sitting where the row lands. */
+  .statement.pending-insert {
+    min-height: 1.7rem;
+    color: var(--muted);
+    cursor: default;
+  }
+
+  .statement.has-findings.selected.pending-change {
+    box-shadow:
+      inset 3px 0 0 var(--gold),
+      inset 0 0 0 1px var(--gold);
+  }
+
+  .statement.pending-delete {
+    box-shadow: inset 3px 0 0 var(--error);
+    text-decoration: line-through;
+  }
+
+  .statement.has-findings.selected.pending-delete {
+    box-shadow:
+      inset 3px 0 0 var(--error),
+      inset 0 0 0 1px var(--gold);
+  }
+
+  @keyframes row-flash {
+    0% {
+      box-shadow: inset 0 0 0 2px var(--gold);
+      background: color-mix(in srgb, var(--gold) 22%, var(--bar));
+    }
+    100% {
+      box-shadow: inset 0 0 0 0 transparent;
+      background: var(--bar);
+    }
+  }
+
+  .statement.flash {
+    animation: row-flash 1s ease-out 1;
+  }
+
+  .column-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+    font-size: 0.85rem;
+  }
+
+  .column-actions .sel-count {
+    color: var(--text);
+    margin-right: 4px;
+  }
+</style>

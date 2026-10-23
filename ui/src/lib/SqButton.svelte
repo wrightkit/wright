@@ -37,3 +37,49 @@
   {#if badge}<span class="sq-badge">{badge}</span>{/if}
   {@render children?.()}
 </button>
+
+<style>
+  .sq {
+    position: relative;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 3px;
+    background: var(--white);
+    color: var(--on-white);
+    cursor: pointer;
+    flex: none;
+  }
+
+  .sq-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    min-width: 18px;
+    padding: 0 4px;
+    border-radius: 9px;
+    background: var(--orange);
+    color: var(--white);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+  }
+
+  .sq:hover:not(:disabled) {
+    filter: brightness(0.93);
+  }
+
+  .sq.pressed {
+    box-shadow: inset 0 0 0 2px var(--orange);
+  }
+
+  .sq:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+</style>

@@ -800,3 +800,104 @@
     {/if}
   {/each}
 {/snippet}
+
+<style>
+  /* The editor's `editor`/`editor-title` classes land on the Dialog
+     wrapper's markup and the picker's `picker-ctl` on Bits UI markup,
+     so those selectors are global; the form rows are this file's. */
+  :global(.editor-title) {
+    font-style: italic;
+    font-size: 34px;
+    margin: 0 0 0.6rem;
+  }
+
+  .editor-disable {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin-bottom: 0.7rem;
+    color: var(--muted);
+  }
+
+  .editor-args {
+    margin-top: 0.7rem;
+    display: flex;
+    flex-direction: column;
+    gap: var(--form-row-gap);
+  }
+
+  .editor-arg {
+    display: flex;
+    align-items: center;
+    gap: var(--form-label-gap);
+  }
+
+  .editor-arg-label {
+    flex: 0 0 9rem;
+    min-height: var(--form-ctl-height);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    box-sizing: border-box;
+    color: var(--lbl);
+    font-size: 0.85rem;
+    text-align: right;
+  }
+
+  .editor-arg:focus-within .editor-arg-label {
+    color: var(--lbl-focus);
+  }
+
+  .editor-nested {
+    margin-left: var(--form-nest-indent);
+    padding-top: var(--form-row-gap);
+    padding-bottom: var(--form-nest-below);
+    border-top: var(--form-nest-line) solid rgb(255 255 255 / 0.12);
+    display: flex;
+    flex-direction: column;
+    gap: var(--form-row-gap);
+  }
+
+  .editor-input {
+    flex: 1;
+    min-width: 0;
+    min-height: var(--form-ctl-height);
+    box-sizing: border-box;
+    padding: 0 0.6rem;
+    border: 0;
+    border-radius: 3px;
+    background: var(--num);
+    color: var(--text);
+    font-size: 0.85rem;
+  }
+
+  .editor-input::placeholder {
+    color: var(--warn);
+  }
+
+  .editor-arg.unset .editor-input,
+  .editor-arg.unset :global(.picker-ctl) {
+    outline: 1px solid var(--warn);
+  }
+
+  .editor-arg.unset :global(.picker-ctl .placeholder) {
+    color: var(--warn);
+  }
+
+  .editor-arg :global(.picker-ctl) {
+    flex: 1;
+    min-width: 0;
+    min-height: var(--form-ctl-height);
+    box-sizing: border-box;
+    text-align: left;
+  }
+
+  .editor-arg-value {
+    color: var(--text);
+    font-size: 0.85rem;
+  }
+
+  .editor-arg-value.warn {
+    color: var(--warn);
+  }
+</style>

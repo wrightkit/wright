@@ -48,3 +48,66 @@
     </span>
   </button>
 </div>
+
+<style>
+  .rule-bar {
+    display: flex;
+    align-items: stretch;
+    gap: var(--chev-gap);
+  }
+
+  .chev {
+    display: inline-flex;
+    width: var(--chev-size);
+  }
+
+  .chev :global(svg) {
+    transition: transform 0.15s ease;
+  }
+
+  .chev.open :global(svg) {
+    transform: rotate(90deg);
+  }
+
+  .bar {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: var(--rule-bar-gap);
+    min-height: var(--rule-bar-height);
+    box-sizing: border-box;
+    border: 0;
+    border-radius: 3px;
+    background: var(--bar);
+    color: var(--text);
+    text-align: left;
+    padding: var(--rule-bar-pad);
+    cursor: pointer;
+  }
+
+  .bar:hover {
+    background: var(--bar-hover);
+  }
+
+  .bar.disabled .bar-name {
+    color: var(--dim);
+    text-decoration: line-through;
+  }
+
+  .bar-side {
+    margin-left: auto;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+
+  .bar-event {
+    color: var(--muted);
+  }
+
+  .bar-count {
+    font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+</style>

@@ -280,3 +280,253 @@
     <button type="button" class="primary" onclick={onclose}>{t.confirm}</button>
   {/snippet}
 </Dialog>
+
+<style>
+  :global(.dialog.view) .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+
+  :global(.dialog.view) .stat-card {
+    background: var(--card);
+    border-radius: 14px;
+    padding: 0.9rem 1rem;
+  }
+
+  :global(.dialog.view) .stat-card h3 {
+    margin: 0;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+
+  :global(.dialog.view) .stat-card .figure {
+    margin: 0.15rem 0 0;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid color-mix(in srgb, var(--text) 50%, transparent);
+    font-size: 1.8rem;
+    font-style: italic;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+
+  :global(.dialog.view) .stat-card .meter {
+    height: 0.45rem;
+    margin-top: 0.55rem;
+    border-radius: 3px;
+    background: rgb(0 0 0 / 0.35);
+    overflow: hidden;
+  }
+
+  :global(.dialog.view) .stat-card .meter span {
+    display: block;
+    height: 100%;
+    background: var(--orange);
+  }
+
+  :global(.dialog.view) .stat-card .meter span.over {
+    background: var(--error);
+  }
+
+  :global(.dialog.view) .stat-card .desc {
+    margin: 0.55rem 0 0;
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+
+  :global(.dialog.view) .stat-card .desc code {
+    color: var(--error);
+  }
+
+  :global(.dialog.view) .section-title {
+    margin: 0.25rem 0 0.4rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+
+  :global(.dialog.view) .top-rules,
+  :global(.dialog.view) .finding-list {
+    list-style: none;
+    margin: 0 0 0.75rem;
+    padding: 0;
+  }
+
+  :global(.dialog.view) .top-rules button {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    width: 100%;
+    padding: 0.35rem 0.6rem;
+    border: 0;
+    border-radius: 3px;
+    background: none;
+    color: var(--text);
+    text-align: left;
+  }
+
+  :global(.dialog.view) .top-rules button:hover {
+    background: var(--bar-hover);
+  }
+
+  :global(.dialog.view) .top-rules .count {
+    font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    color: var(--muted);
+  }
+
+  :global(.dialog.view) .severity-group {
+    margin-bottom: 0.4rem;
+  }
+
+  :global(.dialog.view) .severity-heading {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.2rem 0;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    list-style: none;
+  }
+
+  :global(.dialog.view) .severity-heading::-webkit-details-marker {
+    display: none;
+  }
+
+  :global(.dialog.view) .severity-heading::before {
+    content: '';
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 6px solid var(--muted);
+    transform: rotate(-90deg);
+  }
+
+  :global(.dialog.view) .severity-group[open] > .severity-heading::before {
+    transform: rotate(0deg);
+  }
+
+  :global(.dialog.view) .severity-heading .severity-count {
+    color: var(--muted);
+  }
+
+  :global(.dialog.view) .severity-heading.severity-error .severity-name {
+    color: var(--error);
+  }
+
+  :global(.dialog.view) .severity-heading.severity-warning .severity-name {
+    color: var(--warn);
+  }
+
+  :global(.dialog.view) .severity-heading.severity-info .severity-name {
+    color: var(--muted);
+  }
+
+  :global(.dialog.view) .finding-list {
+    margin: 0.15rem 0 0.5rem;
+  }
+
+  :global(.dialog.view) .finding-list li:nth-child(even) {
+    background: var(--card);
+  }
+
+  :global(.dialog.view) .finding {
+    display: grid;
+    grid-template-columns: auto auto 1fr;
+    gap: 0.1rem 0.6rem;
+    width: 100%;
+    padding: 0.45rem 0.6rem;
+    border: 0;
+    background: none;
+    color: var(--text);
+    text-align: left;
+    font-size: 0.85rem;
+  }
+
+  :global(.dialog.view) button.finding {
+    cursor: pointer;
+  }
+
+  :global(.dialog.view) button.finding:hover {
+    background: var(--bar-hover);
+  }
+
+  :global(.dialog.view) .finding .sev {
+    padding-top: 0.1rem;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+  }
+
+  :global(.dialog.view) .finding.severity-error .sev {
+    color: var(--error);
+  }
+
+  :global(.dialog.view) .finding.severity-warning .sev {
+    color: var(--warn);
+  }
+
+  :global(.dialog.view) .finding.severity-info .sev {
+    color: var(--muted);
+  }
+
+  :global(.dialog.view) .finding .code {
+    font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+    color: var(--dim);
+  }
+
+  :global(.dialog.view) .finding .loc {
+    grid-column: 1 / -1;
+    color: var(--muted);
+    font-size: 0.75rem;
+  }
+
+  :global(.dialog.view) .var-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+
+  :global(.dialog.view) .var-columns h3,
+  :global(.dialog.view) .var-subs h3 {
+    margin: 0 0 0.55rem;
+    text-align: center;
+    font-size: 0.95rem;
+  }
+
+  :global(.dialog.view) .var-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  :global(.dialog.view) .var-list li {
+    padding: 0.35rem 0.65rem;
+    border-radius: 3px;
+    background: var(--card);
+    font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+  }
+
+  :global(.dialog.view) .var-subs {
+    margin-top: 1rem;
+  }
+
+  :global(.dialog.view) .var-subs .var-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+</style>

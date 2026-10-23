@@ -180,3 +180,157 @@
     <button type="button" class="primary" onclick={onclose}>{t.close}</button>
   {/snippet}
 </Dialog>
+
+<style>
+  /* The dialog's `sim` class lands on Bits UI markup, so it is global;
+     the panel contents are this file's markup. */
+  :global(.dialog.sim) {
+    width: min(46rem, calc(100vw - 4rem));
+    max-width: 46rem;
+  }
+
+  .sim-body .room {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+  }
+
+  .sim-body .team-col h3 {
+    margin: 0 0 0.4rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+
+  .sim-body .slot {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.3rem;
+  }
+
+  .sim-body .slot-name {
+    flex: none;
+    width: 4.25rem;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+
+  .sim-body .slot.you .slot-name {
+    color: var(--gold);
+    font-weight: 600;
+  }
+
+  .sim-settings {
+    margin-top: 0.9rem;
+  }
+
+  .sim-body h3 {
+    margin: 0.6rem 0 0.3rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+
+  .sim-settings .settings-group {
+    background: var(--card);
+    border-radius: 3px;
+    padding: 0.45rem 0.6rem;
+    margin-bottom: 0.35rem;
+  }
+
+  .settings-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    font-size: 0.85rem;
+  }
+
+  .settings-row.group {
+    color: var(--gold);
+    font-weight: 600;
+    margin-bottom: 0.15rem;
+  }
+
+  .settings-row .settings-name {
+    color: var(--muted);
+  }
+
+  .settings-row .settings-value {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sim-run {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.75rem;
+    margin-top: 0.9rem;
+  }
+
+  .sim-run .seconds-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+
+  .sim-run .seconds-field input {
+    width: 7rem;
+    padding: 0.3rem 0.6rem;
+    border: 0;
+    border-radius: 3px;
+    background: var(--white);
+    color: var(--on-white);
+    font-size: 0.85rem;
+  }
+
+  .sim-body .refusal {
+    margin: 0.75rem 0 0;
+  }
+
+  .sim-result {
+    margin-top: 0.9rem;
+  }
+
+  .sim-result .outcome {
+    background: var(--card);
+    border-radius: 3px;
+    padding: 0.55rem 0.75rem;
+    font-size: 0.9rem;
+  }
+
+  .sim-result .outcome strong {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.8rem;
+  }
+
+  .sim-result .outcome.incomplete {
+    border-left: 3px solid var(--gold);
+  }
+
+  .sim-result .outcome.incomplete span {
+    color: var(--muted);
+    margin-left: 0.5rem;
+    font-size: 0.8rem;
+  }
+
+  .sim-result .kv {
+    background: var(--card);
+    border-radius: 3px;
+    padding: 0.45rem 0.6rem;
+    margin-bottom: 0.35rem;
+  }
+
+  .sim-result .kv-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    font-size: 0.85rem;
+  }
+</style>

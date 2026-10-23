@@ -87,3 +87,25 @@
     >
   </div>
 </Dialog>
+
+<style>
+  .pending-rule {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin: 0.9rem 0 0.2rem;
+  }
+
+  .pending-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .pending-list li {
+    padding: 0.15rem 0;
+    font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+  }
+</style>

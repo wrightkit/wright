@@ -114,3 +114,83 @@
     </Combobox.Content>
   </Combobox.Portal>
 </Combobox.Root>
+
+<style>
+  /* The trigger, popover, and options are Bits UI markup, so these
+     selectors are global; only the value span is this file's markup. */
+  :global(.picker-ctl) {
+    flex: 1;
+    min-width: 0;
+    padding: 0.3rem 0.6rem;
+    border: 0;
+    border-radius: 3px;
+    background: var(--white);
+    color: var(--on-white);
+    text-align: left;
+    font-size: 0.85rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  :global(.picker-ctl) .placeholder {
+    color: var(--muted);
+  }
+
+  :global(.picker-pop) {
+    z-index: 60;
+    min-width: 14rem;
+    max-width: 22rem;
+    padding: 0.4rem;
+    border-radius: 3px;
+    background: var(--white);
+    color: var(--on-white);
+    box-shadow: 0 8px 28px rgb(0 0 0 / 0.45);
+  }
+
+  :global(.picker-filter) {
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 0.3rem;
+    padding: 0.3rem 0.5rem;
+    border: 1px solid color-mix(in srgb, var(--on-white) 25%, transparent);
+    border-radius: 2px;
+    background: var(--white);
+    color: var(--on-white);
+    font-size: 0.85rem;
+  }
+
+  :global(.picker-list) {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    max-height: 14rem;
+    overflow-y: auto;
+  }
+
+  /* Shared with the row context menu's items (`RowMenu`). */
+  :global(.picker-option) {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.3rem 0.5rem;
+    border: 0;
+    background: transparent;
+    color: var(--on-white);
+    text-align: left;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+
+  :global(.picker-option:hover),
+  :global(.picker-option[data-highlighted]),
+  :global(.picker-option[data-selected]) {
+    background: color-mix(in srgb, var(--orange) 22%, var(--white));
+  }
+
+  :global(.picker-empty) {
+    padding: 0.3rem 0.5rem;
+    color: var(--muted);
+  }
+</style>
