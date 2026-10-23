@@ -83,6 +83,22 @@ export function statementDepths(actions: Action[]): (number | null)[] {
   })
 }
 
+/**
+ * The display depth of a statement inserted at `index` — the running
+ * block depth `statementDepths` reaches just before `index`: `end`
+ * dedents it, an opener indents it, a branch leaves it. A staged insert
+ * mark renders at this depth so it still sits right when the anchor row
+ * or a hidden `end` tail cannot host it.
+ */
+export function insertDepth(actions: Action[], index: number): number {
+  let depth = 0
+  for (const action of actions.slice(0, index)) {
+    if (action.call === 'end') depth = Math.max(0, depth - 1)
+    else if (OPENERS.has(action.call)) depth += 1
+  }
+  return depth
+}
+
 /** Whether the identity is a `SLOT_n`/`ALL` EventPlayer member. */
 export function isEventPlayerMember(member: string): boolean {
   return member === 'ALL' || /^SLOT_\d+$/.test(member)

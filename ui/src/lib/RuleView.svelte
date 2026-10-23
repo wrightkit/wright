@@ -11,7 +11,6 @@
   import type { Names } from './names'
   import { mostSevere, SEVERITY_TOKEN, type RuleFindings } from './findings'
   import {
-    insertMarkKey,
     keyFor,
     type BatchAction,
     type PendingChange,
@@ -20,6 +19,7 @@
   import {
     blockRange,
     collectIdentities,
+    insertDepth,
     isEventPlayerMember,
     sameCallIndices,
     statementDepths,
@@ -263,6 +263,30 @@
     })
   }
 
+  /**
+   * The flat indices this rule's staged `insert` marks sit at,
+   * ascending — the `mark` pending entries, which are view state, not
+   * edits.
+   */
+  function insertMarks(list: StatementList): number[] {
+    return [...pending.values()]
+      .filter(
+        (change) => change.mark === true && change.rule === summary.id && change.list === list,
+      )
+      .map((change) => change.index)
+      .sort((a, b) => a - b)
+  }
+
+  /**
+   * The staged-insert marks landing in `(lo, hi]`. A mark renders after
+   * the nearest shown row below its index, so a hidden `end` tail or a
+   * filter-hidden anchor cannot swallow it; marks before the first shown
+   * row render at the column top.
+   */
+  function marksBetween(marks: number[], lo: number, hi: number): number[] {
+    return marks.filter((n) => n > lo && n <= hi)
+  }
+
   function onkeydown(event: KeyboardEvent) {
     if (event.defaultPrevented) return
     const el = event.target as HTMLElement | null
@@ -431,8 +455,9 @@
 {#snippet pendingInsertRow(depth: number)}
   <!-- The placeholder a staged `insert` renders: the gold pending mark
        (docs/ui/selection.md § Pending marks) and the tag, sitting where
-       the new row lands — after the selected row, or at the column
-       end. Not a statement row: no checkbox, no click target. -->
+       the new row lands — after the nearest shown row at or before its
+       index, so a hidden `end` tail or a filter-hidden anchor still
+       shows it. Not a statement row: no checkbox, no click target. -->
   <li class="statement pending-insert pending-change" data-insert-mark style="--depth: {depth};">
     <span class="pending-tag insert">insert</span>
   </li>
@@ -492,6 +517,7 @@
     {@const actDepths = statementDepths(content.actions)}
     {@const actVisible = actDepths.flatMap((depth, i) => (depth === null ? [] : [i]))}
     {@const actShown = shownIndices('actions', actVisible)}
+    {@const actMarks = insertMarks('actions')}
     {@const actShownSet = new Set(actShown)}
     {@const actVisibleSet = new Set(actVisible)}
     {@const actHiddenSel = [...actSel].filter(
@@ -500,6 +526,7 @@
     {@const condSel = selection.conditions}
     {@const condVisible = content.conditions.map((_, i) => i)}
     {@const condShown = shownIndices('conditions', condVisible)}
+    {@const condMarks = insertMarks('conditions')}
     {@const condShownSet = new Set(condShown)}
     {@const condVisibleSet = new Set(condVisible)}
     {@const condHiddenSel = [...condSel].filter(
@@ -539,7 +566,10 @@
           />
         {/if}
         <ol class="statements" class:has-selection={condSel.size > 0}>
-          {#each condShown as i (i)}
+          {#each marksBetween(condMarks, -1, condShown[0] ?? Infinity) as n (n)}
+            {@render pendingInsertRow(0)}
+          {/each}
+          {#each condShown as i, p (i)}
             {@const condition = content.conditions[i]}
             {@render stmtRow(
               'conditions',
@@ -550,15 +580,10 @@
               condition.disabled,
               condition.span?.start.line ?? '?',
             )}
-            {#if pending.has(insertMarkKey(summary.id, 'conditions', i + 1))}
+            {#each marksBetween(condMarks, i, condShown.at(p + 1) ?? Infinity) as n (n)}
               {@render pendingInsertRow(0)}
-            {/if}
+            {/each}
           {/each}
-          {#if
-            content.conditions.length === 0 &&
-            pending.has(insertMarkKey(summary.id, 'conditions', 0))}
-            {@render pendingInsertRow(0)}
-          {/if}
           {#if content.conditions.length === 0}
             <li class="none">{t.none}</li>
           {/if}
@@ -597,7 +622,10 @@
           />
         {/if}
         <ol class="statements" class:has-selection={actSel.size > 0}>
-          {#each actShown as i (i)}
+          {#each marksBetween(actMarks, -1, actShown[0] ?? Infinity) as n (n)}
+            {@render pendingInsertRow(insertDepth(content.actions, n))}
+          {/each}
+          {#each actShown as i, p (i)}
             {@const action = content.actions[i]}
             {@render stmtRow(
               'actions',
@@ -608,13 +636,10 @@
               action.disabled,
               action.span?.start.line ?? '?',
             )}
-            {#if pending.has(insertMarkKey(summary.id, 'actions', i + 1))}
-              {@render pendingInsertRow(actDepths[i]!)}
-            {/if}
+            {#each marksBetween(actMarks, i, actShown.at(p + 1) ?? Infinity) as n (n)}
+              {@render pendingInsertRow(insertDepth(content.actions, n))}
+            {/each}
           {/each}
-          {#if actVisible.length === 0 && pending.has(insertMarkKey(summary.id, 'actions', 0))}
-            {@render pendingInsertRow(0)}
-          {/if}
           {#if actVisible.length === 0}
             <li class="none">{t.none}</li>
           {/if}
