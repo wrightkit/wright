@@ -4,6 +4,7 @@
   import { SvelteSet } from 'svelte/reactivity'
   import SqButton from './SqButton.svelte'
   import Expr from './Expr.svelte'
+  import ArgHoverCard from './ArgHoverCard.svelte'
   import FindingMark from './FindingMark.svelte'
   import RowMenu from './components/RowMenu.svelte'
   import type { ChromeStrings } from './chrome'
@@ -75,6 +76,98 @@
   let anchor = $state<{ list: StatementList; index: number; extent: number } | null>(null)
   let hoverCol = $state<StatementList | null>(null)
   let root: HTMLElement | undefined = $state()
+
+  /**
+   * The argument hover card (docs/ui/editor.md § Hover card): after
+   * 450 ms over an `.arg` token the card opens under it; leaving the
+   * argument, clicking, or scrolling hides it. Hovering also marks the
+   * token's `.arg-hovered` outline — the same outline the editor's
+   * click would open. `hoverPath`/`hoverAnchor`/`hoverStmt` carry what
+   * the card reads; the timer only arms `showCard`.
+   */
+  const HOVER_DELAY_MS = 450
+  let hoverTimer: ReturnType<typeof setTimeout> | null = null
+  // A DOM element and its box are held as plain references, not rune
+  // state — they are only read by the handlers, never rendered.
+  let hoveredEl: HTMLElement | null = null
+  let showCard = $state(false)
+  let hoverAnchor = $state<{ left: number; bottom: number } | null>(null)
+  let hoverStmt = $state<Node | null>(null)
+  let hoverPath = $state<number[]>([])
+
+  function clearHover() {
+    if (hoverTimer !== null) {
+      clearTimeout(hoverTimer)
+      hoverTimer = null
+    }
+    hoveredEl?.classList.remove('arg-hovered')
+    hoveredEl = null
+    showCard = false
+    hoverAnchor = null
+    hoverStmt = null
+    hoverPath = []
+  }
+
+  /**
+   * The `.arg` token under the pointer, with the statement it belongs
+   * to: `data-path` on the token gives the argument's path and the
+   * row's `data-index`/`data-list` finds the statement node. Only a
+   * `.arg` that resolves to a call-node root arms the card.
+   */
+  function armHover(arg: HTMLElement) {
+    clearHover()
+    const row = arg.closest<HTMLElement>('.statement')
+    const col = arg.closest<HTMLElement>('.col')
+    if (!row || !col || ruleState.phase !== 'ready') return
+    const list = col.dataset.list as StatementList
+    const index = Number(row.dataset.index)
+    const node =
+      list === 'conditions'
+        ? ruleState.content.conditions[index]?.value
+        : ruleState.content.actions[index]
+    if (!node || typeof node !== 'object' || !('args' in node)) return
+    const path = (arg.dataset.path ?? '')
+      .split('.')
+      .filter(Boolean)
+      .map(Number)
+    if (path.length === 0) return
+    hoveredEl = arg
+    arg.classList.add('arg-hovered')
+    hoverStmt = node
+    hoverPath = path
+    hoverTimer = setTimeout(() => {
+      hoverTimer = null
+      if (hoveredEl) {
+        const rect = hoveredEl.getBoundingClientRect()
+        hoverAnchor = { left: rect.left, bottom: rect.bottom }
+        showCard = true
+      }
+    }, HOVER_DELAY_MS)
+  }
+
+  /** Delegated pointer tracking: enter an `.arg` to arm, leave it to clear. */
+  function onpointerover(event: PointerEvent) {
+    const arg = (event.target as HTMLElement).closest?.('.arg') as HTMLElement | null
+    if (arg === hoveredEl) return
+    if (arg && root?.contains(arg)) armHover(arg)
+    else clearHover()
+  }
+
+  $effect(() => {
+    const el = root
+    if (!el) return
+    el.addEventListener('pointerover', onpointerover)
+    el.addEventListener('pointerleave', clearHover)
+    window.addEventListener('scroll', clearHover, true)
+    el.addEventListener('pointerdown', clearHover)
+    return () => {
+      el.removeEventListener('pointerover', onpointerover)
+      el.removeEventListener('pointerleave', clearHover)
+      window.removeEventListener('scroll', clearHover, true)
+      el.removeEventListener('pointerdown', clearHover)
+      if (hoverTimer !== null) clearTimeout(hoverTimer)
+    }
+  })
   let filters = $state<Record<StatementList, string>>({ conditions: '', actions: '' })
   $effect(() => {
     void summary.id
@@ -491,5 +584,8 @@
         </ol>
       </div>
     </div>
+  {/if}
+  {#if showCard && hoverStmt !== null && hoverAnchor !== null}
+    <ArgHoverCard statement={hoverStmt} path={hoverPath} anchor={hoverAnchor} {names} {t} />
   {/if}
 </section>
