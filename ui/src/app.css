@@ -1168,7 +1168,8 @@ details.debug pre {
 
 .editor-title {
   font-style: italic;
-  font-size: 1.05rem;
+  /* § Form · Title: the call name, 34 px italic. */
+  font-size: 34px;
   margin: 0 0 0.6rem;
 }
 
@@ -1178,15 +1179,6 @@ details.debug pre {
   gap: 0.45rem;
   margin-bottom: 0.7rem;
   color: var(--muted);
-}
-
-.editor-statement {
-  padding: 0.5rem 0.75rem;
-  background: var(--card);
-  border: 1px solid rgb(255 255 255 / 0.15);
-  border-radius: 4px;
-  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  font-size: 0.88rem;
 }
 
 .editor-foot {
@@ -1492,6 +1484,10 @@ details.debug pre {
   gap: var(--form-row-gap);
 }
 
+/* The editor's argument rows (docs/ui/editor.md § Form): a `--lbl` label
+   cell per parameter, the slot's control beside it, and a `call`
+   argument's own parameters nested under a 2 px rule. The label turns
+   `--lbl-focus` while its control has focus. */
 .editor-arg {
   display: flex;
   align-items: center;
@@ -1505,9 +1501,45 @@ details.debug pre {
   align-items: center;
   justify-content: flex-end;
   box-sizing: border-box;
-  color: var(--muted);
+  color: var(--lbl);
   font-size: 0.85rem;
   text-align: right;
+}
+
+.editor-arg:focus-within .editor-arg-label {
+  color: var(--lbl-focus);
+}
+
+.editor-nested {
+  margin-left: var(--form-nest-indent);
+  padding-top: var(--form-row-gap);
+  padding-bottom: var(--form-nest-below);
+  border-top: var(--form-nest-line) solid rgb(255 255 255 / 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--form-row-gap);
+}
+
+.editor-input {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--form-ctl-height);
+  box-sizing: border-box;
+  padding: 0 0.6rem;
+  border: 0;
+  border-radius: 3px;
+  background: var(--num);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.editor-input::placeholder {
+  color: var(--warn);
+}
+
+.editor-arg.unset .editor-input,
+.editor-arg.unset .picker-ctl {
+  outline: 1px solid var(--warn);
 }
 
 .editor-arg .picker-ctl {
@@ -1519,6 +1551,10 @@ details.debug pre {
 }
 
 .editor-arg-value {
-  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  color: var(--text);
   font-size: 0.85rem;
+}
+
+.editor-arg-value.warn {
+  color: var(--warn);
 }

@@ -157,7 +157,13 @@
   // Staged statement edits keyed `rule:list:index`; the map is `$state`
   // so staging a change re-renders the marks and the toolbar count.
   let pending = $state<Map<string, PendingChange>>(new SvelteMap())
-  let editTarget = $state<{ rule: number; list: StatementList; index: number } | null>(null)
+  let editTarget = $state<{
+    rule: number
+    list: StatementList
+    index: number
+    /** The clicked argument's `args` path, when the editor opens on it. */
+    argPath?: number[]
+  } | null>(null)
   let submitting = $state(false)
   let submitRefusal = $state<Refusal[] | null>(null)
   // Bumped when the bars' event-name warm lands so `peek` re-reads; the
@@ -574,8 +580,8 @@
    * open the target is the rule that issued the call.
    */
   const oneditFor = (rule: number) => ({
-    open: (list: StatementList, index: number) => {
-      editTarget = { rule, list, index }
+    open: (list: StatementList, index: number, argPath?: number[]) => {
+      editTarget = { rule, list, index, argPath }
     },
     batch: (list: StatementList, indices: number[], action: BatchAction) => {
       const entry = (rules ?? []).find((item) => item.summary.id === rule)
@@ -592,11 +598,14 @@
     },
   })
 
-  function editorSave(disabled: boolean, args?: Node[]) {
+  function editorSave(disabled: boolean, args?: Node[], value?: Node) {
     if (!editNode || !editEntry || !editTarget) return
     const statement = clean(editNode.node)
     if (args !== undefined && editTarget.list === 'actions') {
       ;(statement as { args?: Node[] }).args = args
+    }
+    if (value !== undefined && editTarget.list === 'conditions') {
+      ;(statement as { value?: Node }).value = value
     }
     if (disabled) statement.disabled = true
     stageStatement(
@@ -830,6 +839,7 @@
     staged={editStaged?.tag === 'change' ? editStaged.statement : undefined}
     {t}
     locale={sessionLocale}
+    focusPath={editTarget?.argPath ?? null}
     onsave={editorSave}
     onclose={() => (editTarget = null)}
   />

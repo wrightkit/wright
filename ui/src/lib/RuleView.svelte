@@ -52,7 +52,7 @@
     /** The session locale's chrome strings. */
     t: ChromeStrings
     onedit: {
-      open: (list: StatementList, index: number) => void
+      open: (list: StatementList, index: number, argPath?: number[]) => void
       batch: (list: StatementList, indices: number[], action: BatchAction) => void
     }
   } = $props()
@@ -318,7 +318,12 @@
       }}
     />
     {#if debug}<span class="line-no" data-debug>{line}</span>{/if}
-    <span class="statement-text"><Expr {node} {kinds} {names} /></span>
+    <span class="statement-text"><Expr
+        {node}
+        {kinds}
+        {names}
+        onarg={(argPath) => onedit.open(list, index, argPath)}
+      /></span>
     {#if tag}<span class="pending-tag {tag}">{tag}</span>{/if}
     {#if rowFindings.length > 0}
       <FindingMark findings={rowFindings} {t} />

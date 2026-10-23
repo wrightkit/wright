@@ -10,6 +10,11 @@
    * scope word from the `global` structural entry, a player variable
    * reads `owner.name` — and an unresolvable call id renders verbatim;
    * the page invents no names.
+   *
+   * When `onarg` is supplied each argument span carries its `Action.args`
+   * path (`data-arg-path`) and a click opens the statement editor at that
+   * slot (docs/ui/editor.md § Form · Open) — the same path the hover
+   * outline names (#924).
    */
   import Expr from './Expr.svelte'
   import { enumIdentity, kindClass, nodeClass, VALUE_KINDS } from './nodes'
@@ -20,7 +25,17 @@
     node,
     names,
     kinds = VALUE_KINDS,
-  }: { node: Node; names: Names; kinds?: string[] } = $props()
+    onarg,
+    path = [],
+  }: {
+    node: Node
+    names: Names
+    kinds?: string[]
+    /** An argument's click handler, passed its `Action.args` path. */
+    onarg?: (path: number[], event: MouseEvent) => void
+    /** The rendered node's path inside the statement's `args` tree. */
+    path?: number[]
+  } = $props()
 
   function callName(call: string): { name: string; kind: string | undefined } {
     const resolved = names.peek(call, kinds)
@@ -30,6 +45,28 @@
 
 {#snippet punct(text: string)}
   <span class="tok punctuation">{text}</span>
+{/snippet}
+
+<!--
+  One argument token: wrapped in a span carrying its `args` path so a
+  click opens the editor on that slot. `stopPropagation` keeps the click
+  from re-opening the row's own handler.
+-->
+{#snippet arg(child: Node, childPath: number[])}
+  {#if onarg}
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <span
+      class="arg"
+      data-arg-path={childPath.join('.')}
+      onclick={(event) => {
+        event.stopPropagation()
+        onarg(childPath, event)
+      }}
+      ><Expr node={child} {names} {onarg} path={childPath} /></span
+    >
+  {:else}
+    <Expr node={child} {names} path={childPath} />
+  {/if}
 {/snippet}
 
 {#if typeof node === 'number'}
@@ -55,28 +92,41 @@
   <!-- The scope label's canonical display name is the lowercase `global`
        keyword; the editor shows the capitalized form (`Global.score`). -->
   {@const label = (scope?.name ?? 'Global').replace(/^\p{Ll}/u, (c) => c.toUpperCase())}
-  <span class="tok {kindClass(scope?.kind)}">{label}</span>{@render punct('.')}<Expr
-    node={node.args[0]}
-    {names}
-  />
+  <span class="tok {kindClass(scope?.kind)}">{label}</span>{@render punct('.')}{@render arg(
+    node.args[0],
+    [...path, 0],
+  )}
 {:else if node.call === 'playerVariable'}
-  <Expr node={node.args[0]} {names} />{@render punct('.')}<Expr node={node.args[1]} {names} />
+  {@render arg(node.args[0], [...path, 0])}{@render punct('.')}{@render arg(
+    node.args[1],
+    [...path, 1],
+  )}
 {:else if node.call === 'memberAccess'}
-  <Expr node={node.args[0]} {names} />{@render punct('.')}{#if typeof node.args[1] === 'object' && node.args[1] !== null && 'string' in node.args[1]}<span
-      class="tok variable">{node.args[1].string}</span
-    >{:else}<Expr node={node.args[1]} {names} />{/if}{#if node.args.length > 2}{@render punct(
+  {@render arg(node.args[0], [...path, 0])}{@render punct('.')}{#if typeof node.args[1] === 'object' && node.args[1] !== null && 'string' in node.args[1]}{#if onarg}<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions --><span
+        class="arg"
+        data-arg-path={[...path, 1].join('.')}
+        onclick={(event) => {
+          event.stopPropagation()
+          onarg([...path, 1], event)
+        }}><span class="tok variable">{node.args[1].string}</span></span>{:else}<span
+        class="tok variable"
+        >{node.args[1].string}</span
+      >{/if}{:else}{@render arg(node.args[1], [...path, 1])}{/if}{#if node.args.length > 2}{@render punct(
       '[',
-    )}<Expr node={node.args[2]} {names} />{@render punct(']')}{/if}
+    )}{@render arg(node.args[2], [...path, 2])}{@render punct(']')}{/if}
 {:else}
   {@const head = callName(node.call)}
   {@const cls = nodeClass(node, head.kind)}
   {#if head.kind === 'operator' && node.args.length === 2}
-    <Expr node={node.args[0]} {names} />
+    {@render arg(node.args[0], [...path, 0])}
     <span class="tok {cls}">{head.name}</span>
-    <Expr node={node.args[1]} {names} />
+    {@render arg(node.args[1], [...path, 1])}
   {:else if node.args.length === 0}
     <span class="tok {cls}">{head.name}</span>
   {:else}
-    <span class="tok {cls}">{head.name}</span>{@render punct('(')}{#each node.args as arg, i (i)}{#if i > 0}{@render punct(', ')}{/if}<Expr node={arg} {names} />{/each}{@render punct(')')}
+    <span class="tok {cls}">{head.name}</span>{@render punct('(')}{#each node.args as argNode, i (i)}{#if i > 0}{@render punct(', ')}{/if}{@render arg(
+        argNode,
+        [...path, i],
+      )}{/each}{@render punct(')')}
   {/if}
 {/if}

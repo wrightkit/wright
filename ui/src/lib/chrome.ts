@@ -101,6 +101,11 @@ export interface ChromeStrings {
   disabled: string
   /** The statement editor's confirm button. */
   ok: string
+  /** The editor's empty-slot placeholder (a required argument with no value). */
+  unset: string
+  /** The two boolean literals the editor's boolean picker lists. */
+  trueLiteral: string
+  falseLiteral: string
   /** The simulation button's tooltip and the panel's title (#836). */
   simulation: string
   /** The two room column headings. */
@@ -186,6 +191,9 @@ const enUS: ChromeStrings = {
   conditionTitle: 'Condition',
   disabled: 'Disabled',
   ok: 'OK',
+  unset: 'unset',
+  trueLiteral: 'True',
+  falseLiteral: 'False',
   simulation: 'Simulation',
   simTeam1: 'Team 1',
   simTeam2: 'Team 2',
@@ -260,6 +268,9 @@ const zhCN: ChromeStrings = {
   conditionTitle: '条件',
   disabled: '禁用',
   ok: '确定',
+  unset: '未设置',
+  trueLiteral: '真',
+  falseLiteral: '假',
   simulation: '模拟',
   simTeam1: '队伍 1',
   simTeam2: '队伍 2',
