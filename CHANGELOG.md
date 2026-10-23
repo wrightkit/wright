@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.35.0](https://github.com/wrightkit/wright/compare/v0.34.0...v0.35.0) (2026-10-23)
+
+
+### Features
+
+* **ui:** argument hover card on statement rows ([#950](https://github.com/wrightkit/wright/issues/950)) ([61ad922](https://github.com/wrightkit/wright/commit/61ad922de9bbc5268f6b76dc4538b02f53b697d7)), closes [#924](https://github.com/wrightkit/wright/issues/924)
+* **ui:** insert a statement from the column heading ([#956](https://github.com/wrightkit/wright/issues/956)) ([3d72c23](https://github.com/wrightkit/wright/commit/3d72c2363f5df8351c0dbbb15b33fefa0e54e97e)), closes [#920](https://github.com/wrightkit/wright/issues/920)
+* **ui:** pickers for actions, values, enums, variables, and operators ([#957](https://github.com/wrightkit/wright/issues/957)) ([1ba467a](https://github.com/wrightkit/wright/commit/1ba467ac0f31a6973011609ea2e504d3453f93e2)), closes [#919](https://github.com/wrightkit/wright/issues/919)
+* **ui:** statement editor form for an existing statement ([#949](https://github.com/wrightkit/wright/issues/949)) ([4576068](https://github.com/wrightkit/wright/commit/4576068355048cd9071d7b50a1d9d9428b02dec9)), closes [#918](https://github.com/wrightkit/wright/issues/918)
+
 ## [0.34.0](https://github.com/wrightkit/wright/compare/v0.33.0...v0.34.0) (2026-10-23)
 
 
