@@ -29,6 +29,8 @@ Goal principle 1 makes `wright` the product the user runs. The goal keeps a gene
    - It serves the UI on a loopback address and opens it in the default browser.
    - It is not a hosted service, an editor extension, or a desktop shell. Those need their own distribution channel, and no user workflow needs them yet.
 
+   *Superseded by [ADR-0037](0037-web-editor-experiment.md): the editor moves to an experimental web application in the `editor` repository, served at `web.wrightkit.dev`, and `wright ui` retires at parity.*
+
 2. **Scope: raw Workshop projects, the same scope as ADR-0029.**
    - The UI shows rules, events, conditions, and actions from `rules` content (ADR-0024), and edits statements through `editStatements`.
    - Other inputs are refused with the owning implementation named, as `editStatements` refuses them.
@@ -44,6 +46,8 @@ Goal principle 1 makes `wright` the product the user runs. The goal keeps a gene
    - At startup it creates a random session token and passes it to the page in the URL fragment it opens. Every request must carry the token.
    - Requests whose `Host` or `Origin` is not the server's own loopback origin are refused, which blocks DNS rebinding and cross-site requests. The server sends no CORS headers.
 
+   *Superseded by [ADR-0037](0037-web-editor-experiment.md): the loopback endpoint is removed with `wright ui`.*
+
 5. **`wright ui` writes accepted edits; the page never touches files.** `editStatements` returns a validated transaction and writes nothing (ADR-0029). When the person submits, the host:
    - re-checks `inputIdentity` against the files on disk;
    - applies the transaction;
@@ -51,7 +55,11 @@ Goal principle 1 makes `wright` the product the user runs. The goal keeps a gene
 
    A stale identity is reported to the page and nothing is written. This is host behavior of `wright ui`, not a new `wright-agent/v1` operation.
 
+   *Superseded by [ADR-0037](0037-web-editor-experiment.md) decision 3: the WebAssembly core is the host and applies transactions to its in-memory sources.*
+
 6. **Ownership: the `wright` repository, in a top-level `ui/` directory.** The UI is user-facing tooling, and its assets ship inside the `wright` binary, so it does not get its own repository. Keeping it outside `crates/` keeps the Rust workspace free of Node tooling.
+
+   *Superseded by [ADR-0037](0037-web-editor-experiment.md): the editor moves to the `editor` repository, and the assets no longer ship inside `wright`.*
 
 7. **Stack: Svelte 5 in runes mode, TypeScript in strict mode, and Vite.**
    - **Svelte.** `$state` makes a deep tree of plain objects and arrays reactive in place, which matches how the editor mutates `rule-content-v1` nodes. `bind:` and component-scoped styles remove most of the prototype's hand-written form and style plumbing. The runtime is a few kilobytes, so size does not choose between small frameworks.
@@ -70,6 +78,8 @@ Goal principle 1 makes `wright` the product the user runs. The goal keeps a gene
    - A `ui` Cargo feature of `wright-cli` embeds them. Release builds enable the feature after building the assets.
    - Builds without the feature compile `wright ui` as a command that reports that this build has no UI and exits 2. Rust-only contributors and `cargo test` therefore need no Node toolchain.
    - The release archives, installers, and package-manager channels are unchanged: they carry the same single binary.
+
+   *Superseded by [ADR-0037](0037-web-editor-experiment.md): `wright` publishes a versioned WebAssembly core instead of embedding UI assets, and the `ui` feature is removed when `wright ui` retires.*
 
 10. **Verification.**
     - CI gains one UI job: `svelte-check`, unit tests, the production build, and a size budget of 100 KB gzipped for JavaScript and CSS together. A larger bundle fails the job.

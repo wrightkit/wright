@@ -51,9 +51,10 @@ its audit date.
 * [ADR-0029: Structured statement edits for raw Workshop](0029-structured-statement-edits.md)
 * [ADR-0030: One result model, three renderers, and the CLI/action boundary](0030-renderers-and-the-cli-action-boundary.md)
 * [ADR-0031: Paginated vocabulary listing for structured editors](0031-paginated-vocabulary-listing.md)
-* [ADR-0032: The structured Workshop editor: form factor, ownership, and stack](0032-structured-editor-form-factor.md)
+* [ADR-0032: The structured Workshop editor: form factor, ownership, and stack](0032-structured-editor-form-factor.md) _(decisions 1, 4, 5, 6, and 9 superseded by ADR-0037)_
 * [ADR-0033: The simulate operation in the driver and `wright-agent/v1`](0033-simulate-operation.md)
 * [ADR-0034: Snapshot-scoped numeric symbol and rule addresses](0034-snapshot-scoped-numeric-addresses.md)
 * [ADR-0035: One meaning per selector spelling](0035-cli-selector-vocabulary.md)
 * [ADR-0036: `wright ui` dependency policy](0036-ui-dependency-policy.md)
+* [ADR-0037: The structured editor moves to an experimental web application over a WebAssembly Wright core](0037-web-editor-experiment.md)
 * [Post-ADR-0010 decision inventory](post-0010-inventory.md)
