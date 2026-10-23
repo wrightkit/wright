@@ -1,15 +1,6 @@
-//! The `project` result's read-only projection of the program's settings
-//! block (#836): the simulation panel shows lobby settings verbatim and
-//! defaults its run length from a `matchTimeLimit` member when the block
-//! sets one.
-
 use serde_json::{Value, json};
 use workshop_rs::settings::{Settings, SettingsNode};
 
-/// The settings block as a tree of `{name, value?, children?}` rows:
-/// section names are the canonical keys (`main`, `lobby`, `workshop`),
-/// member names the catalog or authored spelling, and leaf values the
-/// emitted scalar text (`On`/`Off` for booleans).
 pub(crate) fn settings_json(settings: &Settings) -> Value {
     Value::Array(settings.children.iter().map(node_json).collect())
 }

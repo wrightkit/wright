@@ -1,6 +1,3 @@
-//! `listEntries` (ADR-0031): the owner's vocabulary of one kind in owner
-//! order, page by page, answered without a project.
-
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
@@ -53,7 +50,6 @@ fn refusal_code(response: ToolResponse) -> String {
     }
 }
 
-/// Every entry of a listing, following `nextCursor` to the last page.
 fn all_pages(
     service: &mut ToolService<'_>,
     kind: &str,
@@ -188,8 +184,6 @@ fn a_cursor_from_another_request_or_a_tampered_one_is_refused() {
     let page = ok(service.handle(&list("action", None, Some(10), None)));
     let cursor = page["nextCursor"].as_str().unwrap().to_string();
 
-    // Another kind, another locale, and another `within` each change the
-    // binding.
     assert_eq!(
         refusal_code(service.handle(&list("value", None, Some(10), Some(&cursor)))),
         "invalid-cursor"
@@ -207,8 +201,6 @@ fn a_cursor_from_another_request_or_a_tampered_one_is_refused() {
         "invalid-cursor"
     );
 
-    // A cursor that names an owner version other than the running one: the
-    // binding half is replaced.
     let (offset, _) = cursor.split_once('.').unwrap();
     let foreign = format!("{offset}.0000000000000000");
     assert_eq!(
@@ -222,7 +214,6 @@ fn a_cursor_from_another_request_or_a_tampered_one_is_refused() {
             "{garbage:?}"
         );
     }
-    // An offset past the end of the listing.
     let (_, binding) = cursor.split_once('.').unwrap();
     let past = format!("fffff.{binding}");
     assert_eq!(
@@ -260,7 +251,6 @@ fn malformed_requests_are_refused_without_a_listing() {
         refusal_code(service.handle(&list("enumMember", Some("NotADomain"), None, None))),
         "lookup.unknownWithin"
     );
-    // A callable identity is a `lookup` scope but not an enum domain.
     assert_eq!(
         refusal_code(service.handle(&list("enumMember", Some("createHudText"), None, None))),
         "lookup.unknownWithin"

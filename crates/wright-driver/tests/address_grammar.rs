@@ -1,8 +1,3 @@
-//! Rule and symbol address-grammar behavior through `ToolService`
-//! (ADR-0035): `NAME`/`NAME#N` rule addresses, `KIND:NAME` symbol
-//! addresses, and the subject-vs-filter refusal codes — the same
-//! semantics the CLI and `wright serve` share (ADR-0022).
-
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
@@ -115,7 +110,6 @@ rule ("dup") {
         }
     }
 
-    // ADR-0035: `references dup` resolves the variable, never the rules.
     for symbol in ["dup", "globalVariable:dup"] {
         let result = result_of(
             &mut service,
@@ -133,8 +127,6 @@ rule ("dup") {
         assert_eq!(result["references"].as_array().unwrap().len(), 3);
     }
 
-    // A near miss names the declared spelling once; a far miss names the
-    // listing operation instead (#567).
     for (request, needle) in [
         (
             ToolRequest::Usage {
@@ -183,10 +175,6 @@ rule ("dup") {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// #888: the served refusal composes the structured fields one shared
-// result carries — a candidate's `path:line:column` location from the
-// file table (never a bare file index) and the declared-name listing
-// bounded with its total, in the service's own operation spelling.
 #[test]
 fn refusals_render_locations_and_bounded_declared_names() {
     let path = temp_workshop(
@@ -231,8 +219,6 @@ rule ("tick") {
         !error.message.contains("{file:") && !error.message.contains(" at 0:"),
         "no placeholder or bare file index: {error:?}"
     );
-    // The candidate metadata rides along as structured fields (#888):
-    // resolved `path` beside the selectable `address`, never an index.
     let candidates = error.fields["candidates"].as_array().unwrap();
     assert_eq!(candidates.len(), 2);
     for (index, candidate) in candidates.iter().enumerate() {
@@ -245,8 +231,6 @@ rule ("tick") {
         assert!(candidate["line"].is_u64() && candidate["column"].is_u64());
     }
 
-    // Beyond the listing bound the refusal truncates the names, keeps the
-    // total, and the service renders the unbounded operation spelling.
     let many = temp_workshop(
         "many.ws",
         &(1..=25)
@@ -293,9 +277,6 @@ rule ("tick") {
     let _ = std::fs::remove_dir_all(many.parent().unwrap());
 }
 
-// `editStatements` rule targets are rule addresses — the bare duplicate
-// name is `ambiguous-rule` (the subject's own code), `NAME#N` selects the
-// Nth declaration, and a name address needs no `snapshot`.
 #[test]
 fn edit_statements_rule_targets_take_the_address_grammar() {
     let path = temp_workshop(
@@ -351,8 +332,6 @@ rule ("tick") {
         assert!(error.message.contains(candidate), "{error:?}");
     }
 
-    // `tick#2` selects the second declaration: deleting actions[1]
-    // removes its second `Set Global Variable` only.
     let ToolResponse::Ok { result } = service.handle(&request(
         json!([{"rule": "tick#2", "list": "actions", "index": 1, "change": "delete"}]),
     )) else {
@@ -372,11 +351,6 @@ rule ("tick") {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// Diagnostics carry no executable placeholders (#888): a `{` inside
-// user content is text, so a rule name or file selector literally
-// spelling `{file:N}`/`{list:OP}` stays literal through the same
-// composition — including the `NAME#N` address that prints and feeds
-// back to select the rule (ADR-0035).
 #[test]
 fn placeholder_spellings_inside_user_content_stay_literal() {
     let path = temp_workshop(
@@ -401,8 +375,6 @@ rule ("a{list:rules}b") {
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
 
-    // The ambiguous refusal prints both canonical addresses verbatim —
-    // `{list:rules}` inside the name is text, not a listing field.
     let ToolResponse::Error { error } = service.handle(&ToolRequest::Cfg {
         snapshot: None,
         rule: "a{list:rules}b".into(),
@@ -424,7 +396,6 @@ rule ("a{list:rules}b") {
         "the placeholder spelling inside the name did not render: {error:?}"
     );
 
-    // Print-and-pass-back: the printed address selects the rule.
     result_of(
         &mut service,
         &ToolRequest::Cfg {
@@ -436,9 +407,6 @@ rule ("a{list:rules}b") {
         },
     );
 
-    // A `file` selector literally spelling a placeholder stays literal in
-    // the refusal — `{file:0}` never substitutes a path and
-    // `{list:rules}` never renders the operation.
     for argument in ["{file:0}", "{list:rules}"] {
         let ToolResponse::Error { error } = service.handle(&ToolRequest::Symbols {
             kind: None,

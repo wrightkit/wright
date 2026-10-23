@@ -11,10 +11,14 @@
    * reads `owner.name` — and an unresolvable call id renders verbatim;
    * the page invents no names.
    *
-   * When `onarg` is supplied each argument span carries its `Action.args`
-   * path (`data-arg-path`) and a click opens the statement editor at that
-   * slot (docs/ui/editor.md § Form · Open) — the same path the hover
-   * outline names (#924).
+   * `path` is the node's index path into the statement's `args`: each
+   * argument token carries it on an `.arg` wrapper as `data-path`, so
+   * the statement row's hover card can name the argument and its slot
+   * (docs/ui/editor.md § Hover card). When the caller passes `onarg`
+   * the wrapper also reports `data-arg-path` and calls `onarg(path,
+   * event)` on click — the statement editor uses it to open the form
+   * at that argument. The statement's own root carries no path — it
+   * is not its own argument.
    */
   import Expr from './Expr.svelte'
   import { enumIdentity, kindClass, nodeClass, VALUE_KINDS } from './nodes'
@@ -31,9 +35,7 @@
     node: Node
     names: Names
     kinds?: string[]
-    /** An argument's click handler, passed its `Action.args` path. */
     onarg?: (path: number[], event: MouseEvent) => void
-    /** The rendered node's path inside the statement's `args` tree. */
     path?: number[]
   } = $props()
 
@@ -47,16 +49,12 @@
   <span class="tok punctuation">{text}</span>
 {/snippet}
 
-<!--
-  One argument token: wrapped in a span carrying its `args` path so a
-  click opens the editor on that slot. `stopPropagation` keeps the click
-  from re-opening the row's own handler.
--->
 {#snippet arg(child: Node, childPath: number[])}
   {#if onarg}
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
     <span
       class="arg"
+      data-path={childPath.join('.')}
       data-arg-path={childPath.join('.')}
       onclick={(event) => {
         event.stopPropagation()
@@ -65,7 +63,9 @@
       ><Expr node={child} {names} {onarg} path={childPath} /></span
     >
   {:else}
-    <Expr node={child} {names} path={childPath} />
+    <span class="arg" data-path={childPath.join('.')}
+      ><Expr node={child} {names} path={childPath} /></span
+    >
   {/if}
 {/snippet}
 
@@ -89,8 +89,6 @@
   <span class="tok enum">{node.ambiguous}</span>
 {:else if node.call === 'globalVariable'}
   {@const scope = names.peek('global', ['structural'])}
-  <!-- The scope label's canonical display name is the lowercase `global`
-       keyword; the editor shows the capitalized form (`Global.score`). -->
   {@const label = (scope?.name ?? 'Global').replace(/^\p{Ll}/u, (c) => c.toUpperCase())}
   <span class="tok {kindClass(scope?.kind)}">{label}</span>{@render punct('.')}{@render arg(
     node.args[0],
@@ -104,13 +102,15 @@
 {:else if node.call === 'memberAccess'}
   {@render arg(node.args[0], [...path, 0])}{@render punct('.')}{#if typeof node.args[1] === 'object' && node.args[1] !== null && 'string' in node.args[1]}{#if onarg}<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions --><span
         class="arg"
+        data-path={[...path, 1].join('.')}
         data-arg-path={[...path, 1].join('.')}
         onclick={(event) => {
           event.stopPropagation()
           onarg([...path, 1], event)
         }}><span class="tok variable">{node.args[1].string}</span></span>{:else}<span
-        class="tok variable"
-        >{node.args[1].string}</span
+        class="arg"
+        data-path={[...path, 1].join('.')}
+        ><span class="tok variable">{node.args[1].string}</span></span
       >{/if}{:else}{@render arg(node.args[1], [...path, 1])}{/if}{#if node.args.length > 2}{@render punct(
       '[',
     )}{@render arg(node.args[2], [...path, 2])}{@render punct(']')}{/if}

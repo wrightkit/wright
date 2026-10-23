@@ -1,9 +1,3 @@
-//! `simulate` (ADR-0033): the thin pass to `athena` over the effective
-//! Workshop input. These tests pin the request preconditions, the unchanged
-//! trace through the `wright-result/v1` envelope, `not_modeled` and
-//! `missing_input` as result content, and the vendored probe traces against
-//! their recorded client captures under `athena`'s own tolerances.
-
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
@@ -18,8 +12,6 @@ fn fixture(relative: &str) -> PathBuf {
     workspace_root().join("tests/fixtures").join(relative)
 }
 
-/// `project`'s `inputIdentity` for a path input: the raw-bytes digest the
-/// loaded input reports.
 fn identity(path: &Path) -> String {
     sha256_hex(&std::fs::read(path).unwrap())
 }
@@ -48,8 +40,6 @@ fn request(input_identity: &str, rest: Value) -> ToolRequest {
     serde_json::from_value(request).expect("request deserializes")
 }
 
-/// The trace of a served request: `ToolResponse::Ok` result's
-/// `result.trace`.
 fn trace_of(result: &Value) -> &Value {
     &result["result"]["trace"]
 }
@@ -81,9 +71,6 @@ fn simulate_seconds_returns_the_athena_trace() {
 
 #[test]
 fn simulate_scenario_runs_the_real_practice_range() {
-    // The `practice-range` build + `athena`'s own scenario: one injected
-    // final blow takes `score` to 2 and `streak` to 3 — the scenario's
-    // `expect` entries all pass.
     let path = fixture("athena/practice-range.ow");
     let scenario_text =
         std::fs::read_to_string(fixture("athena/scenarios/practice-range.json")).unwrap();
@@ -101,12 +88,7 @@ fn simulate_scenario_runs_the_real_practice_range() {
     for expectation in trace["expectations"].as_array().unwrap() {
         assert_eq!(expectation["status"], json!("pass"), "{expectation}");
     }
-    // The `init` rule's `Create HUD Text` produced one element.
     assert_eq!(trace["hud"].as_array().unwrap().len(), 1);
-    // The envelope carries `athena`'s trace unchanged: the service emits the
-    // loaded program's canonical Workshop text, which parses to the same
-    // program the fixture text does, so the trace is the trace `athena`'s
-    // own `run_scenario` returns on the source text.
     let direct = athena_sim::run_scenario(&std::fs::read_to_string(&path).unwrap(), &scenario_text)
         .expect("athena accepts the fixture text");
     assert_eq!(
@@ -118,8 +100,6 @@ fn simulate_scenario_runs_the_real_practice_range() {
 
 #[test]
 fn simulate_missing_input_is_result_content_not_a_refusal() {
-    // A scenario that omits `eventPlayer`: `athena` reports the missing
-    // input in the trace and stops — never defaulted (ADR-0033).
     let path = fixture("athena/practice-range.ow");
     let scenario: Value = serde_json::from_str(
         &std::fs::read_to_string(fixture(
@@ -145,8 +125,6 @@ fn simulate_missing_input_is_result_content_not_a_refusal() {
 
 #[test]
 fn simulate_not_modeled_is_result_content_not_a_refusal() {
-    // `p5` reads a player world `athena` `v0.2.0` does not model: the run
-    // stops at the construct and reports it — explicit, never defaulted.
     let path = fixture("athena/probes/p5-value-refresh-rate/probe.workshop");
     let (mut session, identity) = service(&path);
     let mut service = ToolService::new(&mut session).unwrap();
@@ -179,10 +157,6 @@ fn simulate_identity_is_the_freshness_precondition() {
 
 #[test]
 fn simulate_supplied_sources_run_the_supplied_text() {
-    // `sources` supplies the caller's current text (ADR-0033 shares
-    // `editStatements`'s #472 semantics): the program is loaded from it and
-    // `inputIdentity` is checked against it — the served snapshot and the
-    // disk file never move.
     let path = fixture("athena/practice-range.ow");
     let original = std::fs::read_to_string(&path).unwrap();
     let supplied = original.replacen(
@@ -233,11 +207,8 @@ fn simulate_requires_exactly_one_source_of_simulated_time() {
     let (mut session, identity) = service(&path);
     let mut service = ToolService::new(&mut session).unwrap();
     for rest in [
-        // `seconds` and `scenario` together are two sources of truth.
         json!({"seconds": 1.0, "scenario": scenario}),
-        // Neither leaves no simulated time at all.
         json!({}),
-        // A non-positive duration is malformed, not clamped.
         json!({"seconds": 0.0}),
         json!({"seconds": -1.0}),
     ] {
@@ -251,8 +222,6 @@ fn simulate_requires_exactly_one_source_of_simulated_time() {
 
 #[test]
 fn simulate_malformed_scenario_refuses() {
-    // `scenario` passes through to `athena`, which owns its validation:
-    // a document `athena` rejects is a structured refusal, nothing runs.
     let path = fixture("workshop/synthetic/control-flow.ws");
     let (mut session, identity) = service(&path);
     let mut service = ToolService::new(&mut session).unwrap();
@@ -266,8 +235,6 @@ fn simulate_malformed_scenario_refuses() {
 
 #[test]
 fn simulate_reports_a_project_that_does_not_load() {
-    // As on every program-reading operation, a load failure is the loader's
-    // structured diagnostic through the refusal channel — nothing runs.
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(fixture("workshop/synthetic/definitely-missing.ws")),
         kind: SourceKind::Workshop,
@@ -283,9 +250,6 @@ fn simulate_reports_a_project_that_does_not_load() {
     assert_ne!(error.code, "edit-stale-source", "{error:?}");
 }
 
-/// An LPP fake provider whose `lpp/compile` returns the canned artifact the
-/// session's sibling `artifact.ws` holds — the provider-compiled Workshop
-/// output an OPY input loads as its program.
 #[cfg(unix)]
 const COMPILE_PROVIDER: &str = r#"#!/usr/bin/env python3
 import json, os, sys
@@ -313,9 +277,6 @@ for line in sys.stdin:
 #[cfg(unix)]
 #[test]
 fn simulate_on_provider_loaded_opy_runs_the_compiled_artifact() {
-    // ADR-0033: `athena` reads Workshop text — a provider-loaded OPY project
-    // simulates the canonical emission of its compiled program, which is
-    // exactly the artifact the provider produced. No kind gate stands.
     use std::os::unix::fs::PermissionsExt;
     let dir = std::env::temp_dir().join(format!("wright-simulate-provider-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -337,10 +298,6 @@ fn simulate_on_provider_loaded_opy_runs_the_compiled_artifact() {
     })
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
-    // The provider backend's canonical snapshot comes from a
-    // compile-producing workflow (#591): `compile` runs the provider's
-    // compile and adopts the parsed artifact, then `project` reports the
-    // loaded input's identity, as a real caller would read it.
     let compiled = service.handle(&ToolRequest::Compile {
         output: Some(dir.join("out.ow")),
         force: false,
@@ -369,8 +326,6 @@ fn simulate_on_provider_loaded_opy_runs_the_compiled_artifact() {
     assert_eq!(trace["globals"]["score"]["value"], json!(2.0));
 }
 
-// --- Recorded-capture comparison ----------------------------------------
-//
 // The probes' `capture*.txt` are verbatim Inspector exports saved from the
 // client. `athena`'s own fixture suite compares its simulation with them
 // under these tolerances; `simulate` returns the same trace, so the same
@@ -386,8 +341,6 @@ struct Capture {
     logs: Vec<String>,
 }
 
-/// Split a verbatim Inspector export into its variable block and log lines —
-/// `athena`'s own `parse_capture`, kept byte-identical in behavior.
 fn parse_capture(text: &str) -> Capture {
     let mut variables = Vec::new();
     let mut logs = Vec::new();
@@ -521,10 +474,6 @@ fn compare_logs(trace: &Value, captured: &Capture) -> Result<(), String> {
     Ok(())
 }
 
-/// `simulate` a vendored probe through the service and compare the returned
-/// trace with every recorded capture, exactly as `athena`'s fixture suite
-/// does over `run_text` — the scheduler behaviors the captures cover reach
-/// the caller unchanged.
 fn check_probe(id: &str) {
     let dir = fixture(&format!("athena/probes/{id}"));
     let program = dir.join("probe.workshop");
@@ -574,8 +523,6 @@ fn probe_p3_same_tick_rule_order_driver_last_matches_recorded_captures() {
 
 #[test]
 fn probe_p4_wait_until_is_reported_not_modeled() {
-    // `athena` `v0.2.0` does not model `Wait Until`: the run stops at the
-    // construct and reports it rather than continuing on a default.
     let path = fixture("athena/probes/p4-wait-until-zero-tick/probe.workshop");
     let (mut session, identity) = service(&path);
     let mut service = ToolService::new(&mut session).unwrap();

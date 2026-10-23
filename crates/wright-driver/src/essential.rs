@@ -1,4 +1,3 @@
-//! Shared CLI and agent presentation; typed session results retain complete facts.
 use serde_json::{Value, json};
 
 pub const DEFAULT_ITEMS: usize = 20;
@@ -23,19 +22,12 @@ fn counts(items: &[Value]) -> Value {
         n[severity(item) as usize] += 1;
     }
     let mut group = json!({"total":items.len(),"error":n[0],"warning":n[1],"info":n[2]});
-    // #791: per-code totals over the counted set — the same population
-    // `total` reports, broken down so a renderer need not recount a list
-    // it may only see capped.
     if let Some(by_code) = by_code_counts(items) {
         group["byCode"] = by_code;
     }
     group
 }
 
-/// Per-code totals over a coded list (`code` members: findings,
-/// diagnostics), counted on the set as passed — before any truncation the
-/// caller applies (#791). `None` for lists whose items carry no `code`
-/// (rules, symbols, cfg blocks); their truncation notes stay unchanged.
 fn by_code_counts(items: &[Value]) -> Option<Value> {
     let mut counts = std::collections::BTreeMap::<String, usize>::new();
     for item in items {
@@ -91,8 +83,6 @@ fn cap(result: &mut Value, key: &str, limit: usize, all: bool) {
     };
     let total = items.len();
     if !all && total > limit {
-        // #791: the note's per-code counts describe the full capped list,
-        // so `truncated` can be attributed per code.
         let by_code = by_code_counts(items);
         items.truncate(limit);
         let mut note = json!({"total":total,"shown":limit,"truncated":total-limit,"expand":"--all / all: true"});
@@ -103,10 +93,6 @@ fn cap(result: &mut Value, key: &str, limit: usize, all: bool) {
     }
 }
 
-/// Pop `findings` until the serialized output fits the ~1.5k-token budget,
-/// recording the truncation so `--all` / `all: true` expands the full set.
-/// An item cap that already ran left its note — the fuller set's `total`
-/// and per-code counts (#791) survive; only `shown`/`truncated` move.
 fn fit_finding_bytes(output: &mut Value, total: usize) {
     let by_code = output["findings"]
         .as_array()
@@ -394,9 +380,6 @@ mod tests {
         let result = lint(&input, false);
         assert_eq!(result["counts"]["findings"]["error"], 1);
         assert_eq!(result["findings"][0]["severity"], "error");
-        // #791: per-code counts describe the complete set in both the
-        // counts group and the truncation note — the cap cannot hide a
-        // code's real count.
         assert_eq!(
             result["counts"]["findings"]["byCode"]["c0"], 1,
             "counts carry per-code totals: {}",
@@ -462,15 +445,11 @@ mod tests {
             query(&bare, false)["truncation"]["items"]["total"],
             DEFAULT_ITEMS + 1
         );
-        // #791: uncoded lists keep the plain note — `byCode` only exists
-        // where items carry `code`.
         assert!(query(&bare, false)["truncation"]["items"]["byCode"].is_null());
         assert_eq!(query(&bare, true), bare);
     }
     #[test]
     fn byte_fit_keeps_the_full_set_per_code_counts() {
-        // #791: a byte-fit truncation merges into the note an item cap
-        // left — `total`/`byCode` still describe the complete set.
         let findings = (0..6)
             .map(|id| {
                 json!({"code":format!("risk-{}",id%2),"severity":"error","message":"long actionable evidence ".repeat(120)})

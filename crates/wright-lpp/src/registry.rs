@@ -1,10 +1,3 @@
-//! A [`ProviderRegistry`] maps opaque language id strings to provider
-//! configurations. Nothing in this module (or elsewhere in the crate)
-//! branches on a particular source language: `x-demo-lang` or any other id
-//! is just a key. When no provider is configured for a language id,
-//! [`ProviderRegistry::spawn`] refuses explicitly with
-//! `ProviderError::NotConfigured` — there is no fallback.
-
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;

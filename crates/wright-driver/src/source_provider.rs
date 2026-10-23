@@ -124,25 +124,12 @@ pub enum SourceProviderError {
     Failed { code: String, message: String },
 }
 
-/// The diagnostic code prefix carrying a provider's typed LPP refusal
-/// (`refusalCode`): `provider-refusal-<refusalCode>`. Wright-originated
-/// refusal codes (currently `session-config-changed`, #511) pass through
-/// verbatim instead, so they keep the same code as the direct diagnostic
-/// path. Other refusals are provider-owned opaque strings (LPP §18.4);
-/// namespacing them keeps the refusal class distinguishable without
-/// parsing `message`.
 const PROVIDER_REFUSAL_CODE_PREFIX: &str = "provider-refusal-";
 
 fn wright_refusal_code(code: &str) -> bool {
     code == "session-config-changed"
 }
 
-/// The stage a `Failed` code reports at. This is the classification the
-/// typed `wright_lpp::ProviderError` was carrying when `provider_error`
-/// reduced it: deliberate refusals and request-level LPP failures are
-/// frontend-stage request outcomes, while transport, environment, and
-/// session-state failures are internal. `capability-unavailable` stays a
-/// distinct code here; `exit_code_from` maps it to the unsupported exit.
 fn failed_stage(code: &str) -> Stage {
     match code {
         "session-config-changed" => Stage::Discovery,
@@ -273,9 +260,6 @@ impl SourceProvider for LppSourceProvider {
     fn compile(&mut self, target: &SourceTarget) -> Result<SourceCompilation, SourceProviderError> {
         let entry = self.entry(target)?;
         let root_uri = Self::project_root_uri(target);
-        // A failed capability query is a provider failure, not a legacy
-        // version signal: propagate it instead of silently choosing the
-        // unnegotiated compile path (#571).
         let negotiates_artifacts = self
             .provider
             .capabilities()
@@ -339,18 +323,10 @@ fn request_context(operation: &str, target: &SourceTarget) -> String {
     )
 }
 
-/// The code a `wright_lpp::ProviderError` carries across the
-/// source-provider boundary. Transport and session failures keep their
-/// `ProviderError::code()`; a typed LPP refusal carries its `refusalCode`
-/// under the `provider-refusal-` namespace so consumers can still classify
-/// the refusal without parsing `message` (LPP §18.4 makes refusal codes
-/// machine-readable). A Wright-originated refusal code stays verbatim.
 pub(crate) fn provider_failure_code(error: &wright_lpp::ProviderError) -> String {
     match error.refusal_code() {
         Some(code) if wright_refusal_code(code) => code.to_string(),
         Some(code) => format!("{PROVIDER_REFUSAL_CODE_PREFIX}{code}"),
-        // A `refusal` kind whose details carry no `refusalCode` is still a
-        // deliberate decline, not a generic `refusal`-coded session error.
         None if error.code() == "refusal" => "provider-refusal".to_string(),
         None => error.code().to_string(),
     }
@@ -374,10 +350,6 @@ fn provider_diagnostics(
     documents: Vec<wright_lpp::DocumentDiagnostics>,
     locale: Option<&str>,
 ) -> Vec<Diagnostic> {
-    // `span.file` is the document's rank in the sorted arena of resolved
-    // paths — the deterministic order `span.path` reports — not the
-    // response array position, which is provider-chosen and misattributes
-    // diagnostics whenever it differs (#638).
     let mut arena: Vec<String> = documents
         .iter()
         .map(|doc| provider_uri_path(&doc.uri))
@@ -389,10 +361,6 @@ fn provider_diagnostics(
         .flat_map(|doc| {
             let path = provider_uri_path(&doc.uri);
             let file = arena.iter().position(|entry| *entry == path).unwrap_or(0);
-            // LPP `character` is a UTF-16 code-unit offset; the authored
-            // line converts it to a character column so positions after
-            // astral characters stay correct. A document Wright cannot
-            // read back keeps the raw offset as its column (#638).
             let lines: Vec<String> = std::fs::read_to_string(&path)
                 .map(|text| text.split('\n').map(str::to_owned).collect())
                 .unwrap_or_default();
@@ -433,8 +401,6 @@ pub(crate) fn provider_uri_path(uri: &str) -> String {
         .unwrap_or_else(|| uri.to_string())
 }
 
-/// The identity/version precondition view a defaulted `sources` mirrors
-/// (#548): every document's own text under its URI.
 pub(crate) fn document_sources(
     documents: &wright_lpp::DocumentSet,
 ) -> std::collections::BTreeMap<String, String> {
@@ -444,11 +410,6 @@ pub(crate) fn document_sources(
         .collect()
 }
 
-/// The provider document set a mutation runs against (#548, #583): the
-/// loaded project's members, each read from disk at `version` 0 and keyed
-/// by `file://` URI, so the provider sees the same project the session
-/// serves. A member that is not a readable disk file is a structured
-/// refusal, never a silently partial set.
 pub(crate) fn provider_document_set(
     members: &[String],
     base: &Path,
@@ -486,12 +447,6 @@ pub(crate) fn provider_project_root(root: &Path) -> Option<String> {
         .map(|u| u.to_string())
 }
 
-/// A loaded project member as `(file:// URI, absolute disk path)` (#548): a
-/// URI spelling keeps its identity and converts back to its path; a bare
-/// path absolutizes against `base` — the directory the member spelling is
-/// relative to — and converts to a `file://` URI. A member that is
-/// not a disk file refuses — the defaulted document set covers only sources
-/// the session read from disk.
 pub(crate) fn provider_member(
     member: &str,
     base: &std::path::Path,
@@ -538,10 +493,6 @@ pub(crate) fn provider_member(
         })
 }
 
-/// `C:\dir\file.opy` or `C:/dir/file.opy` → `(file:///C:/dir/file.opy, path)`.
-/// The path is percent-encoded before parsing so literal `#`, `%`, `?`, and
-/// friends are not reinterpreted as URL syntax — `Url::parse` alone would
-/// treat `#` as a fragment delimiter and `%xx` as existing escapes.
 fn windows_drive_member(member: &str) -> Option<(String, std::path::PathBuf)> {
     const PATH_ENCODE: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
         .add(b' ')
@@ -578,8 +529,6 @@ mod tests {
 
     #[test]
     fn windows_drive_member_is_a_disk_path_not_a_uri_scheme() {
-        // `url::Url::parse` accepts `C:\...` as a URI with scheme `c`; the
-        // provider member helper must classify it as a filesystem path first.
         let (uri, path) = provider_member("C:\\project\\main.opy", Path::new("/cwd"))
             .expect("windows drive member resolves");
         assert_eq!(uri, "file:///C:/project/main.opy");
@@ -589,8 +538,6 @@ mod tests {
             .expect("forward-slash drive member resolves");
         assert_eq!(uri, "file:///D:/work/lib.opy");
 
-        // Literal `#`/`%`/`?` in the path are encoded, not parsed as URL
-        // syntax, and decode back to the same spelling.
         for (member, uri) in [
             ("C:\\project#1\\main.opy", "file:///C:/project%231/main.opy"),
             (
@@ -651,9 +598,6 @@ mod tests {
         assert!(diagnostic.span.is_none());
     }
 
-    /// #638: `span.file` is each document's rank in the URI-sorted response
-    /// arena — the deterministic ordering the LPP document contract defines —
-    /// not the provider's response order.
     #[test]
     fn provider_diagnostics_index_the_sorted_document_arena() {
         let doc = |uri: &str| wright_lpp::DocumentDiagnostics {
@@ -676,8 +620,6 @@ mod tests {
                 message: "diag".to_string(),
             }],
         };
-        // The provider returns `b` before `a`: array order must not decide
-        // which file index a diagnostic lands on.
         let diagnostics = provider_diagnostics(
             vec![doc("file:///project/b.opy"), doc("file:///project/a.opy")],
             None,
@@ -701,16 +643,11 @@ mod tests {
         }
     }
 
-    /// #638: an LPP `character` is a UTF-16 code-unit offset; a diagnostic
-    /// after an astral character maps to the character column, and a document
-    /// Wright cannot read back keeps the raw offset.
     #[test]
     fn provider_diagnostics_convert_utf16_columns() {
         let dir =
             std::env::temp_dir().join(format!("wright-lpp-utf16-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp directory");
-        // "😀ab": the emoji is one char but two UTF-16 code units, so the
-        // UTF-16 offset of `b` (4) maps to character column 4, not 5.
         let file = dir.join("astral.opy");
         std::fs::write(&file, "\u{1F600}ab\n").expect("source");
         let uri = url::Url::from_file_path(&file)
@@ -733,7 +670,7 @@ mod tests {
 
         let diagnostics = provider_diagnostics(
             vec![
-                doc(uri, 4), // `b`, past the surrogate pair
+                doc(uri, 4),
                 doc("file:///definitely/not/on-disk.opy".to_string(), 4),
             ],
             None,
@@ -743,9 +680,6 @@ mod tests {
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 
-    /// #569: each typed `ProviderError` keeps a machine-usable
-    /// classification across the source-provider boundary instead of
-    /// collapsing into one generic internal failure.
     #[test]
     fn provider_error_classification_distinguishes_typed_causes() {
         let cases: &[(ProviderError, &str, Stage)] = &[
@@ -828,8 +762,6 @@ mod tests {
         }
     }
 
-    /// #569: a refusal without a `refusalCode` detail still classifies as a
-    /// refusal rather than an internal failure.
     #[test]
     fn refusal_without_a_detail_code_stays_a_refusal() {
         let mapped = provider_error(
@@ -840,8 +772,6 @@ mod tests {
         assert_eq!(mapped.diagnostic().stage, Stage::Frontend);
     }
 
-    /// #569: timeout method/duration and the typed refusal reason stay in
-    /// the message; nothing on this path reads `message` back for decisions.
     #[test]
     fn provider_error_message_keeps_the_typed_detail_in_text() {
         let mapped = provider_error(

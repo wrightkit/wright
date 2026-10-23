@@ -1,10 +1,3 @@
-//! MCP bootstrap for `wright agent install --mcp <target>` (#509): register
-//! Wright's own MCP server in a coding-agent harness's project-local config.
-//! Wright writes only the one entry it generates (`wright serve --transport
-//! mcp`); the harness starts the stdio process itself. Anything else already
-//! in the config, including a differing `wright` entry, is never rewritten
-//! without `--force`.
-
 use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
@@ -28,8 +21,6 @@ struct Layout {
     file: &'static str,
     servers_key: &'static str,
     typed: bool,
-    /// The harness's project-root expansion, passed as the session input so
-    /// the project does not depend on the server's working directory.
     input: &'static str,
 }
 
@@ -71,7 +62,6 @@ fn generated_entry(layout: &Layout) -> Value {
     Value::Object(entry)
 }
 
-/// An entry that starts the Wright MCP server, however it was authored.
 fn runs_wright_mcp(entry: &Value) -> bool {
     entry.get("command") == Some(&json!(COMMAND))
         && entry
@@ -85,8 +75,6 @@ fn runs_wright_mcp(entry: &Value) -> bool {
             })
 }
 
-/// Refuse anything that is not a regular file inside a real directory, so the
-/// write cannot be redirected outside the project through a link.
 fn ensure_not_linked(root: &Path, path: &Path) -> Result<(), AgentError> {
     let mut current = root.to_path_buf();
     for component in path
@@ -130,8 +118,6 @@ fn read_config(path: &Path) -> Result<Option<Value>, AgentError> {
     }
 }
 
-/// Replace `path` atomically: write a sibling temp file, then rename it over
-/// the original so a failed write never truncates existing configuration.
 fn write_config(path: &Path, config: &Value) -> Result<(), AgentError> {
     let fail = |error: std::io::Error| {
         AgentError::Failed(format!("could not write {}: {error}", path.display()))
@@ -292,7 +278,6 @@ mod tests {
     fn refuses_any_differing_wright_entry_unless_forced() {
         let root = scratch("differing");
         let path = root.join(".mcp.json");
-        // Even a Wright-looking entry with user-authored extras is not ours to rewrite.
         let custom = json!({"mcpServers": {"wright": {
             "command": "wright",
             "args": ["serve", "--transport", "mcp", "other.ws"],

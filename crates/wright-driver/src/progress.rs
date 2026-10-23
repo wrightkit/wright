@@ -1,7 +1,3 @@
-//! The driver reports semantic workflow boundaries without terminal strings,
-//! ANSI, timing, or presentation policy. CLI and embedding consumers may
-//! observe these events independently.
-
 use std::sync::Arc;
 
 /// A real orchestration phase exposed to interested consumers.

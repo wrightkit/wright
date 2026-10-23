@@ -1,7 +1,3 @@
-//! Rule and symbol address-grammar resolution over the semantic index
-//! (ADR-0035): `NAME#N` ordinals, literal `#` names, canonical addresses,
-//! and `KIND:NAME` symbol selection.
-
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -38,7 +34,6 @@ fn workshop_service_from_text(text: &str) -> SemanticService<'static> {
     )
 }
 
-/// A program of Ongoing-Global rules by name, for the address grammar.
 fn rules_service(names: &[&str]) -> SemanticService<'static> {
     let mut program = Program::new();
     for name in names {
@@ -47,8 +42,6 @@ fn rules_service(names: &[&str]) -> SemanticService<'static> {
     service_for(program)
 }
 
-// `NAME#N` selects the Nth rule named `NAME`; a literal `#` name stays
-// selectable while no ordinal reading exists, and out-of-range ordinals fail.
 #[test]
 fn rule_addresses_resolve_names_ordinals_and_literals() {
     let service = rules_service(&["a", "b", "a"]);
@@ -64,17 +57,12 @@ fn rule_addresses_resolve_names_ordinals_and_literals() {
         "ambiguous-rule"
     );
 
-    // A literal `#` name wins while no `NAME#N` reading exists.
     let service = rules_service(&["a#2"]);
     assert_eq!(service.resolve_rule("a#2").unwrap(), 0);
 
-    // Both readings collide: `a#2` names the literal rule and the second
-    // `a`; `a#2#1` re-selects the literal rule by its own ordinal.
     let service = rules_service(&["a", "a", "a#2"]);
     let error = service.resolve_rule("a#2").unwrap_err();
     assert_eq!(error.code, "ambiguous-rule");
-    // Candidate addresses ride as structured fields (#888), not message
-    // text — surfaces render `address at path:line:column` themselves.
     let addresses: Vec<&str> = error.fields["candidates"]
         .as_array()
         .unwrap()
@@ -88,16 +76,12 @@ fn rule_addresses_resolve_names_ordinals_and_literals() {
     assert_eq!(service.resolve_rule("a#2#1").unwrap(), 2);
     assert_eq!(service.resolve_rule("a#1").unwrap(), 0);
 
-    // Unnamed rules are `#N` over the empty name.
     let service = rules_service(&["", "x", ""]);
     assert_eq!(service.resolve_rule("#1").unwrap(), 0);
     assert_eq!(service.resolve_rule("#2").unwrap(), 2);
     assert_eq!(service.resolve_rule("x").unwrap(), 1);
 }
 
-// `inspect rules` prints every rule's canonical address; a reuse selects
-// its own rule or fails ambiguous when the grammar leaves no name-only
-// spelling for it.
 #[test]
 fn canonical_rule_addresses_round_trip_through_the_grammar() {
     let service = rules_service(&["a", "a", "a#2", "", "solo"]);
@@ -114,14 +98,11 @@ fn canonical_rule_addresses_round_trip_through_the_grammar() {
             Ok(resolved) => {
                 assert_eq!(resolved, rule["id"].as_u64().unwrap() as usize, "{address}")
             }
-            // The second `a` beside a literal `a#2` has no name address.
             Err(error) => assert_eq!(error.code, "ambiguous-rule", "{address}: {error:?}"),
         }
     }
 }
 
-// A bare symbol address never resolves a rule; `KIND:NAME` selects the
-// same symbol through its kind.
 #[test]
 fn symbol_addresses_exclude_rules_and_take_kinds() {
     let service = workshop_service_from_text(
@@ -148,7 +129,6 @@ rule ("player starts") {
         service.resolve_symbol("player starts").unwrap_err().code,
         "unknown-symbol"
     );
-    // A rule sharing the variable's name does not make `score` ambiguous.
     let service = workshop_service_from_text(
         r#"
 variables {
@@ -174,9 +154,6 @@ rule ("dup") {
     );
 }
 
-// A bare symbol name shared by a `globalVariable` and a `subroutine` fails
-// `ambiguous-symbol` naming both `KIND:NAME` forms; the explicit kind
-// selects one.
 #[test]
 fn symbol_addresses_disambiguate_kinds_across_collisions() {
     let service = workshop_service_from_text(

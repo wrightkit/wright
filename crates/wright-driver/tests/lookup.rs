@@ -137,7 +137,6 @@ fn workshop_lookup_lists_settings_children_under_a_prefix() {
         limit: Some(10),
     }));
 
-    // `heroes` has two child segments: the team template and `general`.
     assert_eq!(entries.len(), 2, "heroes children: {entries:?}");
     assert!(entries.iter().all(|entry| entry["kind"] == "settingPath"));
     assert_eq!(entries[0]["spelling"], "<team>");
@@ -166,8 +165,6 @@ fn workshop_lookup_answers_a_setting_key() {
         )),
         "settings children are settings or segments: {entries:?}"
     );
-    // Scoped children spell the segment below the prefix (`name-lookup.md`
-    // §21.3): leaf settings carry their key, not the full path.
     assert!(
         entries.iter().all(|entry| entry["kind"] != "setting"
             || !entry["spelling"].as_str().unwrap_or_default().contains('.')),
@@ -177,11 +174,6 @@ fn workshop_lookup_answers_a_setting_key() {
 
 #[test]
 fn workshop_lookup_callable_carries_the_owners_return_type_and_variadic() {
-    // #781/#798: a Workshop `value` entry's `callable` carries the owner's
-    // `returns` — the declared return type in the parameter `type`
-    // vocabulary — and a variadic signature carries `variadic: true`.
-    // Actions declare no return type and non-variadic callables carry no
-    // `variadic` member at all.
     let mut owned = session(workshop_path());
     let mut service = ToolService::new(&mut owned).unwrap();
 
@@ -236,9 +228,6 @@ fn workshop_lookup_callable_carries_the_owners_return_type_and_variadic() {
 
 #[test]
 fn lookup_rejects_an_out_of_range_limit_as_malformed() {
-    // #783: `limit` declares 1..=10 in the committed schema; a value
-    // outside it is a `malformed-request` refusal, never a silent clamp.
-    // `limit: 10` and an omitted limit behave as they always did.
     let mut owned = session(workshop_path());
     let mut service = ToolService::new(&mut owned).unwrap();
 
@@ -260,8 +249,6 @@ fn lookup_rejects_an_out_of_range_limit_as_malformed() {
         assert!(error.message.contains("limit"), "{error:?}");
     }
 
-    // The `Hero` enum has more members than the maximum: `limit: 10`
-    // returns ten where an omitted limit returns the default three.
     let entries = entries_of(service.handle(&ToolRequest::Lookup {
         language: "workshop".to_string(),
         query: None,
@@ -304,8 +291,6 @@ fn workshop_lookup_filters_by_kind_and_bounds_the_limit() {
 fn workshop_lookup_bounds_scoped_results_by_limit() {
     let mut owned = session(workshop_path());
     let mut service = ToolService::new(&mut owned).unwrap();
-    // `within` listings obey the same bound as unscoped results: the
-    // default of 3 caps a wider scope without an explicit limit.
     let entries = entries_of(service.handle(&ToolRequest::Lookup {
         language: "workshop".to_string(),
         query: None,
@@ -332,9 +317,6 @@ fn workshop_lookup_bounds_scoped_results_by_limit() {
 fn workshop_lookup_filters_scoped_children_by_the_owner_matcher() {
     let mut owned = session(workshop_path());
     let mut service = ToolService::new(&mut owned).unwrap();
-    // `within` + `query` delegates matching and ranking to workshop-rs's
-    // scoped lookup: "team 1" resolves the members the owner scored —
-    // never a Wright-side substring filter.
     let entries = entries_of(service.handle(&ToolRequest::Lookup {
         language: "workshop".to_string(),
         query: Some("team 1".to_string()),
@@ -356,8 +338,6 @@ fn workshop_lookup_filters_scoped_children_by_the_owner_matcher() {
         "owner ranking puts the closest match first"
     );
 
-    // Parameters are matchable children: the owner scores them by name,
-    // so a scoped query resolves `VisibleTo` rather than dropping it.
     let entries = entries_of(service.handle(&ToolRequest::Lookup {
         language: "workshop".to_string(),
         query: Some("visibleTo".to_string()),
@@ -377,8 +357,6 @@ fn workshop_lookup_filters_scoped_children_by_the_owner_matcher() {
 
 #[test]
 fn workshop_lookup_answers_without_a_loadable_project() {
-    // A session whose configured project cannot load: lookup is a
-    // vocabulary query and neither requires nor triggers a load (#512).
     let dir = std::env::temp_dir().join(format!("wright-lookup-512-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let mut owned = session(dir.join("missing.ws"));
@@ -397,8 +375,6 @@ fn workshop_lookup_answers_without_a_loadable_project() {
         "lookup did not trigger a project load"
     );
 
-    // The request path stays project-free even after a program-reading
-    // failure invalidated the service.
     let _ = service.handle(&ToolRequest::Check { all: true });
     let entries = entries_of(service.handle(&lookup_request("workshop", Some("Wait"))));
     assert!(!entries.is_empty());
@@ -438,9 +414,6 @@ fn lookup_refuses_an_unknown_language_or_kind() {
 
 #[test]
 fn lookup_kind_filter_accepts_every_kind_the_service_emits() {
-    // #563: `kind` used to reject `parameter`, `settingPath`, `enum`, and
-    // `structural` even though prior responses emit them — an agent that
-    // scoped to a callable could not then narrow to its parameters.
     let mut owned = session(workshop_path());
     let mut service = ToolService::new(&mut owned).unwrap();
 
@@ -474,7 +447,6 @@ fn lookup_kind_filter_accepts_every_kind_the_service_emits() {
         );
     }
 
-    // A kind only the other language emits answers `[]`, not a refusal.
     let entries = entries_of(service.handle(&ToolRequest::Lookup {
         language: "workshop".to_string(),
         query: Some("health".to_string()),
@@ -488,11 +460,6 @@ fn lookup_kind_filter_accepts_every_kind_the_service_emits() {
 
 #[test]
 fn lookup_accepts_every_kind_any_response_emits() {
-    // Drift guard (#563): the `kind` allowlist must cover every kind the
-    // service can emit. Exercise the unscoped query and each `within`
-    // selector form, then replay every emitted `kind` back as a filter —
-    // a kind the owners start emitting but the allowlist rejects would
-    // fail here instead of regressing `invalid-kind` silently.
     let mut owned = session(workshop_path());
     let mut service = ToolService::new(&mut owned).unwrap();
 
@@ -572,9 +539,6 @@ fn lookup_refuses_an_unknown_within_scope() {
     assert_eq!(error.code, "lookup.unknownWithin");
 }
 
-/// An LPP 1.5 fake provider serving `lpp/lookup` for `opy` from canned
-/// vocabulary facts; the callable fact exercises Wright-side signature
-/// rendering.
 #[cfg(unix)]
 const LOOKUP_PROVIDER: &str = r#"#!/usr/bin/env python3
 import json, sys
@@ -625,8 +589,6 @@ for line in sys.stdin:
         reply(id, {})
 "#;
 
-/// A provider that negotiates but never advertises `lookup` (a pre-1.5
-/// session shape).
 #[cfg(unix)]
 const NO_LOOKUP_PROVIDER: &str = r#"#!/usr/bin/env python3
 import json, sys
@@ -650,8 +612,6 @@ for line in sys.stdin:
 fn write_provider(script: &str) -> (PathBuf, PathBuf) {
     use std::os::unix::fs::PermissionsExt;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    // One directory per call: parallel tests sharing a script must not
-    // overwrite or remove each other's provider file.
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
         "wright-lookup-provider-{}-{}",
@@ -691,8 +651,6 @@ fn opy_lookup_serves_provider_entries_with_a_rendered_signature() {
 
     let callable = &entries[0];
     assert_eq!(callable["identity"], "opy:callable/hudText");
-    // Wright renders the signature from the provider's facts (ADR-0021):
-    // the optional enum parameter shows its default, not its members.
     assert_eq!(
         callable["signature"],
         "hudText(visibleTo: Player(All|One), header: String, rounding=Up)"

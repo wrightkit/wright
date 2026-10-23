@@ -1,16 +1,3 @@
-//! # Contract
-//!
-//! * Rule IDs are stable `&'static str` values that match the `code` field on
-//!   every [`Finding`] produced by that rule.
-//! * [`LintRegistry::default`] returns the complete first-party rule set in a
-//!   fixed, deterministic order.
-//! * [`LintConfig::default`] enables every registered rule at its default
-//!   severity with no overrides.
-//! * [`LintRegistry::run`] is deterministic: same program, same config, same
-//!   toolchain → same findings in the same order.
-//! * Unknown rule IDs supplied to [`LintConfig`] are silently stored but do
-//!   not affect registered rules and do not prevent execution.
-
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -82,7 +69,6 @@ pub struct LintRun {
     pub skipped: Vec<SkippedRule>,
 }
 
-/// One registered rule and the implementation that owns it.
 enum RegistryEntry {
     Native(RuleMeta),
     Declarative(Box<DeclarativeRule>),
@@ -306,10 +292,6 @@ pub(crate) const NESTED_BINDER_LAMBDA: RuleMeta = RuleMeta {
 };
 
 impl Default for LintRegistry {
-    /// Build the registry containing the first-party lint rules in their
-    /// canonical order: `min-wait-loop`, `duplicate-condition`,
-    /// `expensive-loop-check`, `ongoing-condition-hot-path`, `repeated-value`,
-    /// `while-without-wait`, `nested-binder-lambda`.
     fn default() -> Self {
         let entries = vec![
             RegistryEntry::Native(MIN_WAIT_LOOP),
@@ -415,7 +397,6 @@ impl LintRegistry {
     ) -> Result<(), RuleRegistryError> {
         let id = rule.id().to_string();
         if let Some(position) = self.entries.iter().position(|entry| entry.id() == id) {
-            // First-party rules replace a native entry for the same ID (#843).
             if identity == RuleIdentity::FirstParty
                 && matches!(self.entries[position], RegistryEntry::Native(_))
             {
@@ -434,7 +415,6 @@ impl LintRegistry {
         self.entries.iter().any(|entry| entry.id() == id)
     }
 
-    /// Whether `id` still names an unreplaced native entry (issue #843).
     fn native_owns(&self, id: &str) -> bool {
         self.entries
             .iter()
@@ -515,7 +495,6 @@ impl LintRegistry {
         let mut findings = hotpath::measure_block!("analyzer::lint_analyze", {
             crate::canonical::analyze(program, config)
         });
-        // A replaced native entry must not also report its ID (issue #843).
         findings.retain(|finding| self.native_owns(&finding.code));
         findings.extend(hotpath::measure_block!("analyzer::lint_custom", {
             self.run_canonical_custom(program, config)

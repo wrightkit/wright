@@ -1,20 +1,9 @@
-//! The `LintPackageResult` renderer impls (#844): `ResultPresentation`,
-//! `PlainReport`, and `TerminalReport` for the `lint package` commands.
-//! They live beside the package runner rather than in the shared renderer
-//! modules, which are at their size budget; the records, tags, and layout
-//! they produce follow ADR-0030 identically.
-
 use wright_driver::result::{Envelope, LintPackageResult, LintPackageRow};
 
 use crate::plain::{Line, PlainReport, Stream, expand_all, field, truncated_record};
 use crate::present::terminal::{TerminalReport, heading, line, next, note, plural};
 use crate::present::{RenderContext, ResultPresentation};
 
-/// The status-count breakdown `summary:`/metadata/headline share: the row
-/// count leads — `packages=N` — then each present status word reports its
-/// own count in the record contract's order. A report whose rows all share
-/// one status adds no breakdown (`5 installed` repeats `installed` five
-/// times' worth of nothing); `search` appends the API's `total_count`.
 fn status_counts(result: &LintPackageResult) -> Vec<(String, usize)> {
     const ORDER: &[&str] = &[
         "found",
@@ -44,8 +33,6 @@ fn status_counts(result: &LintPackageResult) -> Vec<(String, usize)> {
     counts
 }
 
-/// The `lint package` metadata line: `N package(s)` plus the status
-/// breakdown when the rows are mixed, and the search API's total.
 fn metadata(result: &LintPackageResult) -> String {
     let mut metadata = format!("{} package(s)", result.packages.len());
     if let Some(total) = result.total.filter(|total| {
@@ -71,15 +58,9 @@ impl ResultPresentation for LintPackageResult {
     fn metadata(&self) -> Option<String> {
         Some(metadata(self))
     }
-    // Not an artifact stream: the plain renderer emits `package:` records
-    // and the terminal renderer its own layout — `render_body` never runs.
     fn render_body(&self, _ctx: &RenderContext<'_>) {}
 }
 
-/// One `package:` record per row: `source` and `status` lead, then the
-/// row's own facts in a fixed order — the installed `sha`, the remote head
-/// `remote`, the entry `dir`, the rule ids `rules`, the `downloaded` flag,
-/// and `code`/`message`/`description` when the row carries them.
 fn package_record(row: &LintPackageRow) -> String {
     let mut items = vec![field("source", &row.source), field("status", &row.status)];
     if let Some(sha) = &row.sha {
@@ -109,9 +90,6 @@ fn package_record(row: &LintPackageRow) -> String {
     format!("package: {}", items.join(" "))
 }
 
-/// `summary:` counts the rows and names the store root — status counts
-/// appear only when the rows are mixed — then one `package:` record per
-/// row, capped at the default page unless `--all` lifted it.
 impl PlainReport for LintPackageResult {
     fn plain_report(
         &self,
@@ -146,9 +124,6 @@ impl PlainReport for LintPackageResult {
     }
 }
 
-/// One item per row — `owner/repo@<sha7> — status` — with the row's
-/// message, rules, and entry directory as secondary notes, capped at
-/// twenty unless `--all` lifted it.
 impl TerminalReport for LintPackageResult {
     fn headline(&self) -> Option<String> {
         let mut parts = vec![plural(self.packages.len(), "package", "packages")];

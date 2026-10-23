@@ -10,9 +10,7 @@
     t,
   }: {
     findings: Finding[]
-    /** Show the count at the mark's level beside it (the rule bar's form). */
     count?: boolean
-    /** The session locale's chrome strings. */
     t: ChromeStrings
   } = $props()
 

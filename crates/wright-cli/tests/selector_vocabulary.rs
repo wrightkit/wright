@@ -1,10 +1,3 @@
-//! ADR-0035 selector vocabulary: each selector spelling means one thing.
-//! `--rule-file` loads lint-policy YAML on `lint`/`serve`/`ui`, `--rule`
-//! stays the declared-rule selector on semantic queries, `--only` is the
-//! category filter, and removed spellings (`--rule` as a policy path,
-//! `inspect rules --only`, `lookup --kind`, the `rules` request's `name`)
-//! are rejected — never kept as aliases.
-
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -71,8 +64,6 @@ fn parse_json(output: &[u8]) -> serde_json::Value {
 }
 
 fn run_lines(transport: &str, input: &Path, lines: &[&str]) -> Vec<serde_json::Value> {
-    // `compile` writes `<entry stem>.ow` in the working directory, so every
-    // service process gets its own.
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let cwd = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
         "selector-serve-{}-{}",
@@ -118,15 +109,11 @@ fn mcp_call(id: u64, name: &str, arguments: serde_json::Value) -> String {
     .to_string()
 }
 
-/// The tool result's JSON payload: the single text content block parsed back
-/// into a value.
 fn mcp_payload(response: &serde_json::Value) -> serde_json::Value {
     serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap())
         .expect("tool content is JSON")
 }
 
-/// Spawn `wright serve` with `args` over `input` and return the child plus
-/// the responses to `lint` and `lintRules`.
 fn serve_with(args: &[&str], input: &Path) -> (std::process::Child, Vec<serde_json::Value>) {
     let mut child = Command::new(wright())
         .arg("serve")
@@ -181,9 +168,6 @@ fn lint_lists_a_local_yaml_rule_loaded_with_the_rule_file_flag() {
     let _ = std::fs::remove_dir_all(rule_file.parent().unwrap());
 }
 
-/// The lint policy flags configure the served session (#594): `lint` and
-/// `lintRules` report the same effective policy `wright lint` reports for
-/// the same flags, and startup refuses bad policy before serving anything.
 #[test]
 fn serve_applies_the_cli_lint_policy_to_the_session() {
     let input = corpus_workshop("real-world/overpy-cake");
@@ -290,8 +274,6 @@ fn serve_applies_the_cli_lint_policy_to_the_session() {
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty(), "no request was served");
 
-    // An unknown rule id is a startup usage error on every policy surface —
-    // a typo must not silently leave the intended rule enabled (#640).
     let unknown_config = dir.join("unknown.yaml");
     std::fs::write(
         &unknown_config,
@@ -346,9 +328,6 @@ fn serve_applies_the_cli_lint_policy_to_the_session() {
 
 #[test]
 fn removed_selector_spellings_are_usage_errors() {
-    // Removed spellings are rejected, never kept as aliases: the lint
-    // policy path is `--rule-file` now and `--only` never filters
-    // `inspect rules` by name, nor does `lookup` take `--kind`.
     let input = corpus_workshop("synthetic/basic-rule");
     let input = input.to_str().unwrap();
     for args in [
@@ -371,8 +350,6 @@ fn removed_selector_spellings_are_usage_errors() {
 
 #[test]
 fn ui_help_documents_the_rule_file_flag() {
-    // `ui` shares the lint-policy options with `lint`/`serve`; help works
-    // whether or not this binary carries the ui feature.
     let output = run(&["ui", "--help"]);
     assert!(output.status.success());
     let help = String::from_utf8_lossy(&output.stdout);
@@ -384,7 +361,6 @@ fn ui_help_documents_the_rule_file_flag() {
 
 #[test]
 fn lookup_only_filters_entries_by_kind() {
-    // `lookup --only` is the category filter the removed `--kind` spelled.
     let output = run(&["lookup", "wait", "--only", "action", "-f", "json"]);
     assert_eq!(output.status.code(), Some(0), "{}", command_result(&output));
     let result = parse_json(&output.stdout);
@@ -395,9 +371,6 @@ fn lookup_only_filters_entries_by_kind() {
 
 #[test]
 fn inspect_refs_and_cfg_keep_only_as_the_category_filter() {
-    // `--only` still narrows references by kind and cfg blocks by kind on
-    // the semantic queries — the spelling `inspect rules` lost because it
-    // meant a name there, not a category.
     let path = temp_file("cake.txt", &corpus_text("real-world/overpy-cake"));
     let path = path.to_str().unwrap();
 
@@ -424,10 +397,6 @@ fn inspect_refs_and_cfg_keep_only_as_the_category_filter() {
 
 #[test]
 fn a_rules_request_carrying_name_is_malformed_on_every_transport() {
-    // `name` is removed from `rules` — a request still carrying it is
-    // refused `malformed-request`, the same code every other schema
-    // violation produces, on stdio, on JSON-RPC `request`, and as an MCP
-    // tool-result error. It must never be silently ignored.
     let input = corpus_workshop("synthetic/basic-rule");
     let stdio = run_lines(
         "stdio",
@@ -451,7 +420,6 @@ fn a_rules_request_carrying_name_is_malformed_on_every_transport() {
             r#"{"jsonrpc":"2.0","id":1,"method":"request","params":{"op":"rules","name":"player starts"}}"#,
         ],
     );
-    // A service refusal rides `result.error`, never the protocol `error`.
     assert_eq!(jsonrpc[0]["result"]["error"]["code"], "malformed-request");
     assert!(jsonrpc[0].get("error").is_none());
 

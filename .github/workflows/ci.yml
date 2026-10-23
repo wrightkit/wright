@@ -1,7 +1,5 @@
 name: CI
 
-# Docs-only changes match no path filter, so only `paths` and `CI result` run.
-# The workflow itself is never skipped, so `CI result` always reports.
 
 on:
   push:
@@ -74,8 +72,6 @@ jobs:
               - 'tests/fixtures/**'
               - 'scripts/**'
               - '.github/workflows/**'
-            # Cargo.lock carries the workshop-rs pin the generated UI types
-            # follow; schemas/** also runs the Rust gates via rust_core.
             ui:
               - 'ui/**'
               - 'schemas/**'
@@ -162,8 +158,6 @@ jobs:
             expected_exit: 0
           - project: bastion
             expected_exit: 0
-          # The pinned owner corpus admits this project's residual as a
-          # source-level failure; the other projects must remain clean.
           - project: defend
             expected_exit: 1
           - project: illari
@@ -282,7 +276,6 @@ jobs:
         run: target/debug/wright update provider opy
 
       - name: Compile OPY via provider
-        # ADR-0028: profiles apply to Workshop input only.
         run: >-
           target/debug/wright compile tests/fixtures/opy/basic-rule.opy
           -o "$RUNNER_TEMP/basic-rule.ow"
@@ -388,12 +381,6 @@ jobs:
           name: benchmark-report
           path: target/wright-bench-report.json
 
-  # Measures the current-run debug CLI against the latest released provider:
-  # pinning an old provider would measure a snapshot nobody uses. Each shard
-  # runs one project and `Metrics drift` compares the merged set, so
-  # partitioning cannot change the verdict and a project missing from the
-  # matrix fails the merge as `removed-from-run`. Wall time on shared
-  # runners varies ~2x, so latency is not part of this gate.
   metrics-shard:
     name: Metrics shard (${{ matrix.project }})
     needs: [paths, wright-cli-build]
@@ -464,9 +451,6 @@ jobs:
           for run in metrics-shards/*.json; do shards+=(--from "$run"); done
           python3 benchmarks/metrics/metrics.py check --skip-latency "${shards[@]}"
 
-  # Full repeated measurement against the baseline's latency bands, kept
-  # as an artifact. A failure here is a signal to look at the trend, not a
-  # verdict: hosted-runner speed is too variable to gate on.
   metrics-latency:
     name: Metrics latency (trend)
     needs: [paths, wright-cli-build]
@@ -527,10 +511,6 @@ jobs:
 
       - name: Build CLI and LSP
         shell: bash
-        # `wright-cli/ui` matches the release archive's feature set so the
-        # post-install smoke exercises the shipped `wright ui` surface; a
-        # debug build embeds the stub page when ui/dist is absent, which is
-        # enough for the loopback URL and /api contract checks.
         run: cargo build --locked -p wright-cli -p wright-lsp --features wright-cli/ui
 
       - name: Upload distribution binaries
@@ -544,8 +524,6 @@ jobs:
             target/debug/wright-lsp.exe
           if-no-files-found: error
 
-  # A failed build skips this job; CI result then reports both the failure and
-  # the wrongly skipped required job.
   dist-validation:
     name: Dist validation (${{ matrix.channel }}, ${{ matrix.os }})
     needs: [paths, dist-cli-build]

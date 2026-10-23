@@ -108,10 +108,6 @@ export function placeFinding(
   content: RuleContent,
 ): FindingPlacement {
   if (finding.action !== null) {
-    // An index `actions` does not hold — an `end` marker the row layer
-    // hides or an out-of-range index — lands on the rule bar; the row it
-    // addressed is a statement the flat stream carries but the body never
-    // renders, and every finding stays visible.
     const row = content.actions[finding.action]
     return row !== undefined && row.call !== 'end'
       ? { list: 'actions', index: finding.action }

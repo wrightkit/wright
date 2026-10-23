@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Usage: scripts/test-install.sh
 
 set -euo pipefail
 

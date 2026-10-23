@@ -1,5 +1,3 @@
-//! The error contract for declarative rule loading and validation.
-
 use std::fmt;
 
 #[derive(Debug)]

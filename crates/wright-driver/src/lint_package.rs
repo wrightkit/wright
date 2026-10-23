@@ -1,24 +1,3 @@
-//! GitHub lint rule package fetch and store (issue #842, parent #616).
-//!
-//! One GitHub `owner/repo` is one lint package: the `rules/` directory of one
-//! repository at an immutable commit. The Wright-owned store keeps one
-//! directory per `<owner>/<repo>/<full-sha>/`; once a package directory exists
-//! intact it is never downloaded or overwritten again.
-//!
-//! A tag, branch, or other ref resolves to a full commit SHA through the
-//! GitHub commits API with ETag conditional requests; a 304 answer reuses the
-//! earlier resolution without another counted request. The archive itself is
-//! the `codeload.github.com` tarball for the full SHA, which does not count
-//! against the API rate limit. `GITHUB_TOKEN`, when present, raises API
-//! limits and is sent to the API host only — never to codeload.
-//!
-//! Repository code is never executed: only `rules/*.yaml|yml` directly inside
-//! `rules/` is extracted, and every file must load through the existing
-//! SPEC-309 declarative rule contract (`wright_analyzer::registry`). Empty,
-//! malformed, incompatible, or duplicate-ID packages are refused with a
-//! diagnostic naming the file, and a failed fetch or validation leaves no
-//! partial store entry.
-
 mod remote;
 mod rules;
 mod source;
@@ -159,7 +138,6 @@ pub struct LintPackageStore {
     api_base: String,
     codeload_base: String,
     token: Option<String>,
-    /// ETag-conditional resolution cache shared across clones.
     resolved: Arc<ResolutionCache>,
 }
 
@@ -330,9 +308,6 @@ impl LintPackageStore {
                     let Some(sha) = dir.file_name().map(|n| n.to_string_lossy()) else {
                         continue;
                     };
-                    // An entry without its managed `rules/` tree is not a
-                    // package — leftover debris from `remove` (the entry dir
-                    // a user-owned file kept) or an abandoned partial write.
                     if !is_full_sha(&sha) || !dir.join("rules").is_dir() {
                         continue;
                     }
@@ -401,7 +376,6 @@ impl LintPackageStore {
                     dir.display()
                 ))
             })?;
-            // Prune the `<owner>/<repo>` parents once they are empty.
             let mut parent = dir.parent();
             while let Some(path) = parent {
                 if path == self.root || std::fs::remove_dir(path).is_err() {
@@ -428,7 +402,6 @@ impl LintPackageStore {
         let mut hits = Vec::new();
         let mut total = 0u64;
         let mut incomplete = false;
-        // GitHub's search API caps at 1000 results: 10 pages of 100.
         for page in 1..=10u32 {
             let url = remote::search_url(&self.api_base, terms, page);
             let body = remote::api_get(&client, &url, self.token.as_deref(), &self.resolved)?;
@@ -481,7 +454,6 @@ impl LintPackageStore {
         }
     }
 
-    /// A unique staging directory under the store root for one install.
     fn staging_dir(&self, sha: &str) -> Result<PathBuf, LintPackageError> {
         std::fs::create_dir_all(&self.root).map_err(|e| {
             LintPackageError::install(format!(
@@ -515,9 +487,6 @@ impl LintPackageStore {
         )))
     }
 
-    /// Atomically promote a validated staging directory to the final store
-    /// path. A concurrent install that already promoted the same entry is a
-    /// win, not an error.
     fn promote(&self, staging: &Path, final_dir: &Path) -> Result<(), LintPackageError> {
         std::fs::create_dir_all(final_dir.parent().expect("sha dir has a parent")).map_err(
             |e| {
@@ -538,13 +507,6 @@ impl LintPackageStore {
     }
 }
 
-/// Activate the packages `lint.packages` pins on `registry` (issue #843):
-/// each pin names a repository and a full commit SHA — the configuration is
-/// the lock. A package missing from the store is fetched by its SHA; the
-/// first-party source loads with replacement semantics, every other package
-/// as external SPEC-309 rules. On any failure — a malformed pin, an
-/// unfetchable SHA, a refused package, or a rule-ID collision — the caller
-/// gets one diagnostic and the lint run produces no findings.
 pub(crate) fn activate_pinned(
     lint: &wright_analyzer::registry::LintConfig,
     packages: &crate::config::LintPackageConfig,
@@ -612,14 +574,10 @@ fn normalize_ref(reference: Option<&str>) -> Option<&str> {
     reference.map(str::trim).filter(|r| !r.is_empty())
 }
 
-/// A full commit SHA needs no API resolution and keys the store directory.
 pub(crate) fn is_full_sha(value: &str) -> bool {
     value.len() == 40 && value.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-/// The platform Wright data directory for lint packages. Mirrors the
-/// provider data dir convention (`WRIGHT_LINT_PACKAGE_DIR` first, then the
-/// OS data dir).
 fn default_store_dir() -> PathBuf {
     if let Some(path) = std::env::var_os(STORE_DIR_ENV) {
         return PathBuf::from(path);

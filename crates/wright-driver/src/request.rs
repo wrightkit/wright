@@ -1,6 +1,3 @@
-//! The request vocabulary of the tool service: the owned query surface plus
-//! agent-oriented operations, as they arrive on every transport.
-
 use serde::{Deserialize, Serialize};
 
 /// A semantic query target on the agent contract (#429): a numeric id or a
@@ -412,7 +409,6 @@ pub enum StatementList {
 }
 
 impl StatementList {
-    /// The section spelling, for diagnostics.
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Conditions => "conditions",

@@ -1,10 +1,3 @@
-//! The remote half of the lint package store: commits-API resolution with
-//! ETag conditional requests, and the `codeload.github.com` tarball fetch.
-//!
-//! `GITHUB_TOKEN` is attached to API requests only — never to codeload —
-//! because a codeload tarball for a full SHA does not count against the API
-//! rate limit and the token must not leave the API host.
-
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::Mutex;
@@ -15,24 +8,18 @@ use super::{LintPackageError, LintPackageSource};
 pub(super) const MAX_DOWNLOAD_BYTES: u64 = 128 * 1024 * 1024;
 pub(super) const TOKEN_ENV: &str = "GITHUB_TOKEN";
 
-/// Ref spellings that may appear in a URL path keep `/`, `.`, `-`, and `_`
-/// unescaped so branch names such as `feature/x` reach the commits API whole.
 const REF_ENCODE: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
     .remove(b'/')
     .remove(b'.')
     .remove(b'-')
     .remove(b'_');
 
-/// Query-string spellings keep the search qualifier colon plus `.`, `-`,
-/// and `_` readable; spaces and other characters are percent-encoded.
 const QUERY_ENCODE: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
     .remove(b':')
     .remove(b'.')
     .remove(b'-')
     .remove(b'_');
 
-/// An ETag-conditional resolution cache: request URL → the entity tag GitHub
-/// issued and the response body it was issued for.
 pub(super) type ResolutionCache = Mutex<HashMap<String, ResolvedEntry>>;
 
 #[derive(Debug, Clone)]
@@ -41,9 +28,6 @@ pub(super) struct ResolvedEntry {
     body: Vec<u8>,
 }
 
-/// The commits-API endpoint that resolves `reference`: `commits/<ref>` for a
-/// tag/branch/short SHA, or `commits?per_page=1` for the default-branch head.
-/// The boolean reports whether the answer is a single commit object.
 pub(super) fn resolve_url(api_base: &str, source: &LintPackageSource, reference: &str) -> String {
     format!(
         "{}/repos/{}/{}/commits/{}",
@@ -72,8 +56,6 @@ pub(super) fn archive_url(codeload_base: &str, source: &LintPackageSource, sha: 
     )
 }
 
-/// The repository Search API endpoint: the `wrightkit-lint` topic filter
-/// plus optional caller terms, paged at `per_page=100` (1-based `page`).
 pub(super) fn search_url(api_base: &str, terms: Option<&str>, page: u32) -> String {
     let mut query = "topic:wrightkit-lint archived:false fork:false".to_string();
     if let Some(terms) = terms.map(str::trim).filter(|t| !t.is_empty()) {
@@ -87,16 +69,12 @@ pub(super) fn search_url(api_base: &str, terms: Option<&str>, page: u32) -> Stri
     )
 }
 
-/// One parsed search page: `total_count`, `incomplete_results`, and the
-/// raw `items` array.
 pub(super) struct SearchPage {
     pub(super) total: u64,
     pub(super) incomplete: bool,
     pub(super) items: Vec<serde_json::Value>,
 }
 
-/// Parse one Search API page; a malformed or non-object answer is a
-/// `lint-package-remote` error, matching `resolved_sha`.
 pub(super) fn search_page(body: &[u8]) -> Result<SearchPage, LintPackageError> {
     let unexpected =
         || LintPackageError::remote("GitHub returned an unexpected repository search response");
@@ -122,10 +100,6 @@ pub(super) fn package_client() -> Result<reqwest::blocking::Client, LintPackageE
         })
 }
 
-/// One conditional GET against the GitHub API host. The token is attached
-/// here — the only place requests carry it. A stored ETag goes out as
-/// `If-None-Match`; GitHub's 304 reuses the stored body without another
-/// counted request.
 pub(super) fn api_get(
     client: &reqwest::blocking::Client,
     url: &str,
@@ -185,8 +159,6 @@ pub(super) fn api_get(
     Ok(body)
 }
 
-/// The codeload tarball for a full SHA. The token never leaves the API host,
-/// so this request is unauthenticated by design.
 pub(super) fn fetch_archive(
     client: &reqwest::blocking::Client,
     url: &str,
@@ -209,9 +181,6 @@ pub(super) fn fetch_archive(
     Ok(body)
 }
 
-/// The `sha` member of a single-commit object or of the first entry of the
-/// commit list, normalized to lowercase. An empty commit list means the
-/// repository exists but has no commits — a missing source, not a bad answer.
 pub(super) fn resolved_sha(
     body: &[u8],
     single: bool,
@@ -269,8 +238,6 @@ fn read_body(
     Ok(body)
 }
 
-/// GitHub reports a used-up rate limit as 403 with `x-ratelimit-remaining: 0`
-/// (or a "rate limit" body for secondary limits) and as 429.
 fn rate_limited(
     status: reqwest::StatusCode,
     headers: &reqwest::header::HeaderMap,

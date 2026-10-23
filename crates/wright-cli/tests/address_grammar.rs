@@ -1,11 +1,3 @@
-//! ADR-0035 rule/symbol address grammar acceptance through the CLI and
-//! `wright serve` (ADR-0022: one grammar, one resolver, both surfaces).
-//! `NAME#N` selects the Nth rule of its base name, a literal `#` name stays
-//! selectable while no ordinal reading exists, canonical addresses print
-//! and feed back, `--caller` never merges same-name rules, bare symbol
-//! names exclude rules while `KIND:NAME` picks one, and an unmatched `file`
-//! is `invalid-selection` rather than an empty result.
-
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -92,8 +84,6 @@ fn serve(input: &Path, lines: &[String]) -> Vec<serde_json::Value> {
         .collect()
 }
 
-/// `a`, `a`, `a#2`, and an unnamed rule — the ADR-0035 collision set:
-/// `a#2` reads both as the literal name and as the second `a`.
 const HASH_COLLISION: &str = r#"rule ("a") {
     event {
         Ongoing - Global;
@@ -128,8 +118,6 @@ rule ("") {
 }
 "#;
 
-/// Two rules named `tick`, both calling `reset` — the `--caller` merge the
-/// grammar forbids.
 const DUP_CALLERS: &str = r#"subroutines {
     0: reset
 }
@@ -151,8 +139,6 @@ rule ("tick") {
 }
 "#;
 
-/// A global variable and a subroutine sharing `x`: bare `x` is ambiguous
-/// across kinds; `KIND:NAME` selects one.
 const KIND_COLLISION: &str = r#"variables {
     global:
         0: x
@@ -170,9 +156,6 @@ rule ("uses x") {
 }
 "#;
 
-// `NAME#N` selects the Nth rule of its base name; out-of-range ordinals and
-// the duplicated bare name refuse with the existing codes — identically on
-// the CLI and through `wright serve`.
 #[test]
 fn name_ordinals_select_and_out_of_range_refuses() {
     let path = temp_file("dup.ws", DUP_CALLERS);
@@ -217,9 +200,6 @@ fn name_ordinals_select_and_out_of_range_refuses() {
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
 
-// A literal `#` name is selectable while no `NAME#N` reading exists; the
-// `a`, `a`, `a#2` collision makes `a#2` ambiguous and `a#2#1` re-selects
-// the literal rule; `#N` addresses the unnamed rule.
 #[test]
 fn literal_hash_names_and_unnamed_ordinals() {
     let only = temp_file(
@@ -259,8 +239,6 @@ fn literal_hash_names_and_unnamed_ordinals() {
         .collect();
     assert_eq!(addresses, ["a#1", "a#2", "a#2#1", "#1"]);
 
-    // Every address `inspect rules` prints selects its own rule back or
-    // fails ambiguous — the second `a`'s `a#2` is the collision.
     for rule in rules {
         let address = rule["address"].as_str().unwrap();
         let output = run(&[
@@ -285,8 +263,6 @@ fn literal_hash_names_and_unnamed_ordinals() {
         }
     }
 
-    // `a#2` names two rules; the refusal lists each candidate's own
-    // address, and `a#2#1` selects the literal rule.
     let output = run(&[
         "inspect",
         "rules",
@@ -318,7 +294,6 @@ fn literal_hash_names_and_unnamed_ordinals() {
         "a#2"
     );
 
-    // The unnamed rule's `#1` selects it like any other address.
     let output = run(&["inspect", "cfg", "#1", path.to_str().unwrap(), "-f", "json"]);
     assert!(
         output.status.success(),
@@ -329,8 +304,6 @@ fn literal_hash_names_and_unnamed_ordinals() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// An ambiguous `--caller` refuses instead of merging both `tick` rules;
-// `NAME#N` picks one caller — on the CLI and through `wright serve`.
 #[test]
 fn callgraph_caller_refuses_the_merge() {
     let path = temp_file("callers.ws", DUP_CALLERS);
@@ -396,9 +369,6 @@ fn callgraph_caller_refuses_the_merge() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// A bare symbol name shared by a `globalVariable` and a `subroutine` fails
-// `ambiguous-symbol` naming both `KIND:NAME` forms; the explicit kind
-// selects one — the same candidates on the CLI and through `wright serve`.
 #[test]
 fn kind_names_disambiguate_symbol_collisions() {
     let path = temp_file("kinds.ws", KIND_COLLISION);
@@ -447,8 +417,6 @@ fn kind_names_disambiguate_symbol_collisions() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// A `file` naming no source file of the loaded program refuses
-// `invalid-selection`; a matched file with no results still succeeds.
 #[test]
 fn unmatched_files_refuse_on_cli_and_serve() {
     let clean = temp_file(
@@ -457,8 +425,6 @@ fn unmatched_files_refuse_on_cli_and_serve() {
     );
     let clean = clean.to_str().unwrap();
 
-    // The loaded program's own file matches and reports an empty finding
-    // set — a valid result, not an error.
     let output = run(&["analyze", clean, "--file", "clean.ws", "-f", "json"]);
     assert!(
         output.status.success(),
@@ -514,8 +480,6 @@ fn unmatched_files_refuse_on_cli_and_serve() {
     let _ = std::fs::remove_dir_all(Path::new(clean).parent().unwrap());
 }
 
-// `NAME#N` is a name address: it ignores `snapshot` where a numeric id
-// would refuse `stale-id` (ADR-0034 decision 4).
 #[test]
 fn name_addresses_ignore_snapshot() {
     let path = temp_file("snapshot.ws", DUP_CALLERS);
@@ -543,9 +507,6 @@ fn name_addresses_ignore_snapshot() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// `costEstimate`'s `rule` is a filter (ADR-0035 decision text): an
-// ambiguous or unknown name is `invalid-selection` carrying the resolver's
-// candidate list, while `NAME#N` selects the drill-down.
 #[test]
 fn cost_estimate_rule_uses_the_same_grammar() {
     let path = temp_file("cost.ws", DUP_CALLERS);
@@ -621,9 +582,6 @@ fn query_commands_reject_unknown_and_ambiguous_names() {
         );
     }
 
-    // A variable and rules sharing one name is no longer ambiguous for
-    // `refs` (ADR-0035): the bare name resolves the variable, while the
-    // duplicated rule name stays `ambiguous-rule` for a rule selector.
     let dup = temp_file(
         "dup.ws",
         r#"variables {
@@ -678,7 +636,6 @@ rule ("dup") {
             envelope["diagnostics"][0]["message"]
         );
     }
-    // `NAME#N` selects one duplicate — the same grammar `cfg` serves.
     let output = run(&[
         "inspect",
         "cfg",
@@ -693,8 +650,6 @@ rule ("dup") {
         command_result(&output)
     );
 
-    // Text mode carries the failed query's diagnostic on stdout (#891),
-    // and shows no fabricated default result (#446).
     let output = run(&["inspect", "refs", "nope", path]);
     assert_eq!(output.status.code(), Some(1));
     assert!(

@@ -1,8 +1,3 @@
-//! `wright lint package` integration tests (#844): the remote-check
-//! commands — outdated, update, remove — plus the JSON envelope and
-//! usage contract. Remote answers come from the recorded-response
-//! localhost server; no test touches real network or real GitHub.
-
 mod support;
 
 use support::*;
@@ -55,8 +50,6 @@ fn outdated_reports_every_state_without_mutating_the_store() {
             && text.contains(&format!("remote={SHA_B}")),
         "{text}"
     );
-    // Nothing was applied — the entries are untouched and no archive was
-    // ever fetched.
     assert!(
         !server.paths().iter().any(|p| p.contains("tar.gz")),
         "outdated never fetches: {:?}",
@@ -104,7 +97,6 @@ fn update_installs_the_new_head_and_keeps_the_old_entry() {
         text.contains("package: source=team/current status=unchanged"),
         "{text}"
     );
-    // The old entry is immutable — both revisions remain installed.
     assert!(
         entry(&dirs.root, "community", "rules", SHA_A)
             .join("rules/rule.yaml")
@@ -158,7 +150,6 @@ fn update_of_one_source_updates_only_that_repository() {
         !server.paths().iter().any(|p| p.contains("/repos/team/")),
         "{text}"
     );
-    // A repository that is not installed is a not-found error, not a no-op.
     let output = run(
         &dirs,
         Some(&server),
@@ -184,8 +175,6 @@ fn update_of_one_source_updates_only_that_repository() {
 fn update_fails_on_row_errors_and_refuses_damaged_entries() {
     let dirs = TestDirs::new("update-fail");
     write_entry(&dirs.root, "gone", "pkg", SHA_A, RULE);
-    // A locally edited managed file fails store-entry validation — the
-    // damaged entry is refused, never replaced.
     let damaged = write_entry(&dirs.root, "bad", "entry", SHA_A, RULE);
     std::fs::write(damaged.join("rules/rule.yaml"), b"locally edited").unwrap();
     let server = TestServer::serve(|_| Response::not_found());
@@ -210,10 +199,7 @@ fn update_fails_on_row_errors_and_refuses_damaged_entries() {
             && text.contains("diagnostic: error lint-package-not-found"),
         "{text}"
     );
-    // The first failure — the damaged entry's invalid content — is a
-    // source error, like a failing rule file during `lint`.
     assert_eq!(output.status.code(), Some(1));
-    // The locally edited file was never replaced.
     assert_eq!(
         std::fs::read_to_string(damaged.join("rules/rule.yaml")).unwrap(),
         "locally edited"
@@ -259,7 +245,6 @@ fn remove_deletes_managed_content_and_keeps_user_files() {
         "mine"
     );
 
-    // Removing nothing is a not-found error.
     let output = run(
         &dirs,
         None,
@@ -337,7 +322,6 @@ fn the_json_envelope_is_machine_readable() {
         value["result"]["store"],
         dirs.root.display().to_string().as_str()
     );
-    // No token or endpoint plumbing leaks into the wire form.
     let text = String::from_utf8_lossy(&output.stdout);
     assert!(!text.contains("WRIGHT_LINT_PACKAGE_API_BASE"));
 }

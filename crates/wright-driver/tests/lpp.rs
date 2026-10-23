@@ -1,6 +1,3 @@
-//! LPP integration through the driver session and tool service (#142).
-//!
-
 #![allow(clippy::result_large_err)]
 
 use std::path::{Path, PathBuf};
@@ -78,8 +75,6 @@ fn session_spawns_initializes_and_queries_a_provider() {
 
 #[test]
 fn unconfigured_language_refuses_explicitly() {
-    // A non-OPY language remains an unconfigured opaque language id; the
-    // first-party OPY resolver must not change generic registry behavior.
     let session = CompilerSession::new(SessionConfig::default()).expect("session");
     let error = session
         .language_provider("x-unconfigured-lang")

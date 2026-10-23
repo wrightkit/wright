@@ -250,8 +250,6 @@ fn if_parts(actions: &[Action], start: usize) -> Option<IfParts> {
 
 fn action_subroutine(program: &Program, action: &Action) -> Option<usize> {
     let name = super::traversal::subroutine_callee(action)?;
-    // Name resolution mirrors workshop-rs: a redeclared name binds to the
-    // last declaration.
     program
         .subroutines
         .iter()

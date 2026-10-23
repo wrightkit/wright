@@ -1,7 +1,3 @@
-//! Lint package source identity: a GitHub `owner/repo` pair, with parsing for
-//! the repository URL spellings users give (https, ssh, `git@`, and URLs
-//! addressing a ref such as `/tree/<branch>` or `/releases/tag/<tag>`).
-
 use std::fmt;
 
 use super::LintPackageError;
@@ -119,8 +115,6 @@ impl fmt::Display for LintPackageSource {
     }
 }
 
-/// GitHub usernames and organization names are ASCII alphanumerics and
-/// interior hyphens.
 fn valid_owner(owner: &str) -> bool {
     !owner.is_empty()
         && owner.len() <= 39

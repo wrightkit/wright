@@ -4,6 +4,7 @@
   import { SvelteSet } from 'svelte/reactivity'
   import SqButton from './SqButton.svelte'
   import Expr from './Expr.svelte'
+  import ArgHoverCard from './ArgHoverCard.svelte'
   import FindingMark from './FindingMark.svelte'
   import RowMenu from './components/RowMenu.svelte'
   import type { ChromeStrings } from './chrome'
@@ -44,15 +45,8 @@
     names: Names
     debug: boolean
     pending: ReadonlyMap<string, PendingChange>
-    /** This rule's placed findings (`docs/ui/diagnostics.md § In place`). */
     ruleFindings: RuleFindings
-    /**
-     * The row a finding reveal targets (§ In the dialog): a column
-     * filter hiding it is dropped, then the row scrolls in and flashes
-     * once; `nonce` re-arms each reveal.
-     */
     reveal: { rule: number; list: StatementList; index: number; nonce: number } | null
-    /** The session locale's chrome strings. */
     t: ChromeStrings
     onedit: {
       open: (list: StatementList, index: number, argPath?: number[]) => void
@@ -60,8 +54,6 @@
     }
   } = $props()
 
-  // The rule's identities resolve before its statements render, so a name
-  // never flashes its raw id: `peek` answers synchronously once warmed.
   let namesReady = $state(false)
   let generation = 0
   $effect(() => {
@@ -77,9 +69,6 @@
     })
   })
 
-  // Selection is per column of the rule currently rendered; switching
-  // rules or re-reading content drops it (staged marks survive — they
-  // live in the page's pending map). The column filters reset with it.
   let selection = $state<{ conditions: Set<number>; actions: Set<number> }>({
     conditions: new SvelteSet(),
     actions: new SvelteSet(),
@@ -87,6 +76,98 @@
   let anchor = $state<{ list: StatementList; index: number; extent: number } | null>(null)
   let hoverCol = $state<StatementList | null>(null)
   let root: HTMLElement | undefined = $state()
+
+  /**
+   * The argument hover card (docs/ui/editor.md § Hover card): after
+   * 450 ms over an `.arg` token the card opens under it; leaving the
+   * argument, clicking, or scrolling hides it. Hovering also marks the
+   * token's `.arg-hovered` outline — the same outline the editor's
+   * click would open. `hoverPath`/`hoverAnchor`/`hoverStmt` carry what
+   * the card reads; the timer only arms `showCard`.
+   */
+  const HOVER_DELAY_MS = 450
+  let hoverTimer: ReturnType<typeof setTimeout> | null = null
+  // A DOM element and its box are held as plain references, not rune
+  // state — they are only read by the handlers, never rendered.
+  let hoveredEl: HTMLElement | null = null
+  let showCard = $state(false)
+  let hoverAnchor = $state<{ left: number; bottom: number } | null>(null)
+  let hoverStmt = $state<Node | null>(null)
+  let hoverPath = $state<number[]>([])
+
+  function clearHover() {
+    if (hoverTimer !== null) {
+      clearTimeout(hoverTimer)
+      hoverTimer = null
+    }
+    hoveredEl?.classList.remove('arg-hovered')
+    hoveredEl = null
+    showCard = false
+    hoverAnchor = null
+    hoverStmt = null
+    hoverPath = []
+  }
+
+  /**
+   * The `.arg` token under the pointer, with the statement it belongs
+   * to: `data-path` on the token gives the argument's path and the
+   * row's `data-index`/`data-list` finds the statement node. Only a
+   * `.arg` that resolves to a call-node root arms the card.
+   */
+  function armHover(arg: HTMLElement) {
+    clearHover()
+    const row = arg.closest<HTMLElement>('.statement')
+    const col = arg.closest<HTMLElement>('.col')
+    if (!row || !col || ruleState.phase !== 'ready') return
+    const list = col.dataset.list as StatementList
+    const index = Number(row.dataset.index)
+    const node =
+      list === 'conditions'
+        ? ruleState.content.conditions[index]?.value
+        : ruleState.content.actions[index]
+    if (!node || typeof node !== 'object' || !('args' in node)) return
+    const path = (arg.dataset.path ?? '')
+      .split('.')
+      .filter(Boolean)
+      .map(Number)
+    if (path.length === 0) return
+    hoveredEl = arg
+    arg.classList.add('arg-hovered')
+    hoverStmt = node
+    hoverPath = path
+    hoverTimer = setTimeout(() => {
+      hoverTimer = null
+      if (hoveredEl) {
+        const rect = hoveredEl.getBoundingClientRect()
+        hoverAnchor = { left: rect.left, bottom: rect.bottom }
+        showCard = true
+      }
+    }, HOVER_DELAY_MS)
+  }
+
+  /** Delegated pointer tracking: enter an `.arg` to arm, leave it to clear. */
+  function onpointerover(event: PointerEvent) {
+    const arg = (event.target as HTMLElement).closest?.('.arg') as HTMLElement | null
+    if (arg === hoveredEl) return
+    if (arg && root?.contains(arg)) armHover(arg)
+    else clearHover()
+  }
+
+  $effect(() => {
+    const el = root
+    if (!el) return
+    el.addEventListener('pointerover', onpointerover)
+    el.addEventListener('pointerleave', clearHover)
+    window.addEventListener('scroll', clearHover, true)
+    el.addEventListener('pointerdown', clearHover)
+    return () => {
+      el.removeEventListener('pointerover', onpointerover)
+      el.removeEventListener('pointerleave', clearHover)
+      window.removeEventListener('scroll', clearHover, true)
+      el.removeEventListener('pointerdown', clearHover)
+      if (hoverTimer !== null) clearTimeout(hoverTimer)
+    }
+  })
   let filters = $state<Record<StatementList, string>>({ conditions: '', actions: '' })
   $effect(() => {
     void summary.id
@@ -96,7 +177,6 @@
     filters = { conditions: '', actions: '' }
   })
 
-  /** A column shows its filter field once it renders past this many rows. */
   const FILTER_THRESHOLD = 30
 
   const sel = (list: StatementList) => selection[list]
@@ -105,15 +185,12 @@
     return pending.get(keyFor(summary.id, list, index))?.tag
   }
 
-  /** A checkbox click: shift+click extends from the anchor to a range. */
   function selectRow(list: StatementList, index: number, event: MouseEvent) {
     const set = sel(list)
     if (event.shiftKey && anchor?.list === list) {
       extendRange(list, index)
       return
     }
-    // `click` is delegated, so `currentTarget` is the delegation root here;
-    // the target is the checkbox itself (an input has no children).
     if ((event.target as HTMLInputElement).checked) set.add(index)
     else set.delete(index)
     anchor = { list, index, extent: index }
@@ -134,11 +211,6 @@
     if (anchor?.list === list) anchor = null
   }
 
-  /**
-   * The column's select-all works on the rows the filter leaves visible:
-   * checking adds them, unchecking removes them. Rows the filter hid are
-   * outside the gesture — they keep their selection either way.
-   */
   function selectAll(list: StatementList, shown: number[], checked: boolean) {
     const set = sel(list)
     if (checked) for (const index of shown) set.add(index)
@@ -146,12 +218,6 @@
     anchor = null
   }
 
-  /**
-   * A finding reveal (docs/ui/diagnostics.md § In the dialog): once the
-   * target row is rendered — the rule may still be warming its names
-   * when the click lands — a filter hiding it is dropped and it scrolls
-   * in and flashes once. The `nonce` re-arms the effect per reveal.
-   */
   $effect(() => {
     const target = reveal
     if (target === null) return
@@ -162,8 +228,6 @@
         `.col[data-list="${target.list}"] .statement[data-index="${target.index}"]`,
       )
       if (!el) {
-        // Not rendered: either the names are still warming or the column
-        // filter hid it — clear the filter and let the flush retry.
         if (filters[target.list] !== '') filters[target.list] = ''
         return
       }
@@ -175,7 +239,6 @@
     })
   })
 
-  /** The flat-list indices that render as rows (`end` markers stay hidden). */
   function visibleIndices(list: StatementList): number[] {
     if (ruleState.phase !== 'ready') return []
     if (list === 'conditions') return ruleState.content.conditions.map((_, i) => i)
@@ -183,11 +246,6 @@
     return depths.flatMap((depth, i) => (depth === null ? [] : [i]))
   }
 
-  /**
-   * The rendered rows a column's filter leaves: the session-locale text
-   * contains the query, or the call id takes it as a prefix. An empty
-   * query filters nothing out.
-   */
   function shownIndices(list: StatementList, visible: number[]): number[] {
     const query = filters[list]
     if (query === '' || ruleState.phase !== 'ready') return visible
@@ -208,9 +266,6 @@
       !el?.closest('input.sel, input.sel-all, input.col-filter')
     )
       return
-    // Every open RuleView registers a window listener, so a column in a
-    // sibling rule's DOM leaves the gesture to that rule. The pointer
-    // column applies only when the event has no target column.
     const col = el?.closest('.col')
     if (col && !root?.contains(col)) return
     const list = (col?.getAttribute('data-list') as StatementList | null) ?? hoverCol
@@ -232,7 +287,6 @@
       event.preventDefault()
       onedit.batch(list, [...set], 'delete')
     } else if (event.key === 'Escape') {
-      // Esc peels one layer at a time (docs/ui/selection.md § Keyboard).
       if (filters[list] !== '') {
         filters[list] = ''
         event.preventDefault()
@@ -243,14 +297,9 @@
     }
   }
 
-  /** The singular noun an aria label names for a row of `list`. */
   const noun = (list: StatementList) =>
     list === 'conditions' ? t.conditionNoun : t.actionNoun
 
-  /**
-   * The row's flat-stream nodes: an action list renders its actions; a
-   * condition list renders each condition's `value`.
-   */
   function rowNodes(list: StatementList): Node[] {
     if (ruleState.phase !== 'ready') return []
     return list === 'conditions'
@@ -258,12 +307,6 @@
       : ruleState.content.actions
   }
 
-  /**
-   * The row's context menu entries (docs/ui/selection.md § Structural
-   * selection): "Select same action" checks every row in the column
-   * sharing the row's call id; "Select block" checks the opener, its
-   * body, and its `End` — enabled only on control-flow openers.
-   */
   function menuItems(list: StatementList, index: number) {
     const nodes = rowNodes(list)
     const block =
@@ -292,13 +335,6 @@
     ]
   }
 
-  /**
-   * The event rows, in the in-game order: Event always, then Team, Player,
-   * and Subroutine only when the event carries them. Labels are chrome in
-   * the session locale; values are `lookup` names in the session locale
-   * (warmed with the rest of the rule), with the raw identity as the
-   * failed-lookup fallback.
-   */
   function eventRows(event: Event): { key: string; label: string; value: string }[] {
     const rows = [
       { key: 'event', label: t.event, value: names.peek(event.id, ['event'])?.name ?? event.id },
@@ -327,9 +363,6 @@
 
 <svelte:window onkeydown={onkeydown} />
 
-<!-- The statement-row shell the two columns share: the checkbox, the
-     debug line number, the statement text, the pending tag, the findings
-     mark, and the debug node JSON. -->
 {#snippet stmtRow(
   list: StatementList,
   index: number,
@@ -551,5 +584,8 @@
         </ol>
       </div>
     </div>
+  {/if}
+  {#if showCard && hoverStmt !== null && hoverAnchor !== null}
+    <ArgHoverCard statement={hoverStmt} path={hoverPath} anchor={hoverAnchor} {names} {t} />
   {/if}
 </section>

@@ -325,8 +325,6 @@ impl SemanticIndex {
         rule: Option<RuleId>,
         action: Option<ActionId>,
         value: Option<ValueId>,
-        // (reported span, identifier occurrence) — reported falls back to
-        // the statement span when the identifier is absent (#892).
         spans: (Option<Span>, Option<Span>),
     ) {
         self.references.push(Reference {
@@ -360,8 +358,6 @@ impl SemanticIndex {
                 })
             }));
     }
-    /// Name resolution mirrors workshop-rs: a name that declares more than
-    /// once binds its references to the last declaration.
     fn find_symbol(&self, kind: SymbolKind, name: &str) -> Option<SymbolId> {
         self.symbols
             .iter()
@@ -524,9 +520,6 @@ impl SemanticIndex {
     }
 }
 
-/// The provenance root a value tree hangs from: a rule condition or one action
-/// argument. Paths under it address nested values through
-/// `Program::condition_value_span` / `Program::action_argument_value_span`.
 #[derive(Clone, Copy)]
 enum ValueRoot {
     Condition(usize),
@@ -542,8 +535,6 @@ impl ValueRoot {
             }
         }
     }
-    /// The enclosing statement's span — the reported `span` fallback when
-    /// the provenance root carries no identifier occurrence (#892).
     fn statement_span(self, program: &Program, rule: usize) -> Option<Span> {
         match self {
             Self::Condition(condition) => program.condition_span(rule, condition),
@@ -574,9 +565,6 @@ mod tests {
         (program, index)
     }
 
-    /// #555: variable, subroutine, and rule-name positions all resolve
-    /// through the one shared position→symbol rule, and positions outside
-    /// every identifier occurrence miss rather than resolving a neighbor.
     #[test]
     fn symbol_at_resolves_each_symbol_kind_and_misses_outside_occurrences() {
         let text = concat!(

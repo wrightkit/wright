@@ -1,10 +1,4 @@
 <script lang="ts">
-  /**
-   * One severity's mark (docs/ui/diagnostics.md § Severity): a filled
-   * circle for error, a filled triangle for warning, an outlined circle
-   * for info, drawn in the severity's colour. Decorative only — callers
-   * put the severity in their own accessible name.
-   */
   import type { Severity } from './findings'
 
   let { severity }: { severity: Severity } = $props()

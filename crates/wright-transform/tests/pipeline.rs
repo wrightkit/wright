@@ -2,7 +2,6 @@ use workshop_rs::{Action, Event, Program, Rule, Value, Variable};
 use wright_transform::profile::Profile;
 use wright_transform::{run, run_validated};
 
-/// Build a program with `x = len(points) + 2 * 3`.
 fn arithmetic_program() -> Program {
     let mut program = Program::new();
     program.global_variable(Variable::with_index("points", 1));

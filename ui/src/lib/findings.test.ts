@@ -1,10 +1,3 @@
-/**
- * Finding placement (docs/ui/diagnostics.md § In place, #921): the
- * action-index map, the condition-span map, the rule-only fallbacks, the
- * most-severe choice, and the `bastion.ow` regression that all 19 of its
- * findings land — 12 on conditions through their whole-statement spans
- * (#925).
- */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import process from 'node:process'
@@ -91,7 +84,6 @@ describe('spanContains', () => {
     expect(spanContains(outer, span(10, 9, 10, 41))).toBe(false)
     expect(spanContains(outer, span(11, 1, 11, 5))).toBe(false)
     expect(spanContains(outer, span(9, 99, 10, 4))).toBe(false)
-    // A different path or file is never contained.
     expect(spanContains(outer, { ...span(10, 9, 10, 25), path: 'other.ws' })).toBe(false)
     expect(spanContains(outer, { ...span(10, 9, 10, 25), file: 1 })).toBe(false)
   })
@@ -109,8 +101,6 @@ describe('placeFinding', () => {
   })
 
   it('places an unindexed finding on the condition whose span contains its span', () => {
-    // The `ongoing-condition-hot-path` shape: the finding sits inside the
-    // condition's left operand.
     const placed = placeFinding(finding({ action: null, span: span(6119, 9, 6119, 25) }), body)
     expect(placed).toEqual({ list: 'conditions', index: 0 })
   })
@@ -122,15 +112,12 @@ describe('placeFinding', () => {
 
   it('falls to the rule bar when no condition span contains the finding', () => {
     expect(placeFinding(finding({ span: span(7000, 1, 7000, 5) }), body)).toEqual({ list: 'rule' })
-    // No span at all: the rule bar.
     expect(placeFinding(finding({ span: null }), body)).toEqual({ list: 'rule' })
-    // Conditions without spans cannot contain anything.
     const unspanned = content([condition()], [])
     expect(placeFinding(finding({ span: span(10, 1, 10, 5) }), unspanned)).toEqual({ list: 'rule' })
   })
 
   it('falls to the rule bar when `action` names no rendered row', () => {
-    // `end` markers are hidden rows; an index past the stream is out of range.
     expect(placeFinding(finding({ action: 1 }), body)).toEqual({ list: 'rule' })
     expect(placeFinding(finding({ action: 2 }), body)).toEqual({ list: 'rule' })
   })
@@ -147,8 +134,8 @@ describe('placeFindings', () => {
       finding({ rule: 7, action: 0 }),
       finding({ rule: 7, span: span(10, 9, 10, 20) }),
       finding({ rule: 7, span: span(999, 1, 999, 5) }),
-      finding({ rule: 7, action: 1 }), // `end`: hidden, lands on the bar
-      finding({ rule: 9, action: 0 }), // rule 9 has no loaded content
+      finding({ rule: 7, action: 1 }),
+      finding({ rule: 9, action: 0 }),
       finding({ rule: null }),
     ]
     const placed = placeFindings(findings, contents)
@@ -158,11 +145,8 @@ describe('placeFindings', () => {
     expect(for7.conditions.get(0)).toHaveLength(1)
     expect(for7.rule).toHaveLength(2)
 
-    // An unloaded or unmapped rule still carries its findings — on the bar.
     expect(findingsFor(placed, 9).rule).toHaveLength(1)
-    // `rule: null` findings belong to no rule and surface nowhere here.
     expect(placed.has(0)).toBe(false)
-    // A rule with no findings reports the empty placement.
     expect(findingsFor(placed, 42)).toEqual<RuleFindings>({
       actions: new Map(),
       conditions: new Map(),
@@ -191,12 +175,6 @@ describe('allFor', () => {
   })
 })
 
-/**
- * The toolbar's severity levels (#922, docs/ui/diagnostics.md § In
- * place): one count badge per severity that has findings, in its
- * severity colour — error first, and info only when no error or
- * warning exists.
- */
 describe('severity badges (#922)', () => {
   const sev = (severity: Finding['severity']) => finding({ severity })
 
@@ -214,7 +192,6 @@ describe('severity badges (#922)', () => {
     [['error'], ['error']],
     [['warning'], ['warning']],
     [['info'], ['info']],
-    // Error first, then warning; info joins neither while any is shown.
     [['error', 'warning', 'info'], ['error', 'warning']],
     [['warning', 'info'], ['warning']],
     [['error', 'info'], ['error']],
@@ -224,15 +201,12 @@ describe('severity badges (#922)', () => {
   })
 
   it('filters the rule list by the lowest shown severity', () => {
-    // Info is the lowest shown level only when it is the only one.
     expect(lowestShownSeverity([sev('info'), sev('info')])).toBe('info')
     expect(lowestShownSeverity([sev('warning'), sev('info')])).toBe('warning')
     expect(lowestShownSeverity([sev('error'), sev('warning'), sev('info')])).toBe('warning')
     expect(lowestShownSeverity([sev('error')])).toBe('error')
     expect(lowestShownSeverity([])).toBeNull()
 
-    // A rule keeps a finding at or above the floor: an error survives a
-    // warning floor, an info does not.
     const atFloor = (list: Finding['severity'][], floor: 'error' | 'warning' | 'info') =>
       hasFindingAtOrAbove(
         { actions: new Map(), conditions: new Map(), rule: list.map(sev) },
@@ -246,11 +220,6 @@ describe('severity badges (#922)', () => {
   })
 })
 
-/**
- * The dialog's severity groups (#922, docs/ui/diagnostics.md § In the
- * dialog): findings grouped most severe first under toggling headings;
- * error and warning open by default, info collapsed.
- */
 describe('severity groups (#922)', () => {
   const sev = (severity: Finding['severity']) => finding({ severity })
 
@@ -276,14 +245,6 @@ describe('severity groups (#922)', () => {
   })
 })
 
-/**
- * The pinned `bastion.ow` regression (#921 manual check, automated): a
- * 13-rule slice of the `rules?all&content` response — every rule the
- * service's 19 findings reference — plus the `findings?all` response,
- * recorded from `wright serve` on the committed fixture. The check the
- * issue asks for by hand runs as data here: all 19 findings place, 12 on
- * conditions.
- */
 describe('bastion.ow findings placement', () => {
   const dir = join(process.cwd(), 'src', 'fixtures')
   const rules = JSON.parse(readFileSync(join(dir, 'bastion-rules.json'), 'utf8')) as (RuleContent & {

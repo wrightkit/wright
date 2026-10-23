@@ -1,14 +1,3 @@
-//! `simulate` (ADR-0033): a thin pass to `athena`'s simulator entry points
-//! over the effective program's canonical Workshop text — the served
-//! snapshot's program emitted exactly as `wright compile` writes it (a
-//! provider-loaded source project's artifact included), or the caller's
-//! `sources` text loaded like `editStatements` does — returning the trace
-//! unchanged inside a `wright-result/v1` envelope. `athena` owns execution
-//! semantics and the trace contract (`complete`, `not_modeled`,
-//! `missing_input` are all result content); Wright owns the freshness
-//! precondition, the `sources` binding shared with the edit operations,
-//! and the refusal channel for a request that cannot be served at all.
-
 use std::collections::BTreeMap;
 
 use super::{ToolErrorInfo, ToolResponse, ToolService};
@@ -16,17 +5,9 @@ use crate::CompilerSession;
 use crate::result::{Envelope, SimulateResult, exit, exit_code_from, version_info};
 use crate::statement_edit::supplied_source;
 
-/// The `athena` release `simulate` links against, reported by
-/// `capabilities` as `athena_version` (ADR-0033). It names the pinned
-/// `athena-sim` tag in `wright-driver`'s dependency — keep them equal.
 pub(crate) const ATHENA_VERSION: &str = "0.2.0";
 
 impl<'a> ToolService<'a> {
-    /// `simulate` (ADR-0033): run the effective program under `athena` and
-    /// return its trace inside a `wright-result/v1` envelope. The request
-    /// is refused before anything runs when the simulated time is missing
-    /// or named twice, the `sources` carry no text for the loaded input,
-    /// the `inputIdentity` is stale, or the caller's text does not load.
     pub(crate) fn simulate(
         &mut self,
         input_identity: &str,
@@ -48,10 +29,6 @@ impl<'a> ToolService<'a> {
         scenario: &Option<serde_json::Value>,
     ) -> Result<Envelope<SimulateResult>, ToolErrorInfo> {
         let refuse = |code: &str, message: String| ToolErrorInfo::new(code, message);
-        // `seconds` is `athena`'s `Options.seconds` for a scenario-free run;
-        // a scenario owns the simulated time, so both spellings at once are
-        // two sources of truth — refused, not arbitrated — and neither is a
-        // run with no simulated time at all.
         let seconds = match (seconds, scenario) {
             (Some(_), Some(_)) => {
                 return Err(refuse(
@@ -74,10 +51,6 @@ impl<'a> ToolService<'a> {
                 ));
             }
         };
-        // The program to simulate is the caller's `sources` text when
-        // supplied — loaded through the session's own Workshop path exactly
-        // like `editStatements` — else the served snapshot; `inputIdentity`
-        // checks against whichever program that is.
         let loaded = self.snapshot().loaded.clone();
         let derived;
         let effective = match sources {
@@ -108,11 +81,6 @@ impl<'a> ToolService<'a> {
                 "the request's inputIdentity does not match the program to simulate — re-read `project` (or pass the current `sources` text) and retry".to_string(),
             ));
         }
-        // `athena` reads Workshop text and no `Program`, so callers may pin
-        // another workshop-rs; the effective program's canonical emission —
-        // the same text `wright compile` writes — is the faithful form, so
-        // a provider-loaded source-language project simulates its compiled
-        // artifact rather than being refused at a kind boundary.
         let locale = CompilerSession::locale_for(effective);
         let text = workshop_rs::emitter::emit(&effective.program, self.session.catalog(), &locale)
             .map_err(|error| refuse("workshop-emission", error.to_string()))?;

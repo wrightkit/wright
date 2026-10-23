@@ -1,8 +1,3 @@
-//! Fix plans for `exact` findings (#556): `duplicate-condition` carries a
-//! dead-branch removal plan and `repeated-value` carries `Evaluate Once`
-//! wrapping — only where the mechanically determined correction keeps the
-//! authored semantics.
-
 use workshop_rs::catalog::Locale;
 use workshop_rs::parser;
 use workshop_rs::source::Span;
@@ -74,9 +69,6 @@ fn duplicate_condition_offers_a_dead_branch_fix_over_the_branch_extent() {
         !removed.contains("Else If(Compare(Global.index, ==, 1))") && !removed.contains("Else;"),
         "the fix stops before the next chain marker: {removed:?}"
     );
-    // The deletion is the two dead lines exactly: it begins at the marker
-    // line's start and ends where `Else;`'s line begins, so the standard
-    // half-open splice removes them with their newlines.
     assert_eq!(
         (span.start.line, span.start.col, span.end.line, span.end.col),
         (15, 1, 17, 1)
@@ -133,9 +125,6 @@ rule ("nested") {
 
 #[test]
 fn duplicate_condition_fix_ignores_disabled_markers_inside_the_dead_branch() {
-    // `disabled` statements inside the dead branch delete with it, and a
-    // disabled `If` block still counts toward depth — its `End` is not the
-    // chain boundary.
     let disabled = r#"variables {
     global:
         0: index
@@ -502,9 +491,6 @@ rule ("poll") {
 
 #[test]
 fn repeated_value_never_wraps_update_every_frame() {
-    // `Update Every Frame` re-evaluates its argument every tick; freezing
-    // inside it — or the call itself — would stale the live read it exists
-    // to keep. The finding still reports; no fix is offered.
     let framed = r#"variables {
     global:
         0: index
@@ -553,8 +539,6 @@ rule ("frames") {
 
 #[test]
 fn repeated_value_never_wraps_a_shape_containing_update_every_frame() {
-    // The duplicated shape itself contains `Update Every Frame`: wrapping
-    // the whole expression would freeze its per-tick update.
     let containing = r#"variables {
     global:
         0: index
@@ -585,11 +569,6 @@ rule ("containing") {
 
 #[test]
 fn repeated_value_never_wraps_a_reevaluating_persistent_object() {
-    // A persistent-object action whose reevaluation mode is enabled —
-    // spelled as a non-`None` literal, or computed so it cannot be proven
-    // `None` — re-evaluates the fields its mode selects; the catalog pins
-    // which parameter carries the mode. A literal `None` mode does not
-    // re-evaluate, so its occurrence still wraps.
     for (mode, wraps) in [
         ("Visible To and String", false),
         ("Global.mode", false),
@@ -643,11 +622,6 @@ rule ("reevaluating") {{
 
 #[test]
 fn repeated_value_wraps_args_the_reevaluation_mode_does_not_cover() {
-    // #562: `Create Beam Effect` under `Reevaluation = Color` reevaluates
-    // only its `Color` parameter; occurrences in `Visible To`,
-    // `StartPosition`, or `EndPosition` still evaluate once per action and
-    // wrap. The per-parameter coverage is catalog data, so the gate is
-    // reviewed, not guessed.
     let per_param = r#"variables {
     global:
         0: index
@@ -684,10 +658,6 @@ rule ("per-param") {
 
 #[test]
 fn repeated_value_still_refuses_args_the_reevaluation_mode_keeps_live() {
-    // `Visible To Position and Radius` keeps `VisibleTo`, `StartPosition`,
-    // and `EndPosition` live: an occurrence inside `StartPosition` must not
-    // wrap, while a duplicated occurrence inside `Color` — which the member
-    // does not cover — may.
     let live = r#"variables {
     global:
         0: index
@@ -759,9 +729,6 @@ rule ("two-live") {
 
 #[test]
 fn duplicate_condition_fix_applies_to_tick_snapshot_objective_reads() {
-    // Positions and objective state are per-tick snapshot reads — they
-    // cannot differ between the two synchronous evaluations, so the dead
-    // branch fix still applies (unlike randoms, clocks, or sampled load).
     let snapshot = DUPLICATE.replace(
         "Compare(Global.index, ==, 0)",
         "Compare(Flag Position(Team 1), !=, Vector(0, 0, 0))",

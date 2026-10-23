@@ -1,20 +1,6 @@
-//! The generation-scoped numeric-address guard (#595): `symbol`/`rule`
-//! numeric ids are valid only for the program generation that issued
-//! them.
-
 use super::{Address, ToolErrorInfo, ToolRequest, ToolService};
 
 impl ToolService<'_> {
-    /// The snapshot gate for numeric addresses (#595): every numeric
-    /// symbol/rule address a request carries must be scoped to the served
-    /// program's generation — the request's `snapshot` member must match
-    /// `self.generation`. A missing token or a different generation is
-    /// refused `stale-id`, so a numeric id captured from an earlier program
-    /// can never silently resolve against a reloaded or recovered one. A
-    /// `references` request's numeric `rule` filter is checked like its
-    /// `symbol` (#592). A request whose addresses are all declared names is
-    /// generation-agnostic: it ignores `snapshot` and resolves against the
-    /// current program.
     pub(super) fn stale_id(&self, request: &ToolRequest) -> Option<ToolErrorInfo> {
         let (numeric, snapshot) = match request {
             ToolRequest::References {

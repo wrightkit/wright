@@ -1,9 +1,3 @@
-//! `listEntries` (ADR-0031): the owner's Workshop vocabulary of one kind in
-//! owner order, one page at a time, for editors that must show every
-//! choice. Like `lookup` it reads no program and loads none. Wright pages
-//! the owner's listing and renders each entry with the code that renders
-//! `lookup` entries; it matches, ranks, and sorts nothing.
-
 use serde_json::{Value, json};
 use workshop_rs::catalog::{Catalog, Kind, Locale};
 
@@ -15,12 +9,8 @@ use crate::lookup::{
 use crate::service::{ToolResponse, carried_refusal, refusal};
 
 const LIST_ENTRIES_CAPABILITY: &str = "listEntries";
-/// `listEntries` pages hold this many entries without `pageSize`
-/// (ADR-0031 decision 2).
 const DEFAULT_PAGE_SIZE: usize = 100;
-/// `listEntries` never returns more than this many entries per page.
 const MAX_PAGE_SIZE: usize = 500;
-/// The kinds `listEntries` lists (ADR-0031 decision 2).
 const LISTABLE_KINDS: [&str; 5] = ["action", "value", "event", "enum", "enumMember"];
 
 pub(crate) fn list_entries(
@@ -153,10 +143,6 @@ pub(crate) fn list_entries(
     ToolResponse::Ok { result }
 }
 
-/// What a cursor is bound to: the request's `language`, `kind`, `within`,
-/// and resolved locale, and the owner's catalog identity (ADR-0031
-/// decision 4). A request or an owner upgrade that changes any of them
-/// invalidates every earlier cursor.
 fn cursor_binding(catalog: &Catalog, kind: &str, within: Option<&str>, locale: &Locale) -> String {
     let identity = serde_json::to_string(&catalog.identity()).unwrap_or_default();
     let material = format!(

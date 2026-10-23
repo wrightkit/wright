@@ -4,12 +4,10 @@ import type { Action, Node } from './types/generated/rule-content-v1'
 
 describe('nodeClass', () => {
   it('classifies every rule-content-v1 node kind', () => {
-    // Primitive literal forms.
     expect(nodeClass(3.5)).toBe('number')
     expect(nodeClass(true)).toBe('literal')
     expect(nodeClass(false)).toBe('literal')
     expect(nodeClass(null)).toBe('literal')
-    // Tagged forms.
     expect(nodeClass({ string: 'hi' })).toBe('string')
     expect(nodeClass({ localizedString: 'hud.header' })).toBe('string')
     expect(nodeClass({ enum: 'Wait', member: 'IGNORE_CONDITION' })).toBe('enum')
@@ -23,7 +21,6 @@ describe('nodeClass', () => {
     expect(nodeClass(call, 'structural')).toBe('action')
     expect(nodeClass({ call: 'add', args: [] }, 'value')).toBe('value')
     expect(nodeClass({ call: '==', args: [1, 2] }, 'operator')).toBe('operator')
-    // An unresolvable id still reads as a value expression.
     expect(nodeClass(call)).toBe('value')
   })
 
@@ -35,7 +32,6 @@ describe('nodeClass', () => {
     expect(
       nodeClass({ call: 'memberAccess', args: [1, { string: 'm' }] }),
     ).toBe('variable')
-    // Other reserved forms keep the call-colour default.
     expect(nodeClass({ call: 'rawWorkshopAction', args: [] }, 'action')).toBe('action')
   })
 })
@@ -72,7 +68,6 @@ describe('statementDepths', () => {
   })
 })
 
-/** The warmed names `statementText`/`statementMatches` resolve through. */
 const NAMES: Record<string, { name: string; kind: string }> = {
   wait: { name: 'Wait', kind: 'action' },
   '==': { name: '==', kind: 'operator' },
@@ -100,7 +95,6 @@ describe('statementText', () => {
       ),
     ).toBe('Up')
     expect(statementText({ call: 'wait', args: [0.016] }, names, STATEMENT_KINDS)).toBe('Wait(0.016)')
-    // The scope word comes from the structural `global` entry, capitalized.
     expect(
       statementText({ call: 'globalVariable', args: [{ variable: 'score' }] }, names, []),
     ).toBe('Global.score')
@@ -118,7 +112,6 @@ describe('statementText', () => {
         [],
       ),
     ).toBe('Is Alive(Event Player) == true')
-    // An unresolvable call id renders verbatim.
     expect(statementText({ call: 'mysteryCall', args: [] }, names, [])).toBe('mysteryCall')
   })
 })
@@ -133,10 +126,8 @@ describe('statementMatches', () => {
   })
 
   it('matches a call-id prefix the localized text cannot contain', () => {
-    // "setglobal" is a prefix of the id but no substring of the spaced name.
     expect(statementMatches(setVar, names, STATEMENT_KINDS, 'setglobal')).toBe(true)
     expect(statementMatches(setVar, names, STATEMENT_KINDS, 'setglobx')).toBe(false)
-    // Non-call nodes have no call name to prefix against.
     expect(statementMatches({ variable: 'x' }, names, [], 'x')).toBe(true)
     expect(statementMatches(3, names, [], '3')).toBe(true)
   })

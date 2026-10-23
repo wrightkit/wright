@@ -1,15 +1,9 @@
-/* `wright ui` page shell (#879), rule bars (#880), and the rule body
-   (#881): the design spec's backdrop, tokens, title, toolbar, expanding
-   rule bars, event rows, statement columns, and syntax colours
-   (docs/ui/design.md § Tokens, § Main screen, § Statement text). The
-   dialog contents keep their interim styles; #882 restyles them. */
 
 :root {
   color-scheme: light;
   font-family: -apple-system, "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
   font-size: 15px;
 
-  /* docs/ui/design.md § Tokens */
   --bar: rgb(44 48 68 / 0.72);
   --bar-hover: rgb(44 48 68 / 0.86);
   --dlg: #262c40;
@@ -29,12 +23,9 @@
   --blue: #3d9be9;
   --warn: #f0b04a;
   --error: #ff7a70;
-  /* The table's "white control" row: `#f4f5f8` on `#111`. */
   --white: #f4f5f8;
   --on-white: #111;
 
-  /* § Statement text: one token per syntax class — components reference
-     the tokens, never the literals. */
   --tok-action: #ffffff;
   --tok-value: #8fd0ff;
   --tok-enum: #f2c86b;
@@ -45,9 +36,6 @@
   --tok-literal: #6fe0e6;
   --tok-punctuation: #a9b0c2;
 
-  /* § Spacing and sizes — one custom property per value of the spec
-     table (docs/ui/visual-system.md), applied in px; no rem multiples
-     replace them (#914). */
   --page-pad: 18px 28px 60px;
   --title-size: 54px;
   --title-track: 2px;
@@ -93,13 +81,10 @@
 body {
   margin: 0;
   color: var(--text);
-  /* Backdrop: a light blue-grey diagonal gradient under a fixed pattern of
-     faint large triangles drawn as inline SVG. No web fonts are loaded. */
   background-color: #6f80aa;
   background-image:
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='480' height='480' viewBox='0 0 480 480'%3E%3Cg fill='none' stroke='rgba(255,255,255,0.08)' stroke-width='2'%3E%3Cpath d='M40 400 L170 130 L300 400 Z'/%3E%3Cpath d='M300 60 L430 330 L170 330 Z'/%3E%3Cpath d='M60 40 L140 180 L-20 180 Z'/%3E%3C/g%3E%3C/svg%3E"),
     linear-gradient(135deg, #c3c9e6 0%, #98a6cc 50%, #6f80aa 100%);
-  /* `fixed` (and the `repeat` default) apply to both layers. */
   background-attachment: fixed;
 }
 
@@ -109,7 +94,6 @@ select {
   font: inherit;
 }
 
-/* One column: title, toolbar, then the rule list at full width. */
 .page {
   padding: var(--page-pad);
 }
@@ -137,7 +121,6 @@ select {
   color: var(--muted);
 }
 
-/* The toolbar is one row over a 2 px light rule line. */
 .toolbar {
   display: flex;
   align-items: center;
@@ -160,8 +143,6 @@ select {
   white-space: nowrap;
 }
 
-/* Square icon buttons: 40 px, #f4f5f8 on #111, 3 px radius, inline SVG icon
-   drawn for WrightKit, `title` tooltip. */
 .sq {
   position: relative;
   width: 40px;
@@ -178,7 +159,6 @@ select {
   flex: none;
 }
 
-/* The spec's count badge (§ Main screen 2) sits on the button's corner. */
 .sq-badge {
   position: absolute;
   top: -6px;
@@ -198,15 +178,10 @@ select {
   filter: brightness(0.93);
 }
 
-/* A pressed toggle keeps an orange edge — the on state is a state, not
-   a second colour. */
 .sq.pressed {
   box-shadow: inset 0 0 0 2px var(--orange);
 }
 
-/* The Diagnostics button's severity badges (docs/ui/diagnostics.md § In
-   place · Toolbar): one count badge per shown severity in its colour,
-   error first, stacked on the button's corner. */
 .severity-badges {
   position: absolute;
   top: -6px;
@@ -267,9 +242,6 @@ select {
   color: var(--dim);
 }
 
-/* Rule bars (§ Main screen item 3): one full-width bar per rule, a white
-   square chevron button outside the bar on its left. The list is a plain
-   column — the page scrolls as a whole; there is no per-list scroll box. */
 .rule-list {
   display: flex;
   flex-direction: column;
@@ -288,7 +260,6 @@ select {
   gap: var(--chev-gap);
 }
 
-/* The chevron points right when closed and rotates down when open. */
 .chev {
   display: inline-flex;
   width: var(--chev-size);
@@ -322,7 +293,6 @@ select {
   background: var(--bar-hover);
 }
 
-/* A disabled rule's name is dimmed and struck through — no badge. */
 .bar.disabled .bar-name {
   color: var(--dim);
   text-decoration: line-through;
@@ -345,15 +315,10 @@ select {
   color: var(--muted);
 }
 
-/* The open rule body is indented under its bar (§ Main screen item 4):
-   the spec's 70 px indent with 14 px above and below. */
 .rule-body {
   padding: var(--rule-body-pad) 0 var(--rule-body-pad) var(--rule-body-indent);
 }
 
-/* Event rows: a `--bar` label cell about three quarters of the width,
-   then a white value cell (`#f4f5f8` on `#111`) whose caret promises the
-   editing layer's select. */
 .event-rows {
   display: flex;
   flex-direction: column;
@@ -394,9 +359,6 @@ select {
   flex: none;
 }
 
-/* Conditions left, Actions right, 40 px apart; below 900 px the columns
-   stack. The column head is a large light title with a muted count over
-   a 2 px light line. */
 .rule-cols {
   display: grid;
   align-items: start;
@@ -438,8 +400,6 @@ select {
   color: var(--muted);
 }
 
-/* A column past thirty rows gains a filter field under its heading
-   (§ Selection · Large columns) — the spec's white control. */
 .rule-view .col-filter {
   box-sizing: border-box;
   width: 100%;
@@ -463,8 +423,6 @@ select {
   padding: 0;
 }
 
-/* One `--bar` row per statement, at least 40 px high; control-flow bodies
-   indent 18 px per level (`--depth`). */
 .statement {
   display: flex;
   align-items: center;
@@ -486,15 +444,11 @@ select {
   white-space: pre-wrap;
 }
 
-/* A disabled statement is half opacity and struck through; there is no
-   separate disabled marker. */
 .statement.disabled {
   opacity: 0.5;
   text-decoration: line-through;
 }
 
-/* The `?debug` line number sits at the row start in `--dim` monospace —
-   monospace is debug detail only (§ Type). */
 .line-no {
   flex: none;
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
@@ -502,13 +456,11 @@ select {
   color: var(--dim);
 }
 
-/* An empty column shows a muted "none" row. */
 .none {
   color: var(--muted);
   padding: 0.3rem 0.6rem;
 }
 
-/* A refused rule renders the service refusal in the error style. */
 .refusal {
   border: 1px solid var(--error);
   background: color-mix(in srgb, var(--error) 12%, transparent);
@@ -524,8 +476,6 @@ select {
   color: var(--muted);
 }
 
-/* Syntax classes (§ Statement text): each class reads its colour from the
-   spec token defined on :root. */
 .tok {
   white-space: pre-wrap;
 }
@@ -567,6 +517,17 @@ select {
   color: var(--tok-punctuation);
 }
 
+/* docs/ui/editor.md § Form/§ Hover card: an argument token carries its
+   `data-path`; hovering outlines the argument a click would open — the
+   same `--gold` inset ring the editor's argument outline uses. */
+.arg {
+  border-radius: 2px;
+}
+
+.arg-hovered {
+  box-shadow: 0 0 0 1px var(--gold);
+}
+
 .debug {
   font-size: 0.7rem;
   color: var(--muted);
@@ -602,7 +563,6 @@ details.debug pre {
   overflow-y: auto;
 }
 
-/* The Bits UI overlay replaces the native `::backdrop` (#927). */
 .dlg-overlay {
   position: fixed;
   inset: 0;
@@ -628,11 +588,6 @@ details.debug pre {
   border-color: var(--gold);
 }
 
-/* View dialogs (#882, docs/ui/design.md § Dialogs): the shared chrome —
-   a centred title, the scrolling `--dlg` body, and the `--dlg-foot` band
-   with the one orange Confirm — then the Diagnostics cards, top rules,
-   and finding rows, and the Variables columns. The `.view` modifier keeps
-   the pending-changes and editor dialogs on their own chrome. */
 
 .dialog.view {
   display: flex;
@@ -680,9 +635,6 @@ details.debug pre {
   filter: brightness(1.12);
 }
 
-/* Summary cards: a `--card` panel at the spec's one 14 px radius, a
-   label, a large italic figure over a 2 px rule, and a short
-   description. */
 .dialog.view .cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
@@ -781,10 +733,6 @@ details.debug pre {
   color: var(--muted);
 }
 
-/* Findings: grouped by severity under toggling headings (§ In the
-   dialog). Each group lists its findings one per row in alternating
-   shades, severity coloured. A located finding is a button that reveals
-   its rule. */
 .dialog.view .severity-group {
   margin-bottom: 0.4rem;
 }
@@ -895,8 +843,6 @@ details.debug pre {
   font-size: 0.75rem;
 }
 
-/* Variables: the Global and Player columns, subroutines centred under
-   them, each declared name in a dark box. */
 .dialog.view .var-columns {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -937,10 +883,6 @@ details.debug pre {
   justify-content: center;
 }
 
-/* Editing layer (ADR-0032): selection checkboxes, the per-column selection
-   bar, pending marks, the statement editor, and the pending-changes
-   dialog. Colours reuse the view's tokens — gold for selection/changed,
-   the error hue for deletions. */
 
 .statement .sel {
   opacity: 0;
@@ -977,8 +919,6 @@ details.debug pre {
   background: color-mix(in srgb, var(--gold) 7%, transparent);
 }
 
-/* docs/ui/selection.md § Pending marks: the pending state owns the left
-   bar, so a pending row keeps the bar even while selected. */
 .statement.has-findings.selected.pending-change {
   box-shadow:
     inset 3px 0 0 var(--gold),
@@ -996,8 +936,6 @@ details.debug pre {
     inset 0 0 0 1px var(--gold);
 }
 
-/* A finding reveal's one flash (docs/ui/diagnostics.md § In the dialog):
-   a gold ring brightens the row once, then clears. */
 @keyframes row-flash {
   0% {
     box-shadow: inset 0 0 0 2px var(--gold);
@@ -1168,7 +1106,6 @@ details.debug pre {
 
 .editor-title {
   font-style: italic;
-  /* § Form · Title: the call name, 34 px italic. */
   font-size: 34px;
   margin: 0 0 0.6rem;
 }
@@ -1216,9 +1153,6 @@ details.debug pre {
   font-size: 0.85rem;
 }
 
-/* Session locale (#883): the white locale select sits in the toolbar after
-   the filter — the spec's white-control row (`#f4f5f8` on `#111`), the same
-   padding and 3 px radius as the filter input beside it. */
 .locale {
   border: 0;
   border-radius: 3px;
@@ -1227,11 +1161,6 @@ details.debug pre {
   color: var(--on-white);
 }
 
-/* Simulation panel (#836, docs/ui/design.md § Dialogs): the room is two
-   team columns of hero slots over the shared dialog chrome; the lobby
-   settings and the run's outcome, variables, and log read as label/value
-   rows on `--card`. The Picker's top-layer popover is a white control
-   like the statement editor's inputs. */
 .dialog.sim {
   width: min(46rem, calc(100vw - 4rem));
   max-width: 46rem;
@@ -1291,8 +1220,6 @@ details.debug pre {
   color: var(--muted);
 }
 
-/* Bits UI's floating wrapper positions the popover and copies this
-   z-index, which must sit above the `.dialog`/`dlg-overlay` layer. */
 .picker-pop {
   z-index: 60;
   min-width: 14rem;
@@ -1484,10 +1411,6 @@ details.debug pre {
   gap: var(--form-row-gap);
 }
 
-/* The editor's argument rows (docs/ui/editor.md § Form): a `--lbl` label
-   cell per parameter, the slot's control beside it, and a `call`
-   argument's own parameters nested under a 2 px rule. The label turns
-   `--lbl-focus` while its control has focus. */
 .editor-arg {
   display: flex;
   align-items: center;

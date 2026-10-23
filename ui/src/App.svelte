@@ -1,28 +1,4 @@
 <script lang="ts">
-  /**
-   * The structured Workshop rule view (ADR-0032) under the in-game page
-   * shell (#879): spec backdrop and tokens, the title row, and the icon
-   * toolbar (docs/ui/design.md § Tokens, § Main screen 1–2). The rule
-   * list is the in-game expanding bars (#880, § Main screen 3): one bar
-   * per rule in `rules` order, any number open at once, the page
-   * scrolling as a whole. Rule order and content come from `rules` —
-   * one `rules?all&content` call when every rule can be expressed,
-   * otherwise per-rule `rules?rule&content` calls so a refusal replaces
-   * only that rule's body. Names come from `lookup` by identity; the
-   * Variables and Diagnostics dialogs read `symbols` and `findings`.
-   *
-   * Session locale (#883, § Language): `project` → `origin.locale`, else
-   * `en-US`. Every `lookup` carries it; the toolbar selector re-resolves
-   * the on-screen names over `targetMetadata` → `locales` and changes
-   * nothing else — `rules`, open bars, and the filter stay put. Chrome
-   * text comes from `chrome.ts`'s locale table, never from the game.
-   *
-   * Editing layer: statement edits stage in the page's pending map, submit
-   * as one `editStatements` request against the `project` identity and the
-   * listing's generation, and apply through the host `/apply` route — the
-   * page never composes or writes Workshop text. A stale refusal clears
-   * the staged edits and re-reads the program.
-   */
   import { Activity, FileText, List, ListFilter, Play, Plus } from '@lucide/svelte'
   import { tick } from 'svelte'
   import { SvelteMap, SvelteSet } from 'svelte/reactivity'
@@ -99,28 +75,15 @@
 
   let rules = $state<RuleEntry[] | null>(null)
   let loadError = $state<string | null>(null)
-  // The session locale (#883): `project` → `origin.locale` once it loads,
-  // `en-US` before and when the project does not name one. `names`
-  // carries it on every `lookup`.
   let sessionLocale = $state('en-US')
-  // `targetMetadata` → `locales`: the catalog locales the selector lists.
   let targetLocales = $state<string[]>([])
   const t = $derived(chromeStrings(sessionLocale))
-  // The selector's options: the catalog locales plus the session locale
-  // when the catalog does not spell it, so `value` always matches an
-  // option (the service spells locales `zh-cn`/`en-us`).
   const localeOptions = $derived(
     targetLocales.some((locale) => locale.toLowerCase() === sessionLocale.toLowerCase())
       ? targetLocales
       : [sessionLocale, ...targetLocales],
   )
-  // Open state is per rule, keyed by the listing id: any number of rules
-  // stay open at once and a rule filtered out keeps its open state (#880).
   const openRules = new SvelteSet<number>()
-  // The row a finding reveal targets (§ In the dialog): the owning
-  // RuleView clears a column filter hiding it, scrolls it in, and
-  // flashes it once the statement rows have mounted; `nonce` re-arms
-  // each reveal.
   let revealRow = $state<{
     rule: number
     list: StatementList
@@ -129,54 +92,30 @@
   } | null>(null)
   let revealNonce = 0
   let filter = $state('')
-  // The "Only rules with findings" toolbar toggle (#922, § In place ·
-  // Filter): off keeps every rule; on limits the list to rules with a
-  // finding at or above the lowest severity the button badges.
   let onlyFindings = $state(false)
-  // The dialog's severity-heading state (§ In the dialog): error and
-  // warning open, info collapsed; the page holds it so the choice
-  // persists for the session across dialog opens.
   const severityOpen = $state<Record<Severity, boolean>>({ ...DEFAULT_GROUP_OPEN })
   let fileName = $state<string | null>(null)
   let symbols = $state<unknown[] | null>(null)
   let findings = $state<Finding[] | null>(null)
   let findingsError = $state<ToolErrorInfo | null>(null)
   let dialog = $state<'variables' | 'diagnostics' | 'pending' | 'simulate' | null>(null)
-  // The loaded project and the simulation panel's hero options (#836):
-  // `project` holds `inputIdentity` and the read-only settings tree the
-  // panel displays; `heroes` loads once, on the panel's first open.
   let project = $state<ProjectResult | null>(null)
   let heroes = $state<LookupEntry[] | null>(null)
-  // The locale `heroes` was listed in — a session-locale switch (#883)
-  // re-lists them so the panel's labels match every other on-screen name.
   let heroesLocale = $state<string | null>(null)
 
-  // The program's identity (`project`) and generation (the rules listing's
-  // `snapshot`): the freshness pair an `editStatements` request carries.
   let inputIdentity = $state<string | null>(null)
   let snapshot = $state<number | undefined>(undefined)
-  // Staged statement edits keyed `rule:list:index`; the map is `$state`
-  // so staging a change re-renders the marks and the toolbar count.
   let pending = $state<Map<string, PendingChange>>(new SvelteMap())
   let editTarget = $state<{
     rule: number
     list: StatementList
     index: number
-    /** The clicked argument's `args` path, when the editor opens on it. */
     argPath?: number[]
   } | null>(null)
   let submitting = $state(false)
   let submitRefusal = $state<Refusal[] | null>(null)
-  // Bumped when the bars' event-name warm lands so `peek` re-reads; the
-  // cells stay empty until the first warm resolves rather than flashing
-  // a raw event id.
   let namesVersion = $state(0)
-  // `?debug` only: element counts by `elementCount.rules[].index`, which
-  // is the `rules` listing id (#691); null until the call lands.
   let elementCounts = $state<Record<number, number> | null>(null)
-  // The shared `costEstimate?all` response: the Diagnostics dialog's
-  // cards and top rules and the `?debug` bar counts read the same call,
-  // so one fetch serves both surfaces.
   let costEstimate = $state<ToolResponse | null>(null)
   let costRequest: Promise<void> | null = null
   let pageEl: HTMLDivElement | undefined = $state()
@@ -189,8 +128,6 @@
     return placeFindings(findings ?? [], contents)
   })
 
-  // The Diagnostics button's badge set (§ In place · Toolbar): a count
-  // per badged severity, error first, info only alone.
   const severityBadges = $derived.by(() => {
     const counts = severityCounts(findings ?? [])
     return badgeSeverities(findings ?? []).map((severity) => ({
@@ -199,7 +136,6 @@
     }))
   })
 
-  // The toggle's floor: the lowest severity the button shows (§ Filter).
   const shownFloor = $derived(lowestShownSeverity(findings ?? []))
 
   const filtered = $derived(
@@ -215,7 +151,6 @@
       ),
   )
 
-  /** The rule the open statement editor's target belongs to. */
   const editEntry = $derived.by(() => {
     const target = editTarget
     if (target === null) return null
@@ -234,8 +169,6 @@
       ? effectiveDisabled(pending, editEntry.summary.id, editTarget.list, editTarget.index, editNode.node)
       : false,
   )
-  /** The identities the loaded program uses — the pickers' usage-first
-      ordering source (docs/ui/editor.md § Pickers). */
   const usedIds = $derived.by(() => {
     const out = new Set<string>()
     for (const entry of rules ?? []) {
@@ -243,8 +176,6 @@
     }
     return out
   })
-
-  /** The staged `change` at the open target, so the editor shows it. */
   const editStaged = $derived(
     editNode && editEntry && editTarget
       ? pending.get(keyFor(editEntry.summary.id, editTarget.list, editTarget.index))
@@ -258,23 +189,12 @@
 
   async function loadOne(id: number, generation?: number): Promise<RuleState> {
     try {
-      // `rule` is a numeric address the listing issued, so its `snapshot`
-      // generation rides along (#595).
       return ruleStateFromResponse(await call({ op: 'rules', rule: id, snapshot: generation, content: true }))
     } catch (error) {
       return ruleStateFromError(error)
     }
   }
 
-  /**
-   * `project` carries freshness, title, and language data: `inputIdentity`
-   * is the precondition `editStatements` requires, `sourceFiles` lists the
-   * loaded sources in canonical file-id order so `[0]` is the entry source
-   * and only its base name shows in the title row (#879), and
-   * `origin.locale` names the session locale — `en-US` when absent, never
-   * guessed from file text (#883). `names.setLocale` runs on every path so
-   * the parked `lookup`s unblock even when `project` never answers.
-   */
   async function loadProject() {
     try {
       const response = await call({ op: 'project' })
@@ -288,40 +208,26 @@
         sessionLocale = result.origin?.locale ?? 'en-US'
       }
     } catch {
-      // An unreachable endpoint leaves the identity unset and the title
-      // row without a file name; Submit refuses rather than composing a
-      // request without a precondition.
     } finally {
       void names.setLocale(sessionLocale)
     }
   }
 
-  /**
-   * `targetMetadata` → `locales` feeds the locale selector (#883); an
-   * unreachable endpoint leaves the selector on the session locale alone.
-   */
   async function loadMetadata() {
     try {
       const response = await call({ op: 'targetMetadata' })
       if ('result' in response) {
         targetLocales = (response.result as TargetMetadataResult).locales ?? []
-        // Adopt the catalog's spelling for the session locale so the
-        // selector has exactly one matching option; the service resolves
-        // locales case-insensitively so nothing re-warms.
         const catalogSpelling = targetLocales.find(
           (locale) => locale.toLowerCase() === sessionLocale.toLowerCase(),
         )
         if (catalogSpelling) sessionLocale = catalogSpelling
       }
     } catch {
-      // The selector keeps the session locale as its only option.
     }
   }
 
   async function load() {
-    // The bulk read expresses every rule in one call; when any rule's
-    // content cannot be expressed the call refuses wholesale, so the page
-    // falls back to per-rule reads and keeps each refusal in place.
     if (debug) void loadElementCounts()
     void loadFindings()
     const bulk = await call({ op: 'rules', all: true, content: true })
@@ -355,8 +261,6 @@
           : undefined
       snapshot = generation
       rules = summaries.map((summary) => ({ summary, state: { phase: 'loading' } }))
-      // Bars render while the per-rule reads finish: an open click during
-      // the reads is a state `rules` never overwrites.
       warmEvents(summaries)
       await Promise.all(
         rules.map(async (entry) => {
@@ -366,11 +270,6 @@
     }
   }
 
-  /**
-   * Warm the bars' event ids so `peek` answers synchronously, then bump
-   * `namesVersion` so the cells re-read their names. `subroutine:` ids
-   * are not catalog identities and need no lookup.
-   */
   function warmEvents(summaries: RuleSummary[]) {
     const ids = summaries
       .map((summary) => summary.event)
@@ -383,11 +282,6 @@
     })
   }
 
-  /**
-   * The bar's event cell (#880 requirement 2): the event's `lookup` name
-   * in the session locale, the subroutine name for a subroutine rule,
-   * and the raw event id when the lookup found no name.
-   */
   function barEvent(summary: RuleSummary): string {
     const event = summary.event
     if (event === undefined) return ''
@@ -420,11 +314,6 @@
     }
   }
 
-  /**
-   * The `costEstimate?all` response, fetched once and shared: a refusal or
-   * an unreachable endpoint is kept as the `{error}` body so the callers
-   * render it rather than retrying per surface.
-   */
   function ensureCostEstimate(): Promise<void> {
     costRequest ??= call({ op: 'costEstimate', all: true })
       .then((response) => {
@@ -441,11 +330,6 @@
     return costRequest
   }
 
-  /**
-   * `?debug` only: `elementCount.rules` ranks rules by count with `index`
-   * naming the `rules` listing id, so the bars can show each rule's
-   * element count. A refused or unreachable call leaves the cells empty.
-   */
   async function loadElementCounts() {
     await ensureCostEstimate()
     if (costEstimate && 'result' in costEstimate) {
@@ -469,11 +353,6 @@
     else openRules.add(id)
   }
 
-  /**
-   * The toolbar selector (#883): switch the session locale and re-resolve
-   * every on-screen name in place — `rules` is not re-read, open bars stay
-   * open, and the filter keeps its text.
-   */
   function changeLocale(locale: string) {
     sessionLocale = locale
     void names.setLocale(locale)
@@ -497,11 +376,6 @@
     dialog = 'variables'
   }
 
-  /**
-   * The simulation panel (#836): its hero options are `listEntries` over
-   * the `Hero` domain in the session locale, re-listed when the locale
-   * changed since the last listing.
-   */
   function openSimulate() {
     dialog = 'simulate'
     if (heroes === null || heroesLocale !== sessionLocale) {
@@ -515,7 +389,6 @@
             within: 'Hero',
             locale,
           })
-          // A locale switch during the fetch must not install stale labels.
           if (locale !== sessionLocale) return
           if ('result' in response) {
             const entries = (response.result as { entries?: LookupEntry[] }).entries
@@ -523,9 +396,6 @@
             heroesLocale = locale
           }
         } catch {
-          // A failed listing does not satisfy the locale: `heroesLocale`
-          // stays stale so the next open retries instead of locking in
-          // the previous locale's labels.
           heroes = heroes ?? []
         }
       })()
@@ -538,12 +408,6 @@
     dialog = 'diagnostics'
   }
 
-  /**
-   * A finding's row in its rule's body (§ In the dialog): the placed
-   * statement or null when the finding lands on the bar alone. The
-   * placement is recomputed against the open rule's loaded content — the
-   * reveal may run before `placedFindings` saw it ready.
-   */
   function findingRow(finding: Finding): { list: StatementList; index: number } | null {
     if (finding.rule === null) return null
     const entry = (rules ?? []).find((item) => item.summary.id === finding.rule)
@@ -552,16 +416,6 @@
     return placement.list === 'rule' ? null : { list: placement.list, index: placement.index }
   }
 
-  /**
-   * A dialog's reveal request (design.md § Dialogs): close the dialog,
-   * open the rule's bar, and scroll it into view. A filter that would
-   * hide the target is dropped — the reveal has to land — as is an
-   * "only findings" toggle the finding's severity does not reach.
-   * `elementCount` indexes and `finding.rule` both name `rules` listing
-   * ids. A located finding hands its row to the open RuleView, which
-   * drops a column filter hiding it, scrolls to it, and flashes it once
-   * (§ In the dialog).
-   */
   async function revealFinding(finding?: Finding, id?: number) {
     const target = finding?.rule ?? id
     if (target === undefined || target === null) return
@@ -572,10 +426,6 @@
     }
     openRules.add(target)
     const row = finding !== undefined ? findingRow(finding) : null
-    // The slot scrolls at once; the row refines the position once the
-    // rule's body has mounted its statements (the name warm may still be
-    // out), and a column filter hiding it is dropped — the reveal has to
-    // land, like the rule-name filter above.
     if (row !== null) {
       revealRow = { rule: target, list: row.list, index: row.index, nonce: ++revealNonce }
     }
@@ -585,11 +435,6 @@
       ?.scrollIntoView?.({ block: 'nearest' })
   }
 
-  /**
-   * The `rules` content node the open editor acts on. Each open rule's
-   * view gets callbacks bound to its listing id, so with several rules
-   * open the target is the rule that issued the call.
-   */
   const oneditFor = (rule: number) => ({
     open: (list: StatementList, index: number, argPath?: number[]) => {
       editTarget = { rule, list, index, argPath }
@@ -635,7 +480,6 @@
     )
   }
 
-  /** A stale refusal's staged edits addressed a superseded program. */
   async function refreshAfterStale() {
     pending.clear()
     editTarget = null
@@ -643,13 +487,6 @@
     await load()
   }
 
-  /**
-   * Submit the staged edits: `editStatements` plans and validates them —
-   * refusing on a stale `inputIdentity` or generation before anything is
-   * written — and the host `/apply` re-checks and writes the returned
-   * transaction. Refusals surface their diagnostics in the dialog; a
-   * stale refusal also drops the staging and re-reads the program.
-   */
   async function submitPending() {
     if (inputIdentity === null) {
       submitRefusal = [
@@ -731,8 +568,6 @@
         placeholder={t.filterPlaceholder}
         bind:value={filter}
       />
-      <!-- The locale selector (#883): one option per catalog locale, each
-           in its own name; the session locale is selected. -->
       <select
         class="locale"
         aria-label={t.language}

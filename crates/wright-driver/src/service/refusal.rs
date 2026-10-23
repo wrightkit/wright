@@ -1,15 +1,3 @@
-//! Refusal-metadata composition (ADR-0035, #888) and the agent-surface
-//! [`ToolService::handle`] entry that applies it.
-//!
-//! Name-resolution emitters produce a neutral `message` plus structured
-//! `fields` — `candidates` entries (`address`, `file`/`path`, `line`,
-//! `column`), the `listOp`/`listAll` operation that lists the declared
-//! names, `declared`/`declaredTotal`, and the queried `name`. The message
-//! needs no rewriting: each surface appends its own clause — `wright
-//! serve` the operation name (`the 'rules' operation`), the CLI its
-//! `wright inspect` command — and resolves `file` indices to the loaded
-//! program's path spellings.
-
 use serde_json::json;
 
 use wright_analyzer::service::Request;
@@ -100,33 +88,22 @@ fn merge_selected_references_with_usage(
     usage
 }
 
-/// A refusal with a Wright-coined `code` — the strict kebab grammar is
-/// asserted inside `ToolErrorInfo::new` (#871).
 pub(crate) fn refusal(code: &str, message: impl Into<String>) -> ToolResponse {
     ToolResponse::Error {
         error: ToolErrorInfo::new(code, message),
     }
 }
 
-/// A refusal whose `code` is owner- or provider-issued vocabulary carried
-/// verbatim (the LPP `refusalCode` contract, e.g. `lookup.unknownWithin`):
-/// the wire contract fixes the spelling, so the kebab grammar does not
-/// apply — only the whitespace-free floor.
 pub(crate) fn carried_refusal(code: &str, message: impl Into<String>) -> ToolResponse {
     ToolResponse::Error {
         error: ToolErrorInfo::carried(code, message),
     }
 }
 
-/// An unknown selection/filter value is a structured usage error, never a
-/// silent empty result (#430, #531).
 pub(crate) fn invalid_selection(message: String) -> ToolResponse {
     invalid_selection_fields(message, Default::default())
 }
 
-/// The same refusal carrying the emitter's structured fields (#888): a
-/// selector whose failure already names candidates or the listing
-/// operation keeps them for the surface to render.
 pub(crate) fn invalid_selection_fields(
     message: String,
     fields: serde_json::Map<String, serde_json::Value>,
@@ -139,18 +116,10 @@ pub(crate) fn invalid_selection_fields(
     }
 }
 
-/// The agent surface's `listOp` spelling (#888): the operation name —
-/// `the 'rules' operation` — while the CLI names its own `wright
-/// inspect` command on the same fields.
 fn agent_operation(operation: &str, _unbounded: bool) -> String {
     format!("the '{operation}' operation")
 }
 
-/// Resolve a refusal's `candidates` against `loaded` and append
-/// `: {address} at {path}:{line}:{column}` to `message` (#888), plus the
-/// `unaddressable` rename note. Runs at the emit boundary that owns the
-/// file table — each `file` index is rewritten to `path`, so a second
-/// call with a different table never re-resolves.
 pub(crate) fn resolve_candidates(
     message: &mut String,
     fields: &mut serde_json::Map<String, serde_json::Value>,
@@ -160,8 +129,6 @@ pub(crate) fn resolve_candidates(
         .get_mut("candidates")
         .and_then(serde_json::Value::as_array_mut);
     if let Some(candidates) = candidates {
-        // Entries carrying `path` were rendered by an earlier pass —
-        // appending again would double the candidate list.
         let mut rendered = Vec::with_capacity(candidates.len());
         for candidate in candidates.iter_mut() {
             let Some(entry) = candidate.as_object_mut() else {
@@ -214,11 +181,6 @@ pub fn compose_fields(
     }
 }
 
-/// One candidate's `path:line:column`: `path` already resolved stays
-/// (the emitters resolve against their own file table), a `file` index
-/// resolves against `loaded` and is rewritten in place, and a missing
-/// location renders `<unknown>`. The rendered `path` is always written
-/// back so a later pass never re-appends the same candidate.
 fn candidate_location(
     entry: &mut serde_json::Map<String, serde_json::Value>,
     loaded: Option<&Loaded>,
@@ -245,10 +207,6 @@ fn candidate_location(
     }
 }
 
-/// Compose the diagnostics embedded in an `Ok` payload (#888): any JSON
-/// object carrying refusal fields and a `message` gets this surface's
-/// clauses, wherever in the payload it nests. `Ok` payloads carry no
-/// other rewriting — the payload itself passes through verbatim.
 fn compose_payload(
     value: &mut serde_json::Value,
     loaded: Option<&Loaded>,

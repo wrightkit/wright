@@ -1,18 +1,4 @@
 <script lang="ts">
-  /**
-   * The statement editor (ADR-0032 editing layer, #918): opened by clicking
-   * a statement row — or an argument inside it, which focuses that slot's
-   * control and scrolls it into view (docs/ui/editor.md § Form · Open).
-   * The title is the call's session-locale name; each `lookup` parameter
-   * gets one `--lbl` label cell and the control its slot type calls for:
-   * a numeric input, a text input, the two-literal boolean picker, a
-   * picker over the slot's options — actions, admitted values, enum
-   * members, scope variables, modify operations, comparison operators
-   * (#919) — with a call argument's own parameters as nested rows.
-   * A required slot with no value reads "unset" in `--warn` and
-   * disables OK. OK stages one `replace` edit through the pending-changes
-   * model; Cancel stages nothing. The dialog composes no Workshop text.
-   */
   import { call } from './api'
   import {
     type ArgField,
@@ -63,21 +49,11 @@
   }: {
     target: { list: 'conditions' | 'actions'; index: number; node: StatementNode } | null
     names: Names
-    /** The statement's effective disabled state, pending edits included. */
     disabled: boolean
-    /** The pending `change` staged at this statement, when one exists. */
     staged?: RuleContentStatement
-    /** The session locale's chrome strings. */
     t: ChromeStrings
-    /** The session locale, for `listEntries`. */
     locale: string
-    /**
-     * The identities the loaded program uses — call ids, enum member
-     * identities, and declared names — so a picker lists the options the
-     * project already uses first (docs/ui/editor.md § Pickers).
-     */
     used?: ReadonlySet<string>
-    /** The clicked argument's `args` path; its control gets focus. */
     focusPath?: number[] | null
     onsave: (disabled: boolean, call?: string, args?: Node[], value?: Node) => void
     onclose: () => void
@@ -85,43 +61,25 @@
 
   let checked = $state(false)
   let shownFor: unknown = null
-  /** The callable's `lookup` entry — an action's, or `compare` for a condition. */
   let callableEntry = $state<LookupEntry | null>(null)
-  /** A condition's own `value.call` entry — its parameters decompose the value's args. */
   let valueEntry = $state<LookupEntry | null>(null)
-  /** The form's staged args, replacing the statement's on save. */
   let editedArgs = $state<Node[] | null>(null)
-  /** The staged call id — an action or condition value the picker replaced. */
   let editedCall = $state<string | null>(null)
-  /** `listEntries` results per enum domain the form touches. */
   let enumOptions = $state<Record<string, { id: string; label: string }[]>>({})
-  /** The project's declared variables, for `variable` fields. */
   let variableSymbols = $state<Symbol[] | null>(null)
-  /** The `listEntries` `action` and `value` catalogs the pickers list. */
   let actionEntries = $state<LookupEntry[] | null>(null)
   let valueEntries = $state<LookupEntry[] | null>(null)
-  /**
-   * `lookup` entries per nested call id — a `call` field's own parameter
-   * facts for its indented rows.
-   */
   let nestedEntries = $state<Record<string, LookupEntry | null>>({})
-  /** In-flight option fetches, so a `fields` recompute can't duplicate them. */
   const enumLoading = new Set<string>()
   const nestedLoading = new Set<string>()
   let symbolsLoading = false
   let actionLoading = false
   let valueLoading = false
-  /** The locale the option caches below were loaded under. */
   let optionsLocale = ''
   let root: HTMLElement | undefined = $state()
 
   const isCondition = $derived(target?.list === 'conditions')
 
-  /**
-   * The args-tree the form edits: an action's own `args`, or a condition's
-   * `value` dressed as a call — `value.call`/`value.args` — so one field
-   * model serves both. A plain (non-call) condition value keeps no args.
-   */
   const sourceAction = $derived.by((): Action | null => {
     if (target === null) return null
     if (!isCondition) return target.node as SpannedAction
@@ -141,19 +99,13 @@
       : sourceAction,
   )
 
-  /** The `listEntries` catalogs a call id resolves to — an action or
-      value picker's own options. */
   const listedEntry = (callId: string): LookupEntry | undefined =>
     (actionEntries ?? []).find((entry) => entry.identity === callId) ??
     (valueEntries ?? []).find((entry) => entry.identity === callId)
 
-  /** The entry a call id resolves to for `paramFacts` — the `listEntries`
-      catalogs first, then the `names.entries` cache a nested row fetched. */
   const entryFor = (callId: string): LookupEntry | null =>
     listedEntry(callId) ?? nestedEntries[callId] ?? null
 
-  /** A nested call's parameters — its `listEntries` entry or its fetched
-      `lookup` entry; `null` until either lands. */
   const nestedFacts = (callId: string): ParamFact[] | null => {
     const listed = listedEntry(callId)
     const entry = listed ?? (callId in nestedEntries ? nestedEntries[callId] : undefined)
@@ -163,7 +115,6 @@
   const fields = $derived.by((): ArgField[] => {
     if (shownAction === null) return []
     if (isCondition) {
-      // The condition's live value node — staged edits replace inside it.
       const value =
         (shownAction.call as string) !== ''
           ? ({ call: shownAction.call, args: shownAction.args } as Node)
@@ -190,7 +141,6 @@
     focusedFor = null
     callableEntry = null
     valueEntry = null
-    // A staged `change` seeds the form, so reopening shows it.
     const stagedValue = staged?.value as Node | undefined
     const seed =
       target.list === 'actions'
@@ -206,8 +156,6 @@
             ? ((stagedValue as { args: Node[] }).args ?? null)
             : [stagedValue]
     editedArgs = seed
-    // A staged `change` also seeds a renamed call, so reopening shows
-    // the picker's choice.
     const stagedCall =
       target.list === 'actions' && typeof staged?.call === 'string'
         ? staged.call
@@ -263,12 +211,6 @@
     }
   })
 
-  /**
-   * Focus the clicked argument's control once the form renders — its row
-   * carries `data-arg-control` keyed by the `args` path and scrolls into
-   * view (§ Form · Open). Runs once per open so a re-render mid-edit
-   * never steals focus back.
-   */
   let focusedFor: unknown = null
   $effect(() => {
     if (target === null || focusPath === null || fields.length === 0) return
@@ -280,13 +222,6 @@
     ;(el.querySelector<HTMLElement>('input,button') ?? el).focus()
   })
 
-  // The form's option sources load once the callable's facts arrive:
-  // operation spellings warm the names cache, enum domains list their
-  // members, a variable field pulls the project's declared symbols, the
-  // `call` rows pull the `listEntries` catalogs their pickers need, and
-  // a nested call outside the catalogs fetches its own `lookup` entry for
-  // its indented rows. A locale switch invalidates the caches so the
-  // next pass refetches.
   $effect(() => {
     if (target === null) return
     if (optionsLocale !== locale) {
@@ -302,9 +237,6 @@
       valueLoading = false
       optionsLocale = locale
     }
-    // The Action row lists every action; `call` fields list the values
-    // their slot type admits. Both come from `listEntries` in the
-    // session locale (docs/ui/editor.md § Controls by slot type).
     if (!isCondition && actionEntries === null && !actionLoading) {
       actionLoading = true
       const requestLocale = locale
@@ -344,8 +276,6 @@
     for (const domain of domains) {
       if (enumOptions[domain] || enumLoading.has(domain)) continue
       enumLoading.add(domain)
-      // Capture the locale the request issues under; a response that
-      // lands after a switch is dropped, not installed.
       const requestLocale = locale
       void call({
         op: 'listEntries',
@@ -390,9 +320,6 @@
           symbolsLoading = false
         })
     }
-    // A `call` field's nested rows need the chosen call's own `lookup`
-    // parameters; the field recomputes when the entry lands. A call the
-    // `listEntries` catalogs already cover skips the fetch.
     for (const field of flat) {
       if (field.kind !== 'call' || !shownAction) continue
       const node =
@@ -432,7 +359,6 @@
     return t.conditionTitle
   })
 
-  /** Every `listEntries` entry of a kind, page by page (ADR-0031). */
   async function listAll(
     kind: 'action' | 'value',
     locale: string,
@@ -460,11 +386,6 @@
     return out
   }
 
-  /**
-   * The pickers' usage ordering (docs/ui/editor.md § Pickers): options
-   * the loaded program already uses come first, owner order kept inside
-   * each group.
-   */
   function usageOrder(options: { id: string; label: string }[]): {
     id: string
     label: string
@@ -512,8 +433,6 @@
         current !== null &&
         !options.some((option) => option.id === current)
       ) {
-        // A reserved or operator call the listing does not carry keeps
-        // its own statement text as an option so the row reads right.
         options.unshift({ id: current, label: callLabel(node, field) })
       }
       return usageOrder(options)
@@ -521,13 +440,7 @@
     return usageOrder(enumOptions[field.domain ?? ''] ?? [])
   }
 
-  /**
-   * The plain text a `call` row shows — the session-locale call name for a
-   * catalog call, or the variable-access text a reserved call renders as.
-   */
   function callLabel(node: Node | undefined, field: ArgField): string {
-    // A pseudo-field with no arg position names its node on the field
-    // itself (the condition's single `call` row carries the whole value).
     const subject = node ?? field.node
     const callId =
       subject !== undefined &&
@@ -549,9 +462,6 @@
     return names.peek(callId, VALUE_KINDS)?.name ?? callId
   }
 
-  /** The action picker's options: every `listEntries` action, the
-      statement's own call synthesized when the listing misses it (a
-      `structural` call is not listable), used-first. */
   const actionOptions = $derived.by(() => {
     const options = (actionEntries ?? []).map((entry) => ({
       id: entry.identity,
@@ -569,7 +479,6 @@
 
   function chooseAction(id: string) {
     if (id === sourceAction?.call) {
-      // Repicking the statement's own call restores its args and entry.
       editedCall = null
       editedArgs = null
       const requestLocale = locale
@@ -591,9 +500,6 @@
   function choose(field: ArgField, id: string) {
     if (!shownAction) return
     if (field.path.length === 0) {
-      // The condition's path-less rows: the operator row swaps the
-      // value's call id, keeping the operands; the single `call` row
-      // replaces the whole value with the picked call's defaults.
       if (field.kind === 'comparison') {
         editedCall = id
         const requestLocale = locale
