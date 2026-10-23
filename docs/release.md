@@ -290,7 +290,7 @@ The package version equals the `wright` release version. It contains the
 `wasm32-unknown-unknown` core (`wright-core.wasm`), the ESM entry
 `wright-core.mjs` with its TypeScript declarations, the `wright-agent/v1`
 types generated from the committed `schemas/` by
-`scripts/generate-core-types.mjs`, and the `wright-agent/v1` schema JSON.
+`scripts/generate-core-types.ts`, and the `wright-agent/v1` schema JSON.
 The `agent_contract` field of its `package.json` records the contract
 version the core carries.
 

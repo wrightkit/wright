@@ -2,7 +2,7 @@
 // installs it in a clean directory, type-checks a small TypeScript call
 // to `request` against the shipped types, and runs it in Node.
 //
-//   node scripts/smoke-core-package.mjs --tarball dist/wrightkit-core-0.36.0.tgz
+//   node scripts/smoke-core-package.ts --tarball dist/wrightkit-core-0.36.0.tgz
 
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -13,7 +13,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const index = process.argv.indexOf('--tarball')
 const tarball = index === -1 ? undefined : process.argv[index + 1]
 if (!tarball) {
-  console.error('usage: smoke-core-package.mjs --tarball <path>')
+  console.error('usage: smoke-core-package.ts --tarball <path>')
   process.exit(2)
 }
 
@@ -83,7 +83,7 @@ console.log(\`smoke ok: \${capabilities.agent_contract} from \${capabilities.nam
 `,
 )
 
-const run = (command, args) => {
+const run = (command: string, args: string[]) => {
   const result = spawnSync(command, args, { cwd: dir, stdio: 'inherit' })
   if (result.status !== 0) process.exit(result.status ?? 1)
 }

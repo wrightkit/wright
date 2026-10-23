@@ -1,6 +1,6 @@
 // TypeScript declarations for `wright-core.mjs`, the `@wrightkit/core`
 // entry (#960). The `wright-agent/v1` types come from the committed
-// schema via scripts/generate-core-types.mjs.
+// schema via scripts/generate-core-types.ts.
 
 import type {
   EditTransaction,

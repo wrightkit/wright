@@ -677,7 +677,8 @@ jobs:
       - name: Check generated core types are fresh
         run: |
           npm ci --prefix scripts
-          node scripts/generate-core-types.mjs --check
+          npm --prefix scripts run typecheck
+          node scripts/generate-core-types.ts --check
 
       - name: Build the wasm core and the native parity driver
         run: |

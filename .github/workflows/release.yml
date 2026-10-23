@@ -288,14 +288,14 @@ jobs:
 
       - name: Pack @wrightkit/core
         run: >-
-          node scripts/package-core.mjs
+          node scripts/package-core.ts
           --version "$RELEASE_VERSION"
           --tag "$RELEASE_TAG"
           --commit "$RELEASE_COMMIT"
 
       - name: Smoke check the packed core
         run: >-
-          node scripts/smoke-core-package.mjs
+          node scripts/smoke-core-package.ts
           --tarball "dist/wrightkit-core-${RELEASE_VERSION}.tgz"
 
       - name: Upload core package

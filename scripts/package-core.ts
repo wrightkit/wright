@@ -4,7 +4,7 @@
 // regenerated from the committed schemas here, and packing refuses to
 // proceed when they differ from the committed generated file.
 //
-//   node scripts/package-core.mjs \
+//   node scripts/package-core.ts \
 //     --version 0.36.0 --commit <sha> [--tag v0.36.0] \
 //     [--wasm target/wasm32-unknown-unknown/release/wright_wasm.wasm] \
 //     [--out-dir dist]
@@ -24,13 +24,15 @@ import {
 } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { generateCoreTypes } from './generate-core-types.mjs'
+import { generateCoreTypes } from './generate-core-types.ts'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const jsDir = join(repoRoot, 'crates/wright-wasm/js')
 const schemaFile = 'wright-agent-v1.schema.json'
 
-function arg(name, fallback) {
+function arg(name: string, fallback: string): string
+function arg(name: string, fallback?: string): string | undefined
+function arg(name: string, fallback?: string): string | undefined {
   const index = process.argv.indexOf(`--${name}`)
   return index === -1 ? fallback : process.argv[index + 1]
 }
@@ -45,7 +47,7 @@ const wasm = arg(
 const outDir = resolve(arg('out-dir', join(repoRoot, 'dist')))
 
 if (!version || !commit) {
-  console.error('usage: package-core.mjs --version X.Y.Z --commit <sha> [--tag <tag>]')
+  console.error('usage: package-core.ts --version X.Y.Z --commit <sha> [--tag <tag>]')
   process.exit(2)
 }
 if (!/^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/.test(version)) {
@@ -67,7 +69,7 @@ const committed = readFileSync(
 if (committed !== generated) {
   console.error(
     'crates/wright-wasm/js/generated/wright-agent-v1.d.ts is stale;' +
-      ' run `node scripts/generate-core-types.mjs`',
+      ' run `node scripts/generate-core-types.ts`',
   )
   process.exit(1)
 }
