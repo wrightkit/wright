@@ -514,4 +514,26 @@ describe('the statement editor form (#918)', () => {
     const right = editor().querySelector<HTMLInputElement>('[data-arg-control="1"] input')!
     expect(right.value).toBe('3')
   })
+
+  it('renders a bare variable-access condition as its variable text', async () => {
+    api.handler = handlerFor([
+      summaryFor(
+        1,
+        'setup',
+        contentFor(
+          [],
+          [{ value: { call: 'globalVariable', args: [{ variable: 'score' }] } }],
+        ),
+      ),
+    ])
+    mountApp()
+    await settle()
+    await openRule(1)
+    click(rows()[0])
+    await settle()
+
+    // The single call row shows the variable-access text, not the raw id.
+    const row = editor().querySelector<HTMLElement>('[data-arg-control=""]')!
+    expect(row.querySelector('.editor-arg-value')!.textContent).toBe('Global.score')
+  })
 })

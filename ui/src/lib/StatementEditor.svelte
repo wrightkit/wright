@@ -361,19 +361,25 @@
    * catalog call, or the variable-access text a reserved call renders as.
    */
   function callLabel(node: Node | undefined, field: ArgField): string {
+    // A pseudo-field with no arg position names its node on the field
+    // itself (the condition's single `call` row carries the whole value).
+    const subject = node ?? field.node
     const callId =
-      node !== undefined && node !== null && typeof node === 'object' && 'call' in node
-        ? (node.call as string)
+      subject !== undefined &&
+      subject !== null &&
+      typeof subject === 'object' &&
+      'call' in subject
+        ? (subject.call as string)
         : field.call
     if (callId === undefined) return ''
     if (
-      node !== undefined &&
-      node !== null &&
-      typeof node === 'object' &&
-      'call' in node &&
-      ['globalVariable', 'playerVariable', 'memberAccess'].includes(node.call as string)
+      subject !== undefined &&
+      subject !== null &&
+      typeof subject === 'object' &&
+      'call' in subject &&
+      ['globalVariable', 'playerVariable', 'memberAccess'].includes(subject.call as string)
     ) {
-      return statementText(node, names, VALUE_KINDS)
+      return statementText(subject, names, VALUE_KINDS)
     }
     return names.peek(callId, VALUE_KINDS)?.name ?? callId
   }

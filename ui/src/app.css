@@ -1542,6 +1542,10 @@ details.debug pre {
   outline: 1px solid var(--warn);
 }
 
+.editor-arg.unset .picker-ctl .placeholder {
+  color: var(--warn);
+}
+
 .editor-arg .picker-ctl {
   flex: 1;
   min-width: 0;

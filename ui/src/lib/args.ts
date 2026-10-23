@@ -64,6 +64,13 @@ export interface ArgField {
    */
   call?: string
   /**
+   * The value node a `call` pseudo-field with no arg position names — a
+   * condition's single `call` row carries the whole `value` so a
+   * reserved call (`globalVariable`/`playerVariable`/`memberAccess`)
+   * still renders its variable-access text.
+   */
+  node?: Node
+  /**
    * The `lookup`-declared default for this position as a `rule-content-v1`
    * node (`Wait.IGNORE_CONDITION` → `{"enum":"Wait","member":"IGNORE_CONDITION"}`,
    * `"null"` → `null`, a number string → the literal); `undefined` when the
@@ -170,7 +177,7 @@ function fieldFor(
     required: param.required !== false && param.default === undefined,
   }
   field.kind = fieldKind(param, node)
-  if (param.default !== undefined) field.default = defaultNode(param.default)
+  if (param.default !== undefined) field.default = defaultNode(param.default, param)
   if (field.kind === 'variable') {
     field.scope = variableScope(foldCall, '')
   } else if (field.kind === 'operation') {
@@ -221,17 +228,7 @@ export function argFields(
     if (field.kind === 'variable') {
       field.scope = variableScope(foldFact?.call, action.call)
     }
-    if (field.kind === 'call' && isObject(node) && 'call' in node) {
-      const nestedParams = nestedFacts?.(node.call as string)
-      if (nestedParams && nestedParams.length > 0) {
-        const nested = argFields(
-          nestedParams,
-          { call: node.call as string, args: (node.args as Node[]) ?? [] },
-          nestedFacts,
-        ).map((inner) => ({ ...inner, path: [...field.path, ...inner.path] }))
-        if (nested.length > 0) field.nested = nested
-      }
-    }
+    attachNested(field, node, nestedFacts)
     fields.push(field)
   }
   return fields
@@ -284,12 +281,15 @@ export function conditionFields(
       ? {
           // A call whose `lookup` entry declares no parameter facts: the
           // form has no slot decomposition for it — the call name alone,
-          // read-only here (the picker that replaces it is #919's).
+          // read-only here (the picker that replaces it is #919's). The
+          // value node stays on the row so a reserved variable-access
+          // call renders its `Global.name` text, not the raw call id.
           path: [],
           label: compare[0]?.displayName ?? compare[0]?.name ?? '',
           kind: 'call' as const,
           required: true,
           call: value.call as string,
+          node: value,
         }
       : fieldFor(compare[0] ?? {}, [0], value, undefined)
   attachNested(single, value, nestedFacts, true)
@@ -317,10 +317,15 @@ function attachNested(
 /**
  * The `rule-content-v1` node a `lookup` parameter `default` names
  * (`name-lookup.md` §21.4): `null` is the null literal, `Domain.MEMBER`
- * an enum node, a decimal the number literal, and anything else the
- * string node — the same spellings `editStatements` accepts.
+ * an enum node, a decimal the number literal, a camel-case identifier on
+ * a non-`String` parameter a zero-arg call node (`isButtonHeld.player`
+ * defaults to the `eventPlayer` call, not the string), and anything else
+ * the string node — the same spellings `editStatements` accepts.
  */
-export function defaultNode(declared: unknown): Node | undefined {
+export function defaultNode(
+  declared: unknown,
+  param?: Pick<ParamFact, 'type'>,
+): Node | undefined {
   if (declared === null) return null
   if (typeof declared === 'number' || typeof declared === 'boolean') return declared
   if (typeof declared !== 'string' || declared === '') return undefined
@@ -328,6 +333,9 @@ export function defaultNode(declared: unknown): Node | undefined {
   if (/^-?\d+(\.\d+)?$/.test(declared)) return Number(declared)
   const split = declared.lastIndexOf('.')
   if (split > 0) return enumNode(declared)
+  if (param?.type !== 'String' && /^[a-z][A-Za-z0-9_]*$/.test(declared)) {
+    return { call: declared, args: [] }
+  }
   return stringNode(declared)
 }
 

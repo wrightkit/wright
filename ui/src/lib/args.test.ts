@@ -129,6 +129,21 @@ describe('node constructors', () => {
     expect(defaultNode('null')).toBeNull()
     expect(defaultNode('Free-form')).toEqual({ string: 'Free-form' })
   })
+
+  it('reads a call-id default on a non-String parameter as a call node', () => {
+    // `isButtonHeld.player` declares `default: 'eventPlayer'` — the
+    // default is the zero-arg call, not a string literal.
+    expect(defaultNode('eventPlayer', { type: 'Player' })).toEqual({
+      call: 'eventPlayer',
+      args: [],
+    })
+    expect(defaultNode('allPlayers', { type: 'Player|Array' })).toEqual({
+      call: 'allPlayers',
+      args: [],
+    })
+    // A `String` slot keeps the string reading (`customString`'s `Hello`).
+    expect(defaultNode('Hello', { type: 'String' })).toEqual({ string: 'Hello' })
+  })
 })
 
 describe('literal controls', () => {
@@ -193,6 +208,20 @@ describe('literal controls', () => {
     expect(fillGaps({ call: 'demo', args: [] }, fields, [0]).args).toEqual([])
   })
 
+  it('fills a crossed gap with the call node a call-id default declares', () => {
+    // `isButtonHeld`'s `player` defaults to the `eventPlayer` call;
+    // crossing the slot stages that node, never `{"string":"eventPlayer"}`.
+    const fields = argFields(
+      [
+        { name: 'player', displayName: 'Player', type: 'Player', default: 'eventPlayer' },
+        { name: 'button', displayName: 'Button', type: 'Button', enum: { domain: 'Button' } },
+      ],
+      { call: 'isButtonHeld', args: [] },
+    )
+    const filled = fillGaps({ call: 'isButtonHeld', args: [] }, fields, [1])
+    expect(filled.args).toEqual([{ call: 'eventPlayer', args: [] }])
+  })
+
   it('flags a required empty slot while a defaulted one stays set', () => {
     const fields = argFields(
       [
@@ -238,6 +267,16 @@ describe('conditionFields', () => {
     const fields = conditionFields([], compare, { call: 'isTrueForAll', args: [true] })
     expect(fields).toHaveLength(1)
     expect(fields[0].kind).toBe('call')
+  })
+
+  it('carries the value node on a bare variable-access condition row', () => {
+    // A `Global.score` condition's single `call` row keeps its node so
+    // the label renders `Global.score`, not the raw `globalVariable` id.
+    const value = { call: 'globalVariable', args: [{ variable: 'score' }] }
+    const fields = conditionFields([], compare, value)
+    expect(fields).toHaveLength(1)
+    expect(fields[0]).toMatchObject({ kind: 'call', call: 'globalVariable' })
+    expect(fields[0].node).toEqual(value)
   })
 
   it('uses the value call\'s own parameters when lookup declares them', () => {
