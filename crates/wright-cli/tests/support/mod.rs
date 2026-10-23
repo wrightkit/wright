@@ -106,8 +106,8 @@ impl TestServer {
                         let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
                         let request = read_request(&mut stream);
                         let response = handler(&request);
-                        write_response(&mut stream, &response);
                         seen.lock().unwrap().push(request);
+                        write_response(&mut stream, &response);
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                         if stop_flag.load(Ordering::Relaxed) {
