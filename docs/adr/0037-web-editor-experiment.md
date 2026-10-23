@@ -53,15 +53,16 @@ The editor is an experiment. It must be able to change fast, and to stop, withou
    - The first implementation issue measures the transfer size of the core and its data and sets a budget for them. The ADR-0032 budget of 100 KB gzipped continues to apply to the editor's JavaScript and CSS only.
    - If the measurement shows a need, loading data on demand (per locale, or deferring descriptions and gameplay data) is a separate `workshop-rs` decision, because data is compiled into that library today. Loaded data always has the same version as the core. There is no independently updated data feed.
 
-8. **`wright ui` retires when the editor reaches parity with it.**
-   - Parity means the read view, statement editing, and the simulation panel work in the editor on `practice-range`. A manual check records it on the tracking issue.
+8. **`wright ui` retires when the deployed editor reaches parity with it.**
+   - Parity means the read view, statement editing with pickers, applying an edit, a stale transaction being refused, and the simulation panel work in the editor on `practice-range`. Automated checks in the `editor` repository show it: unit tests against the pinned core covering those flows. There is no manual parity check and no tracking issue for it.
+   - The owner may still run a manual comparison; it is recorded as a comment on the retirement issue and never blocks it.
    - Until then `wright ui` keeps working unchanged.
    - Retirement removes `wright ui`, the `ui/` directory, the `ui` Cargo feature with its `tiny_http` and `getrandom` dependencies, the UI CI job, and `docs/ui/`, which moves to the `editor` repository.
 
 9. **Order of work.** Each step leaves a working product.
    1. Build the WebAssembly core in `wright`, with the CI check and the size measurement.
    2. Create the `editor` repository from `ui/`, replacing the loopback host calls (`call` and `apply` in `ui/src/lib/api.ts`) with the core package.
-   3. Record the parity check.
+   3. Deploy the editor at `web.wrightkit.dev`, with its parity checks in the `editor` repository's CI.
    4. Retire `wright ui`.
 
 This decision supersedes ADR-0032 decisions 1 (form factor), 4 (loopback endpoint), 5 (host on disk), 6 (ownership), and 9 (build and distribution) once the steps that replace each of them land.
@@ -85,6 +86,7 @@ This decision supersedes ADR-0032 decisions 1 (form factor), 4 (loopback endpoin
 - The online editor is a network deployment of AGPL-3.0 software and must offer its source to users.
 - #839 is rescoped: the browser host is the `editor` repository, not a host inside `wright`. #840 follows.
 - `docs/architecture/` and `docs/cli/` change when `wright ui` retires, not before.
+- A check that only a person can perform is not filed as an issue and never blocks development.
 
 ## Compatibility impact
 
