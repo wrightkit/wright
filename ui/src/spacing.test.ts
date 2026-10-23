@@ -5,7 +5,21 @@ import { describe, expect, it } from 'vitest'
 
 const root = process.cwd()
 const spec = readFileSync(join(root, '..', 'docs', 'ui', 'visual-system.md'), 'utf8')
-const css = readFileSync(join(root, 'src', 'app.css'), 'utf8')
+// Rules live in app.css (tokens/backdrop/base) and each component's
+// scoped <style> block (#928). Concatenate them and unwrap the
+// `:global(...)` escapes the wrapper components use for Bits UI markup
+// so a selector still reads as its rendered form.
+const css = [
+  'src/app.css',
+  'src/App.svelte',
+  'src/lib/RuleView.svelte',
+  'src/lib/RuleBar.svelte',
+  'src/lib/StatementEditor.svelte',
+  'src/lib/components/Dialog.svelte',
+]
+  .map((file) => readFileSync(join(root, file), 'utf8'))
+  .join('\n')
+  .replace(/:global\(([^)]*)\)/g, '$1')
 
 function specRows(): Map<string, number[]> {
   const section = spec.split('## Spacing and sizes')[1]

@@ -168,9 +168,13 @@ describe('findings in place (#921)', () => {
 
     const card = slot(7)!.querySelector('.finding-card')!
     const rows = [...card.querySelectorAll<HTMLElement>('.card-row')]
-    expect(rows.map((row) => row.className)).toEqual([
-      'card-row severity-error',
-      'card-row severity-info',
+    expect(rows.map((row) => row.classList.contains('severity-error'))).toEqual([
+      true,
+      false,
+    ])
+    expect(rows.map((row) => row.classList.contains('severity-info'))).toEqual([
+      false,
+      true,
     ])
     expect(rows[0].querySelector('.card-code')?.textContent).toBe('the-error')
     expect(rows[0].querySelector('.card-msg')?.textContent).toBe('error one')

@@ -130,3 +130,59 @@
       )}{/each}{@render punct(')')}
   {/if}
 {/if}
+
+<style>
+  /* The token classes colour the statement text (docs/ui/design.md §
+     Statement text); the `--tok-*` values come from `app.css`. */
+  .tok {
+    white-space: pre-wrap;
+  }
+
+  .tok.action {
+    color: var(--tok-action);
+    font-weight: 700;
+  }
+
+  .tok.value {
+    color: var(--tok-value);
+  }
+
+  .tok.enum {
+    color: var(--tok-enum);
+  }
+
+  .tok.number {
+    color: var(--tok-number);
+  }
+
+  .tok.string {
+    color: var(--tok-string);
+  }
+
+  .tok.variable {
+    color: var(--tok-variable);
+  }
+
+  .tok.operator {
+    color: var(--tok-operator);
+  }
+
+  .tok.literal {
+    color: var(--tok-literal);
+  }
+
+  .tok.punctuation {
+    color: var(--tok-punctuation);
+  }
+
+  /* docs/ui/editor.md § Form/§ Hover card: an argument token carries its
+     `data-path`; hovering outlines the argument a click would open — the
+     same `--gold` inset ring the editor's argument outline uses. */
+  .arg {
+    border-radius: 2px;
+  }
+
+  .arg:global(.arg-hovered) {
+    box-shadow: 0 0 0 1px var(--gold);
+  }
+</style>

@@ -134,8 +134,10 @@ const rowsIn = (root: Element, list: 'conditions' | 'actions') =>
   [...root.querySelectorAll<HTMLLIElement>(`.col[data-list="${list}"] .statement`)]
 
 describe('the statement-text colour table (#881)', () => {
-  const css = readFileSync(join(process.cwd(), 'src', 'app.css'), 'utf8')
-  const root = css.match(/:root\s*\{([^}]*)\}/)?.[1] ?? ''
+  const appCss = readFileSync(join(process.cwd(), 'src', 'app.css'), 'utf8')
+  const root = appCss.match(/:root\s*\{([^}]*)\}/)?.[1] ?? ''
+  // The `.tok` rules moved into `Expr.svelte`'s scoped style (#928).
+  const css = readFileSync(join(process.cwd(), 'src', 'lib', 'Expr.svelte'), 'utf8')
 
   it.each([
     ['action', '#ffffff'],
@@ -308,7 +310,7 @@ describe('the statement columns (#881)', () => {
     expect(heads[1].textContent).toContain('Actions (1)')
     const none = body.querySelector('.col .none')!
     expect(none.textContent).toBe('none')
-    const css = readFileSync(join(process.cwd(), 'src', 'app.css'), 'utf8')
+    const css = readFileSync(join(process.cwd(), 'src', 'lib', 'RuleView.svelte'), 'utf8')
     expect(css.match(/\.none\s*\{([^}]*)\}/)?.[1] ?? '').toContain('var(--muted)')
   })
 })
@@ -348,7 +350,7 @@ describe('the debug layer (#881)', () => {
       expect(children.indexOf(lineNo)).toBe(1)
       expect(row.querySelector('details.debug')).not.toBeNull()
     }
-    const css = readFileSync(join(process.cwd(), 'src', 'app.css'), 'utf8')
+    const css = readFileSync(join(process.cwd(), 'src', 'lib', 'RuleView.svelte'), 'utf8')
     const rule = css.match(/\.line-no\s*\{([^}]*)\}/)?.[1] ?? ''
     expect(rule).toContain('var(--dim)')
     expect(rule).toContain('monospace')

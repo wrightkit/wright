@@ -19,3 +19,22 @@
     <circle cx="5" cy="5" r="3.5" fill="none" stroke-width="1.8" />
   {/if}
 </svg>
+
+<style>
+  .severity-mark {
+    display: block;
+    flex: none;
+    fill: var(--muted);
+    stroke: var(--muted);
+  }
+
+  .severity-mark.severity-error {
+    fill: var(--error);
+    stroke: var(--error);
+  }
+
+  .severity-mark.severity-warning {
+    fill: var(--warn);
+    stroke: var(--warn);
+  }
+</style>

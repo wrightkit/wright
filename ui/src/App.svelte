@@ -726,3 +726,142 @@
     onclose={() => (editTarget = null)}
   />
 </div>
+
+<style>
+  .page {
+    padding: var(--page-pad);
+  }
+
+  .title-row {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-bottom: 6px;
+  }
+
+  .title-row h1 {
+    margin: 0;
+    font-size: var(--title-size);
+    font-weight: 700;
+    font-style: italic;
+    letter-spacing: var(--title-track);
+    line-height: 1.1;
+  }
+
+  .file-name {
+    font-size: var(--file-name-size);
+    font-style: italic;
+    color: var(--muted);
+  }
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--toolbar-gap);
+    padding-bottom: var(--toolbar-pad-below);
+    border-bottom: var(--toolbar-line) solid
+      color-mix(in srgb, var(--text) 55%, transparent);
+  }
+
+  .toolbar .end {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--toolbar-gap);
+  }
+
+  .rule-count {
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  /* The severity badges sit on the diagnostics SqButton's badge corner. */
+  .severity-badges {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    display: flex;
+    gap: 2px;
+  }
+
+  .sev-badge {
+    min-width: 18px;
+    padding: 0 4px;
+    border-radius: 9px;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+  }
+
+  .sev-badge.severity-error {
+    background: var(--error);
+    color: var(--on-white);
+  }
+
+  .sev-badge.severity-warning {
+    background: var(--warn);
+    color: var(--on-white);
+  }
+
+  .sev-badge.severity-info {
+    background: var(--muted);
+    color: var(--on-white);
+  }
+
+  .sep {
+    width: 1px;
+    height: 28px;
+    background: color-mix(in srgb, var(--text) 40%, transparent);
+  }
+
+  .filter {
+    width: 256px;
+    max-width: 100%;
+    height: 40px;
+    border: 0;
+    border-radius: 3px;
+    padding: 0 12px;
+    background: var(--white);
+    color: var(--on-white);
+    box-sizing: border-box;
+  }
+
+  .filter::placeholder {
+    color: var(--dim);
+  }
+
+  .locale {
+    border: 0;
+    border-radius: 3px;
+    padding: 0.45rem 0.6rem;
+    background: var(--white);
+    color: var(--on-white);
+  }
+
+  .rule-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--rule-list-gap);
+    padding: var(--rule-list-below) 0 0;
+  }
+
+  /* Each slot holds the RuleBar and, when open, the indented RuleView. */
+  .rule-slot {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .rule-body {
+    padding: var(--rule-body-pad) 0 var(--rule-body-pad) var(--rule-body-indent);
+  }
+
+  @media (max-width: 900px) {
+    .rule-body {
+      padding-left: 0;
+    }
+  }
+</style>
