@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.0](https://github.com/wrightkit/wright/compare/v0.35.1...v0.36.0) (2026-10-23)
+
+
+### Features
+
+* **wasm:** build the Wright core for WebAssembly over in-memory input ([#971](https://github.com/wrightkit/wright/issues/971)) ([cd03235](https://github.com/wrightkit/wright/commit/cd032356f655e723ed071d6b045adf45fc4b2f81)), closes [#959](https://github.com/wrightkit/wright/issues/959) [#951](https://github.com/wrightkit/wright/issues/951)
+
 ## [0.35.1](https://github.com/wrightkit/wright/compare/v0.35.0...v0.35.1) (2026-10-23)
 
 
