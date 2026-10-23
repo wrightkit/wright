@@ -330,7 +330,11 @@ pub enum ToolRequest {
         snapshot: Option<u64>,
         /// The statement edits, every one addressed against the program
         /// before any edit in this request applies. Two edits at the same
-        /// statement address refuse `edit-duplicate-address`.
+        /// statement address refuse `edit-duplicate-address`. An edit
+        /// whose result leaves a rule's `actions` block structure
+        /// unbalanced — an opener without its `End`, an `End` without an
+        /// open block, or an `Else`/`Else If` outside an open `If` —
+        /// refuses `unbalanced-block` (#962).
         edits: Vec<StatementEditRequest>,
     },
     /// Resolve a free-text name guess — a display name, a near spelling, or
