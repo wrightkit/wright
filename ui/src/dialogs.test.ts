@@ -162,7 +162,8 @@ const click = (el: Element) => {
 
 const toolbarButton = (title: string) =>
   host.querySelector<HTMLButtonElement>(`.toolbar button[title="${title}"]`)!
-const dialog = () => host.querySelector<HTMLDialogElement>('dialog.view')!
+// Bits UI portals the dialog into `document.body`; mounted content is open.
+const dialog = () => document.body.querySelector<HTMLElement>('.dialog.view')!
 const isOpen = (id: number) =>
   host.querySelector(`.rule-slot[data-rule-id="${id}"] .rule-view`) != null
 const slot = (id: number) => host.querySelector(`.rule-slot[data-rule-id="${id}"]`)
@@ -185,7 +186,7 @@ describe('the Diagnostics dialog (#882)', () => {
     click(toolbarButton('Diagnostics'))
     await settle()
 
-    expect(dialog().open).toBe(true)
+    expect(dialog(), 'the view dialog is open').not.toBeNull()
     // Chrome: the centred title, the scrolling body, the footer band with
     // the one orange Confirm — and no leftover Close text button.
     expect(dialog().querySelector('.dlg-title')?.textContent).toBe('Diagnostics')
@@ -397,7 +398,7 @@ describe('rule reveal (#882)', () => {
     click(topRule)
     await settle()
 
-    expect(dialog().open).toBe(false)
+    expect(dialog(), 'the dialog closed on reveal').toBeNull()
     expect(isOpen(1)).toBe(true)
     expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(1)
     expect(vi.mocked(Element.prototype.scrollIntoView).mock.instances[0]).toBe(
@@ -411,7 +412,7 @@ describe('rule reveal (#882)', () => {
     click(row)
     await settle()
 
-    expect(dialog().open).toBe(false)
+    expect(dialog(), 'the dialog closed on reveal').toBeNull()
     expect(isOpen(1)).toBe(true)
     expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(2)
   })
@@ -645,7 +646,7 @@ describe('severity levels (#922)', () => {
     click(dialog().querySelector<HTMLButtonElement>('button.finding')!)
     await settle()
 
-    expect(dialog().open).toBe(false)
+    expect(dialog(), 'the dialog closed on reveal').toBeNull()
     expect(isOpen(1)).toBe(true)
 
     const row = slot(1)!.querySelector<HTMLElement>(

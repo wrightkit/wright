@@ -117,7 +117,8 @@ const pendingBadge = () => pendingButton().querySelector('.sq-badge')?.textConte
 
 const rows = () => [...host.querySelectorAll<HTMLLIElement>('.statement')]
 const checkbox = (row: Element) => row.querySelector<HTMLInputElement>('.sel')!
-const dialog = () => host.querySelector<HTMLDialogElement>('dialog.pending')!
+// Bits UI portals the dialogs into `document.body`; mounted content is open.
+const dialog = () => document.body.querySelector<HTMLElement>('.dialog.pending')!
 const buttonByText = (root: Element, text: string) =>
   [...root.querySelectorAll('button')].find((button) => button.textContent === text)!
 
@@ -176,7 +177,7 @@ describe('the editing layer', () => {
     // posts the returned transaction to the host apply path.
     click(pendingButton())
     await settle()
-    expect(dialog().open).toBe(true)
+    expect(dialog(), 'the pending dialog is open').not.toBeNull()
     expect(dialog().textContent).toContain('actions[0]')
     click(buttonByText(dialog(), 'Submit'))
     await settle()
@@ -253,7 +254,7 @@ describe('the editing layer', () => {
 
     // The refusal renders in the dialog; the apply route was never hit.
     expect(applySpy).not.toHaveBeenCalled()
-    expect(host.querySelector('[data-testid="pending-refusal"]')?.textContent).toContain(
+    expect(document.body.querySelector('[data-testid="pending-refusal"]')?.textContent).toContain(
       'edit-stale-source',
     )
     // A stale refusal drops the staging: the marks addressed a program the
@@ -305,7 +306,7 @@ describe('the editing layer', () => {
     click(buttonByText(dialog(), 'Submit'))
     await settle()
 
-    expect(host.querySelector('[data-testid="pending-refusal"]')?.textContent).toContain(
+    expect(document.body.querySelector('[data-testid="pending-refusal"]')?.textContent).toContain(
       'edit-stale-source',
     )
     expect(pendingBadge()).toBeNull()
@@ -334,14 +335,14 @@ describe('the editing layer', () => {
     click(rows()[0])
     await settle()
 
-    const editor = host.querySelector<HTMLDialogElement>('dialog.editor')!
-    expect(editor.open).toBe(true)
+    const editor = document.body.querySelector<HTMLElement>('.dialog.editor')!
+    expect(editor, 'the editor dialog is open').not.toBeNull()
     const toggle = editor.querySelector<HTMLInputElement>('[data-testid="editor-disable"]')!
     click(toggle)
     click(buttonByText(editor, 'OK'))
     await settle()
 
-    expect(editor.open).toBe(false)
+    expect(document.body.querySelector('.dialog.editor'), 'the editor closed').toBeNull()
     expect(pendingBadge()).toBe('1')
     expect(rows()[0].classList.contains('pending-change')).toBe(true)
   })

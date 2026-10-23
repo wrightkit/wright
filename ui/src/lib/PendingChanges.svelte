@@ -9,7 +9,7 @@
    */
   import type { EditStatementsRequest } from './types/generated/wright-agent-v1'
   import type { ChromeStrings } from './chrome'
-  import { closeDialog, showModal } from './dialog'
+  import Dialog from './components/Dialog.svelte'
   import type { PendingChange } from './edit'
 
   let {
@@ -39,14 +39,6 @@
     onclose: () => void
   } = $props()
 
-  let dialogEl: HTMLDialogElement | undefined = $state()
-
-  $effect(() => {
-    if (!dialogEl) return
-    if (open && !dialogEl.open) showModal(dialogEl)
-    if (!open && dialogEl.open) closeDialog(dialogEl)
-  })
-
   const groups = $derived.by(() => {
     const byRule = new Map<number, { name: string; items: PendingChange[] }>()
     for (const change of changes) {
@@ -65,8 +57,7 @@
   })
 </script>
 
-<dialog bind:this={dialogEl} onclose={onclose} class="dialog pending">
-  <h2>{t.pendingChanges}</h2>
+<Dialog {open} {onclose} class="pending" title={t.pendingChanges}>
   {#if refusal}
     <div class="refusal" data-testid="pending-refusal">
       {#each refusal as diagnostic, i (i)}
@@ -101,7 +92,7 @@
       disabled={submitting || changes.length === 0}
       onclick={ondiscard}>{t.discardAll}</button
     >
-    <button type="button" onclick={() => dialogEl && closeDialog(dialogEl)}>{t.cancel}</button>
+    <button type="button" onclick={onclose}>{t.cancel}</button>
     <button
       type="button"
       class="ok"
@@ -109,4 +100,4 @@
       onclick={onsubmit}>{submitting ? t.applying : t.submit}</button
     >
   </div>
-</dialog>
+</Dialog>

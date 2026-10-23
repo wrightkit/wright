@@ -650,6 +650,10 @@ jobs:
         working-directory: ui
         run: npm run check-types
 
+      - name: Dependency registry (ADR-0036)
+        working-directory: ui
+        run: npm run check:deps
+
       - name: svelte-check
         working-directory: ui
         run: npm run check
