@@ -1,9 +1,3 @@
-//! The `lint` command tree: the finding-report arguments plus the
-//! `lint package` subcommand tree (#844) — discovery and lifecycle
-//! management for GitHub lint rule packages over the wright-driver store
-//! (#842). Installing a package never activates it; project configuration
-//! pins packages by commit SHA (#843).
-
 use clap::{Args, Subcommand};
 
 use super::{ColorArg, CommonArgs, OutputFormatArg, RendererArg, SelectArgs};

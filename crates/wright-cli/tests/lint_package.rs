@@ -1,9 +1,3 @@
-//! `wright lint package` integration tests (#844): discovery, install,
-//! and list. Every remote answer is a recorded response from a localhost
-//! HTTP server — the `WRIGHT_LINT_PACKAGE_*` endpoint overrides point the
-//! command at it — and every store lives in a per-test temp dir. No test
-//! touches real network or real GitHub.
-
 mod support;
 
 use support::*;
@@ -126,8 +120,6 @@ fn install_fetches_into_the_store_and_never_activates() {
          == stderr\n",
         "{text}"
     );
-    // The package landed under <owner>/<repo>/<sha>/ and nothing else was
-    // written — no project files were created or modified.
     assert_eq!(
         std::fs::read_to_string(
             dirs.root
@@ -143,7 +135,6 @@ fn install_fetches_into_the_store_and_never_activates() {
         "install writes only to the store"
     );
 
-    // A second install reuses the intact entry — no second download.
     let again = run(
         &dirs,
         Some(&server),
@@ -173,7 +164,6 @@ fn install_accepts_ref_spellings_and_a_full_sha() {
     let dirs = TestDirs::new("install-refs");
     let server = package_server("community", "rules", SHA_A, package_tarball(RULE));
 
-    // `owner/repo@<ref>` resolves through the commits API.
     let output = run(
         &dirs,
         Some(&server),
@@ -198,7 +188,6 @@ fn install_accepts_ref_spellings_and_a_full_sha() {
             .contains(&"/repos/community/rules/commits/v1".to_string())
     );
 
-    // A full SHA needs no resolution at all.
     let dirs = TestDirs::new("install-refs-sha");
     let server = package_server("community", "rules", SHA_B, package_tarball(RULE));
     let output = run(
@@ -225,7 +214,6 @@ fn install_accepts_ref_spellings_and_a_full_sha() {
         server.paths()
     );
 
-    // A URL source selects the repository; --ref selects the revision.
     let dirs = TestDirs::new("install-refs-url");
     let server = package_server("community", "rules", SHA_A, package_tarball(RULE));
     let output = run(
@@ -300,7 +288,6 @@ fn install_failures_report_stable_error_codes() {
         "a refused package leaves no partial store entry"
     );
 
-    // A malformed source is a usage error, not a remote failure.
     let output = run(
         &dirs,
         Some(&server),
@@ -326,7 +313,6 @@ fn install_failures_report_stable_error_codes() {
 fn list_reports_installed_and_damaged_entries() {
     let dirs = TestDirs::new("list");
     write_entry(&dirs.root, "community", "rules", SHA_A, RULE);
-    // A damaged entry reports `damaged` with the reason it fails validation.
     let damaged = entry(&dirs.root, "team", "pkg", SHA_B).join("rules");
     std::fs::create_dir_all(&damaged).unwrap();
     std::fs::write(damaged.join("bad.yaml"), b"id: bad\nmetadata: []\n").unwrap();

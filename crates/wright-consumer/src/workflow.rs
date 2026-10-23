@@ -105,9 +105,6 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
     }
 
     if input.ends_with(".ws") && !source.is_empty() {
-        // `validateEditTransaction` exercises the shared validated-edit path
-        // with a caller-proposed no-op replacement of the source's first
-        // character.
         let transaction = wright_driver::edit::EditTransaction {
             edits: vec![wright_driver::edit::SourceEdit {
                 edit_kind: "edit".to_string(),

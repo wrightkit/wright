@@ -1,15 +1,4 @@
 <script lang="ts">
-  /**
-   * The simulation panel (#836): the in-game custom-game room as a modal
-   * dialog — two team columns of hero slots, a simulated-seconds field,
-   * the project's lobby settings read-only, and a Start button. Start
-   * builds an `athena` scenario from the occupied slots and the field and
-   * calls `simulate` against the project identity; the result shows the
-   * trace's outcome, variables, and logs, and a refusal is a message that
-   * leaves the previous result in place. The two incomplete outcomes
-   * carry the not-verified wording — the panel never presents them as
-   * verified.
-   */
   import type { ChromeStrings } from './chrome'
   import Dialog from './components/Dialog.svelte'
   import type {
@@ -38,9 +27,6 @@
     onclose: () => void
   } = $props()
 
-  // Six slots per team, as in the in-game room; the user's slot is the
-  // first team-1 slot. `null` hero means an empty slot — the scenario
-  // carries only occupied slots.
   let slots = $state(
     Array.from({ length: 12 }, (_, index) => ({
       hero: null as string | null,
@@ -54,8 +40,6 @@
   let refusal = $state<string | null>(null)
 
   const settings = $derived<SettingsNode[] | null>(project?.settings ?? null)
-  // The room's run length (#836): the field wins once touched; otherwise
-  // the lobby's match time limit, else 60.
   const effectiveSeconds = $derived.by(() => {
     if (secondsTouched) return seconds
     return String(matchTimeLimit(settings) ?? 60)
@@ -64,9 +48,6 @@
 
   const heroOptions = $derived(
     (heroes ?? []).map((entry) => ({
-      // The scenario's hero is the catalog member token — `athena` accepts
-      // the canonical member id and en-US spellings — while the picker's
-      // label is the localized display name.
       id: entry.identity.split('.').pop() ?? entry.identity,
       label: entry.displayName ?? entry.identity,
     })),

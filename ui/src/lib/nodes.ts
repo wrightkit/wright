@@ -1,10 +1,3 @@
-/**
- * Pure presentation helpers over `workshop-rs/rule-content-v1` nodes. The
- * page holds no Workshop semantics of its own: names come from `lookup`,
- * and the only structural reading here is what the format documents —
- * reserved call forms and the flat action stream whose nesting is
- * recoverable from `If`/`Else If`/`Else`/`While`/`For` openers and `End`.
- */
 import type { Action, CallNode, Condition, Event, Node } from './types/generated/rule-content-v1'
 
 /**
@@ -24,7 +17,6 @@ export type SyntaxClass =
   | 'literal'
   | 'punctuation'
 
-/** Reserved call ids whose documented forms read as variable accesses. */
 const VARIABLE_CALLS = new Set(['globalVariable', 'playerVariable', 'memberAccess'])
 
 /**
@@ -66,7 +58,7 @@ export function nodeClass(node: Node, kind?: string): SyntaxClass {
  * openers and `End`). `elseIf`/`else` continue the enclosing block at its
  * own depth.
  */
-const OPENERS = new Set(['if', 'while', 'forGlobalVariable', 'forPlayerVariable'])
+export const OPENERS = new Set(['if', 'while', 'forGlobalVariable', 'forPlayerVariable'])
 const BRANCHES = new Set(['elseIf', 'else'])
 
 /**
@@ -132,8 +124,6 @@ export function statementText(node: Node, names: PeekNames, kinds: string[]): st
   if ('subroutine' in node) return node.subroutine
   if ('ambiguous' in node) return node.ambiguous
   if (node.call === 'globalVariable') {
-    // The scope label's canonical display name is the lowercase `global`
-    // keyword; the editor shows the capitalized form (`Global.score`).
     const scope = names.peek('global', ['structural'])
     const label = (scope?.name ?? 'Global').replace(/^\p{Ll}/u, (c) => c.toUpperCase())
     return `${label}.${text(node.args[0])}`
@@ -154,6 +144,46 @@ export function statementText(node: Node, names: PeekNames, kinds: string[]): st
   }
   if (node.args.length === 0) return name
   return `${name}(${node.args.map(text).join(', ')})`
+}
+
+/**
+ * The flat-stream indices of every action whose call id equals the one at
+ * `index` — the row context menu's "Select same action" set
+ * (docs/ui/selection.md § Structural selection). `end` markers are real
+ * actions too, so they match each other like any other call.
+ */
+export function sameCallIndices(nodes: Node[], index: number): number[] {
+  const target = nodes[index]
+  if (target === null || target === undefined || typeof target !== 'object' || !('call' in target)) {
+    return []
+  }
+  return nodes.flatMap((node, i) =>
+    node !== null && typeof node === 'object' && 'call' in node && node.call === target.call
+      ? [i]
+      : [],
+  )
+}
+
+/**
+ * The flat-stream range of the block the opener at `index` opens: the
+ * opener itself through its `end` marker inclusive — an `else if`/`else`
+ * branch inside it counts as the block's own. The open call is the
+ * exported `OPENERS` set's; anything else answers `null` so the menu can
+ * disable the entry.
+ */
+export function blockRange(actions: Action[], index: number): [number, number] | null {
+  const call = actions[index]?.call
+  if (call === undefined || !OPENERS.has(call)) return null
+  let depth = 0
+  for (let i = index; i < actions.length; i++) {
+    const at = actions[i].call
+    if (OPENERS.has(at)) depth += 1
+    else if (at === 'end') {
+      depth -= 1
+      if (depth === 0) return [index, i]
+    }
+  }
+  return [index, actions.length - 1]
 }
 
 export function statementMatches(
@@ -213,8 +243,6 @@ function collectNode(node: Node, out: { identity: string; kinds: string[] }[]): 
     out.push({ identity: node.localizedString, kinds: [] })
   } else if ('call' in node) {
     out.push({ identity: node.call, kinds: VALUE_KINDS })
-    // A global variable read renders `Global.name`; `global` is the
-    // structural catalog entry whose localized name is the scope word.
     if (node.call === 'globalVariable') {
       out.push({ identity: 'global', kinds: ['structural'] })
     }

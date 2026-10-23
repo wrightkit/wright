@@ -1,8 +1,3 @@
-//! The `inspect` command's argument model: the query subcommands each
-//! share the agent operation's name (ADR-0035), plus their narrowing
-//! flags — the same flags the usage errors and help examples name
-//! (#888).
-
 use clap::{Args, Subcommand};
 
 use super::{CfgBlockKindArg, CommonArgs, ReferenceKindArg, SelectArgs, SymbolKindArg};

@@ -1,5 +1,3 @@
-//! A thin LSP protocol adapter over [`wright_language::LanguageService`].
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, Read, Write};
 use std::path::PathBuf;
@@ -54,9 +52,6 @@ fn main() {
     }
 }
 
-/// The LSP lifecycle phase (#637): `initialize` is served only from
-/// `Waiting`, ordinary requests only from `Running`, and `exit` reports
-/// the negotiated `shutdown` through the process exit code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Lifecycle {
     /// Before `initialize`: requests are refused `-32002`.
@@ -82,9 +77,6 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
     let mut service = LanguageService::with_config(root.clone(), config.clone());
     let mut ownership: PublicationOwnership = BTreeMap::new();
     let mut lifecycle = Lifecycle::Waiting;
-    // Whether the client negotiated versioned workspace edits
-    // (`workspace.workspaceEdit.documentChanges`). Renames are only served
-    // when they can carry the validated document version.
     let mut versioned_workspace_edits = false;
 
     loop {
@@ -111,15 +103,9 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
         let id = value.get("id").cloned();
         let params = value.get("params").cloned();
 
-        // A message with an `id` but no `method` is a client response —
-        // it is never answered (#637); neither is anything else without
-        // a method.
         if method.is_empty() {
             continue;
         }
-        // Lifecycle messages always dispatch; every other message
-        // requires `Running` (#637): requests get the protocol refusal,
-        // notifications are dropped.
         if !matches!(method.as_str(), "initialize" | "shutdown" | "exit")
             && lifecycle != Lifecycle::Running
         {
@@ -166,12 +152,6 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
                     ownership.clear();
                 }
                 lifecycle = Lifecycle::Running;
-                // Negotiate the OPY provider now (#738): a capability may
-                // only be advertised when the negotiated provider backs it,
-                // and negotiation is what tells us. Spawn plus
-                // `lpp/initialize` run inside the LSP initialize handshake;
-                // an unresolvable provider leaves `OpyProviderSupport`
-                // all-false rather than failing the LSP session.
                 let opy_support = service.opy_provider_support();
                 if id.is_some() {
                     write_response(
@@ -186,8 +166,6 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
                 }
             }
             "initialized" => {
-                // A notification-only method carrying an `id` is a
-                // request by JSON-RPC and must be answered (#637).
                 if id.is_some() {
                     write_response(&mut writer, id, Value::Null)?;
                 }
@@ -241,11 +219,6 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
                     continue;
                 };
                 let uri = params.text_document.uri.to_string();
-                // Full sync replaces the document with the last rangeless
-                // change; a change carrying `range` is not a full
-                // replacement under the negotiated sync kind and applying
-                // it as one would corrupt the buffer. A version the store
-                // drops as stale must not republish the old state (#637).
                 let applied = params
                     .content_changes
                     .iter()
@@ -383,8 +356,6 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
                 if id.is_none() {
                     continue;
                 }
-                // OPY-only capability (#738): the answer is `null` for
-                // every document without negotiated provider backing.
                 let symbols = service
                     .document_symbols(params.text_document.uri.as_str())
                     .map(|symbols| {
@@ -454,10 +425,6 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
     }
 }
 
-/// `documentChanges` carries the validated document version per file so the
-/// client can reject the edit if its buffer moved while the rename was
-/// pending. One `TextDocumentEdit` per document; a dropped edit would apply a
-/// partial rename, so an unparseable URI is returned as the error.
 fn versioned_workspace_edit(edits: Vec<SourceTextEdit>) -> Result<WorkspaceEdit, String> {
     let mut grouped: BTreeMap<String, (i32, Vec<OneOf<TextEdit, AnnotatedTextEdit>>)> =
         BTreeMap::new();
@@ -502,19 +469,10 @@ fn initialize_result(
                     ..Default::default()
                 },
             )),
-            // Applied renames are returned as versioned `documentChanges`;
-            // a client that cannot receive the validated document version
-            // cannot be handed an edit safely, so rename stays unadvertised.
             rename_provider: versioned_workspace_edits.then_some(OneOf::Left(true)),
-            // Raw Workshop hover/definition/references are backed by the
-            // session's canonical check/index pipeline (#555); documents
-            // outside that scope still answer `null`.
             hover_provider: Some(HoverProviderCapability::Simple(true)),
             definition_provider: Some(OneOf::Left(true)),
             references_provider: Some(OneOf::Left(true)),
-            // OPY document symbols have no in-process backing, so the
-            // capability is advertised exactly when the negotiated
-            // provider serves `lpp/symbols` (#738).
             document_symbol_provider: opy_support.symbols.then_some(OneOf::Left(true)),
             ..Default::default()
         },
@@ -525,9 +483,6 @@ fn initialize_result(
     }
 }
 
-/// One provider symbol as an LSP `DocumentSymbol` (#738): the authored
-/// range and its selection range fall back to each other, as the spec
-/// requires `selectionRange` to sit inside `range`.
 #[allow(deprecated)]
 fn lsp_document_symbol(symbol: &SourceSymbol) -> DocumentSymbol {
     let range = convert_range(symbol.range);
@@ -543,9 +498,6 @@ fn lsp_document_symbol(symbol: &SourceSymbol) -> DocumentSymbol {
     }
 }
 
-/// The provider's OPY symbol vocabulary maps onto the closest LSP kind;
-/// an unrecognized kind stays a variable — the honest floor for a
-/// program-scope name.
 fn symbol_kind(kind: &str) -> SymbolKind {
     match kind {
         "constant" => SymbolKind::CONSTANT,
@@ -554,10 +506,6 @@ fn symbol_kind(kind: &str) -> SymbolKind {
     }
 }
 
-/// One frame off the wire (#637). Malformed framing — missing, invalid,
-/// or oversized `Content-Length`, an overlong header line or section, or
-/// a non-UTF-8 body — is consumed so the stream stays aligned and the
-/// server answers the protocol error instead of exiting mid-session.
 enum Frame {
     /// A complete, decodable frame body.
     Message(String),
@@ -570,8 +518,6 @@ enum Frame {
 
 const MAX_HEADER_LINE: usize = 8 * 1024;
 const MAX_HEADER_BYTES: usize = 64 * 1024;
-/// A frame body may not exceed this many bytes — the declared
-/// `Content-Length` is never trusted enough to allocate it unchecked.
 const MAX_CONTENT_LENGTH: u64 = 32 * 1024 * 1024;
 
 fn read_message(reader: &mut impl BufRead) -> Result<Frame, String> {
@@ -585,10 +531,6 @@ fn read_message(reader: &mut impl BufRead) -> Result<Frame, String> {
             return Ok(Frame::Closed);
         }
         header_bytes += read;
-        // A header line that does not fit the bound is framing garbage:
-        // drain its remainder so the next read starts at a line boundary,
-        // then mark the frame malformed — the stream still resyncs at the
-        // next frame.
         while !raw.ends_with(b"\n") {
             raw.clear();
             read = read_bounded(reader, &mut raw)?;
@@ -625,10 +567,6 @@ fn read_message(reader: &mut impl BufRead) -> Result<Frame, String> {
     let malformed =
         invalid.or((length > MAX_CONTENT_LENGTH).then_some("Content-Length exceeds limit"));
     if let Some(reason) = malformed {
-        // Refuse without honoring the declared body. When the declared
-        // boundary is known and bounded, consume it so the next frame
-        // starts clean; an oversized body is left for the next read to
-        // consume as bounded header lines until the stream resynchronizes.
         if length <= MAX_CONTENT_LENGTH {
             discard_bytes(reader, length)?;
         }
@@ -642,8 +580,6 @@ fn read_message(reader: &mut impl BufRead) -> Result<Frame, String> {
     }
 }
 
-/// One header line, bounded so an unbounded line is detected by a missing
-/// newline rather than by the allocation it caused (#637).
 fn read_bounded(reader: &mut impl BufRead, buf: &mut Vec<u8>) -> Result<usize, String> {
     reader
         .by_ref()
@@ -652,9 +588,6 @@ fn read_bounded(reader: &mut impl BufRead, buf: &mut Vec<u8>) -> Result<usize, S
         .map_err(|e| e.to_string())
 }
 
-/// Consume `length` bytes without honoring the declared allocation — a
-/// malformed frame's bounded body still has to leave the stream before
-/// the next frame can be read.
 fn discard_bytes(reader: &mut impl BufRead, length: u64) -> Result<(), String> {
     std::io::copy(&mut reader.by_ref().take(length), &mut std::io::sink())
         .map(|_| ())
@@ -675,9 +608,6 @@ fn write_response(writer: &mut impl Write, id: Option<Value>, result: Value) -> 
     )
 }
 
-/// A JSON-RPC error response that preserves the refusal's structured code in
-/// `error.data.code` so clients can distinguish refusals without parsing the
-/// message.
 fn write_error(
     writer: &mut impl Write,
     id: Option<Value>,
@@ -700,10 +630,6 @@ fn parse_params<T: serde::de::DeserializeOwned>(params: Option<Value>) -> Result
         .map_err(|error| error.to_string())
 }
 
-/// Params for a message, answering `-32602` when a request carries none or
-/// malformed ones. `None` means the message was malformed and already handled —
-/// or was a notification, which gets no response — so the caller skips it and
-/// the server keeps serving.
 fn read_params<T: serde::de::DeserializeOwned>(
     writer: &mut impl Write,
     id: &Option<Value>,
@@ -741,8 +667,6 @@ fn refresh_root(
     let diagnostics = service.diagnostics(root_uri);
     let mut by_source: BTreeMap<String, Vec<LspDiagnostic>> = BTreeMap::new();
     for diagnostic in diagnostics {
-        // A source with no URI to publish under is dropped rather than
-        // attributed to a fabricated `file:///unknown` (#637).
         if let Some(uri) = publication_uri(service, &diagnostic.source) {
             by_source
                 .entry(uri)
@@ -789,8 +713,6 @@ fn publication_uri(service: &LanguageService, source: &str) -> Option<String> {
     if let Some(document) = service.store.document(source) {
         return Some(document.uri.clone());
     }
-    // A path or normalized-URI spelling of an open document still
-    // publishes under the URI the client opened.
     let path =
         wright_language::document::uri_to_path(source).unwrap_or_else(|| PathBuf::from(source));
     if let Some(uri) = service.store.uri_for_path(&path) {
@@ -808,8 +730,6 @@ fn convert_diagnostic(diagnostic: wright_language::SourceDiagnostic) -> LspDiagn
             "hint" => DiagnosticSeverity::HINT,
             _ => DiagnosticSeverity::INFORMATION,
         }),
-        // A provider diagnostic may carry no code — an empty string is
-        // not a code, so the field drops out entirely (#738).
         code: (!diagnostic.code.is_empty())
             .then_some(lsp_types::NumberOrString::String(diagnostic.code)),
         message: diagnostic.message,
@@ -824,9 +744,6 @@ fn publish_to(
     diagnostics: Vec<LspDiagnostic>,
 ) -> Result<(), String> {
     let Ok(uri) = Uri::from_str(uri) else {
-        // An identity with no URI spelling gets no publication — a
-        // fabricated `file:///unknown` would orphan the diagnostics
-        // (#637).
         return Ok(());
     };
     let params = PublishDiagnosticsParams {

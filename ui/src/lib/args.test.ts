@@ -3,10 +3,16 @@ import {
   type ParamFact,
   argAt,
   argFields,
+  conditionFields,
   currentId,
+  defaultNode,
   enumNode,
+  fillGaps,
   operationNode,
   paramFacts,
+  slotSet,
+  stringNode,
+  unsetRequired,
   variableNode,
   withArg,
 } from './args'
@@ -45,7 +51,7 @@ describe('argFields', () => {
       { call: 'setPlayerVariable', args: [{ variable: 'kills' }, 0] },
     )
     expect(fields[0]).toMatchObject({ kind: 'variable', scope: 'playerVariable', path: [0] })
-    expect(fields[1]).toMatchObject({ kind: 'other', path: [1] })
+    expect(fields[1]).toMatchObject({ kind: 'number', path: [1] })
   })
 
   it('offers exactly the operations the parameter declares', () => {
@@ -114,6 +120,183 @@ describe('node constructors', () => {
     })
     expect(enumNode('Wait.RESTART')).toEqual({ enum: 'Wait', member: 'RESTART' })
     expect(currentId({ enum: 'Wait', member: 'RESTART' })).toBe('Wait.RESTART')
+    expect(stringNode('hello')).toEqual({ string: 'hello' })
+    expect(defaultNode('Wait.IGNORE_CONDITION')).toEqual({
+      enum: 'Wait',
+      member: 'IGNORE_CONDITION',
+    })
+    expect(defaultNode('0.5')).toBe(0.5)
+    expect(defaultNode('null')).toBeNull()
+    expect(defaultNode('Free-form')).toEqual({ string: 'Free-form' })
+  })
+
+  it('reads a call-id default on a non-String parameter as a call node', () => {
+    expect(defaultNode('eventPlayer', { type: 'Player' })).toEqual({
+      call: 'eventPlayer',
+      args: [],
+    })
+    expect(defaultNode('allPlayers', { type: 'Player|Array' })).toEqual({
+      call: 'allPlayers',
+      args: [],
+    })
+    expect(defaultNode('Hello', { type: 'String' })).toEqual({ string: 'Hello' })
+  })
+})
+
+describe('literal controls', () => {
+  it('classifies a number, a string, and a boolean node to their inputs', () => {
+    const fields = argFields(
+      [
+        { name: 'time', type: 'Any', displayName: 'Duration' },
+        { name: 'text', type: 'String', displayName: 'Text' },
+        { name: 'enabled', type: 'Boolean', displayName: 'Enabled' },
+      ],
+      { call: 'demo', args: [0.25, { string: 'hi' }, false] },
+    )
+    expect(fields.map((field) => field.kind)).toEqual(['number', 'string', 'boolean'])
+  })
+
+  it('marks a call argument a `call` row and nests its lookup params', () => {
+    const nested: Record<string, ParamFact[]> = {
+      allPlayers: [
+        {
+          name: 'array',
+          displayName: 'Team',
+          type: 'Team',
+          required: false,
+          default: 'Team.ALL',
+          enum: { domain: 'Team' },
+        },
+      ],
+    }
+    const fields = argFields(
+      [{ name: 'visibleTo', type: 'Player|Array', displayName: 'Visible To', required: true }],
+      { call: 'createHudText', args: [{ call: 'allPlayers', args: [{ enum: 'Team', member: 'ALL' }] }] },
+      (call) => nested[call] ?? null,
+    )
+    expect(fields[0].kind).toBe('call')
+    expect(fields[0].nested?.[0]).toMatchObject({
+      kind: 'enum',
+      label: 'Team',
+      path: [0, 0],
+    })
+  })
+
+  it('fills a gap before the edited slot with the parameter default', () => {
+    const fields = argFields(
+      [
+        { name: 'time', type: 'Any', displayName: 'Duration', required: true },
+        {
+          name: 'waitBehavior',
+          displayName: 'Wait Behavior',
+          required: false,
+          default: 'Wait.IGNORE_CONDITION',
+          enum: { domain: 'Wait' },
+        },
+        { name: 'note', displayName: 'Note', required: true, type: 'Number' },
+      ],
+      { call: 'demo', args: [] },
+    )
+    const filled = fillGaps({ call: 'demo', args: [] }, fields, [2])
+    expect(filled.args).toEqual([null, { enum: 'Wait', member: 'IGNORE_CONDITION' }])
+    expect(fillGaps({ call: 'demo', args: [] }, fields, [0]).args).toEqual([])
+  })
+
+  it('fills a crossed gap with the call node a call-id default declares', () => {
+    const fields = argFields(
+      [
+        { name: 'player', displayName: 'Player', type: 'Player', default: 'eventPlayer' },
+        { name: 'button', displayName: 'Button', type: 'Button', enum: { domain: 'Button' } },
+      ],
+      { call: 'isButtonHeld', args: [] },
+    )
+    const filled = fillGaps({ call: 'isButtonHeld', args: [] }, fields, [1])
+    expect(filled.args).toEqual([{ call: 'eventPlayer', args: [] }])
+  })
+
+  it('flags a required empty slot while a defaulted one stays set', () => {
+    const fields = argFields(
+      [
+        { name: 'time', type: 'Any', displayName: 'Duration', required: true },
+        {
+          name: 'waitBehavior',
+          displayName: 'Wait Behavior',
+          required: false,
+          default: 'Wait.IGNORE_CONDITION',
+          enum: { domain: 'Wait' },
+        },
+      ],
+      { call: 'wait', args: [] },
+    )
+    expect(unsetRequired({ call: 'wait', args: [] }, fields)).toHaveLength(1)
+    expect(slotSet({ call: 'wait', args: [1] }, fields[0])).toBe(true)
+    expect(slotSet({ call: 'wait', args: [1] }, fields[1])).toBe(false)
+    expect(unsetRequired({ call: 'wait', args: [1] }, fields)).toHaveLength(0)
+  })
+})
+
+describe('conditionFields', () => {
+  const compare: ParamFact[] = [
+    { name: 'value', displayName: 'Value', type: 'Any', required: true },
+    { name: 'comparison', displayName: 'Comparison', type: '__Operator__', required: true },
+    { name: 'value', displayName: 'Value', type: 'Any', required: true },
+  ]
+
+  it('splits a two-arg operator call into left, operator, right rows', () => {
+    const fields = conditionFields([], compare, {
+      call: '>=',
+      args: [{ call: 'globalVariable', args: [{ variable: 'score' }] }, 3],
+    })
+    expect(fields.map((field) => field.label)).toEqual(['Value', 'Comparison', 'Value'])
+    expect(fields[0].path).toEqual([0])
+    expect(fields[0].kind).toBe('call')
+    expect(fields[1]).toMatchObject({ kind: 'call', call: '>=', path: [] })
+    expect(fields[2]).toMatchObject({ kind: 'number', path: [1] })
+  })
+
+  it('renders a non-comparison value as a single row', () => {
+    const fields = conditionFields([], compare, { call: 'isTrueForAll', args: [true] })
+    expect(fields).toHaveLength(1)
+    expect(fields[0].kind).toBe('call')
+  })
+
+  it('carries the value node on a bare variable-access condition row', () => {
+    const value = { call: 'globalVariable', args: [{ variable: 'score' }] }
+    const fields = conditionFields([], compare, value)
+    expect(fields).toHaveLength(1)
+    expect(fields[0]).toMatchObject({ kind: 'call', call: 'globalVariable' })
+    expect(fields[0].node).toEqual(value)
+  })
+
+  it('carries the value node on the operator row of a two-arg reserved call', () => {
+    for (const value of [
+      {
+        call: 'playerVariable',
+        args: [{ call: 'eventPlayer', args: [] }, { variable: 'aim' }],
+      },
+      {
+        call: 'memberAccess',
+        args: [
+          { call: 'globalVariable', args: [{ variable: 'm' }] },
+          { string: 'x' },
+        ],
+      },
+    ]) {
+      const fields = conditionFields([], compare, value)
+      expect(fields).toHaveLength(3)
+      expect(fields[1]).toMatchObject({ kind: 'call', call: value.call, path: [] })
+      expect(fields[1].node).toEqual(value)
+    }
+  })
+
+  it('uses the value call\'s own parameters when lookup declares them', () => {
+    const fields = conditionFields(
+      [{ name: 'array', displayName: 'Array', type: 'Array', required: true }],
+      compare,
+      { call: 'isTrueForAll', args: [true] },
+    )
+    expect(fields).toHaveLength(1)
+    expect(fields[0]).toMatchObject({ label: 'Array', kind: 'boolean', path: [0] })
   })
 })
 
@@ -154,8 +337,6 @@ describe('stageStatement', () => {
   })
 
   it('re-saving the staged statement keeps the pending change', () => {
-    // A reopened editor seeds its args from the staged change; an
-    // unchanged save must re-stage it, not drop it.
     const map = new Map<string, PendingChange>()
     const staged = {
       ...modify,

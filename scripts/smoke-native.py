@@ -85,8 +85,6 @@ def main() -> None:
         if args.version not in output:
             fail(f"{name} did not report version {args.version}: {output.strip()}")
 
-    # Profiles apply to Workshop input only (ADR-0028, #725): the OPY
-    # compile fixture drops the flag; the Workshop check keeps it.
     run(
         "compile",
         [str(wright), "compile", str(args.compile), "-o", "-"],
@@ -109,10 +107,6 @@ def main() -> None:
     if responses[1].get("result", {}).get("command") != "check":
         fail("agent session did not return the structured check result")
 
-    # `wright ui --no-open` (ADR-0032): the embedded page is served on
-    # loopback behind the session token, whose fragment never reaches the
-    # server — endpoint calls carry it as a bearer token instead. The
-    # proxy-free opener keeps loopback traffic local under CI proxy envs.
     print("==> native runtime: ui session")
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     ui = subprocess.Popen(

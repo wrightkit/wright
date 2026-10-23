@@ -1,15 +1,3 @@
-//! `editStatements` (ADR-0029): structured, non-mutating edits of a raw
-//! Workshop program's `conditions`/`actions` lists, addressed by
-//! `rule` + `list` + `index` and carrying `workshop-rs/rule-content-v1`
-//! statement documents.
-//!
-//! The owner split is the ADR's: `workshop-rs` converts each content node
-//! to the canonical model and produces the checked source edit — locale
-//! spellings, literal formatting, indentation, comment handling, and
-//! section creation never live here — while Wright owns addressing,
-//! freshness, the assembled `EditTransaction`, and its validation through
-//! `validateEditTransaction`.
-
 use std::collections::BTreeMap;
 
 use serde::Serialize;
@@ -19,10 +7,6 @@ use crate::diag::{Diagnostic, Stage};
 use crate::edit::{EditRange, EditTransaction, SourceEdit, SourcePreview};
 use crate::request::{StatementEditChange, StatementEditRequest, StatementList};
 
-/// The `editStatements` result: the `validateEditTransaction` payload —
-/// `ok`, `exit`, `diagnostics`, and `preview` when the assembled
-/// transaction validates — plus the transaction itself, so a caller can
-/// apply the edits through its own write path.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct EditStatementsResult {
     pub ok: bool,
@@ -34,9 +18,6 @@ pub(crate) struct EditStatementsResult {
     pub preview: Option<Vec<SourcePreview>>,
 }
 
-/// The refusal result for a request the operation could not plan: `ok:
-/// false` plus diagnostics, no transaction — the same shape
-/// `validateEditTransaction` reports refusals in.
 pub(crate) fn refusal(diagnostics: Vec<Diagnostic>) -> EditStatementsResult {
     EditStatementsResult {
         ok: false,
@@ -47,7 +28,6 @@ pub(crate) fn refusal(diagnostics: Vec<Diagnostic>) -> EditStatementsResult {
     }
 }
 
-/// The owner statement list a request `list` names.
 pub(crate) fn owner_list(list: StatementList) -> OwnerStatementList {
     match list {
         StatementList::Conditions => OwnerStatementList::Conditions,
@@ -55,8 +35,6 @@ pub(crate) fn owner_list(list: StatementList) -> OwnerStatementList {
     }
 }
 
-/// The owner edit a request `change` describes, borrowing its
-/// `rule-content-v1` payloads.
 pub(crate) fn owner_change(
     change: &StatementEditChange,
 ) -> workshop_rs::rules::statement_edit::StatementEdit<'_> {
@@ -71,9 +49,6 @@ pub(crate) fn owner_change(
     }
 }
 
-/// One owner refusal as a Wright diagnostic. The owner's display text is
-/// kept as the message; emission failures go through `workshop_diag` so
-/// they carry the same codes the parse path reports.
 pub(crate) fn owner_error(
     error: StatementEditError,
     edit: &StatementEditRequest,
@@ -93,8 +68,6 @@ pub(crate) fn owner_error(
                 edit.index
             ),
         ),
-        // The service bounds-checks the resolved index before the owner
-        // runs; this stays the fail-closed path should the owner disagree.
         StatementEditError::UnknownRule { rule } => Diagnostic::error(
             "invalid-statement-address",
             Stage::Discovery,
@@ -125,15 +98,10 @@ pub(crate) fn owner_error(
         StatementEditError::Edit(error) => {
             Diagnostic::error("source-edit-error", Stage::Internal, error.to_string())
         }
-        // `StatementEditError` is `#[non_exhaustive]`; a variant added
-        // later still surfaces as a structured refusal, not a panic.
         _ => Diagnostic::error("statement-edit-error", Stage::Internal, error.to_string()),
     }
 }
 
-/// The Wright `SourceEdit` for one owner-produced edit: byte range to
-/// the shared 1-based line/column `EditRange`, the precondition source
-/// spelling, and the identity of the text the program was parsed from.
 pub(crate) fn wright_edit(
     program: &workshop_rs::Program,
     rule: usize,
@@ -160,9 +128,6 @@ pub(crate) fn wright_edit(
     })
 }
 
-/// The 1-based (line, column) position of a UTF-8 byte offset — the
-/// inverse of the owner's `byte_offset`, so owner `SourceEdit` byte
-/// ranges land on the same positions the owner's `Span` model records.
 fn byte_position(text: &str, offset: usize) -> (u32, u32) {
     let mut line = 1u32;
     let mut col = 1u32;
@@ -180,10 +145,6 @@ fn byte_position(text: &str, offset: usize) -> (u32, u32) {
     (line, col)
 }
 
-/// The request's `sources` entry naming the loaded input, spelled exactly
-/// as the caller keyed it — the edit `source` and the precondition text
-/// stay under the caller's spelling, like `validateEditTransaction`
-/// requires.
 pub(crate) fn supplied_source<'a>(
     sources: &'a BTreeMap<String, String>,
     resolved: &crate::input::ResolvedInput,

@@ -1,15 +1,3 @@
-//! Name-address resolution over the semantic index (ADR-0035), with
-//! nearest-name candidates on a miss (#567).
-//!
-//! A rule address is `NAME` (the declared rule name) or `NAME#N` (the Nth
-//! rule, counted from 1 in program order, among the rules named `NAME`; an
-//! unnamed rule is `#N`). A symbol address is `NAME` or `KIND:NAME`, where
-//! `KIND` is a non-rule value of `inspect symbols --only`; symbol
-//! resolution excludes rules — a rule never competes with a variable or
-//! subroutine for a name. Resolution never guesses: an inexact address is
-//! refused, and a refusal names the nearest declared names or the
-//! candidates' own selectable addresses so the caller can retry.
-
 use super::symbols::{RuleId, SemanticIndex, Symbol, SymbolKind};
 use crate::service::ErrorInfo;
 use workshop_rs::source::Span;
@@ -17,14 +5,11 @@ use workshop_rs::source::Span;
 const CANDIDATE_LIMIT: usize = 3;
 
 impl SemanticIndex {
-    /// Rule symbols in program order — the order `inspect rules` lists
-    /// (ADR-0035): each carries its rule index in `rule`.
     fn rule_symbols(&self) -> impl Iterator<Item = &Symbol> {
         self.symbols()
             .filter(|symbol| symbol.kind == SymbolKind::Rule)
     }
 
-    /// The `N`th rule named `name` in program order, counted from 1.
     fn nth_rule_named(&self, name: &str, ordinal: usize) -> Option<&Symbol> {
         self.rule_symbols()
             .filter(|symbol| symbol.name == name)
@@ -49,9 +34,6 @@ impl SemanticIndex {
             .filter(|symbol| symbol.name == name)
             .count()
             == 1;
-        // `NAME` alone is usable only when its `NAME#N` reading does not
-        // select a different rule: a lone `a#2` literal collides with the
-        // second `a`, and an empty name has no bare form at all (`#N`).
         let collides = ordinal_form(name)
             .and_then(|(base, ordinal)| self.nth_rule_named(base, ordinal))
             .is_some_and(|other| other.rule != Some(rule));
@@ -82,8 +64,6 @@ impl SemanticIndex {
         if let Some((name, ordinal)) = ordinal_form(address)
             && let Some(rule) = self.nth_rule_named(name, ordinal)
         {
-            // The two readings never name the same rule: `name` is a
-            // strict prefix of `address`, so no rule carries both.
             candidates.push(rule);
         }
         match candidates.as_slice() {
@@ -99,11 +79,6 @@ impl SemanticIndex {
         }
     }
 
-    /// The `ambiguous-rule` refusal: each candidate's canonical address
-    /// and location (ADR-0035). When a candidate's own canonical address
-    /// does not resolve back to it — the collision is total — the error
-    /// says so: renaming one of the conflicting rules is the only way to
-    /// select it.
     fn ambiguous_rule(&self, address: &str, candidates: &[&Symbol]) -> ErrorInfo {
         let mut fields = error_fields();
         fields.insert("name".to_string(), address.into());
@@ -117,10 +92,6 @@ impl SemanticIndex {
                 })
                 .collect(),
         );
-        // The address-grammar candidates a string resolves to, without the
-        // error branch: `Some(id)` when it selects exactly `id`. Calling
-        // `resolve_rule` here would recurse into `ambiguous_rule` forever
-        // when a candidate's canonical address collides totally.
         let resolves_to = |address: &str, id: RuleId| {
             let mut hits: Vec<RuleId> = self
                 .rule_symbols()
@@ -205,9 +176,6 @@ impl SemanticIndex {
     }
 }
 
-/// The `KIND` of a `KIND:NAME` symbol address: the non-rule values of
-/// `inspect symbols --only` (ADR-0035). `rule` is not a symbol-address
-/// kind — rules are addressed with rule addresses.
 fn symbol_address_kind(kind: &str) -> Option<SymbolKind> {
     SymbolKind::ALL
         .iter()
@@ -215,10 +183,6 @@ fn symbol_address_kind(kind: &str) -> Option<SymbolKind> {
         .find(|known| *known != SymbolKind::Rule && known.as_str() == kind)
 }
 
-/// The `NAME#N` ordinal form of a rule address: `N` is a positive decimal
-/// integer counted from 1 with no leading zero, taken after the last `#`.
-/// A trailing `#` or a malformed `N` leaves the whole string a literal
-/// name — a rule named `a#2x` is still `a#2x`.
 fn ordinal_form(address: &str) -> Option<(&str, usize)> {
     let (name, digits) = address.rsplit_once('#')?;
     if digits.is_empty()
@@ -231,10 +195,6 @@ fn ordinal_form(address: &str) -> Option<(&str, usize)> {
     Some((name, ordinal))
 }
 
-/// A candidate's structured location (`candidates` entry, #888): the
-/// canonical address a retry passes back plus the file-table index,
-/// line, and column each surface resolves to its own `path:line:col`
-/// spelling — the analyzer knows only file ids, never the spellings.
 fn candidate(address: String, span: Option<Span>) -> serde_json::Value {
     let mut entry = serde_json::Map::new();
     entry.insert("address".to_string(), address.into());
@@ -246,13 +206,10 @@ fn candidate(address: String, span: Option<Span>) -> serde_json::Value {
     entry.into()
 }
 
-/// The refusal-metadata map [`ErrorInfo::fields`] carries (#888).
 fn error_fields() -> serde_json::Map<String, serde_json::Value> {
     serde_json::Map::new()
 }
 
-/// How many declared names an unknown-name error lists (#888); beyond the
-/// bound the error reports the total and names the unbounded listing.
 const NAME_LIST_LIMIT: usize = 20;
 
 fn unknown<'a>(
@@ -267,10 +224,6 @@ fn unknown<'a>(
     let mut fields = error_fields();
     fields.insert("name".to_string(), name.into());
     let hint = if candidates.is_empty() {
-        // No near match: name the declared names — each once, in
-        // declaration order, bounded with the total (#888) — as `declared`
-        // fields and in the message, and let each surface append its own
-        // spelling of the `listOp` operation that lists them.
         let mut seen = std::collections::HashSet::new();
         let names: Vec<&str> = declared
             .iter()

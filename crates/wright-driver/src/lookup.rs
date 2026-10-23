@@ -1,22 +1,3 @@
-//! `lookup` (ADR-0021, #529): resolve a free-text name guess — a display
-//! name, a near spelling, or a guess — to the owner's accepted vocabulary:
-//! spellings, enum domains and members, settings keys, and callable
-//! signatures.
-//!
-//! `workshop` answers from the in-process `workshop-rs` catalog; `opy`
-//! answers through the LPP 1.5 `lpp/lookup` capability of the configured
-//! provider, reporting an explicit `unavailable` result (never a text
-//! fallback) when the capability is absent. The operation consults language
-//! vocabulary only: it neither requires nor triggers a project load, so it
-//! answers in a session whose configured project cannot load.
-//!
-//! Owners match and rank and supply facts; Wright renders the `signature`
-//! string from those facts under its own presentation rules (ADR-0021
-//! decision 4). Wright performs no matching of its own — a scoped `within`
-//! query delegates to `Catalog::lookup_within`, which ranks children with
-//! the owner's scorer — stores no names, and does not translate between
-//! languages.
-
 use std::collections::HashSet;
 
 use serde_json::{Value, json};
@@ -29,22 +10,13 @@ use crate::CompilerSession;
 use crate::opy_provider;
 use crate::service::{SERVICE_NAME, SERVICE_VERSION, ToolResponse, carried_refusal, refusal};
 
-/// `lookup` without `limit` returns at most this many entries (ADR-0021).
 const DEFAULT_LIMIT: usize = 3;
-/// `lookup` never returns more than this many entries (ADR-0021).
 const MAX_LIMIT: usize = 10;
-/// A required enum parameter lists its domain members inline in a rendered
-/// signature when the domain has at most this many members, once per entry;
-/// a larger domain reports its member count (ADR-0021).
 const INLINE_MEMBER_LIMIT: usize = 32;
 
 pub(crate) const OWNER_WORKSHOP: &str = "workshop-rs";
 pub(crate) const OWNER_OPY: &str = "opy-rs";
 const LOOKUP_CAPABILITY: &str = "lookup";
-/// The entry kinds `kind` accepts — exactly the union of the kinds both
-/// owners emit (#563): the five originally admitted plus the emitted kinds
-/// the filter used to reject. A kind valid for one language answers `[]`
-/// on the other, and a true typo still refuses `invalid-kind`.
 const KINDS: [&str; 12] = [
     "action",
     "value",
@@ -59,11 +31,7 @@ const KINDS: [&str; 12] = [
     "structural",
     "operator",
 ];
-/// The LPP refusal code an owner returns when `within` names no known
-/// scope; Wright's `within` identity tries each selector kind in order and
-/// this refusal is what moves resolution to the next kind.
 pub(crate) const UNKNOWN_WITHIN: &str = "lookup.unknownWithin";
-/// The `within` selector kinds tried for an identity, in order.
 const WITHIN_KINDS: [&str; 3] = ["enum", "callable", "settings"];
 
 pub(crate) fn lookup(
@@ -75,10 +43,6 @@ pub(crate) fn lookup(
     locale: Option<&str>,
     limit: Option<usize>,
 ) -> ToolResponse {
-    // A `limit` outside the contract's 1..=10 is a schema violation and is
-    // rejected like one (`malformed-request`), never silently clamped
-    // (#783). The refusal comes from the service rather than transport
-    // deserialization so the CLI's in-process request rejects identically.
     let limit = limit.unwrap_or(DEFAULT_LIMIT);
     if !(1..=MAX_LIMIT).contains(&limit) {
         return refusal(
@@ -111,9 +75,6 @@ pub(crate) fn lookup(
     }
 }
 
-/// The shared result shape: the queried language, the answering owner named
-/// once, the ranked entries, and `unavailable` when the owner lacks the
-/// capability (ADR-0021 decision 3).
 fn result(language: &str, owner: &str, entries: Vec<Value>) -> ToolResponse {
     ToolResponse::Ok {
         result: json!({
@@ -339,18 +300,10 @@ pub(crate) fn workshop_entry(
             "spelling": segment,
             "displayName": path,
         }),
-        // A `LookupMatch` variant added after this Wright: unknown entries
-        // drop out of the result rather than fail the request.
         _ => return None,
     })
 }
 
-/// The `callable` fact object for a Workshop callable: the ordered
-/// parameter facts the signature renders from (`name-lookup.md` §21.4),
-/// plus the owner's `returns` when the signature declares a return type
-/// (#781) and `variadic` when its last parameter repeats (#798) — both
-/// passed through unchanged, both absent when the owner does not declare
-/// them.
 fn callable_facts(signature: &workshop_rs::lookup::Signature) -> Value {
     let parameters = signature
         .params
@@ -405,11 +358,6 @@ fn callable_facts(signature: &workshop_rs::lookup::Signature) -> Value {
     facts
 }
 
-/// The `rule-content-v1` facts a parameter declares beyond its surface
-/// type: the folded variable-target call it contributes to and the
-/// modify-operation call ids it accepts, plus the editor's localized
-/// parameter label. A parameter that maps one-to-one onto a plain content
-/// argument emits no `content` member.
 fn param_facts(param: &SignatureParam, fact: &mut Value) {
     if let Some(content) = &param.content {
         let mut wire = json!({});
@@ -476,12 +424,6 @@ fn workshop_default(catalog: &Catalog, locale: &Locale, default: &str) -> String
         .to_string()
 }
 
-/// `within` children for Workshop: `workshop-rs` resolves the scope and
-/// owns matching and ranking — an enum domain's members, a callable's
-/// parameters, or the settings keys and segments under a path prefix —
-/// and Wright projects the result (`name-lookup.md` §21.3). `kind`
-/// narrows the entry kinds afterward; it is a result-shaping filter, not
-/// matching.
 pub(crate) fn workshop_within(
     catalog: &Catalog,
     locale: &Locale,
@@ -506,9 +448,6 @@ pub(crate) fn workshop_within(
         .into_iter()
         .filter_map(|child| workshop_entry(catalog, locale, child))
         .collect();
-    // A scoped settings child spells the segment below the prefix — the
-    // last segment of its leaf path — not the full path an unscoped
-    // `setting` entry spells (`name-lookup.md` §21.3).
     for entry in &mut entries {
         if entry["kind"] != "setting" {
             continue;
@@ -525,8 +464,6 @@ pub(crate) fn workshop_within(
     Ok(entries)
 }
 
-/// The `setting` fact object: the value domain the key accepts, with its
-/// numeric bounds or enum domain (`name-lookup.md` §21.2).
 fn setting_facts(definition: &SettingDefinition) -> Value {
     let domain = definition.domain();
     let mut wire = json!({ "type": domain.kind() });
@@ -553,11 +490,6 @@ fn setting_facts(definition: &SettingDefinition) -> Value {
     wire
 }
 
-/// `opy` lookup answers through the configured provider's LPP 1.5
-/// `lpp/lookup` capability. A missing provider, a session that cannot
-/// negotiate 1.5, or a negotiated session without `capabilities.lookup`
-/// reports `unavailable` naming `opy-rs` — never a text fallback; transport
-/// failures after negotiation are ordinary structured errors.
 fn opy_lookup(
     session: &CompilerSession,
     query: Option<&str>,
@@ -604,13 +536,6 @@ fn opy_lookup(
         locale: locale.map(str::to_string),
         limit: Some(limit as u64),
     };
-    // A `within` identity selects the scope the provider resolves it as:
-    // an enum domain, a callable, or a settings prefix, tried in that
-    // order. The identity is opaque and passed through unchanged: the
-    // protocol requires a provider to accept the identities it issued as
-    // `within` values for the matching selector kinds, so Wright never
-    // interprets them. When every kind refuses with `lookup.unknownWithin`,
-    // the last refusal is the answer.
     let outcome = match within {
         Some(within) => {
             let mut outcome = None;
@@ -651,14 +576,6 @@ fn opy_lookup(
     }
     result("opy", OWNER_OPY, entries)
 }
-
-// One renderer serves both languages (ADR-0021 decision 4): parameters in
-// call order, `name: Type` for a required parameter, `name=default` or
-// `name?` for an optional one (types of optional non-enum parameters are
-// omitted), and `name: Domain(members)` for a required enum parameter whose
-// domain has at most INLINE_MEMBER_LIMIT members — once per signature — or
-// `name: Domain(N members)` for a larger domain. An optional enum parameter
-// shows its default and never lists members.
 
 struct ParamView<'a> {
     name: &'a str,
@@ -729,10 +646,6 @@ fn render_signature(
     format!("{head}({})", rendered.join(", "))
 }
 
-/// Render an LPP `callable` entry's signature from its wire facts
-/// (`name-lookup.md` §21.2/§21.4). Returns `None` when the callable facts
-/// are malformed — the entry still passes through, just without a
-/// `signature`.
 fn lpp_signature(entry: &Value, callable: &Value) -> Option<String> {
     let head = entry["spelling"].as_str()?;
     let receiver = callable["receiver"].as_str();
@@ -752,10 +665,6 @@ fn lpp_signature(entry: &Value, callable: &Value) -> Option<String> {
                 required: param["required"].as_bool().unwrap_or(true),
                 default,
                 domain: param.get("enum").map(|domain| DomainView {
-                    // The rendered domain name is the parameter's declared
-                    // type; the enum fact's `domain` is an opaque
-                    // provider-issued identity, shown whole only as a
-                    // fallback — never parsed (`name-lookup.md` §21.4).
                     name: param["type"]
                         .as_str()
                         .or_else(|| domain["domain"].as_str())

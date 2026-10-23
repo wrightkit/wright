@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.0](https://github.com/wrightkit/wright/compare/v0.33.0...v0.34.0) (2026-10-23)
+
+
+### Features
+
+* **ui:** select same action and select block ([#947](https://github.com/wrightkit/wright/issues/947)) ([44897bb](https://github.com/wrightkit/wright/commit/44897bba8e7d1d73588f0ab0bf304fbf3ae40ec0)), closes [#917](https://github.com/wrightkit/wright/issues/917)
+
 ## [0.33.0](https://github.com/wrightkit/wright/compare/v0.32.0...v0.33.0) (2026-10-22)
 
 

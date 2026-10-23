@@ -1,21 +1,11 @@
 // @vitest-environment jsdom
 /// <reference types="node" />
-/**
- * The large-column filter (docs/ui/selection.md § Large columns): a
- * column past thirty rendered rows gains a filter field under its
- * heading. Rows are filtered to those whose session-locale text contains
- * the query (case-insensitive) or whose call id takes it as a prefix;
- * hidden rows keep their selection, select-all covers the visible
- * matches only, the count reads `N selected (M hidden)`, and Esc clears
- * the filter before the selection.
- */
 import { flushSync, mount, unmount } from 'svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App.svelte'
 import type { RuleContent } from './lib/view'
 import type { RuleSummary, ToolRequest, ToolResponse } from './lib/types/generated/wright-agent-v1'
 
-/** The api module the components call; each test installs its own handler. */
 const api = vi.hoisted(() => ({
   handler: null as null | ((request: ToolRequest) => Promise<ToolResponse>),
 }))
@@ -27,7 +17,6 @@ vi.mock('./lib/api', () => ({
   },
 }))
 
-/** Drain pending promise continuations, then flush Svelte's effects and DOM. */
 async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0))
   flushSync()
@@ -56,7 +45,6 @@ const contentFor = (
 const summaryFor = (id: number, name: string, content?: RuleContent): RuleSummary =>
   ({ id, name, span: null, ...(content ? { content } : {}) }) as unknown as RuleSummary
 
-/** `lookup` names the tests resolve, keyed by identity. */
 const NAMES: Record<string, { kind: string; name: string }[]> = {
   ongoingGlobal: [{ kind: 'event', name: 'Ongoing - Global' }],
   global: [{ kind: 'structural', name: 'Global' }],
@@ -130,7 +118,6 @@ const selAll = (list: 'conditions' | 'actions') =>
   col(list).querySelector<HTMLInputElement>('input.sel-all')!
 const checkbox = (row: Element) => row.querySelector<HTMLInputElement>('.sel')!
 
-/** Type a query into a column's filter field. */
 const typeInFilter = (list: 'conditions' | 'actions', query: string) => {
   const input = filterInput(list)!
   input.value = query
@@ -143,7 +130,6 @@ const escapeKey = (target: Element) =>
 const keydown = (target: Element, key: string, init: KeyboardEventInit = {}) =>
   target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, ...init }))
 
-/** Thirty `setGlobalVariableAtIndex` rows then five `wait` rows. */
 const bigActions = (): RuleContent['actions'] => [
   ...Array.from({ length: 30 }, (_, i) =>
     action('setGlobalVariableAtIndex', [
@@ -205,8 +191,6 @@ describe('filtering rows', () => {
     for (const row of rows) {
       expect(row.querySelector('.statement-text')!.textContent).toContain('Wait')
     }
-    // The rendered text, not the raw call id, decides: the localized
-    // argument text matches too.
     typeInFilter('actions', 'event player')
     expect(rowsIn('actions').length).toBeGreaterThan(0)
     for (const row of rowsIn('actions')) {
@@ -225,9 +209,6 @@ describe('filtering rows', () => {
     await settle()
     await openRule(1)
 
-    // "setglobalvariableati" is a prefix of the call id but never a
-    // substring of "Set Global Variable At Index(…)" — and the plain
-    // `setGlobalVariable` row is too short to reach the prefix.
     typeInFilter('actions', 'setglobalvariableati')
     const rows = rowsIn('actions')
     expect(rows).toHaveLength(30)
@@ -330,8 +311,6 @@ describe('selection under a filter', () => {
     expect(selBar('actions')!.textContent).toContain('5 selected')
     const selected = rowsIn('actions').filter((row) => row.classList.contains('selected'))
     expect(selected).toHaveLength(5)
-    // Clearing the filter restores the hidden rows; only the five waits
-    // carry the selection.
     typeInFilter('actions', '')
     expect(rowsIn('actions')).toHaveLength(35)
     expect(rowsIn('actions').filter((row) => row.classList.contains('selected'))).toHaveLength(5)
@@ -344,7 +323,6 @@ describe('selection under a filter', () => {
     await settle()
     await openRule(1)
 
-    // Select one `setGlobalVariableAtIndex` row and one `wait` row.
     click(checkbox(rowsIn('actions')[0]))
     click(checkbox(rowsIn('actions')[30]))
     expect(selBar('actions')!.textContent).toContain('2 selected')
@@ -352,7 +330,6 @@ describe('selection under a filter', () => {
     typeInFilter('actions', 'wait')
     expect(rowsIn('actions')).toHaveLength(5)
     expect(selBar('actions')!.textContent).toContain('2 selected (1 hidden)')
-    // The surviving visible row still shows its selection.
     expect(
       rowsIn('actions').filter((row) => row.classList.contains('selected')),
     ).toHaveLength(1)
@@ -370,15 +347,12 @@ describe('selection under a filter', () => {
     expect(rowsIn('actions')).toHaveLength(5)
     expect(selBar('actions')!.textContent).toContain('1 selected (1 hidden)')
 
-    // The first Esc empties the filter: the hidden row returns and the
-    // selection stands.
     escapeKey(filterInput('actions')!)
     flushSync()
     expect(filterInput('actions')!.value).toBe('')
     expect(rowsIn('actions')).toHaveLength(35)
     expect(selBar('actions')!.textContent).toContain('1 selected')
 
-    // The second Esc clears the selection.
     escapeKey(filterInput('actions')!)
     flushSync()
     expect(selBar('actions')).toBeNull()
@@ -403,8 +377,6 @@ describe('selection under a filter', () => {
     click(checkbox(rowB))
     expect(slotB.querySelector('.column-actions .sel-count')!.textContent).toContain('1 selected')
 
-    // Esc inside rule A's filter field clears A's filter only — rule B's
-    // selection must survive every open RuleView's window listener.
     const inputA = slotA.querySelector<HTMLInputElement>('input.col-filter')!
     inputA.value = 'wait'
     inputA.dispatchEvent(new Event('input', { bubbles: true }))
@@ -414,7 +386,6 @@ describe('selection under a filter', () => {
     expect(inputA.value).toBe('')
     expect(slotB.querySelector('.column-actions .sel-count')!.textContent).toContain('1 selected')
 
-    // Esc targeting rule B's column clears only B's selection.
     escapeKey(rowB)
     flushSync()
     expect(slotB.querySelector('.column-actions .sel-count')).toBeNull()
@@ -438,9 +409,6 @@ describe('selection under a filter', () => {
     click(checkbox(colA.querySelector<HTMLLIElement>('.statement')!))
     click(boxB)
 
-    // The pointer rests over rule A's column while focus stays on rule
-    // B's checkbox: every keydown still resolves against the target's own
-    // rule, never the pointer column.
     colA.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false }))
     keydown(boxB, 'a', { ctrlKey: true })
     flushSync()
@@ -456,7 +424,7 @@ describe('selection under a filter', () => {
 
     const filterA = colA.querySelector<HTMLInputElement>('input.col-filter')!
     const filterB = colB.querySelector<HTMLInputElement>('input.col-filter')!
-    typeInFilter('actions', 'wait') // the open slot under the pointer: rule A
+    typeInFilter('actions', 'wait')
     filterB.value = 'wait'
     filterB.dispatchEvent(new Event('input', { bubbles: true }))
     flushSync()

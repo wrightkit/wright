@@ -2,7 +2,6 @@
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { defineConfig } from 'vite'
 
-// https://vite.dev/config/
 export default defineConfig({
   plugins: [svelte()],
   // Vitest resolves imports through the SSR pipeline, whose defaults pick

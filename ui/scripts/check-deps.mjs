@@ -1,4 +1,3 @@
-// Runtime dependency registry check (ADR-0036 decision 6).
 
 import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -11,7 +10,6 @@ const { dependencies = {} } = JSON.parse(readFileSync(join(uiDir, 'package.json'
 const escapeRegExp = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 const missing = Object.keys(dependencies).filter(
-  // Package-name boundaries — \b fails on scoped names like `@lucide/svelte`.
   (name) => !new RegExp(`(?<![\\w@/.-])${escapeRegExp(name)}(?![\\w/.-])`, 'i').test(doc),
 )
 

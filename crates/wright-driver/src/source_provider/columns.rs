@@ -1,6 +1,3 @@
-//! Provider-position conversion: LPP UTF-16 positions become the
-//! diagnostic's 1-based line/column form.
-
 use crate::diag::Position;
 
 pub(super) fn provider_position(pos: wright_lpp::Position, lines: &[String]) -> Position {

@@ -1,17 +1,3 @@
-//! MCP stdio transport (#473): a thin adapter that maps MCP tools onto
-//! `ToolService::handle` — one `wright_<operation>` tool per operation in the
-//! initial set (ADR-0020). The adapter performs initialization, answers
-//! `tools/list`, and turns `tools/call` into a `ToolRequest`; all semantics,
-//! freshness, and refusals belong to the service. A successful `result`
-//! becomes the tool result content as JSON; a service refusal becomes a tool
-//! result with `isError: true` carrying the same `{code, message}`.
-//!
-//! The protocol layer is handwritten rather than SDK-based: MCP over stdio is
-//! newline-delimited JSON-RPC 2.0 — the same framing as the `jsonrpc`
-//! transport — and the whole mapping needs five methods, so pulling in the
-//! tokio-based `rmcp` crate would buy a runtime this binary does not
-//! otherwise need.
-
 use std::process::ExitCode;
 
 use serde_json::{Map, Value, json};
@@ -20,20 +6,14 @@ use wright_driver::service::{ToolRequest, ToolResponse, ToolService};
 use crate::serve::serve_lines;
 use crate::tooldefs::{TOOL_SPECS, ToolSpec, input_schema, tool_name};
 
-/// Protocol versions the adapter negotiates (`initialize` echoes the client's
-/// version when supported, else responds with the newest listed).
 const PROTOCOL_VERSIONS: &[&str] = &["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"];
 
-/// A tool definition as listed by `tools/list`.
 struct Tool {
     name: String,
     spec: &'static ToolSpec,
     input_schema: Value,
 }
 
-/// The tools this service advertises: the initial MCP set (ADR-0020)
-/// intersected with `capabilities.operations`, so listing and the contract
-/// cannot disagree.
 fn build_tools(service: &ToolService<'_>) -> (Vec<Tool>, String, String) {
     let capabilities = service.capabilities();
     let defs = crate::tooldefs::schema_defs();
@@ -59,8 +39,6 @@ pub(crate) fn serve_mcp(service: &mut ToolService<'_>) -> ExitCode {
             &version,
             match line {
                 Ok(line) => line,
-                // Invalid UTF-8 is a JSON-RPC parse error, not a clean EOF
-                // (#642).
                 Err(_) => {
                     return Some(error_response(Value::Null, -32700, "Parse error").to_string());
                 }
@@ -91,10 +69,6 @@ fn dispatch_message(
         return Some(error_response(Value::Null, -32600, "Invalid Request"));
     };
     let Some(id) = object.get("id").cloned() else {
-        // `notifications/*` methods carry no id and get no response. Any
-        // other method without an id is not a notification — it is an
-        // invalid request, and a `tools/call` must never silently vanish
-        // (#642).
         if method.starts_with("notifications/") {
             return None;
         }
@@ -152,8 +126,6 @@ fn call_tool(
         Some(Value::Object(arguments)) => arguments.clone(),
         _ => return Err((-32602, "tools/call arguments must be an object".into())),
     };
-    // The tool name carries the operation; caller arguments are the request
-    // fields. An `op` passed by the client is the adapter's own, not theirs.
     let mut request = arguments;
     request.insert("op".to_string(), Value::String(tool.spec.op.to_string()));
     let request = serde_json::from_value::<ToolRequest>(Value::Object(request))
@@ -161,9 +133,6 @@ fn call_tool(
     Ok(tool_result(service.handle(&request)))
 }
 
-/// `CallToolResult` for one handled request: the service `result` becomes the
-/// tool content as JSON; a refusal becomes `isError` carrying the same
-/// `{code, message}` the service produced.
 fn tool_result(response: ToolResponse) -> Value {
     let (payload, is_error) = match response {
         ToolResponse::Ok { result } => (result, false),
@@ -248,8 +217,6 @@ mod tests {
         assert_eq!(input["required"], json!(["language"]));
         assert!(input["properties"].get("op").is_none());
         assert!(input["properties"].get("within").is_some());
-        // ADR-0029: `editStatements` drops `sources` like the other edit
-        // tools and keeps `inputIdentity`/`edits` required.
         let edit_statements = TOOL_SPECS
             .iter()
             .find(|spec| spec.op == "editStatements")
@@ -272,9 +239,6 @@ mod tests {
 
     #[test]
     fn tool_result_passes_refusals_through_with_their_code() {
-        // The mapping is code-agnostic: any service refusal — including
-        // `edit-requires-provider`, which only an OPY-backed session can
-        // produce — arrives as `isError` with the original {code, message}.
         let refusal = tool_result(ToolResponse::Error {
             error: wright_driver::service::ToolErrorInfo {
                 code: "edit-requires-provider".to_string(),
@@ -312,8 +276,6 @@ mod tests {
         let mut service = ToolService::new(&mut session).unwrap();
         let (tools, name, version) = build_tools(&service);
 
-        // An unknown client version falls back to the newest supported; the
-        // string id is echoed.
         let response = dispatch_message(
             &mut service,
             &tools,
@@ -325,8 +287,6 @@ mod tests {
         assert_eq!(response["id"], "abc");
         assert_eq!(response["result"]["protocolVersion"], "2025-11-25");
 
-        // Object/array ids are not valid JSON-RPC ids, matching the jsonrpc
-        // transport's check.
         let response = dispatch_message(
             &mut service,
             &tools,
@@ -341,9 +301,6 @@ mod tests {
 
     #[test]
     fn id_less_messages_follow_notification_rules() {
-        // `notifications/*` methods may omit `id` silently; every other
-        // method without an `id` is an invalid request, and a `tools/call`
-        // must never silently vanish (#642).
         use wright_driver::{CompilerSession, InputSpec, SessionConfig, SourceKind};
         let input = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
@@ -381,9 +338,6 @@ mod tests {
 
     #[test]
     fn malformed_address_arguments_name_the_expected_shape() {
-        // An object-shaped `symbol` used to surface serde's generic "did not
-        // match any variant of untagged enum" — useless to an agent. The
-        // refusal now names the two accepted forms.
         use wright_driver::{CompilerSession, InputSpec, SessionConfig, SourceKind};
         let input = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")

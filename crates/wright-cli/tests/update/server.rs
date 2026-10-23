@@ -57,8 +57,6 @@ impl MockServer {
 impl Drop for MockServer {
     fn drop(&mut self) {
         self.shutdown.store(true, Ordering::Relaxed);
-        // A blocked accept() is not woken by closing the listener; connect
-        // once so the serving thread observes the flag and exits.
         if let Ok(stream) = TcpStream::connect(self.addr) {
             drop(stream);
         }

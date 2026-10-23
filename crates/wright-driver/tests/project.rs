@@ -1,7 +1,3 @@
-//! `project` (#836): the response carries the parsed settings block as a
-//! read-only name/value tree so the simulation panel can show lobby
-//! settings without owning Workshop text.
-
 use std::path::PathBuf;
 
 use serde_json::Value;

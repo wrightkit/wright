@@ -1,19 +1,10 @@
 // @vitest-environment jsdom
-/**
- * The #882 view dialogs (docs/ui/design.md § Dialogs): the shared chrome
- * — centred title, `--dlg` body, `--dlg-foot` band with the one orange
- * Confirm — the `costEstimate` cards and their error form, the top-ten
- * element rules, the severity-coloured findings, the Variables
- * Global/Player/Subroutines grouping, and the rule reveal a top rule or
- * a located finding asks for.
- */
 import { flushSync, mount, unmount } from 'svelte'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.svelte'
 import type { RuleContent } from './lib/view'
 import type { RuleSummary, ToolRequest, ToolResponse } from './lib/types/generated/wright-agent-v1'
 
-/** The api module the components call; each test installs its own handler. */
 const api = vi.hoisted(() => ({
   handler: null as null | ((request: ToolRequest) => Promise<ToolResponse>),
 }))
@@ -26,7 +17,6 @@ vi.mock('./lib/api', () => ({
   apply: () => Promise.reject(new Error('test installed no apply handler')),
 }))
 
-/** Drain pending promise continuations, then flush Svelte's effects and DOM. */
 async function settle(): Promise<void> {
   for (let i = 0; i < 4; i++) {
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -76,11 +66,6 @@ interface Fixture {
   costEstimate?: ToolResponse
 }
 
-/**
- * A handler over the fixture: `rules`/`project` always answer; `symbols`,
- * `findings`, `costEstimate` answer the fixture, `lookup` resolves the
- * heading ids with capitalised display names.
- */
 const handlerFor =
   (fixture: Fixture, summaries: RuleSummary[]) =>
   (request: ToolRequest): Promise<ToolResponse> => {
@@ -138,7 +123,6 @@ let host: HTMLDivElement
 let app: ReturnType<typeof mount> | undefined
 
 beforeEach(() => {
-  // jsdom does not implement `scrollIntoView`; the reveal targets it.
   Element.prototype.scrollIntoView = vi.fn()
 })
 
@@ -162,7 +146,6 @@ const click = (el: Element) => {
 
 const toolbarButton = (title: string) =>
   host.querySelector<HTMLButtonElement>(`.toolbar button[title="${title}"]`)!
-// Bits UI portals the dialog into `document.body`; mounted content is open.
 const dialog = () => document.body.querySelector<HTMLElement>('.dialog.view')!
 const isOpen = (id: number) =>
   host.querySelector(`.rule-slot[data-rule-id="${id}"] .rule-view`) != null
@@ -187,8 +170,6 @@ describe('the Diagnostics dialog (#882)', () => {
     await settle()
 
     expect(dialog(), 'the view dialog is open').not.toBeNull()
-    // Chrome: the centred title, the scrolling body, the footer band with
-    // the one orange Confirm — and no leftover Close text button.
     expect(dialog().querySelector('.dlg-title')?.textContent).toBe('Diagnostics')
     const foot = dialog().querySelector('.dlg-foot')!
     const buttons = [...foot.querySelectorAll('button')]
@@ -198,22 +179,18 @@ describe('the Diagnostics dialog (#882)', () => {
     const cards = [...dialog().querySelectorAll('.stat-card')]
     expect(cards).toHaveLength(3)
 
-    // Total elements: the element total, the budget in the description,
-    // and the total/budget bar.
     expect(cards[0].querySelector('h3')?.textContent).toBe('Total elements')
     expect(cards[0].querySelector('.figure')?.textContent?.trim()).toBe('1234')
     expect(cards[0].querySelector('.desc')?.textContent).toContain('32768')
     const bar = cards[0].querySelector<HTMLElement>('.meter span')!
     expect(bar.style.width).toBe(`${Math.min(100, (1234 / 32768) * 100)}%`)
 
-    // Output size: emitted KB figure; rule/action/wait counts below.
     expect(cards[1].querySelector('h3')?.textContent).toBe('Output size')
     expect(cards[1].querySelector('.figure')?.textContent?.trim()).toBe('25.0 KB')
     expect(cards[1].querySelector('.desc')?.textContent).toContain('12 rules')
     expect(cards[1].querySelector('.desc')?.textContent).toContain('42 actions')
     expect(cards[1].querySelector('.desc')?.textContent).toContain('3 waits')
 
-    // Rule length: no figure, the whole-program explanation.
     expect(cards[2].querySelector('h3')?.textContent).toBe('Rule length')
     expect(cards[2].querySelector('.figure')).toBeNull()
     expect(cards[2].querySelector('.desc')?.textContent).toContain(
@@ -246,8 +223,6 @@ describe('the Diagnostics dialog (#882)', () => {
   })
 
   it('lists the ten rules with the most elements, ranked by count', async () => {
-    // Twelve entries deliberately unordered: the view keeps the ten
-    // largest, sorted by count.
     const entries: [number, string, number][] = [
       [3, 'rule three', 10],
       [11, 'rule eleven', 5],
@@ -276,16 +251,16 @@ describe('the Diagnostics dialog (#882)', () => {
     expect(rows).toHaveLength(10)
     const names = rows.map((row) => row.querySelector('.name')?.textContent)
     expect(names).toEqual([
-      'rule one', // 900
-      'rule zero', // 800
-      'rule two', // 700
-      'rule four', // 80
-      'rule five', // 60
-      'rule six', // 50
-      'rule seven', // 40
-      'rule eight', // 30
-      'rule nine', // 20
-      'rule ten', // 15
+      'rule one',
+      'rule zero',
+      'rule two',
+      'rule four',
+      'rule five',
+      'rule six',
+      'rule seven',
+      'rule eight',
+      'rule nine',
+      'rule ten',
     ])
     const counts = rows.map((row) => row.querySelector('.count')?.textContent)
     expect(counts).toEqual(['900', '800', '700', '80', '60', '50', '40', '30', '20', '15'])
@@ -308,8 +283,6 @@ describe('the Diagnostics dialog (#882)', () => {
     click(toolbarButton('Diagnostics'))
     await settle()
 
-    // One group per severity that has findings, most severe first; the
-    // heading carries the mark and the level count.
     const groups = [...dialog().querySelectorAll('.severity-group')]
     expect(groups).toHaveLength(2)
     expect(groups[0].querySelector('.severity-heading.severity-error')).not.toBeNull()
@@ -322,7 +295,6 @@ describe('the Diagnostics dialog (#882)', () => {
     expect(rows[0].textContent).toContain('error')
     expect(rows[0].textContent).toContain('while-without-wait message')
     expect(rows[0].textContent).toContain('demo.ws:3:5')
-    // A located finding is a button; one without a rule is not clickable.
     expect(rows[0].tagName).toBe('BUTTON')
     expect(rows[1].tagName).toBe('DIV')
     expect(rows[1].classList.contains('severity-info')).toBe(true)
@@ -354,7 +326,6 @@ describe('the Variables dialog (#882)', () => {
 
     const columns = [...dialog().querySelectorAll('.var-columns section')]
     expect(columns).toHaveLength(2)
-    // Localized headings resolve through `lookup` in the session locale.
     expect(columns[0].querySelector('h3')?.textContent).toBe('Global')
     expect(columns[1].querySelector('h3')?.textContent).toBe('Player')
 
@@ -367,8 +338,6 @@ describe('the Variables dialog (#882)', () => {
     expect(subs.querySelector('h3')?.textContent).toBe('Subroutines')
     expect(itemsOf(subs)).toEqual(['report'])
 
-    // Rule-kind symbols never enter the dialog, and no per-kind h3 list
-    // survives from the interim view.
     expect(dialog().textContent).not.toContain('not a variable')
     expect(dialog().querySelector('.symbol-kind, .symbol-list')).toBeNull()
   })
@@ -392,8 +361,6 @@ describe('rule reveal (#882)', () => {
     click(toolbarButton('Diagnostics'))
     await settle()
 
-    // A top-rule row: the dialog closes, rule 1's bar opens, the slot is
-    // scrolled into view.
     const topRule = dialog().querySelector<HTMLButtonElement>('.top-rules button')!
     click(topRule)
     await settle()
@@ -405,7 +372,6 @@ describe('rule reveal (#882)', () => {
       slot(1),
     )
 
-    // Reopen the dialog; the located finding reveals the same way.
     click(toolbarButton('Diagnostics'))
     await settle()
     const row = dialog().querySelector<HTMLButtonElement>('button.finding')!
@@ -445,11 +411,6 @@ describe('rule reveal (#882)', () => {
   })
 })
 
-/**
- * Severity levels (#922, docs/ui/diagnostics.md): the toolbar's badges
- * and "Only rules with findings" toggle, and the dialog's grouped,
- * toggling severity headings and row reveal.
- */
 describe('severity levels (#922)', () => {
   const toggle = () => toolbarButton('Only rules with findings')
   const badges = () => [...host.querySelectorAll('.toolbar .sev-badge')]
@@ -471,7 +432,6 @@ describe('severity levels (#922)', () => {
     mountApp()
     await settle()
 
-    // Info stays off the button while an error or warning is shown.
     expect(badges().map((badge) => badge.textContent)).toEqual(['1', '1'])
     expect(badges()[0].classList.contains('severity-error')).toBe(true)
     expect(badges()[1].classList.contains('severity-warning')).toBe(true)
@@ -539,13 +499,9 @@ describe('severity levels (#922)', () => {
     click(toolbarButton('Diagnostics'))
     await settle()
 
-    // Open the collapsed info group, then close the dialog: the choice
-    // persists for the session.
     const infoGroup = dialog().querySelector('.severity-heading.severity-info')!
       .parentElement! as HTMLDetailsElement
     infoGroup.querySelector('summary')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    // jsdom lacks the UA toggle; the component binds `open` one way, so
-    // emulate the toggle the browser would have run.
     infoGroup.open = true
     infoGroup.dispatchEvent(new Event('toggle'))
     flushSync()
@@ -585,8 +541,6 @@ describe('severity levels (#922)', () => {
     click(toggle())
     await settle()
 
-    // The lowest shown severity is warning — the info-only and clean
-    // rules leave the list.
     expect(host.querySelectorAll('.rule-slot')).toHaveLength(2)
     expect(slot(0)).toBeNull()
     expect(slot(1)).not.toBeNull()

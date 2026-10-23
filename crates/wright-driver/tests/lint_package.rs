@@ -1,6 +1,3 @@
-//! Offline lint package store tests: every remote answer is served by a
-//! recorded-response HTTP server on localhost; no test touches real network.
-
 mod support;
 
 use std::collections::HashMap;
@@ -29,7 +26,6 @@ fn full_sha_install_stores_only_rule_files() {
         store.installed(&source(), SHA_A),
         Some(dir.path().join("community/rules").join(SHA_A))
     );
-    // Only rules/*.yaml|yml was extracted; repository code was not read.
     let rules = installed.rules_dir();
     assert_eq!(
         std::fs::read_dir(&rules)
@@ -43,7 +39,6 @@ fn full_sha_install_stores_only_rule_files() {
             .unwrap()
             .contains("community/minimum-wait")
     );
-    // A full SHA needs no commits-API resolution.
     assert!(server.find("/repos/").is_empty());
 }
 
@@ -51,7 +46,6 @@ fn full_sha_install_stores_only_rule_files() {
 fn multi_rule_packages_load_in_lexical_file_order() {
     let dir = TestDir::new("multi-rule");
     let archive = tarball(&[
-        // Lexical file order, not id order, sets the load order.
         ("o-r-aaaaaaaa/rules/b-second.yaml", RULE.as_bytes()),
         ("o-r-aaaaaaaa/rules/a-first.yaml", SECOND_RULE.as_bytes()),
     ]);
@@ -294,7 +288,6 @@ fn malformed_incompatible_empty_and_duplicate_packages_are_refused() {
         );
     }
     assert_eq!(store_entries(dir.path()), Vec::<String>::new());
-    // A refused install also leaves no staging debris behind.
     let debris: Vec<_> = std::fs::read_dir(dir.path())
         .unwrap()
         .flatten()

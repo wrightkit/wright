@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Exercise release packaging with synthetic binaries on the host runner."""
 
 from __future__ import annotations
 

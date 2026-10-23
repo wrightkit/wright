@@ -141,9 +141,6 @@ fn compile_over_workshop_file_emits_correct_text() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-/// A program over the Overwatch client element limit (#488) still emits its
-/// artifact (stdout with `-o -`), with the import-limit warning on stderr;
-/// in JSON mode the warning rides inside the envelope's diagnostics.
 #[test]
 fn compile_over_element_limit_warns_and_still_emits() {
     let array = (0..17_000).map(|_| "1").collect::<Vec<_>>().join(", ");
@@ -220,9 +217,6 @@ fn sha256_of(path: &Path) -> String {
     format!("{:x}", Sha256::digest(std::fs::read(path).unwrap()))
 }
 
-/// ADR-0025: `compile` writes `<entry stem>.ow` in the current directory and
-/// reports only the verdict, the path and the digest; no surface carries the
-/// program text.
 #[test]
 fn compile_writes_the_default_file_and_reports_status_only() {
     let dir = temp_dir();
@@ -356,14 +350,9 @@ fn compile_o_dash_prints_only_the_program() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// wright#759: `--to` selects the Workshop output locale independently of
-/// `--locale` (the input override) — a zh-CN program re-emits as en-US and
-/// the envelope reports the emitted locale, not the input's.
 #[test]
 fn compile_to_emits_the_target_locale_independently_of_the_input() {
     let dir = temp_dir();
-    // A program whose locale evidence is unambiguously zh-CN (structural
-    // keywords carry no mapping ambiguity between these two locales).
     let zh = "变量 {\n    全局:\n        0: index\n}\n\n规则 (\"first\") {\n    事件 {\n        持续 - 全局;\n    }\n    动作 {\n        设置全局变量(index, 1);\n    }\n}\n";
     std::fs::write(dir.join("mode.ws"), zh).unwrap();
 
@@ -386,8 +375,6 @@ fn compile_to_emits_the_target_locale_independently_of_the_input() {
     let envelope = parse_json(&json.stdout);
     assert_eq!(envelope["result"]["output"]["locale"], "en-us");
 
-    // `--locale` stays the input override: telling Wright the zh-CN input
-    // is en-US still fails like it did before `--to` existed.
     let wrong = run_in(
         &dir,
         &[
@@ -398,9 +385,6 @@ fn compile_to_emits_the_target_locale_independently_of_the_input() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// wright#759: an undeclared `--to` locale is a usage error naming the
-/// declared locales, and a declared locale missing mappings for the
-/// program fails `missing-mapping` with no partial output file.
 #[test]
 fn compile_to_rejects_unknown_and_unmapped_target_locales() {
     let dir = temp_dir();
@@ -423,7 +407,6 @@ fn compile_to_rejects_unknown_and_unmapped_target_locales() {
     );
     assert!(!dir.join("out.ow").exists());
 
-    // `EventTeam.ALL` (used by `declarations-rules`) has no tr-TR mapping.
     std::fs::write(
         dir.join("teams.ws"),
         corpus_workshop("synthetic/declarations-rules"),
@@ -511,9 +494,6 @@ fn analyze_real_project_report_is_bounded_and_ranked() {
     assert!(stdout.contains("State and coupling"));
     assert!(stdout.contains("[static]"));
     assert!(stdout.contains("Next"));
-    // Bounded means the report does not scale with program size: every
-    // section truncates to a fixed row budget, and `Next` is a constant
-    // follow-up list.
     assert!(
         stdout.lines().count() <= 48,
         "report is not bounded:\n{stdout}"
@@ -551,7 +531,6 @@ fn analyze_low_cost_program_reports_cost_without_risks() {
 
 #[test]
 fn check_over_malformed_input_exits_one_with_structured_diagnostics() {
-    // Enough locale evidence to pass detection, then a syntax error.
     let path = temp_file(
         "broken.txt",
         "rule (\"x\") { event { Ongoing - Global; } actions { If(True); }",
@@ -585,9 +564,6 @@ fn check_excludes_configurable_lint_findings() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// Two `raw-setting` warnings plus one `unknown-value` error exercise the
-// blocking/non-blocking split and the errors-first ordering at once.
-
 const MIXED_CHECK_SOURCE: &str = r#"settings {
     customGroup {
         mySetting: 1
@@ -607,9 +583,6 @@ rule ("x") {
 
 #[test]
 fn terminal_renderer_marks_independent_diagnostics() {
-    // The terminal layout leads with the verdict tag, then indents each
-    // diagnostic under it; the reported set, order, and content are
-    // unchanged.
     let path = temp_file("mixed.txt", MIXED_CHECK_SOURCE);
     let output = run(&[
         "check",
@@ -656,8 +629,6 @@ fn terminal_renderer_marks_independent_diagnostics() {
 
 #[test]
 fn plain_renderer_keeps_the_undecorated_diagnostic_layout() {
-    // `plain` is the deterministic line-record surface (#793): no box
-    // connectors, `diagnostic:` records in place of the sentence layout.
     let path = temp_file("mixed.txt", MIXED_CHECK_SOURCE);
     let output = run(&[
         "check",
@@ -717,7 +688,6 @@ fn terminal_renderer_marks_lint_findings_and_keeps_compact_results_flat() {
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 
-    // A bare verdict with nothing to group stays flat.
     let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
     let output = run(&[
         "check",
@@ -729,8 +699,6 @@ fn terminal_renderer_marks_lint_findings_and_keeps_compact_results_flat() {
     ]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // The verdict stays flat — no findings group — while the shared
-    // program summary and follow-ups (#821) still report.
     assert_eq!(
         stdout,
         " PASS  check\n  0 diagnostics\n\nProgram overview\n  1 file, 1 rule, \
@@ -743,9 +711,6 @@ fn terminal_renderer_marks_lint_findings_and_keeps_compact_results_flat() {
 
 #[test]
 fn only_the_terminal_renderer_draws_the_verdict_tag() {
-    // The filled verdict tag is a terminal detail: plain, CI, GitHub
-    // Actions, and JSON keep their undecorated layout for the same run,
-    // and no surface draws the retired rail frame.
     let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
     let path = path.to_str().unwrap();
     let terminal = run(&["lint", path, "--renderer", "terminal", "--color", "never"]);
@@ -783,9 +748,6 @@ fn only_the_terminal_renderer_draws_the_verdict_tag() {
 
 #[test]
 fn terminal_renderer_never_leaks_frame_markers() {
-    // An artifact-stream command prints its diagnostics outside the
-    // verdict-tag report; no internal marker byte or retired rail
-    // character may reach either stream, for any report shape.
     let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
     let path = path.to_str().unwrap();
     let invocations: [&[&str]; 4] = [
@@ -863,8 +825,6 @@ fn terminal_renderer_marks_analyze_risks_and_cfg_blocks() {
 
 #[test]
 fn check_unmapped_locations_are_not_fabricated() {
-    // `<stdin>` is a pseudo-path: the record carries the position verbatim
-    // as `at=<stdin>:l:c`, never dressed up as a file location.
     let output = run_with_stdin(
         &["check", "-", "--renderer", "plain", "--color", "never"],
         "rule (\"x\") { event { Ongoing - Global; } actions { If(True); }",
@@ -905,7 +865,6 @@ fn check_success_renders_a_compact_deterministic_summary() {
         Some("summary: errors=0 warnings=0 notes=0"),
         "{stdout}"
     );
-    // `check` reports the program summary and shared follow-ups (#792).
     assert_eq!(
         lines.next(),
         Some("program: files=1 rules=1 globalVariables=0 playerVariables=0 subroutines=0"),
@@ -1169,10 +1128,6 @@ fn lint_fix_previews_and_writes_validated_fixes() {
 
 #[test]
 fn lint_fix_refuses_stdin_without_rereading_it() {
-    // stdin has no reloadable source: fix preview refuses each finding's
-    // transaction with `edit-input-stdin` instead of resolving stdin a
-    // second time (EOF on a pipe, a block on a terminal), and `--write`
-    // refuses the input up front.
     let output = run_with_stdin(&["lint", "-", "--fix", "-f", "json"], FIXABLE_WORKSHOP);
     assert!(output.status.success(), "{}", command_result(&output));
     let envelope = parse_json(&output.stdout);
@@ -1208,10 +1163,6 @@ fn lint_fix_refuses_stdin_without_rereading_it() {
 
 #[test]
 fn span_path_is_consistent_across_input_spellings() {
-    // Lint resolves the same root-relative `span.path` for the absolute,
-    // bare-name (cwd), and dir-relative spellings of the same Workshop file.
-    // Each subprocess gets its own cwd, so the bare-name spelling is
-    // exercised end-to-end exactly as in the issue.
     let dir = temp_dir();
     std::fs::create_dir_all(dir.join("sub")).unwrap();
     std::fs::write(
@@ -1292,9 +1243,6 @@ fn lint_rule_flags_control_findings() {
             .all(|finding| finding["code"] != "min-wait-loop"),
         "the disabled rule must produce no findings"
     );
-    // --rule-severity overrides the effective severity of a rule. The
-    // control-flow fixture produces no expensive-loop-check findings, so
-    // the assertion is on the rules metadata.
     let output = run(&[
         "lint",
         path.to_str().unwrap(),
@@ -1335,9 +1283,6 @@ fn lint_flags_are_usage_errors_for_other_commands() {
     }
 }
 
-// `real-world/overpy-cake.ws` produces 10 findings: 9 identical
-// `repeated-value` warnings and 1 `min-wait-loop` warning.
-
 #[test]
 fn lint_selection_filters_findings_and_reports_withheld() {
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
@@ -1360,9 +1305,6 @@ fn lint_selection_filters_findings_and_reports_withheld() {
     assert!(findings.iter().all(|f| f["code"] == "repeated-value"));
     assert_eq!(envelope["result"]["selection"]["total"], 10);
     assert_eq!(envelope["result"]["selection"]["withheld"], 7);
-    // #791: `byCode` counts the filtered set `max` truncated, so the cap
-    // cannot hide a code's real count; `repeated` carries the facts the
-    // finding message states, as data a renderer can consume.
     assert_eq!(
         envelope["result"]["selection"]["byCode"]["repeated-value"],
         9
@@ -1378,8 +1320,6 @@ fn lint_selection_filters_findings_and_reports_withheld() {
             )
     }));
 
-    // --severity is a threshold: `error` selects none of the warning findings
-    // while the envelope records the full set.
     let output = run(&["lint", path, "--severity", "error", "-f", "json"]);
     assert!(output.status.success());
     let envelope = parse_json(&output.stdout);
@@ -1392,9 +1332,6 @@ fn lint_selection_filters_findings_and_reports_withheld() {
     assert_eq!(envelope["result"]["selection"]["total"], 10);
     assert_eq!(envelope["result"]["selection"]["withheld"], 0);
 
-    // --file selects by file identity: the reported span.path is
-    // root-relative, and the absolute input path exactly as passed selects
-    // the same file.
     let reported_path =
         parse_json(&run(&["lint", path, "-f", "json"]).stdout)["result"]["findings"][0]["location"]
             .as_str()
@@ -1426,8 +1363,6 @@ fn lint_selection_filters_findings_and_reports_withheld() {
 
 #[test]
 fn omitted_selection_reproduces_the_unfiltered_envelope() {
-    // Omitting every selection option reproduces the current output:
-    // complete findings/diagnostics arrays and no `selection` member (#430).
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
     let output = run(&["lint", path.to_str().unwrap(), "-f", "json"]);
     assert!(output.status.success());
@@ -1440,9 +1375,6 @@ fn omitted_selection_reproduces_the_unfiltered_envelope() {
 
 #[test]
 fn selection_never_changes_the_verdict_or_exit_code() {
-    // The ablation guard of #430: if exit codes were computed from the
-    // selected set instead of the full set, filtering an error out of view
-    // would flip a failing check to exit 0.
     let broken = temp_file(
         "broken.txt",
         "rule (\"x\") { event { Ongoing - Global; } actions { If(True); }",
@@ -1493,14 +1425,9 @@ fn selection_never_changes_the_verdict_or_exit_code() {
 
 #[test]
 fn fail_on_raises_warn_to_fail_on_every_renderer() {
-    // ADR-0030 decision 13: `--fail-on <severity>` makes a result at or
-    // above the threshold exit 1 with a FAIL verdict, off by default. The
-    // wait-less loop produces a warning finding, so `lint` and `inspect
-    // cost` report WARN.
     let path = temp_file("waitless.txt", WAITLESS_LOOP);
     let path = path.to_str().unwrap();
 
-    // Default behavior is unchanged: WARN still exits 0.
     let default = run(&["lint", path]);
     assert_eq!(default.status.code(), Some(0));
     assert!(
@@ -1509,8 +1436,6 @@ fn fail_on_raises_warn_to_fail_on_every_renderer() {
         String::from_utf8_lossy(&default.stdout)
     );
 
-    // Plain (the non-TTY default): FAIL verdict, exit 1, and the result
-    // body still renders — the findings are the reason it failed.
     let gated = run(&["lint", path, "--fail-on", "warning"]);
     assert_eq!(gated.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&gated.stdout);
@@ -1520,7 +1445,6 @@ fn fail_on_raises_warn_to_fail_on_every_renderer() {
         "{stdout}"
     );
 
-    // Terminal.
     let terminal = run(&[
         "lint",
         path,
@@ -1535,8 +1459,6 @@ fn fail_on_raises_warn_to_fail_on_every_renderer() {
     let stdout = String::from_utf8_lossy(&terminal.stdout);
     assert!(stdout.contains(" FAIL  lint"), "{stdout}");
 
-    // GitHub Actions: the log group and the step-summary line carry the
-    // same FAIL verdict and exit code.
     let gha = run(&[
         "lint",
         path,
@@ -1550,7 +1472,6 @@ fn fail_on_raises_warn_to_fail_on_every_renderer() {
     assert!(stderr.contains("FAIL lint"), "{stderr}");
     assert!(stderr.contains("**FAIL** (exit 1)"), "{stderr}");
 
-    // JSON: the envelope carries the raised verdict as ok/exit.
     let json = run(&["lint", path, "--fail-on", "warning", "-f", "json"]);
     assert_eq!(json.status.code(), Some(1));
     let envelope = parse_json(&json.stdout);
@@ -1558,7 +1479,6 @@ fn fail_on_raises_warn_to_fail_on_every_renderer() {
     assert_eq!(envelope["exit"], 1);
     assert!(envelope.get("gated").is_none());
 
-    // `inspect cost` gates on the same finding severities.
     let cost = run(&[
         "inspect",
         "cost",
@@ -1579,9 +1499,6 @@ fn fail_on_raises_warn_to_fail_on_every_renderer() {
 
 #[test]
 fn fail_on_can_only_raise_a_verdict() {
-    // A genuine failure keeps its verdict and exit code even at the lowest
-    // threshold — the gate never turns a failing command into a passing
-    // one or an ERROR into a FAIL.
     let broken = temp_file(
         "broken.txt",
         "rule (\"x\") { event { Ongoing - Global; } actions { If(True); }",
@@ -1591,23 +1508,18 @@ fn fail_on_can_only_raise_a_verdict() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("ERROR check"), "{stdout}");
 
-    // A result below the threshold is untouched: WARN + `--fail-on error`
-    // stays WARN and exits 0.
     let waitless = temp_file("waitless.txt", WAITLESS_LOOP);
     let output = run(&["lint", waitless.to_str().unwrap(), "--fail-on", "error"]);
     assert_eq!(output.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("WARN lint"), "{stdout}");
 
-    // A clean result has nothing at the threshold and stays PASS.
     let clean = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
     let output = run(&["check", clean.to_str().unwrap(), "--fail-on", "warning"]);
     assert_eq!(output.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("PASS check"), "{stdout}");
 
-    // Error-severity findings are at the threshold: today they exit 0, so
-    // `--fail-on error` raises them to FAIL.
     let cake = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
     let output = run(&[
         "lint",
@@ -1684,7 +1596,6 @@ fn essential_reports_bound_lists_and_expose_expansion() {
         );
         let text = run(&["inspect", query, path.to_str().unwrap()]);
         let stdout = String::from_utf8_lossy(&text.stdout);
-        // The truncation record sits on the wrapped list member (#595).
         assert!(
             stdout.contains(&format!("truncated: {query}=20/21")),
             "{stdout}"
@@ -1724,8 +1635,6 @@ fn essential_reports_bound_lists_and_expose_expansion() {
     assert_eq!(content["rules"].as_array().unwrap().len(), 21);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
-/// A program whose only risk is the wait-less `While(True)` warning — the
-/// smallest input that separates the verdict paths #635 joined.
 const WAITLESS_LOOP: &str = "rule (\"r\") {
     event {
         Ongoing - Global;
@@ -1755,9 +1664,6 @@ fn analyze_default_and_all_report_the_same_verdict() {
         assert!(stdout.contains("WARN analyze"), "{args:?}: {stdout}");
     }
 
-    // The same parity holds under a selection: `lint --severity error`
-    // reports an empty selected set but the full set's WARN verdict, and the
-    // expanded form must agree rather than judging the filtered counts.
     let lint = run(&["lint", path.to_str().unwrap(), "--severity", "error"]);
     let lint_stdout = String::from_utf8_lossy(&lint.stdout);
     assert!(lint_stdout.contains("WARN lint"), "{lint_stdout}");
@@ -1776,9 +1682,6 @@ fn analyze_default_and_all_report_the_same_verdict() {
 
 #[test]
 fn analyze_selection_narrows_facts_risks() {
-    // `severity`/`rule`/`file`/`max` narrow `facts.risks` and the JSON
-    // `selection` reports the true total — never a 0/0 beside non-empty
-    // risks.
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
 
     let output = run(&[
@@ -1859,18 +1762,12 @@ fn inspect_json_resolves_span_paths() {
 
 #[test]
 fn inspect_cost_verdict_and_file_selection() {
-    // Cost findings carry severities, so `inspect cost` judges them like
-    // lint findings — the wait-less loop's warning yields WARN.
     let path = temp_file("waitless.txt", WAITLESS_LOOP);
     let output = run(&["inspect", "cost", path.to_str().unwrap()]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("WARN cost"), "{stdout}");
 
-    // Cost findings carry resolved source locations (#722), so `--file`
-    // narrows the reported set like `lint` — a matching file keeps its
-    // finding; a file that is not a source file of the loaded program is
-    // `invalid-selection`, never an empty result (ADR-0035).
     let output = run(&[
         "inspect",
         "cost",
@@ -1959,9 +1856,6 @@ fn analyze_github_renderer_emits_risk_annotations() {
 
 #[test]
 fn lint_text_collapses_identical_findings_into_one_entry() {
-    // Two loops duplicating the same expression raise two findings that share
-    // their rule id and message (#735 names the expression); they collapse into
-    // one entry listing both locations.
     let path = temp_file(
         "collapse.txt",
         "rule (\"r\") {
@@ -1983,7 +1877,6 @@ fn lint_text_collapses_identical_findings_into_one_entry() {
 }
 ",
     );
-    // The terminal view collapses the identical entries (#735).
     let output = run(&[
         "lint",
         path.to_str().unwrap(),
@@ -2016,8 +1909,6 @@ fn lint_text_collapses_identical_findings_into_one_entry() {
         "two grouped locations per warning entry plus four expensive-loop-check locations: {stdout}"
     );
 
-    // The record surface never collapses: each finding is its own
-    // `finding:` record carrying the repeated-value count (#793).
     let output = run(&["lint", path.to_str().unwrap()]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -2038,9 +1929,6 @@ fn lint_text_collapses_identical_findings_into_one_entry() {
 
 #[test]
 fn lint_text_leads_with_the_verdict_and_orders_by_action_priority() {
-    // One rule raised to error severity produces a mixed-severity result:
-    // the verdict leads, the error entry renders before warning entries, and
-    // the complete result set is unchanged.
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
     let output = run(&[
         "lint",
@@ -2072,8 +1960,6 @@ fn lint_text_leads_with_the_verdict_and_orders_by_action_priority() {
 
 #[test]
 fn lint_text_orders_all_severity_bands_by_action_priority() {
-    // An input yielding error, warning, and info findings renders the bands
-    // in action order regardless of the driver's reported order.
     let path = temp_file(
         "mixed.txt",
         "variables {\n\
@@ -2136,8 +2022,6 @@ fn lint_text_orders_all_severity_bands_by_action_priority() {
 
 #[test]
 fn lint_text_presents_a_finding_with_location_and_secondary_metadata() {
-    // The record form carries what the terminal's stacked entry did: the
-    // location is one `at=` token, evidence and message are fields (#793).
     let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
     let output = run(&["lint", path.to_str().unwrap()]);
     assert!(output.status.success());
@@ -2156,9 +2040,6 @@ fn lint_text_presents_a_finding_with_location_and_secondary_metadata() {
 
 #[test]
 fn lint_text_resolves_locations_under_a_subdirectory_input_root() {
-    // `span.path` is reported root-relative; the human view resolves it under
-    // the input root so a subdirectory input still gets an actionable
-    // location and a source frame instead of a bare file name.
     let dir = temp_dir();
     std::fs::create_dir_all(dir.join("sub")).unwrap();
     let path = dir.join("sub").join("flow.txt");
@@ -2171,7 +2052,6 @@ fn lint_text_resolves_locations_under_a_subdirectory_input_root() {
         "the record's location resolves under the input root: {stdout}"
     );
 
-    // The terminal view keeps the resolved absolute path and source frame.
     let output = run(&[
         "lint",
         path.to_str().unwrap(),
@@ -2226,9 +2106,6 @@ fn an_unknown_rule_id_in_a_selection_is_a_usage_error() {
 
 #[test]
 fn an_unknown_rule_id_in_the_lint_policy_is_a_usage_error() {
-    // `--disable-rule`, `--rule-severity`, and lint-config `rules:` keys all
-    // reject ids the registry does not know — a typo must not silently leave
-    // the intended rule enabled (#640).
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
     let config = path.parent().unwrap().join("lint.yaml");
     std::fs::write(&config, "rules:\n  not-a-rule:\n    enabled: false\n").unwrap();
@@ -2255,7 +2132,6 @@ fn an_unknown_rule_id_in_the_lint_policy_is_a_usage_error() {
             "the message names the unknown id"
         );
     }
-    // A lint-config key for a rule loaded through --rule-file is known (#640).
     let rule_file = path.parent().unwrap().join("smoke.yaml");
     std::fs::write(
         &rule_file,
@@ -2289,7 +2165,6 @@ fn stdin_workshop_works_and_legacy_protocol_is_refused() {
     let output = run_with_stdin(&["check", "-"], &corpus_workshop("synthetic/basic-rule"));
     assert_eq!(output.status.code(), Some(0));
 
-    // Legacy protocol JSON is recognized but no longer parsed by Wright.
     let protocol = r#"{"protocol":{"name":"wright/opy-hir","version":"1.1.0"}}"#;
     let output = run_with_stdin(&["check", "-"], protocol);
     assert_eq!(
@@ -2307,8 +2182,6 @@ fn stdin_workshop_works_and_legacy_protocol_is_refused() {
 
 #[test]
 fn bom_prefixed_workshop_behaves_like_the_plain_file() {
-    // #636: a U+FEFF byte-order mark is a file-encoding artifact, not
-    // source text — check and compile see the BOM-less program.
     let bom = format!("\u{FEFF}{}", corpus_workshop("synthetic/basic-rule"));
     let plain = temp_file("plain.ws", &corpus_workshop("synthetic/basic-rule"));
     let bommed = temp_file("bom.ws", &bom);
@@ -2323,8 +2196,6 @@ fn bom_prefixed_workshop_behaves_like_the_plain_file() {
     assert!(bommed_out.status.success() && plain_out.status.success());
     assert_eq!(bommed_out.stdout, plain_out.stdout);
 
-    // A BOM-prefixed Workshop stdin resolves the same way; a BOM-prefixed
-    // JSON stdin is still protocol input, not Workshop text.
     let output = run_with_stdin(&["check", "-"], &bom);
     assert_eq!(output.status.code(), Some(0));
     let output = run_with_stdin(&["check", "-"], "\u{FEFF}{\"protocol\":{}}");
@@ -2371,11 +2242,6 @@ fn unknown_extension_is_ambiguous_and_fails_explicitly() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-/// #725 / ADR-0028: `--profile` applies to Workshop input only — a
-/// non-Workshop input is a usage error (exit 2) on compile and inspect,
-/// `aggressive` is rejected as an unknown value, and serve rejects the
-/// combination at startup when `--kind` fixes the type and per request
-/// when the kind resolves from the input.
 #[test]
 fn profile_applies_to_workshop_input_only() {
     let opy = std::fs::read_to_string(workspace_root().join("tests/fixtures/opy/basic-rule.opy"))
@@ -2387,8 +2253,6 @@ fn profile_applies_to_workshop_input_only() {
         &corpus_workshop("synthetic/control-flow"),
     );
 
-    // OPY and OSTW inputs with a profile are a usage error, by extension
-    // and by explicit --kind alike.
     for (input, extra) in [
         (opy_path.to_str().unwrap().to_string(), vec![]),
         (ostw_path.to_str().unwrap().to_string(), vec![]),
@@ -2425,8 +2289,6 @@ fn profile_applies_to_workshop_input_only() {
         }
     }
 
-    // `aggressive` is rejected as an unknown value; the error lists the
-    // surviving spellings.
     let aggressive = run(&[
         "check",
         workshop_path.to_str().unwrap(),
@@ -2444,7 +2306,6 @@ fn profile_applies_to_workshop_input_only() {
         "aggressive is no longer a possible value: {stderr}"
     );
 
-    // A Workshop input with `compat` still folds as before.
     let workshop = run(&[
         "check",
         workshop_path.to_str().unwrap(),
@@ -2453,7 +2314,6 @@ fn profile_applies_to_workshop_input_only() {
     ]);
     assert!(workshop.status.success(), "{}", command_result(&workshop));
 
-    // `serve --kind opy --profile compat` is a startup usage error.
     let serve = run(&[
         "serve",
         "--transport",
@@ -2628,7 +2488,6 @@ fn version_and_help_are_documented_contract_surfaces() {
         assert!(help.contains(command), "help documents {command}");
     }
 
-    // #439: semantic queries live under `inspect`, not the top level.
     let output = run(&["inspect", "--help"]);
     assert!(output.status.success());
     let inspect_help = String::from_utf8_lossy(&output.stdout);
@@ -2654,8 +2513,6 @@ fn version_and_help_are_documented_contract_surfaces() {
     }
     assert!(help.contains("EXIT CODES"));
 
-    // The consolidated maintenance surface (#439) retires the dedicated
-    // meta/provider commands; `--help` and `--version` are canonical.
     for removed in ["version", "help", "provider"] {
         let output = run(&[removed]);
         assert_eq!(
@@ -2738,9 +2595,6 @@ fn completion_install_explicit_shell_and_dir() {
 
 #[test]
 fn completion_shell_positional_before_install_selects_that_shell() {
-    // `wright completion bash install` accepts `bash` ahead of the
-    // subcommand; it must install the bash completion, not the detected
-    // shell's (#641).
     let dir = temp_dir();
     let output = Command::new(wright())
         .args([
@@ -2766,7 +2620,6 @@ fn completion_shell_positional_before_install_selects_that_shell() {
     );
     assert!(dir.join("wright").is_file(), "{stdout}");
 
-    // An explicit install positional still wins over the outer one.
     let output = Command::new(wright())
         .args([
             "completion",
@@ -2816,7 +2669,6 @@ fn agent_install_writes_the_guide_and_refreshes_it() {
     assert!(output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains("up to date"));
 
-    // A foreign directory refuses (exit 1) unless --force replaces it.
     std::fs::write(target.join("BUILD.json"), "{}").unwrap();
     let output = install(&[]);
     assert_eq!(output.status.code(), Some(1));
@@ -3154,11 +3006,6 @@ fn provider_backed_opy_analyze_surfaces_provider_resolution_failures() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-/// #655: `wright inspect` and every query subcommand load a provider-backed
-/// `.opy` input through the provider's compile operation — the same
-/// operation-aware load `lint`/`analyze` run — instead of refusing on the
-/// check-only path. The provider is a staged LPP script so the test stays
-/// hermetic.
 #[cfg(unix)]
 #[test]
 fn provider_backed_opy_accepts_inspect_and_its_query_subcommands() {
@@ -3266,10 +3113,6 @@ for line in sys.stdin:
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// #691: `inspect cost` on a provider-backed `.opy` reports the canonical
-/// element count of the compiled artifact — the same `workshop-rs` count a
-/// `wright compile` re-parse measures. The provider is a staged LPP script
-/// serving one canned artifact, so the test stays hermetic.
 #[cfg(unix)]
 #[test]
 fn provider_backed_opy_cost_reports_the_artifact_element_count() {
@@ -3316,9 +3159,6 @@ for line in sys.stdin:
     let provider = script.to_str().unwrap();
     let input = input.to_str().unwrap();
 
-    // `wright compile` emits the artifact the cost query loads; the
-    // canonical count of that output — measured by the owner's own
-    // counter — is the expected total.
     let output = run(&["compile", input, "--opy-provider", provider, "-o", "-"]);
     assert!(output.status.success(), "{}", command_result(&output));
     let compiled = String::from_utf8_lossy(&output.stdout);
@@ -3350,12 +3190,6 @@ for line in sys.stdin:
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A staged OPY provider for `convert` tests: `reconstruct` toggles the one
-/// capability under test. The ambient provider release decides which
-/// capabilities it advertises — `opy-provider` 0.3.19 added `reconstruct` —
-/// so a test that asserts wright's response to a negotiated (or absent)
-/// capability stages its own provider rather than depending on today's
-/// release contents.
 #[cfg(unix)]
 fn write_convert_provider(dir: &std::path::Path, reconstruct: bool) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;
@@ -3389,9 +3223,6 @@ for line in sys.stdin:
     script
 }
 
-/// `convert --target opy` refuses `capability-unavailable` when the
-/// negotiated provider lacks `reconstruct` — regardless of what the
-/// ambient release happens to advertise.
 #[cfg(unix)]
 #[test]
 fn convert_workshop_input_to_opy_requires_provider_reconstruct_capability() {
@@ -3424,7 +3255,6 @@ fn convert_workshop_input_to_opy_requires_provider_reconstruct_capability() {
 
 #[test]
 fn convert_workshop_input_to_ostw_reports_provider_unavailable() {
-    // `wright convert --target ostw` is a recognized provider boundary.
     let path = temp_file("convert.txt", &corpus_workshop("synthetic/basic-rule"));
     let path = path.to_str().unwrap();
     let output = run(&["convert", "--target", "ostw", path, "-f", "json"]);
@@ -3445,8 +3275,6 @@ fn convert_workshop_input_to_ostw_reports_provider_unavailable() {
     assert!(envelope["result"]["text"].as_str().unwrap().is_empty());
 }
 
-/// The success envelope: a staged provider that negotiates `reconstruct`
-/// keeps the assertion independent of the ambient provider release.
 #[cfg(unix)]
 #[test]
 fn convert_json_envelope_reports_command_result_and_target() {
@@ -3494,8 +3322,6 @@ fn convert_requires_an_explicit_target_flag() {
 
 #[test]
 fn convert_rejects_non_workshop_input() {
-    // OPY conversion requires an entry provider workflow; it never falls back
-    // to a direct OPY ↔ OSTW conversion.
     let source =
         std::fs::read_to_string(workspace_root().join("tests/fixtures/opy/basic-rule.opy"))
             .unwrap();
@@ -3522,10 +3348,6 @@ fn convert_rejects_non_workshop_input() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// `inspect symbols`, `inspect refs`, `inspect cfg`, `inspect callgraph`,
-// and `inspect cost` run the same operations the agent contract serves;
-// `refs`/`cfg` address their target by name.
-
 #[test]
 fn symbols_lists_program_symbols_and_filters_by_kind() {
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
@@ -3536,7 +3358,6 @@ fn symbols_lists_program_symbols_and_filters_by_kind() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("SYMBOLS symbols"), "{stdout}");
     assert!(stdout.contains("summary: symbols=5"), "{stdout}");
-    // Each symbol is a `symbol:` record naming kind and location (#446/#793).
     assert!(
         stdout.contains("symbol: globalVariable name=cakePos at=cake.txt:3:14"),
         "{stdout}"
@@ -3560,9 +3381,6 @@ fn symbols_lists_program_symbols_and_filters_by_kind() {
     assert_eq!(rule["kind"], "rule");
     assert_eq!(rule["span"]["path"], "cake.txt");
 
-    // --only narrows to one symbol kind; --kind stays the input frontend.
-    // The listing always reports `{symbols, snapshot}` (#595); --max (or
-    // --file) adds `selection` (#531).
     let output = run(&["inspect", "symbols", path, "--only", "rule", "-f", "json"]);
     let envelope = parse_json(&output.stdout);
     let symbols = envelope["result"]["symbols"].as_array().unwrap();
@@ -3583,7 +3401,6 @@ fn symbols_lists_program_symbols_and_filters_by_kind() {
 
 #[test]
 fn refs_reports_references_and_usage_for_a_named_symbol() {
-    // The issue's example: cakePos has 16 reads and 1 write across 1 rule.
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
     let path = path.to_str().unwrap();
 
@@ -3591,7 +3408,6 @@ fn refs_reports_references_and_usage_for_a_named_symbol() {
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("REFS refs"), "{stdout}");
-    // Target identity and the usage summary lead the location list (#446).
     assert!(
         stdout.contains(
             "summary: symbol=cakePos kind=globalVariable reads=16 writes=1 calls=0 rules=1"
@@ -3602,7 +3418,6 @@ fn refs_reports_references_and_usage_for_a_named_symbol() {
         stdout.contains("ref: declaration at=cake.txt:3:14"),
         "locations carry source positions: {stdout}"
     );
-    // 18 references bound to a first page; JSON is the complete path (#446).
     assert!(!stdout.contains("truncated:"), "{stdout}");
 
     let output = run(&["inspect", "refs", "cakePos", path, "-f", "json"]);
@@ -3640,7 +3455,6 @@ fn cfg_reports_the_named_rules_control_flow_graph() {
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("CFG cfg"), "{stdout}");
-    // Rule identity and the graph shape lead the block detail (#446).
     assert!(
         stdout.contains("summary: rule=cake blocks=18 edges=22"),
         "{stdout}"
@@ -3694,7 +3508,6 @@ fn callgraph_ranks_fan_in_and_fan_out_before_the_edge_list() {
     let output = run(&["inspect", "callgraph", path]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // The shape summary leads, then notable fan-in/fan-out, then edges (#446).
     assert!(
         stdout.contains("summary: edges=3 callers=2 callees=2"),
         "{stdout}"
@@ -3712,9 +3525,6 @@ fn callgraph_ranks_fan_in_and_fan_out_before_the_edge_list() {
 
 #[test]
 fn callgraph_highlight_sections_fold_beyond_the_bound() {
-    // Twelve subroutines each with two callers: the highlight list exceeds
-    // one page and folds with the complete-output pointer like every other
-    // bounded section (#446).
     let mut source = String::from("subroutines {\n");
     for i in 0..12 {
         source.push_str(&format!("    {i}: sub{i}\n"));
@@ -3748,9 +3558,6 @@ fn callgraph_highlight_sections_fold_beyond_the_bound() {
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
 
-/// #723 / ADR-0027: the `.wright/` run cache compares each `inspect cost`
-/// run against the previous successful run of the same key, never changes
-/// the verdict, and `--no-cache`/`WRIGHT_NO_CACHE`/`CI` leave it untouched.
 #[test]
 fn cost_run_cache_compares_against_the_previous_run() {
     let dir = temp_dir();
@@ -3758,7 +3565,6 @@ fn cost_run_cache_compares_against_the_previous_run() {
     std::fs::write(&path, "rule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Wait(0.016);\n    }\n}\n").unwrap();
     let path = path.to_str().unwrap();
 
-    // The first run records a reference and reports no comparison.
     let first = run(&["inspect", "cost", path]);
     assert!(first.status.success(), "{}", command_result(&first));
     assert!(
@@ -3767,7 +3573,6 @@ fn cost_run_cache_compares_against_the_previous_run() {
     );
     assert!(dir.join(".wright").is_dir(), "the run wrote a record");
 
-    // The second run of the same key reports a zero delta.
     let second = run(&["inspect", "cost", path]);
     let stdout = String::from_utf8_lossy(&second.stdout);
     assert!(
@@ -3776,7 +3581,6 @@ fn cost_run_cache_compares_against_the_previous_run() {
     );
     assert!(stdout.contains("delta=0"), "{stdout}");
 
-    // The comparison rides the envelope, never the default JSON result.
     let json = run(&["inspect", "cost", path, "-f", "json"]);
     let result = parse_json(&json.stdout)["result"].clone();
     assert!(
@@ -3784,15 +3588,11 @@ fn cost_run_cache_compares_against_the_previous_run() {
         "default JSON carries no comparison (ADR-0027 decision 3): {result}"
     );
 
-    // `--max-total` below the current total exits 1 and names the overage;
-    // at or above it exits 0 — identical with and without a cache.
     let over = run(&["inspect", "cost", path, "--max-total", "1"]);
     assert_eq!(over.status.code(), Some(1), "{}", command_result(&over));
     let under = run(&["inspect", "cost", path, "--max-total", "32768"]);
     assert!(under.status.success(), "{}", command_result(&under));
 
-    // `--no-cache`, `WRIGHT_NO_CACHE`, and a truthy `CI` each leave
-    // `.wright/` untouched and produce no comparison.
     for (args, env) in [
         (vec!["inspect", "cost", path, "--no-cache"], vec![]),
         (
@@ -3816,8 +3616,6 @@ fn cost_run_cache_compares_against_the_previous_run() {
         assert_eq!(before.ok(), after.ok(), "{args:?} left the cache untouched");
     }
 
-    // A named baseline compares against a fixed reference; an unknown name
-    // given explicitly is a usage error.
     let save = run(&["inspect", "cost", path, "--save-baseline", "v1"]);
     assert!(save.status.success(), "{}", command_result(&save));
     let named = run(&["inspect", "cost", path, "--baseline", "v1"]);
@@ -3871,8 +3669,6 @@ fn cost_run_cache_is_shared_by_compile_and_inspect() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// #723: a fixture pair where the second run adds one rule and grows
-/// another reports exactly those rules with the correct deltas.
 #[test]
 fn cost_run_cache_names_added_and_grown_rules() {
     let dir = temp_dir();
@@ -3882,7 +3678,6 @@ fn cost_run_cache_names_added_and_grown_rules() {
     let path_str = path.to_str().unwrap();
     assert!(run(&["inspect", "cost", path_str]).status.success());
 
-    // Grow rule a by one wait and add rule b.
     let grown = "rule (\"a\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Wait(0.016);\n        Wait(0.016);\n    }\n}\n\nrule (\"b\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Wait(0.016);\n    }\n}\n";
     std::fs::write(&path, grown).unwrap();
     let second = run(&["inspect", "cost", path_str]);
@@ -3902,12 +3697,6 @@ fn cost_run_cache_names_added_and_grown_rules() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// ADR-0030 decision 14 / #797: under a truthy `CI` the explicit baseline
-/// flags still read and write `.wright/` (so a platform cache can restore
-/// and save it), a baseline that is missing, unreadable, or keyed to a
-/// different input turns the comparison off silently — byte-identical
-/// output and the same exit code as a run without `--baseline` — and the
-/// implicit previous-run comparison stays off.
 #[test]
 fn cost_baseline_degrades_silently_under_ci() {
     let dir = temp_dir();
@@ -3932,21 +3721,16 @@ fn cost_baseline_degrades_silently_under_ci() {
             assert_eq!(output.stderr, bare.stderr, "{case}: stderr changed");
         };
 
-    // No cache restored: a run with an unknown `--baseline` is identical
-    // to the bare run.
     let bare = run_with_env(&["inspect", "cost", a], ci);
     assert!(bare.status.success(), "{}", command_result(&bare));
     let unknown = run_with_env(&["inspect", "cost", a, "--baseline", "nope"], ci);
     assert_same_run(&unknown, &bare, "unknown name");
 
-    // A corrupt record degrades the same way.
     std::fs::create_dir_all(dir.join(".wright")).unwrap();
     std::fs::write(dir.join(".wright/baseline-bad.json"), "not json").unwrap();
     let corrupt = run_with_env(&["inspect", "cost", a, "--baseline", "bad"], ci);
     assert_same_run(&corrupt, &bare, "corrupt record");
 
-    // A baseline saved for a different key never compares under CI —
-    // `--save-baseline` still wrote it through the restored cache.
     let save = run_with_env(&["inspect", "cost", a, "--save-baseline", "v1"], ci);
     assert!(save.status.success(), "{}", command_result(&save));
     let bare_b = run_with_env(&["inspect", "cost", b], ci);
@@ -3954,19 +3738,15 @@ fn cost_baseline_degrades_silently_under_ci() {
     let mismatched = run_with_env(&["inspect", "cost", b, "--baseline", "v1"], ci);
     assert_same_run(&mismatched, &bare_b, "mismatched key");
 
-    // A usable baseline still produces the comparison under CI.
     let named = run_with_env(&["inspect", "cost", a, "--baseline", "v1"], ci);
     assert!(named.status.success(), "{}", command_result(&named));
     let stdout = String::from_utf8_lossy(&named.stdout);
     assert!(stdout.contains("baseline:v1"), "{stdout}");
 
-    // `compile` shares the contract: under CI an unusable `--baseline`
-    // emits no diagnostic and the artifact is identical to the bare run.
     let bare_compile = run_with_env(&["compile", a, "-o", "-"], ci);
     let compiled = run_with_env(&["compile", a, "-o", "-", "--baseline", "nope"], ci);
     assert_same_run(&compiled, &bare_compile, "compile with unknown baseline");
 
-    // CI runs wrote only the named baseline — no previous-run record.
     let mut names: Vec<_> = std::fs::read_dir(dir.join(".wright"))
         .unwrap()
         .map(|entry| entry.unwrap().file_name().into_string().unwrap())
@@ -3974,7 +3754,6 @@ fn cost_baseline_degrades_silently_under_ci() {
     names.sort();
     assert_eq!(names, ["baseline-bad.json", "baseline-v1.json"]);
 
-    // Outside CI the unknown name is still refused — diagnostic on stdout (#891).
     let outside = run(&["inspect", "cost", a, "--baseline", "nope"]);
     assert_eq!(
         outside.status.code(),
@@ -3998,20 +3777,15 @@ fn cost_reports_exact_counts_and_selected_findings() {
     let output = run(&["inspect", "cost", path]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // The cost verdict counts static finding severities: warnings warn (#635).
     assert!(stdout.contains("WARN cost"), "{stdout}");
     assert!(stdout.contains("emittedBytes=3960"), "{stdout}");
     assert!(stdout.contains("actions=29"), "{stdout}");
-    // The bounded default page states what it withheld: the shown subset,
-    // the true total, and the expansion command.
     assert_eq!(
         stdout.matches("finding: warning repeated-value").count(),
         3,
         "{stdout}"
     );
     assert!(stdout.contains("truncated: findings=3/10"), "{stdout}");
-    // Each repeated-value finding names its expression (#735), so the nine
-    // cake findings render as nine distinguishable records under `--all`.
     let full = run(&["inspect", "cost", path, "--all"]);
     assert!(full.status.success(), "{}", command_result(&full));
     let full_stdout = String::from_utf8_lossy(&full.stdout);
@@ -4026,8 +3800,6 @@ fn cost_reports_exact_counts_and_selected_findings() {
         full_stdout.contains("`add(valueInArray(cakePos, 7), vector(0, i2, 0))` is evaluated"),
         "{full_stdout}"
     );
-    // Repeated identical findings still collapse into one counted entry
-    // (#446): two hot loops raise the same min-wait-loop finding.
     let identical = temp_file(
         "identical.txt",
         "rule (\"r\") {
@@ -4063,8 +3835,6 @@ fn cost_reports_exact_counts_and_selected_findings() {
     assert_eq!(exact["programActions"], 29);
     assert_eq!(exact["programRules"], 2);
     assert_eq!(exact["waitActions"], 1);
-    // The default payload bounds the finding list by serialized bytes and
-    // records the true total; `--all` lists the same set `lint` reports.
     assert_eq!(envelope["result"]["truncation"]["findings"]["total"], 10);
     let output = run(&["inspect", "cost", path, "--all", "-f", "json"]);
     assert!(output.status.success(), "{}", command_result(&output));
@@ -4075,7 +3845,6 @@ fn cost_reports_exact_counts_and_selected_findings() {
         "cost reports the same findings set as `findings`/`lint`"
     );
 
-    // The shared finding selection applies exactly as on `costEstimate` (#430).
     let output = run(&["inspect", "cost", path, "--max", "2", "-f", "json"]);
     let envelope = parse_json(&output.stdout);
     assert_eq!(envelope["result"]["findings"].as_array().unwrap().len(), 2);
@@ -4085,9 +3854,6 @@ fn cost_reports_exact_counts_and_selected_findings() {
     let _ = std::fs::remove_dir_all(identical.parent().unwrap());
 }
 
-/// #691: text `inspect cost` reports the canonical element count against
-/// the client budget — scoped as structure, not importability — and each
-/// rule's share ranked by count.
 #[test]
 fn cost_text_reports_the_element_budget_and_rule_shares() {
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
@@ -4107,8 +3873,6 @@ fn cost_text_reports_the_element_budget_and_rule_shares() {
         stdout.contains(&format!("cost: elements={total} budget=32768")),
         "{stdout}"
     );
-    // The payload is already ranked by count, largest first; the text view
-    // renders that order as-is.
     let rules = elements["rules"].as_array().unwrap();
     assert!(
         rules
@@ -4118,7 +3882,6 @@ fn cost_text_reports_the_element_budget_and_rule_shares() {
     );
     let mut offset = 0;
     for rule in rules {
-        // Each share renders `share: rule=<name> index=<i> elements=<n>` (#722).
         let needle = format!(
             "share: rule={} index={} elements={}",
             rule["name"].as_str().unwrap(),
@@ -4130,7 +3893,6 @@ fn cost_text_reports_the_element_budget_and_rule_shares() {
             .map(|found| offset + found + needle.len())
             .expect("shares render in payload order");
     }
-    // Each rule's printed location equals the span `inspect rules` reports.
     for rule in rules {
         let span = &rule["span"];
         let location = format!(
@@ -4147,15 +3909,8 @@ fn cost_text_reports_the_element_budget_and_rule_shares() {
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
 
-/// #790 (ADR-0030 decision 3): a failed element count reports unavailable
-/// with its reason and the known client budget — never `0 element(s) of the
-/// 0-element budget` — and failed emission reports `emitted bytes:
-/// unavailable`, never `0`; a program whose count succeeds reports the real
-/// total and emitted size.
 #[test]
 fn cost_reports_unavailable_element_count_with_budget_and_reason() {
-    // A stray `End;` is preserved as an opaque `rawWorkshopAction`, so the
-    // program loads but the emitter and the element counter cannot model it.
     let failing = temp_file(
         "opaque.ws",
         "variables {\n    global:\n        0: x\n}\nrule (\"test\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Wait(1);\n        End;\n    }\n}\n",
@@ -4208,8 +3963,6 @@ fn cost_reports_unavailable_element_count_with_budget_and_reason() {
         "{result}"
     );
 
-    // The succeeding path keeps reporting the real total, the same budget,
-    // and a real emitted size.
     let ok = temp_file("ok.ws", &corpus_workshop("synthetic/basic-rule"));
     let ok = ok.to_str().unwrap();
     let json = run(&["inspect", "cost", ok, "-f", "json"]);
@@ -4226,13 +3979,8 @@ fn cost_reports_unavailable_element_count_with_budget_and_reason() {
     let _ = std::fs::remove_dir_all(Path::new(ok).parent().unwrap());
 }
 
-/// The default `inspect cost` view keeps the 5 largest rules — payload
-/// order is the ranking, so the cap keeps the head of it — and
-/// reports the cut through `elementCount.truncation.rules`.
 #[test]
 fn cost_rule_shares_rank_and_cap_at_five_by_default() {
-    // 25 rules with strictly increasing action counts give every rule a
-    // distinct element share.
     let mut source = String::from("variables {\n    global:\n        0: g\n}\n\n");
     for index in 0..25 {
         let actions = "        Set Global Variable(g, 0);\n".repeat(index + 1);
@@ -4243,7 +3991,6 @@ fn cost_rule_shares_rank_and_cap_at_five_by_default() {
     let path = temp_file("many-rules.ws", &source);
     let path = path.to_str().unwrap();
 
-    // The expected ranking is workshop-rs' own report, not the CLI output.
     let catalog = workshop_rs::catalog::Catalog::builtin_ref().expect("catalog");
     let locale = workshop_rs::catalog::Locale::new("en-US");
     let program = workshop_rs::parser::parse_with_context(&source, catalog, &locale, catalog)
@@ -4291,17 +4038,11 @@ fn cost_rule_shares_rank_and_cap_at_five_by_default() {
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
 
-/// #724: `inspect cost --rule` reports one rule's element-cost breakdown.
-/// The `byNode` own-cost shares sum to the rule's `count`, and each
-/// `Costliest statements` entry is a direct child ranked by recursive
-/// `count` with the same span `inspect rules --content` reports.
 #[test]
 fn cost_rule_drilldown_reconciles_to_the_rule_total() {
     let path = temp_file("drill.ws", &corpus_workshop("real-world/overpy-cake"));
     let path = path.to_str().unwrap();
 
-    // The whole-program view names the rule and its total; the rule span
-    // equals the one `inspect rules` reports for it.
     let whole = run(&["inspect", "cost", path, "-f", "json"]);
     assert!(whole.status.success(), "{}", command_result(&whole));
     let whole = parse_json(&whole.stdout);
@@ -4329,8 +4070,6 @@ fn cost_rule_drilldown_reconciles_to_the_rule_total() {
         "the rule share's span equals `inspect rules`' span (#722)"
     );
 
-    // The drill-down's own-cost shares sum to the rule's total and its
-    // statements are the direct children ranked by recursive count.
     let drill = run(&[
         "inspect", "cost", path, "--rule", "cake", "--all", "-f", "json",
     ]);
@@ -4356,8 +4095,6 @@ fn cost_rule_drilldown_reconciles_to_the_rule_total() {
             .all(|w| w[0]["count"].as_u64().unwrap() >= w[1]["count"].as_u64().unwrap()),
         "statements rank by recursive count: {statements:?}"
     );
-    // Each statement's span resolves to a real source location inside the
-    // rule's span — the drill-down surfaces the retained spans (#722/#724).
     let rule_span = &drill["rule"]["span"];
     let (r_start, r_end) = (
         rule_span["start"]["line"].as_u64().unwrap(),
@@ -4376,7 +4113,6 @@ fn cost_rule_drilldown_reconciles_to_the_rule_total() {
         );
     }
 
-    // An unknown rule name is a structured `invalid-selection` usage error.
     let bad = run(&[
         "inspect",
         "cost",
@@ -4393,15 +4129,8 @@ fn cost_rule_drilldown_reconciles_to_the_rule_total() {
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
 
-/// #788: `analyze`, `inspect cost` and `lint` serve the same facts for one
-/// input — every declared rule (disabled included) counts toward the program
-/// inventory, and the finding set comes from the one configured semantic
-/// service, so the totals agree on every surface.
 #[test]
 fn analyze_lint_and_cost_report_the_same_rule_and_finding_totals() {
-    // A disabled rule is the case that split the counters: it belongs to the
-    // program inventory `analyze`/`inspect cost` report and to
-    // `elementCount.rules`, but generates no actions.
     let path = temp_file(
         "mixed.txt",
         "rule (\"live one\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Wait(1, Ignore Condition);\n    }\n}\n\ndisabled rule (\"disabled one\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Wait(0.016, Ignore Condition);\n    }\n}\n\nrule (\"waitless\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Global.A = 0;\n        While(Global.A < 10);\n            Global.A += 1;\n        End;\n    }\n}\n",
@@ -4418,7 +4147,6 @@ fn analyze_lint_and_cost_report_the_same_rule_and_finding_totals() {
     assert!(lint.status.success(), "{}", command_result(&lint));
     let lint = parse_json(&lint.stdout);
 
-    // Rule totals: three declared rules on every surface that reports them.
     let rules = analyze["result"]["program"]["rules"].as_u64().unwrap();
     assert_eq!(rules, 3, "fixture declares three rules");
     assert_eq!(
@@ -4434,16 +4162,11 @@ fn analyze_lint_and_cost_report_the_same_rule_and_finding_totals() {
         rules,
         "elementCount.rules enumerates the same declared rules"
     );
-    // `lint`'s verdict names the same inventory rather than its own
-    // lint-rule count.
     let fix = run(&["lint", path, "--fix"]);
     assert!(fix.status.success(), "{}", command_result(&fix));
     let stdout = String::from_utf8_lossy(&fix.stdout);
     assert!(stdout.contains("program: files=1 rules=3"), "{stdout}");
 
-    // Finding totals: one `while-without-wait` info finding — lint's whole
-    // set, cost's whole set, and analyze's risk subset all report it with
-    // the same code and severity.
     let lint_total = lint["result"]["counts"]["findings"]["total"]
         .as_u64()
         .unwrap();
@@ -4489,7 +4212,6 @@ fn inspect_names_the_detail_query_commands() {
             "{pointer}: {stdout}"
         );
     }
-    // The program inventory leads; the detail commands close (#446).
     assert!(
         stdout.find("summary:").unwrap() < stdout.find("next:").unwrap(),
         "{stdout}"
@@ -4499,10 +4221,6 @@ fn inspect_names_the_detail_query_commands() {
 
 #[test]
 fn inspect_names_unnamed_rules_by_index() {
-    // An unnamed rule prints its canonical `#N` address (ADR-0035) — the
-    // spelling `cfg`/`--rule` accepts — instead of an indistinguishable
-    // `<unnamed>` (#446, real-world rule ("") blocks such as
-    // overpy-pixelart).
     let path = temp_file(
         "unnamed.ws",
         "rule (\"\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Wait(1);\n    }\n}\n",
@@ -4516,8 +4234,6 @@ fn inspect_names_unnamed_rules_by_index() {
 
 #[test]
 fn rename_is_an_ordinary_unknown_subcommand() {
-    // #780: semantic rename is removed from the CLI — `rename` parses as an
-    // unknown subcommand, the same usage error any other misspelling gives.
     let output = run(&["rename", "score", "total"]);
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty(), "usage errors write stderr only");
@@ -4527,8 +4243,6 @@ fn rename_is_an_ordinary_unknown_subcommand() {
 
 #[test]
 fn inspect_overview_and_cfg_bound_large_detail() {
-    // A program larger than one screen: 13 rules, one of them a wide graph.
-    // Text output stays bounded and names the complete-output path (#446).
     let mut source = String::new();
     for i in 0..13 {
         let mut branches = String::new();
@@ -4589,9 +4303,6 @@ fn agent_install_mcp_configures_a_project_whose_server_answers_mcp() {
     assert!(install(&["--mcp", "claude"]).status.success());
     assert!(project.join(".agents/skills/wright/SKILL.md").is_file());
 
-    // Start the configured server as the harness would: the entry's command
-    // and args with the harness's project-root expansion applied, from a
-    // working directory that is not the project.
     let config: serde_json::Value = serde_json::from_slice(&first).unwrap();
     let entry = &config["mcpServers"]["wright"];
     assert_eq!(entry["command"], "wright");
@@ -4647,8 +4358,6 @@ fn agent_install_mcp_configures_a_project_whose_server_answers_mcp() {
     drop(stdin);
     let _ = child.wait();
 
-    // Hand removal (delete the `wright` entry) is the documented removal; a
-    // differing entry is then refused without --force.
     let mut config = config;
     config["mcpServers"]["wright"]["command"] = "other".into();
     std::fs::write(project.join(".mcp.json"), config.to_string()).unwrap();
@@ -4670,9 +4379,6 @@ fn agent_install_mcp_configures_a_project_whose_server_answers_mcp() {
     let _ = std::fs::remove_dir_all(&project);
     let _ = std::fs::remove_dir_all(&elsewhere);
 }
-
-// The command is the agent contract's `lookup` operation on argv: vocabulary
-// answers need no input and never load a project.
 
 #[test]
 fn lookup_help_carries_the_agent_guidance() {
@@ -4720,8 +4426,6 @@ fn lookup_json_matches_the_agent_result() {
 
 #[test]
 fn lookup_json_carries_callable_returns_and_variadic() {
-    // #781/#798: a value entry's `callable` names the owner-declared
-    // return type, and `array`'s repeats its last parameter.
     let output = run(&["lookup", "distance", "-f", "json"]);
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     let result = parse_json(&output.stdout);
@@ -4765,9 +4469,6 @@ fn lookup_within_rejects_an_unknown_scope() {
 
 #[test]
 fn lookup_rejects_an_out_of_range_limit() {
-    // #783: `--limit` outside the contract's 1..=10 is a
-    // `malformed-request` refusal on the JSON surface, not a silent clamp;
-    // the boundary `--limit 10` still answers.
     for limit in ["0", "11"] {
         let output = run(&["lookup", "wait", "--limit", limit, "-f", "json"]);
         assert_eq!(output.status.code(), Some(1), "--limit {limit}: {output:?}");
@@ -4780,10 +4481,6 @@ fn lookup_rejects_an_out_of_range_limit() {
 
 #[test]
 fn lookup_never_reads_stdin() {
-    // `lookup` takes no input: a stdin that never reaches EOF (a held-open
-    // pipe, like a terminal's) must not block the command — the session's
-    // warm load resolving the default `InputSpec::Stdin` would read stdin
-    // to EOF before the lookup ever runs.
     let mut child = Command::new(wright())
         .args(["lookup", "create hud text"])
         .stdin(Stdio::piped())
@@ -4810,8 +4507,6 @@ fn lookup_never_reads_stdin() {
 
 #[test]
 fn lookup_names_opy_rs_when_the_provider_cannot_answer() {
-    // A provider that cannot run never produces a Wright-side guess: the
-    // result is the explicit `unavailable` payload naming the owner.
     let output = run(&[
         "lookup",
         "--language",
@@ -4831,8 +4526,6 @@ fn lookup_names_opy_rs_when_the_provider_cannot_answer() {
 
 #[test]
 fn check_text_points_unknown_names_at_lookup() {
-    // ADR-0021 decision 6, in record form (#793): a rejected name closes
-    // the report with a `next:` follow-up pointing at the lookup surface.
     let path = temp_file("lookup-hint.txt", MIXED_CHECK_SOURCE);
     let output = run(&[
         "check",
@@ -4855,9 +4548,6 @@ fn check_text_points_unknown_names_at_lookup() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-/// #789: owner `kind` phrases carry spaces (`"enum member"`), but the
-/// diagnostic code is a single kebab-case token on every surface — the
-/// `diagnostic:` record, the JSON envelope, and the GitHub annotation title.
 #[test]
 fn check_unknown_kind_code_is_kebab_case_on_every_surface() {
     const SOURCE: &str = "rule (\"r\")\n{\n    event\n    {\n        Ongoing - Global;\n    }\n    actions\n    {\n        Set Global Variable(A, Map(Not A Real Map));\n    }\n}\n";
@@ -4900,10 +4590,6 @@ fn check_unknown_kind_code_is_kebab_case_on_every_surface() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-/// wright#753: a rejected value in a non-default Workshop locale names its
-/// file and line, and the hint carries the locale `lookup` needs to resolve it.
-/// `无需装弹: 禁用` stays rejected across workshop-rs versions; the
-/// secondary-fire key accepts `禁用` starting with workshop-rs 1.16.9.
 #[test]
 fn check_text_locates_unknown_setting_value_and_names_the_locale() {
     let path = temp_file(
@@ -4935,11 +4621,6 @@ fn check_text_locates_unknown_setting_value_and_names_the_locale() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-/// #692: `lookup` defaults to the Workshop vocabulary, so an OPY rejected
-/// name must point at `--language opy`. The provider is a staged LPP script
-/// whose `lpp/check` returns the unknown-action diagnostic an OPY check
-/// reports — the driver stamps its `source` origin `opy` (#638), and the
-/// hint selects on that origin.
 #[cfg(unix)]
 #[test]
 fn check_text_points_opy_unknown_names_at_the_opy_vocabulary() {
@@ -4999,9 +4680,6 @@ for line in sys.stdin:
 
 #[test]
 fn check_text_skips_the_lookup_hint_when_no_name_was_rejected() {
-    // `unknown-language` fires when the input holds no Workshop language
-    // markers at all — detection rejected no name, so lookup has nothing
-    // to resolve and the pointer must not appear.
     let path = temp_file("lookup-hint-none.txt", "0.11.0\n");
     let output = run(&[
         "check",
@@ -5026,8 +4704,6 @@ fn check_text_skips_the_lookup_hint_when_no_name_was_rejected() {
 
 #[test]
 fn check_and_compile_json_keep_their_envelope_after_unknown_names() {
-    // The hint lives only in text presentation: JSON mode's envelope and
-    // stderr are untouched for the same rejected-name input.
     let path = temp_file("lookup-hint-json.txt", MIXED_CHECK_SOURCE);
     for command in ["check", "compile"] {
         let output = run(&[command, path.to_str().unwrap(), "-f", "json"]);

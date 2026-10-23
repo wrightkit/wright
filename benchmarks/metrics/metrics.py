@@ -58,20 +58,13 @@ TOKEN_BYTES = 4
 SIZE_REL_BAND = 0.15
 SIZE_ABS_BAND = 30.0
 LATENCY_REL_BAND = 0.50
-# Median latency under ~1 ms is timer-resolution noise; the relative band
-# applies only once the absolute delta clears this floor.
 LATENCY_ABS_BAND = 1.0
-# A baseline recorded on another host differs by a uniform speed factor, so
-# `check` bands each metric against `baseline * median(run/baseline)`. Below
-# MIN_LATENCY_PAIRS comparable pairs that factor is untrusted.
 MIN_LATENCY_PAIRS = 10
 REQUEST_TIMEOUT_S = 180.0
 
 METRICS_DIR = Path(__file__).resolve().parent
 CACHE_DIR = METRICS_DIR / ".cache"
 
-# Mutation operations (validateEditTransaction and the provider* ops)
-# are absent: they need caller-supplied transactions and are not measured.
 AGENT_OPS = [
     "capabilities",
     "targetMetadata",
@@ -102,7 +95,6 @@ BLOCKING_CHANGES = {"removed-from-run", "broken-in-run", "removed"}
 
 
 class ServeSession:
-    """One `wright serve --transport stdio` process with line requests."""
 
     def __init__(self, wright: str, entry: Path, kind: str, cwd: Path):
         self.process = subprocess.Popen(
@@ -134,7 +126,6 @@ class ServeSession:
         return json.loads(line)
 
     def request_timed(self, op: str, **params) -> tuple[str, float]:
-        """One request; returns (raw line, wall ms)."""
         self._next_id += 1
         body = {"id": self._next_id, "op": op, "contract": "wright-agent/v1"}
         body.update(params)
@@ -176,7 +167,6 @@ def load_corpus(manifest: Path) -> dict:
 
 
 def fetch_project(project: dict) -> Path:
-    """Return the project directory, cloning pinned repositories if needed."""
     if "repository" not in project:
         directory = (METRICS_DIR / project["path"]).resolve()
         if not directory.is_dir():
@@ -250,7 +240,6 @@ _LISTING_KEYS = ("symbols", "rules", "persistentObjects", "findings", "items")
 
 
 def _snapshot_listing(result):
-    """The id list a `{key: [...], snapshot}` listing carries (#595)."""
     if not isinstance(result, dict) or "snapshot" not in result:
         return None
     lists = [key for key, value in result.items() if isinstance(value, list)]
@@ -258,7 +247,6 @@ def _snapshot_listing(result):
 
 
 def _listing_measurement(result):
-    """Stamped listings measure in the legacy `items` vocabulary (#595)."""
     listed = _snapshot_listing(result)
     if listed is None:
         return None
@@ -273,7 +261,6 @@ def _listing_measurement(result):
 
 
 def agent_counts(op: str, result) -> dict:
-    """Result-shape counts for one agent operation's `result` payload."""
     if not isinstance(result, (list, dict)):
         return {}
     if op in _LISTING_KEYS[:4] and (measured := _listing_measurement(result)) is not None:
@@ -324,8 +311,6 @@ def agent_counts(op: str, result) -> dict:
 
 
 def envelope_failure(envelope) -> str | None:
-    """Code of the first diagnostic when a CLI result envelope reports
-    ``ok: false`` without a result (a refusal, not a completed verdict)."""
     if not isinstance(envelope, dict) or envelope.get("ok") is not False:
         return None
     if envelope.get("result") is not None and envelope.get("exit") == 1:
@@ -337,7 +322,6 @@ def envelope_failure(envelope) -> str | None:
 
 
 def cli_counts(command: str, envelope: dict) -> dict:
-    """Result-shape counts for one CLI command's JSON envelope."""
     if not isinstance(envelope, dict):
         return {}
     counts: dict[str, float] = {"diagnostics": len(envelope.get("diagnostics") or [])}
@@ -373,15 +357,10 @@ def run_agent_ops(
 ) -> dict:
     metrics: dict[str, dict] = {}
     scratch = tempfile.TemporaryDirectory(prefix="wright-metrics-")
-    # `compile` writes the program to a file (ADR-0025); keep it out of the
-    # measured project and replace it on every repeat.
     targets: dict[str, dict] = {
         "compile": {"output": str(Path(scratch.name) / "compiled.ow"), "force": True}
     }
     with scratch, ServeSession(wright, entry, kind, project_dir) as session:
-        # Warm-up is not optional: the first envelope drains load-time
-        # diagnostics, so a repeats=1 run without it measures a different
-        # shape than a repeats=N median.
         try:
             session.request("check")
         except (queue.Empty, TimeoutError):
@@ -418,7 +397,6 @@ def run_agent_ops(
                     }
                     continue
                 metrics[key] = metric_record(lines_bytes, latencies, counts)
-                # Numeric addresses echo the listing's generation (#595).
                 snap = last_result.get("snapshot") if isinstance(last_result, dict) else None
                 if op == "symbols":
                     sid = _first_id(last_result)
@@ -436,8 +414,6 @@ def run_agent_ops(
 
 
 def _first_id(items) -> int | None:
-    """Numeric id of the first listed item — unambiguous within the session
-    where a name may resolve to several rules/symbols (`ambiguous-rule`)."""
     if isinstance(items, dict):
         items = _snapshot_listing(items) or items.get("items", [])
     for item in items if isinstance(items, list) else []:
@@ -448,7 +424,6 @@ def _first_id(items) -> int | None:
 
 
 def unique_name(items) -> str | None:
-    """Choose an address that stays unambiguous across the complete query."""
     if isinstance(items, dict):
         items = _snapshot_listing(items) or items.get("items", [])
     names = [item.get("name") for item in items if isinstance(item, dict)] if isinstance(items, list) else []
@@ -457,7 +432,6 @@ def unique_name(items) -> str | None:
 
 
 def default_counts(payload) -> dict:
-    """Count structured default lists and the complete totals they report."""
     if isinstance(payload, list):
         return {"items": len(payload)}
     if not isinstance(payload, dict):
@@ -471,14 +445,12 @@ def default_counts(payload) -> dict:
         elif isinstance(value, dict):
             counts.update({f"{key}.{k}": v for k, v in default_counts(value).items()})
         elif isinstance(value, (int, float)) and not isinstance(value, bool):
-            if key != "snapshot":  # generation stamp is metadata, not content
+            if key != "snapshot":
                 counts[key] = value
     return counts
 
 
 def discover_addresses(wright: str, entry: Path, kind: str, project_dir: Path) -> dict:
-    """Globally unique rule/symbol names, keyed by the `inspect` subcommand
-    (`cfg`, `refs`) that addresses them."""
     addresses = {}
     with ServeSession(wright, entry, kind, project_dir) as session:
         for op, address in (("rules", "cfg"), ("symbols", "refs")):
@@ -494,10 +466,6 @@ def discover_addresses(wright: str, entry: Path, kind: str, project_dir: Path) -
 def run_cli_commands(
     wright: str, entry: Path, kind: str, project_dir: Path, repeats: int, jobs: int = 1
 ) -> dict:
-    """Measure default JSON and text forms; address refs/cfg through queries.
-
-    Each command/form is an independent CLI invocation, so ``jobs`` > 1 runs
-    them concurrently; the result order does not depend on ``jobs``."""
     scratch = tempfile.TemporaryDirectory(prefix="wright-metrics-")
     addresses = discover_addresses(wright, entry, kind, project_dir)
 
@@ -542,11 +510,6 @@ def run_cli_commands(
 
 
 def accumulate_scenario(steps: list[list[str]], execute) -> dict:
-    """Cumulative size of one scenario's call sequence.
-
-    ``execute(step)`` returns ``(output bytes, failure or None)``. Any failing
-    step makes the whole scenario an ``error``: a partial sequence is not a
-    measurement."""
     total = 0
     for index, step in enumerate(steps, 1):
         size, failure = execute(step)
@@ -559,8 +522,6 @@ def accumulate_scenario(steps: list[list[str]], execute) -> dict:
 def run_scenarios(
     wright: str, entry: Path, kind: str, project_dir: Path, scenarios: list[dict], jobs: int = 1
 ) -> dict:
-    """`scenario:<id>` metrics: each recommended call sequence in its default
-    text form, run as separate CLI invocations."""
     addresses = discover_addresses(wright, entry, kind, project_dir)
     placeholders = {"{symbol}": addresses.get("refs"), "{rule}": addresses.get("cfg")}
 
@@ -585,8 +546,6 @@ def run_scenarios(
 
 
 def scenario_ratios(projects: dict, scenarios: list[dict], corpus_projects: list[dict]) -> dict:
-    """Per scenario: the largest measured project and its token ratio to each
-    seed project that ran the same scenario."""
     ratios: dict[str, dict] = {}
     for scenario in scenarios:
         key = f"scenario:{scenario['id']}"
@@ -625,7 +584,6 @@ def wright_version(wright: str) -> str:
 
 
 def _opy_provider_store() -> Path:
-    """Mirror wright-driver's `default_store_dir` resolution (read-only)."""
     override = os.environ.get("WRIGHT_PROVIDER_DATA_DIR")
     if override:
         return Path(override) / "providers" / "opy"
@@ -639,7 +597,6 @@ def _opy_provider_store() -> Path:
 
 
 def provider_version() -> str | None:
-    """Active OPY provider version, resolved like wright resolves it."""
     try:
         store = _opy_provider_store()
         active = store / "active"
@@ -653,7 +610,6 @@ def provider_version() -> str | None:
 
 
 def strip_latency(document: dict) -> dict:
-    """Copy of a metrics document without any ``latencyMs`` field."""
     stripped = json.loads(json.dumps(document))
     for project in (stripped.get("projects") or {}).values():
         for record in (project.get("metrics") or {}).values():
@@ -693,8 +649,6 @@ def run_metrics(
             sc for sc in corpus.get("scenarios", []) if sc["id"] in project.get("scenarios", [])
         ]
         cli_runs = repeats if cli_repeats is None else cli_repeats
-        # Parallel surfaces overlap and blur latency, so only a run that
-        # discards latency may request jobs > 1.
         with ThreadPoolExecutor(max_workers=3 if jobs > 1 else 1) as pool:
             surfaces = [
                 pool.submit(run_agent_ops, wright, entry, project["kind"], directory, repeats),
@@ -738,12 +692,6 @@ MERGE_IDENTITY_KEYS = (
 
 
 def merge_runs(documents: list[dict], corpus: dict) -> dict:
-    """One run document from per-project shard runs of the same build.
-
-    Shards must agree on every identity key and must not overlap; scenario
-    ratios are recomputed over the merged projects so they never depend on how
-    the corpus was partitioned.
-    """
     if not documents:
         raise ValueError("no shard runs to merge")
     first = documents[0]
@@ -780,8 +728,6 @@ def _latency_out_of_band(base: float, current: float) -> bool:
 
 
 def _latency_factor(baseline: dict, current: dict) -> tuple[float, int]:
-    """(median run/baseline latency ratio, pair count): the machine-speed
-    offset between the baseline host and this host."""
     ratios = []
     base_projects = baseline.get("projects") or {}
     run_projects = current.get("projects") or {}
@@ -811,7 +757,6 @@ def _latency_factor(baseline: dict, current: dict) -> tuple[float, int]:
 
 
 def compare_metrics(baseline: dict, current: dict) -> tuple[list[dict], list[str]]:
-    """(violations, warnings): every out-of-band metric and structural change."""
     violations: list[dict] = []
     warnings: list[str] = []
     if baseline.get("corpusVersion") != current.get("corpusVersion"):
@@ -963,8 +908,6 @@ def _compare_metric(
 
 
 def split_changes(violations: list[dict]) -> tuple[list[dict], list[dict]]:
-    """(blocking, drift): drift is every change that is not in BLOCKING_CHANGES."""
-    # Scenario metrics are not yet a gate (#665): every change is drift.
     def blocks(v: dict) -> bool:
         return v["change"] in BLOCKING_CHANGES and not v["metric"].startswith("scenario:")
 

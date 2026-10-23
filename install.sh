@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# Wright installer for Linux and macOS (#108).
-#
-# Installs the standalone `wright` and `wright-lsp` binaries from WrightKit's
-# release distribution. GitHub Releases remains the canonical release record;
-# this thin installer resolves the R2-backed release artifact, verifies its
-# SHA-256 checksum, extracts the two binaries, and smoke-checks the installed
-# version.
-#
 # Usage:
 #   install.sh                   # latest stable release into ~/.local/bin
 #   install.sh --version 0.1.0   # exact version (CI/agents)
@@ -90,8 +82,6 @@ esac
   *)                    fail "unsupported CPU architecture '$(uname -m)' (supported: x86_64, arm64)" ;;
 esac
 
-# Platform -> artifact mapping (must match the release target matrix in
-# docs/release.md).
 case "$OS/$ARCH" in
   linux/x86_64)  TARGET=x86_64-unknown-linux-gnu ;;
   darwin/x86_64) TARGET=x86_64-apple-darwin ;;

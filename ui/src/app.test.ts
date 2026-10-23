@@ -1,24 +1,5 @@
 // @vitest-environment jsdom
 /// <reference types="node" />
-/**
- * The #880 rule-bar coverage — one bar per rule in `rules` order, per-rule
- * open state, the event cell, the disabled name, and the debug element
- * count — plus the #879 page-shell coverage: the spec tokens on `:root`,
- * the title row, the icon toolbar, and the single-column layout, and the
- * #883 session-locale coverage: `origin.locale` on load, the toolbar
- * selector, and the in-place re-resolve a locale change runs.
- *
- * The async-overwrite defect class (#868) — an async read must not
- * overwrite state a newer action produced during its await:
- *
- * - `load()` used to assign `selected = rules[0]` after the per-rule reads
- *   landed, overwriting a rule the user clicked while they were pending
- *   (#829/#863). The test below opens a bar while the reads are still out.
- * - `RuleView`'s name warm used to write `namesReady` unconditionally, so a
- *   superseded warm resolving last could mark a newer rule's body ready
- *   before its own lookups landed (#863). The test below lets the old
- *   rule's lookup resolve after the newer rule's was issued.
- */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import process from 'node:process'
@@ -28,7 +9,6 @@ import App from './App.svelte'
 import type { RuleContent } from './lib/view'
 import type { RuleSummary, ToolRequest, ToolResponse } from './lib/types/generated/wright-agent-v1'
 
-/** The api module the components call; each test installs its own handler. */
 const api = vi.hoisted(() => ({
   handler: null as null | ((request: ToolRequest) => Promise<ToolResponse>),
 }))
@@ -53,7 +33,6 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve }
 }
 
-/** Drain pending promise continuations, then flush Svelte's effects and DOM. */
 async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0))
   flushSync()
@@ -69,8 +48,6 @@ const contentFor = (eventId: string, disabled = false): RuleContent => ({
   actions: [],
 })
 
-// `content` arrives as the schema's loose `{[k:string]: unknown}` shape, so
-// tests build summaries through a record and cast like the loader does.
 const summaryFor = (
   id: number,
   name: string,
@@ -121,8 +98,6 @@ describe('the page shell (#879)', () => {
   it('defines every spec token on :root with its spec value and drops the removed tokens', () => {
     const css = readFileSync(join(process.cwd(), 'src', 'app.css'), 'utf8')
     const root = css.match(/:root\s*\{([^}]*)\}/)?.[1] ?? ''
-    // docs/ui/design.md § Tokens, including the "white control" row
-    // (`--white`/`--on-white` carry `#f4f5f8` on `#111`).
     const tokens: Record<string, string> = {
       '--bar': 'rgb(44 48 68 / 0.72)',
       '--bar-hover': 'rgb(44 48 68 / 0.86)',
@@ -189,17 +164,12 @@ describe('the page shell (#879)', () => {
     mountApp()
     await settle()
 
-    // Title row: "Workshop" large italic, then the entry file's base name.
     expect(host.querySelector('.title-row h1')?.textContent).toBe('Workshop')
     expect(host.querySelector('.file-name')?.textContent).toBe('demo-project.ws')
 
     const toolbar = host.querySelector('.toolbar')!
     expect(toolbar.querySelector('.rule-count')?.textContent?.trim()).toBe('Rules (2)')
 
-    // One square icon button per toolbar action, each with a `title`
-    // tooltip and an inline SVG: Diagnostics, the findings toggle (#922),
-    // and Simulation on the left; Variables, the pending-changes view
-    // button, and a disabled Add rule on the right.
     const squares = [...toolbar.querySelectorAll<HTMLButtonElement>('.sq')]
     expect(squares).toHaveLength(6)
     for (const button of squares) {
@@ -212,7 +182,6 @@ describe('the page shell (#879)', () => {
     expect(simulation.title).toBe('Simulation')
     expect(variables.title).toBe('Variables')
     expect(pending.title).toBe('Pending changes')
-    // The count badge only renders once edits are staged.
     expect(pending.querySelector('.sq-badge')).toBeNull()
     expect(addRule.disabled).toBe(true)
     expect(addRule.title).toContain('rule-level edits are not available')
@@ -220,8 +189,6 @@ describe('the page shell (#879)', () => {
     expect(toolbar.querySelector<HTMLInputElement>('input.filter')?.type).toBe('search')
     expect(toolbar.querySelectorAll('.sep')).toHaveLength(2)
 
-    // One column at any width: no sidebar grid and no <nav> pane; the rule
-    // list sits under the toolbar inside the single column.
     expect(host.querySelector('.layout')).toBeNull()
     expect(host.querySelector('nav')).toBeNull()
     expect(host.querySelector('.page > .rule-list')).not.toBeNull()
@@ -229,7 +196,6 @@ describe('the page shell (#879)', () => {
 })
 
 describe('the rule bars (#880)', () => {
-  /** A `rules`+`project`+`lookup` handler over the given summaries. */
   const handlerFor =
     (summaries: RuleSummary[]) =>
     (request: ToolRequest): Promise<ToolResponse> => {
@@ -261,8 +227,6 @@ describe('the rule bars (#880)', () => {
       'second',
       'third',
     ])
-    // Every bar starts closed; its chevron is the white square button
-    // outside the bar on the left.
     expect(openBodies()).toHaveLength(0)
     for (const bar of bars) {
       expect(bar.getAttribute('aria-expanded')).toBe('false')
@@ -283,7 +247,6 @@ describe('the rule bars (#880)', () => {
     mountApp()
     await settle()
 
-    // Any number open at once: bar click, then chevron click.
     click(barOf(1))
     click(chevOf(3))
     click(barOf(2))
@@ -293,7 +256,6 @@ describe('the rule bars (#880)', () => {
     expect(barOf(1).getAttribute('aria-expanded')).toBe('true')
     expect(slot(2)!.querySelector('.chev')!.classList.contains('open')).toBe(true)
 
-    // Closing one leaves the others open — and its chevron rotates back.
     click(chevOf(1))
     await settle()
     expect([isOpen(1), isOpen(2), isOpen(3)]).toEqual([false, true, true])
@@ -317,13 +279,10 @@ describe('the rule bars (#880)', () => {
     filter.dispatchEvent(new Event('input', { bubbles: true }))
     flushSync()
 
-    // Case-insensitive name match: 'spawn handler' is hidden, 'setup mode'
-    // stays and stays open.
     expect(slot(2)).toBeNull()
     expect(isOpen(1)).toBe(true)
     expect(host.querySelectorAll('.rule-slot')).toHaveLength(1)
 
-    // Clearing the filter restores the hidden bar with its open state intact.
     filter.value = ''
     filter.dispatchEvent(new Event('input', { bubbles: true }))
     flushSync()
@@ -374,7 +333,6 @@ describe('the rule bars (#880)', () => {
     expect(eventCell(1)).toBe('Ongoing - Global')
     expect(eventCell(2)).toBe('worker')
     expect(eventCell(3)).toBe('oddEvent')
-    // A subroutine id is not a catalog identity — it never hits `lookup`.
     expect(queries).not.toContain('subroutine:worker')
   })
 
@@ -395,7 +353,6 @@ describe('the rule bars (#880)', () => {
             elementCount: {
               total: 42,
               budget: 10000,
-              // Ranked by count, not `rules` order — `index` names the rule.
               rules: [
                 { index: 2, name: 'second', count: 30 },
                 { index: 1, name: 'first', count: 12 },
@@ -412,7 +369,6 @@ describe('the rule bars (#880)', () => {
       return Promise.resolve({ result: {} } as ToolResponse)
     }
 
-    // Without `?debug` the count is absent from the DOM and never fetched.
     mountApp()
     await settle()
     expect(host.querySelectorAll('.bar-count, .rule-bar [data-debug]')).toHaveLength(0)
@@ -431,7 +387,6 @@ describe('the rule bars (#880)', () => {
 })
 
 describe('the session locale (#883)', () => {
-  /** A handler whose `lookup` names show the request's own locale. */
   const localeHandler =
     (
       summaries: RuleSummary[],
@@ -461,13 +416,9 @@ describe('the session locale (#883)', () => {
 
   it('takes the initial locale from origin.locale and falls back to en-US', async () => {
     const summaries = [summaryFor(1, 'first', contentFor('ev.a'), 'ev.a')]
-    // The service spells locales lowercase (`zh-cn`, `en-us`).
     const locales = ['en-us', 'de-de', 'zh-cn']
     let requests: { op: string; query?: string; locale?: string | null }[] = []
 
-    // A zh-CN project opens in zh-CN: every `lookup` carries it, the
-    // selector shows each catalog locale in its own name, and the chrome
-    // strings follow.
     api.handler = localeHandler(
       summaries,
       { origin: { kind: 'workshop', locale: 'zh-cn' }, sourceFiles: ['demo.ws'] },
@@ -495,9 +446,6 @@ describe('the session locale (#883)', () => {
     document.body.innerHTML = ''
     requests = []
 
-    // A project that names no origin.locale falls back to en-US — the
-    // locale is never guessed from file text. The selector adopts the
-    // catalog's spelling (`en-us`) so it offers exactly one option.
     api.handler = localeHandler(
       summaries,
       { origin: { kind: 'workshop' }, sourceFiles: ['demo.ws'] },
@@ -529,7 +477,6 @@ describe('the session locale (#883)', () => {
 
     mountApp()
     await settle()
-    // An open rule body and a set filter: neither may change on a switch.
     click(barOf(1))
     await settle()
     const filter = host.querySelector<HTMLInputElement>('input.filter')!
@@ -547,8 +494,6 @@ describe('the session locale (#883)', () => {
     select.dispatchEvent(new Event('change', { bubbles: true }))
     await settle()
 
-    // No `rules` request went out: the listing, open bars, and the filter
-    // are untouched while every `lookup` carries the new locale.
     expect(requests.filter((request) => request.op === 'rules')).toHaveLength(0)
     const lookups = requests.filter((request) => request.op === 'lookup')
     expect(lookups.length).toBeGreaterThan(0)
@@ -556,8 +501,6 @@ describe('the session locale (#883)', () => {
     expect(filter.value).toBe('fir')
     expect(isOpen(1)).toBe(true)
 
-    // The bar's event cell, the open body's event row, and the chrome all
-    // re-resolved in place.
     expect(barOf(1).querySelector('.bar-event')?.textContent).toBe('Name ev.a@zh-cn')
     const rows = [...slot(1)!.querySelectorAll('.event-row')]
     expect(rows[0]?.querySelector('.event-label')?.textContent).toBe('事件')
@@ -573,7 +516,6 @@ describe('async results must not overwrite newer state', () => {
     const reads = new Map<number, Deferred<ToolResponse>>()
     api.handler = (request) => {
       if (request.op === 'lookup') {
-        // Name lookups for an open rule resolve on their own.
         return Promise.resolve({
           result: { language: 'workshop', owner: 'workshop-rs', entries: [] },
         } as ToolResponse)
@@ -587,7 +529,6 @@ describe('async results must not overwrite newer state', () => {
         return read.promise
       }
       if (request.content === true) {
-        // Bulk `rules?all&content` refuses, forcing the per-rule path.
         return Promise.resolve({
           error: { code: 'rule-content-unavailable', message: 'opaque node' },
         } as ToolResponse)
@@ -597,10 +538,8 @@ describe('async results must not overwrite newer state', () => {
 
     mountApp()
     await settle()
-    // The bars are already clickable while the per-rule reads are still out.
     expect(reads.size).toBe(2)
 
-    // The user opens rule 2 before either read lands.
     click(barOf(2))
     expect(isOpen(2)).toBe(true)
     expect(isOpen(1)).toBe(false)
@@ -639,7 +578,6 @@ describe('async results must not overwrite newer state', () => {
     mountApp()
     await settle()
 
-    // The user opens rule 1, then rule 2; both bodies' lookups are out.
     click(barOf(1))
     await settle()
     expect(lookups.has('ev.one')).toBe(true)
@@ -648,16 +586,12 @@ describe('async results must not overwrite newer state', () => {
     expect(lookups.has('ev.two')).toBe(true)
     expect(openBodies()).toHaveLength(2)
 
-    // The older read resolves after the newer one was issued: it must not
-    // mark the newer rule's body ready.
     lookups.get('ev.one')!.resolve(lookupResult('ev.one', 'Event One'))
     await settle()
     expect(slot(1)!.querySelector('.event-row .event-value')?.textContent).toContain('Event One')
     expect(slot(2)!.querySelector('.event-row')).toBeNull()
     expect(slot(2)!.textContent).toContain('Loading rule…')
 
-    // Once the newer rule's own lookups land, its body renders — resolved
-    // names, never the stale read's.
     lookups.get('ev.two')!.resolve(lookupResult('ev.two', 'Event Two'))
     await settle()
     expect(slot(2)!.querySelector('.event-row .event-value')?.textContent).toContain('Event Two')

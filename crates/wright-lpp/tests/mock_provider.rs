@@ -1,13 +1,3 @@
-//! End-to-end LPP client tests against the reference conformance mock
-//! provider from the `language-provider-protocol` repository.
-//!
-//! The mock provider serves the deliberately foreign reference language
-//! `x-demo-lang`, so every assertion below is also evidence that the client
-//! has no source-language-specific protocol logic: the language id is an
-//! opaque key, and a document tagged with an unserved language id is refused
-//! by the provider through the normal `invalidLanguage` error path.
-//!
-
 #![allow(clippy::result_large_err)]
 
 use std::path::{Path, PathBuf};
@@ -87,8 +77,6 @@ fn initializes_and_negotiates_capabilities_with_x_demo_lang() {
     let negotiated = provider.capabilities().expect("negotiated");
     assert_eq!(negotiated.language_ids(), vec![DEMO_LANGUAGE_ID]);
     for capability in Capability::ALL {
-        // Capabilities introduced after the negotiated protocol version are
-        // not advertised on this session.
         if protocol_tuple(capability.since()) > protocol_tuple(&result.protocol_version) {
             continue;
         }
@@ -265,7 +253,6 @@ fn symbols_definition_and_references_resolve_across_the_document() {
         "declaration order, provider-defined kinds"
     );
 
-    // Position inside the `double` op name (0-based line 4, char 6).
     let position = Position {
         line: 4,
         character: 6,

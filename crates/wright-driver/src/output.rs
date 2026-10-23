@@ -1,5 +1,3 @@
-//! Where `compile` delivers the program (ADR-0025): a file, never the result.
-
 use std::path::{Path, PathBuf};
 
 use crate::diag::{Diagnostic, Stage};
@@ -36,7 +34,6 @@ pub struct CompileWrite<'a> {
     pub to: Option<String>,
 }
 
-/// Resolve and write the program; returns the displayed destination.
 pub(crate) fn write_program(
     text: &str,
     entry: Option<&Path>,

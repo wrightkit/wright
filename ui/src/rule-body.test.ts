@@ -1,12 +1,5 @@
 // @vitest-environment jsdom
 /// <reference types="node" />
-/**
- * The #881 expanded-rule body (docs/ui/design.md § Main screen item 4 and
- * § Statement text): the event rows, the two statement columns, the
- * indented `--bar` statement rows with hidden `End` markers, the spec's
- * syntax-token colours, the `?debug` line numbers, and the in-place
- * refusal that lets the next rule still open.
- */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import process from 'node:process'
@@ -16,7 +9,6 @@ import App from './App.svelte'
 import type { RuleContent } from './lib/view'
 import type { RuleSummary, ToolRequest, ToolResponse } from './lib/types/generated/wright-agent-v1'
 
-/** The api module the components call; each test installs its own handler. */
 const api = vi.hoisted(() => ({
   handler: null as null | ((request: ToolRequest) => Promise<ToolResponse>),
 }))
@@ -28,7 +20,6 @@ vi.mock('./lib/api', () => ({
   },
 }))
 
-/** Drain pending promise continuations, then flush Svelte's effects and DOM. */
 async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0))
   flushSync()
@@ -55,12 +46,9 @@ const contentFor = (
   actions,
 })
 
-// `content` arrives as the schema's loose `{[k:string]: unknown}` shape, so
-// tests build summaries through a record and cast like the loader does.
 const summaryFor = (id: number, name: string, content?: RuleContent): RuleSummary =>
   ({ id, name, span: null, ...(content ? { content } : {}) }) as unknown as RuleSummary
 
-/** `lookup` names the tests resolve, keyed by identity. */
 const NAMES: Record<string, { kind: string; name: string }[]> = {
   eachPlayer: [{ kind: 'event', name: 'Ongoing - Each Player' }],
   'EventTeam.TEAM_1': [{ kind: 'enumMember', name: 'Team 1' }],
@@ -97,7 +85,6 @@ const lookupResponse = (query: string): ToolResponse =>
     },
   }) as ToolResponse
 
-/** `rules`+`project`+`lookup` over the given summaries (bulk content path). */
 const handlerFor =
   (summaries: RuleSummary[]) =>
   (request: ToolRequest): Promise<ToolResponse> => {
@@ -150,8 +137,6 @@ describe('the statement-text colour table (#881)', () => {
   const css = readFileSync(join(process.cwd(), 'src', 'app.css'), 'utf8')
   const root = css.match(/:root\s*\{([^}]*)\}/)?.[1] ?? ''
 
-  // docs/ui/design.md § Statement text: every spec class resolves through
-  // a `--tok-*` custom property holding its spec colour.
   it.each([
     ['action', '#ffffff'],
     ['value', '#8fd0ff'],
@@ -183,7 +168,6 @@ describe('the statement-text colour table (#881)', () => {
         /\/\*[\s\S]*?\*\//g,
         '',
       )
-      // A colour literal is a 6- or 8-digit hex; `#123` issue refs are not.
       expect(source, file).not.toMatch(/#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{8}\b/)
     }
   })
@@ -210,7 +194,6 @@ describe('the event rows (#881)', () => {
       'Team 1',
       'Ana',
     ])
-    // Each white value cell carries the dropdown caret affordance.
     for (const row of rows) {
       expect(row.querySelector('.event-value svg')).not.toBeNull()
     }
@@ -289,7 +272,6 @@ describe('the statement columns (#881)', () => {
       'Actions (6)',
     ])
 
-    // One --bar row per statement; the two `end` markers render nothing.
     const rows = rowsIn(body, 'actions')
     expect(rows).toHaveLength(6)
     const depthOf = (row: HTMLElement) =>
@@ -298,13 +280,10 @@ describe('the statement columns (#881)', () => {
     expect(body.textContent).not.toContain('End')
     expect(body.querySelector('.disabled-badge')).toBeNull()
 
-    // The disabled statement is struck through at half opacity — the
-    // row carries `.disabled` and no marker badge.
     const disabledRow = rows[4]
     expect(disabledRow.classList.contains('disabled')).toBe(true)
     expect(disabledRow.querySelector('.disabled-badge')).toBeNull()
 
-    // Statement text: `Global.name` and `owner.name` forms, punctuation tokens.
     const last = rows[5].querySelector('.statement-text')!
     expect(last.textContent).toContain('Set Global Variable')
     expect(last.textContent).toContain('Global.score')
@@ -366,7 +345,6 @@ describe('the debug layer (#881)', () => {
       const children = [...row.children]
       const lineNo = row.querySelector('.line-no')!
       expect(lineNo.textContent).toBe('5')
-      // Row start: the line number follows only the selection checkbox.
       expect(children.indexOf(lineNo)).toBe(1)
       expect(row.querySelector('details.debug')).not.toBeNull()
     }
@@ -477,6 +455,162 @@ describe('column selection', () => {
   })
 })
 
+describe('the statement-row context menu (#917)', () => {
+  const actions = [
+    action('wait', [0]),
+    action('if', [true]),
+    action('wait', [1]),
+    action('while', [true]),
+    action('wait', [2]),
+    action('end'),
+    action('else'),
+    action('wait', [3]),
+    action('end'),
+    action('wait', [4]),
+  ]
+  const conditions = [
+    { value: { call: 'isAlive', args: [{ call: 'eventPlayer', args: [] }] } },
+    { value: true },
+    { value: { call: 'isAlive', args: [{ call: 'eventPlayer', args: [] }] } },
+  ]
+
+  async function setup() {
+    const content = contentFor(
+      { id: 'global' },
+      conditions as RuleContent['conditions'],
+      actions,
+    )
+    api.handler = handlerFor([summaryFor(1, 'menu', content)])
+    mountApp()
+    await settle()
+    await openRule(1)
+  }
+
+  const column = (list: 'conditions' | 'actions' = 'actions') =>
+    slot(1)!.querySelector<HTMLElement>(`.col[data-list="${list}"]`)!
+  const rows = (list: 'conditions' | 'actions' = 'actions') =>
+    [...column(list).querySelectorAll<HTMLLIElement>('.statement')]
+  const selected = (list: 'conditions' | 'actions' = 'actions') =>
+    new Map(
+      rows(list).map((row) => [
+        Number(row.getAttribute('data-index')),
+        row.classList.contains('selected'),
+      ]),
+    )
+  const menu = () => document.body.querySelector<HTMLElement>('[role="menu"]')
+  const menuItems = () => [...menu()!.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+  const itemNamed = (label: string) =>
+    menuItems().find((item) => item.textContent === label)!
+
+  const contextmenu = async (row: HTMLElement) => {
+    row.dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }),
+    )
+    await settle()
+  }
+  const choose = async (item: HTMLElement) => {
+    item.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await settle()
+  }
+
+  it('selects every same-call row across nested blocks', async () => {
+    await setup()
+    await contextmenu(rows()[2]!)
+    expect(menu(), 'the menu opened in the top layer').not.toBeNull()
+    await choose(itemNamed('Select same action'))
+    expect(selected()).toEqual(
+      new Map([
+        [0, true],
+        [1, false],
+        [2, true],
+        [3, false],
+        [4, true],
+        [6, false],
+        [7, true],
+        [9, true],
+      ]),
+    )
+    expect(menu(), 'choosing closed the menu').toBeNull()
+  })
+
+  it('selects a block through its End and no row past it', async () => {
+    await setup()
+    await contextmenu(rows()[1]!)
+    await choose(itemNamed('Select block'))
+    expect(selected()).toEqual(
+      new Map([
+        [0, false],
+        [1, true],
+        [2, true],
+        [3, true],
+        [4, true],
+        [6, true],
+        [7, true],
+        [9, false],
+      ]),
+    )
+    expect(column().querySelector('.sel-count')?.textContent).toBe('8 selected')
+  })
+
+  it('selects a nested block without its enclosing block', async () => {
+    await setup()
+    await contextmenu(rows()[3]!)
+    await choose(itemNamed('Select block'))
+    expect(selected()).toEqual(
+      new Map([
+        [0, false],
+        [1, false],
+        [2, false],
+        [3, true],
+        [4, true],
+        [6, false],
+        [7, false],
+        [9, false],
+      ]),
+    )
+    expect(column().querySelector('.sel-count')?.textContent).toBe('3 selected')
+  })
+
+  it('disables Select block on a non-opener', async () => {
+    await setup()
+    await contextmenu(rows()[0]!)
+    const item = itemNamed('Select block')
+    expect(item.getAttribute('aria-disabled'), 'aria-disabled').toBe('true')
+    await choose(item)
+    expect([...selected().values()], 'a disabled item selects nothing').toEqual(
+      rows().map(() => false),
+    )
+    expect(itemNamed('Select same action').getAttribute('aria-disabled')).toBe('false')
+  })
+
+  it('selects same-call conditions and disables Select block on a condition row', async () => {
+    await setup()
+    await contextmenu(rows('conditions')[0]!)
+    await choose(itemNamed('Select same action'))
+    expect(selected('conditions')).toEqual(
+      new Map([
+        [0, true],
+        [1, false],
+        [2, true],
+      ]),
+    )
+
+    await contextmenu(rows('conditions')[0]!)
+    expect(itemNamed('Select block').getAttribute('aria-disabled')).toBe('true')
+  })
+
+  it('renders the menu in the popover style of editor.md § Pickers', async () => {
+    await setup()
+    await contextmenu(rows()[0]!)
+    const pop = menu()!
+    expect(pop.classList.contains('picker-pop'), 'the popover chrome').toBe(true)
+    expect(pop.getAttribute('aria-label'), 'the menu is labelled').toBe('action 1 menu')
+    for (const item of menuItems()) {
+      expect(item.classList.contains('picker-option')).toBe(true)
+    }
+  })
+})
+
 describe('a refused rule (#881)', () => {
   it('renders the refusal code and message in the body while the next rule opens', async () => {
     const good = summaryFor(
@@ -486,7 +620,6 @@ describe('a refused rule (#881)', () => {
     )
     api.handler = (request) => {
       if (request.op === 'rules' && request.all === true && request.content === true) {
-        // The bulk read refuses wholesale, so the page reads per rule.
         return Promise.resolve({
           error: { code: 'rule-content-unavailable', message: 'opaque node' },
         } as ToolResponse)
@@ -519,7 +652,6 @@ describe('a refused rule (#881)', () => {
     expect(refusal.textContent).toContain('rule-content-unavailable')
     expect(refusal.textContent).toContain('opaque node in rule one')
 
-    // The following rule still opens and renders its statement rows.
     const rows = rowsIn(slot(2)!, 'actions')
     expect(rows).toHaveLength(1)
     expect(rows[0].querySelector('.statement-text')?.textContent).toContain('Wait')

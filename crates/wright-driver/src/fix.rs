@@ -1,12 +1,3 @@
-//! Automated fixes for lint findings (#556): the analyzer's `LintFix` plan
-//! is materialized here into the validated [`EditTransaction`] contract —
-//! edits against the authored source, carrying the input identity, that
-//! `validateEditTransaction` previews and `write_previews` applies. Fixes
-//! exist only for `exact` findings whose correction is unambiguous
-//! (`duplicate-condition`, `repeated-value`), and only for input whose
-//! spans map to retained authored source: raw Workshop parses, and
-//! provider-mapped programs whose file table retains source text (#583).
-
 use serde::Serialize;
 use serde_json::{Value as JsonValue, json};
 use workshop_rs::catalog::{Catalog, Kind, Locale};
@@ -39,8 +30,6 @@ pub fn attach_fixes(
     catalog: &Catalog,
     locale: &Locale,
 ) {
-    // An unmapped provider artifact's spans index generated text, not the
-    // caller's files; a mapped artifact's spans address authored members.
     if loaded.provenance == Provenance::Unmapped {
         return;
     }
@@ -61,10 +50,6 @@ pub fn attach_fixes(
     }
 }
 
-/// Turn a finding's fix plan into the source-edit transaction for the
-/// loaded input: each edit names the input's display source and the
-/// identity of the text the program was parsed from, so a changed source
-/// refuses at validation time with `edit-stale-source`.
 fn materialize(
     finding: &Finding,
     loaded: &Loaded,
@@ -112,12 +97,6 @@ fn materialize(
     })
 }
 
-/// One plan span as a `SourceEdit` against the loaded input. For a raw
-/// Workshop input the span must map to file 0's parsed text; for a
-/// provider-mapped program the span's file indexes the source map's file
-/// table — the edit names the member's `file://` URI and the identity of
-/// the retained text, so `providerValidateEdits` and the write path
-/// preconditions see the same bytes (#583).
 fn edit(loaded: &Loaded, span: Span, new_text: String) -> Option<SourceEdit> {
     let range = EditRange {
         start_line: span.start.line,

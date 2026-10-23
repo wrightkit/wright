@@ -1,25 +1,3 @@
-//! Project-local run cache (ADR-0027): a small `.wright/` store that lets
-//! `compile` and `inspect cost` compare the current run's element cost
-//! against the previous successful run of the same key — never a verdict,
-//! exit code, or part of the default JSON.
-//!
-//! The cache is a convenience layer for people. It never changes a
-//! command's verdict, exit code, or default JSON; a comparison is reported
-//! only when it is available, and `--max-total` is an explicit gate that
-//! reads no cache. `--no-cache` or a non-empty `WRIGHT_NO_CACHE` disables
-//! both reading and writing, and every cache failure is ignored — a
-//! read-only directory, a corrupt record, or a concurrent writer can never
-//! fail a command.
-//!
-//! Under a truthy `CI` (ADR-0030 decision 14, amending ADR-0027 decisions
-//! 7 and 9) only the explicit baseline flags touch `.wright/`, so an
-//! action can restore and save it with the platform cache: `--baseline`
-//! compares against the named record and `--save-baseline` writes it. The
-//! implicit previous-run record stays off, and a baseline that is missing,
-//! unreadable, incompatible or keyed to a different input, kind, locale
-//! or profile turns the comparison off silently — never an error, warning
-//! or output line.
-
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -28,16 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::input::sha256_hex;
 
-/// The on-disk schema version. A record with an unknown version or kind is
-/// treated as absent (ADR-0027 decision 7).
 const RECORD_VERSION: u32 = 1;
-/// The payload kind this implementation reads and writes. Other kinds are
-/// ignored on read (decision 13).
 const KIND_COST: &str = "cost";
 
-/// A persisted cache record: one file under `.wright/` keyed by the
-/// resolved input, kind, locale, and profile (decision 12). `payload` is
-/// command-owned — the store never interprets it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Record {
     version: u32,
@@ -48,15 +19,12 @@ struct Record {
     payload: serde_json::Value,
 }
 
-/// One rule's element cost inside a `cost` record, for comparison.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RuleCost {
     name: String,
     count: usize,
 }
 
-/// The `cost` payload a record carries: the element total, the budget, and
-/// the per-rule shares needed to name which rules changed between runs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CostPayload {
     total: usize,
@@ -64,15 +32,10 @@ struct CostPayload {
     rules: Vec<RuleCost>,
 }
 
-/// Where `.wright/` lives for a run: the project root (`--root` when given,
-/// otherwise the input's resolved root, otherwise the invocation cwd).
 fn cache_dir(input_root: Option<&Path>, cwd: &Path) -> PathBuf {
     input_root.unwrap_or(cwd).join(".wright")
 }
 
-/// The cache-file name for one key. Keys differ in the resolved input file,
-/// input kind, locale, and profile, so a development entry point and a
-/// release entry point never compare with each other (decision 12).
 fn key_id(input_path: Option<&Path>, kind: &str, locale: &str, profile: &str) -> String {
     let material = format!(
         "{}|{kind}|{locale}|{profile}",
@@ -87,8 +50,6 @@ fn key_id(input_path: Option<&Path>, kind: &str, locale: &str, profile: &str) ->
     sha256_hex(material.as_bytes())[..16].to_string()
 }
 
-/// The truthiness check the renderer's environment detection uses:
-/// unset, empty, `0`, `false` and `no` are falsy, anything else truthy.
 fn truthy(value: &str) -> bool {
     !matches!(
         value.trim().to_ascii_lowercase().as_str(),
@@ -132,28 +93,16 @@ impl CacheEnvironment {
     }
 }
 
-/// Read the previous `cost` record for `key`, or a named baseline.
-/// Returns `None` when the record is absent, unreadable, or an unknown
-/// version/kind — never an error (decision 7).
 fn read_record(dir: &Path, file_name: &str) -> Option<Record> {
     let text = fs::read_to_string(dir.join(file_name)).ok()?;
     let record: Record = serde_json::from_str(&text).ok()?;
     (record.version == RECORD_VERSION && record.kind == KIND_COST).then_some(record)
 }
 
-/// Read the named baseline usable for `key`: a missing file, an
-/// unreadable or incompatible record, or a record keyed to a different
-/// input, kind, locale or profile (decision 12) all yield `None` — the
-/// baseline is unusable and the caller degrades it: a usage error outside
-/// CI, silence under it (ADR-0030 decision 14).
 fn read_baseline(dir: &Path, name: &str, key: &str) -> Option<Record> {
     read_record(dir, &format!("baseline-{name}.json")).filter(|record| record.key == key)
 }
 
-/// Write a record atomically — a temporary file in the same directory,
-/// then a rename — so concurrent writers of different keys cannot corrupt
-/// each other and the same key ends with one complete record (decision 12).
-/// Failures are ignored: the cache is a convenience, never a gate.
 fn write_record(dir: &Path, file_name: &str, record: &Record) {
     let _ = fs::create_dir_all(dir);
     let tmp = dir.join(format!(".{file_name}.tmp-{}", std::process::id()));
@@ -321,9 +270,6 @@ pub(crate) fn compare_and_record_in(
     if environment.disabled(run.no_cache) {
         return None;
     }
-    // Under CI the implicit previous-run record stays off entirely — a
-    // run that names no explicit baseline flag touches nothing (ADR-0030
-    // decision 14).
     if environment.ci && run.baseline.is_none() && run.save_baseline.is_none() {
         return None;
     }
@@ -364,10 +310,6 @@ pub(crate) fn compare_and_record_in(
         })
     };
 
-    // The current run becomes the new previous run for this key; a named
-    // baseline is written additionally and never overwritten by reads.
-    // Under CI the previous-run record stays off — only the explicit
-    // `--save-baseline` write reaches `.wright/`.
     let record = Record {
         version: RECORD_VERSION,
         kind: KIND_COST.to_string(),
@@ -509,7 +451,6 @@ mod tests {
             };
             compare_and_record_in(&run, &snap(100, &[("a", 100)]), LOCAL_CACHE);
         }
-        // Each key saw only its own first run, so no comparison exists.
         for (locale, profile) in [("en-US", "off"), ("zh-CN", "off"), ("en-US", "compat")] {
             let run = CostRun {
                 locale: locale.to_string(),
@@ -527,7 +468,6 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("wright-cache4-{}", std::process::id()));
         let run = cost_run(&dir);
         fs::create_dir_all(cache_dir(Some(&dir), &dir)).unwrap();
-        // A corrupt file is ignored rather than failing the command.
         let key = key_id(run.input_path.as_deref(), "workshop", "en-US", "off");
         fs::write(
             cache_dir(Some(&dir), &dir).join(format!("{key}.json")),
@@ -538,14 +478,10 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// ADR-0030 decision 14: under CI a run that names neither `--baseline`
-    /// nor `--save-baseline` touches nothing — the implicit previous-run
-    /// record stays off entirely.
     #[test]
     fn ci_run_without_baseline_flags_touches_nothing() {
         let dir = std::env::temp_dir().join(format!("wright-cache-ci1-{}", std::process::id()));
         let run = cost_run(&dir);
-        // A record left by a local run is not even read under CI.
         compare_and_record_in(&run, &snap(100, &[("a", 100)]), LOCAL_CACHE);
         assert!(dir.join(".wright").is_dir());
         assert!(
@@ -555,8 +491,6 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// Under CI `--save-baseline` writes only the named record and
-    /// `--baseline` reads it; the previous-run record is never written.
     #[test]
     fn ci_save_and_compare_round_trips_the_named_baseline() {
         let dir = std::env::temp_dir().join(format!("wright-cache-ci2-{}", std::process::id()));
@@ -581,8 +515,6 @@ mod tests {
         assert_eq!(cmp.total_delta, 20);
         assert!(baseline_exists_in(&compare, CI_CACHE));
 
-        // Missing, corrupt, and differently keyed records all degrade
-        // silently (decision 14 amends ADR-0027 decision 7 for CI).
         let mut unknown = cost_run(&dir);
         unknown.baseline = Some("nope".to_string());
         assert!(compare_and_record_in(&unknown, &snap(120, &[]), CI_CACHE).is_none());
@@ -605,9 +537,6 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// Outside CI the same unusable baselines keep the caller-facing
-    /// "unknown baseline" contract: `baseline_exists` is false for a
-    /// missing, corrupt, or differently keyed record.
     #[test]
     fn unusable_baselines_are_absent_outside_ci_too() {
         let dir = std::env::temp_dir().join(format!("wright-cache-ci3-{}", std::process::id()));

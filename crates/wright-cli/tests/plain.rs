@@ -1,9 +1,3 @@
-//! Byte-deterministic golden tests for the plain renderer's line records
-//! (#793, ADR-0030): every command's stdout/stderr is snapshotted against a
-//! fixed fixture. Inputs are copied into a temp dir and addressed by a
-//! relative name, so `root=`/`at=` render as `.` and `name.ext:line:col` on
-//! any machine — the snapshots stay byte-identical across runs and hosts.
-
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
@@ -101,8 +95,6 @@ fn check_fail_reports_diagnostics_and_next() {
 
 #[test]
 fn check_truncates_the_diagnostic_stream() {
-    // 25 unsupported actions: the diagnostic page holds 20 records and the
-    // `truncated:` record names the expansion.
     let mut actions = String::new();
     for index in 0..25 {
         actions.push_str(&format!("        FutureValueThing{index}(1);\n"));
@@ -179,8 +171,6 @@ fn analyze_reports_the_essential_sections() {
         &[("cake.ws", &corpus_workshop("real-world/overpy-cake"))],
     );
     let output = run_in(&dir, &["analyze", "cake.ws"]);
-    // ADR-0025: the default analyze report stays inside its token budget —
-    // the record form is leaner than the JSON it renders (~2k tokens).
     assert!(
         output.stdout.len() <= 8 * 1024,
         "the analyze report stays bounded: {} bytes",
@@ -304,9 +294,6 @@ fn update_refusals_are_error_records() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// #793 parity: the plain surface and the JSON envelope describe the same
-/// outcome — same exit code, a verdict word consistent with `ok`/`exit`,
-/// and the same headline counts.
 #[test]
 fn plain_and_json_agree_on_verdict_exit_and_counts() {
     let dir = fixture_dir(
@@ -370,7 +357,6 @@ fn plain_and_json_agree_on_verdict_exit_and_counts() {
             );
         }
 
-        // The `summary:` record's counts mirror the JSON counts.
         let summary = stdout
             .lines()
             .find_map(|line| line.strip_prefix("summary: "))

@@ -1,9 +1,3 @@
-//! `wright agent` — the coding-agent surface that does not need a project
-//! parse (#415). `install` writes the canonical Wright agent guide (vendored
-//! from `wrightkit/skills`, see `agent-guide/UPSTREAM.md`) into the project's
-//! agent skills directory so agents discover Wright's capabilities without
-//! npm or a manual copy.
-
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -25,7 +19,6 @@ const INSTALLED_BY: &str = "wright agent install";
 const UPSTREAM: &str = "wrightkit/skills@cdd694f";
 const DEFAULT_DEST: &str = ".agents/skills";
 
-/// The guide files `install` writes, as `(relative path, content)`.
 const FILES: &[(&str, &str)] = &[
     (
         "SKILL.md",
@@ -68,10 +61,6 @@ pub(crate) enum InstallStatus {
     DryRun(PathBuf),
 }
 
-/// The content hash the install record carries: same recipe as the benchmark's
-/// `content_hash` (relative path + per-file sha256 over every `*.md`), so an
-/// installed guide verifies like a pinned skill. Python's `sorted(Path)` is
-/// component-wise, so the key splits on `/` rather than sorting raw strings.
 static SKILL_SHA256: LazyLock<String> = LazyLock::new(|| {
     let mut files = FILES.to_vec();
     files.sort_by_key(|(path, _)| path.split('/').collect::<Vec<_>>());
@@ -93,7 +82,6 @@ fn build_record() -> serde_json::Value {
     })
 }
 
-/// The `BUILD.json` left by `wright agent install`, or None for anything else.
 fn wright_record(target: &Path) -> Option<serde_json::Value> {
     let record: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(target.join("BUILD.json")).ok()?).ok()?;
@@ -117,9 +105,6 @@ fn write_files(target: &Path) -> Result<(), AgentError> {
     Ok(())
 }
 
-/// A `*.md` file in `target` that the guide does not ship. The bench's content
-/// hash covers every `*.md` in the skill directory, so a stray file makes the
-/// installed copy diverge even when our files match.
 fn has_stray_markdown(target: &Path) -> bool {
     let mut stack = vec![target.to_path_buf()];
     while let Some(dir) = stack.pop() {
@@ -159,9 +144,6 @@ pub(crate) fn install(args: &AgentInstallArgs) -> Result<InstallStatus, AgentErr
         .unwrap_or_else(|| PathBuf::from(DEFAULT_DEST))
         .join(SKILL_NAME);
     let record = wright_record(&target);
-    // `symlink_metadata` so a dangling symlink at the destination still counts
-    // as occupied (foreign refusal / force removal) instead of falling through
-    // to a confusing `create_dir_all` failure.
     let present = target.symlink_metadata().is_ok();
     if present && record.is_none() && !args.force {
         return Err(AgentError::Rejected(format!(
@@ -191,8 +173,6 @@ pub(crate) fn install(args: &AgentInstallArgs) -> Result<InstallStatus, AgentErr
     std::fs::create_dir_all(&target).map_err(|error| {
         AgentError::Failed(format!("could not create {}: {error}", target.display()))
     })?;
-    // The record lands first so any partial state still counts as ours and the
-    // next run refreshes instead of refusing as foreign.
     let record_path = target.join("BUILD.json");
     std::fs::write(
         &record_path,
@@ -353,7 +333,6 @@ mod tests {
         let target = root.join("wright");
         std::fs::create_dir_all(&target).unwrap();
         std::fs::write(target.join("SKILL.md"), "not ours").unwrap();
-        // A BUILD.json without the installer's identity is still foreign.
         std::fs::write(target.join("BUILD.json"), r#"{"name":"other"}"#).unwrap();
         assert_eq!(
             install(&args(Some(root.clone()), false, false)),
@@ -384,7 +363,6 @@ mod tests {
             Ok(InstallStatus::Updated(target.clone()))
         );
         assert!(target.is_dir());
-        // A stray guide markdown file makes the copy diverge: refresh removes it.
         let stray = target.join("references/notes.md");
         std::fs::write(&stray, "user note").unwrap();
         assert_eq!(
@@ -404,7 +382,6 @@ mod tests {
             Ok(InstallStatus::DryRun(target.clone()))
         );
         assert!(!target.exists());
-        // A foreign destination refuses even under --dry-run.
         std::fs::create_dir_all(&target).unwrap();
         assert_eq!(
             install(&args(Some(root.clone()), false, true)).map_err(|e| e.exit_code()),
