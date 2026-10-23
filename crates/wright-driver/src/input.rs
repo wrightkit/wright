@@ -23,7 +23,10 @@ pub struct ResolvedInput {
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 pub(crate) fn decode_source_text(bytes: &[u8]) -> String {
@@ -102,7 +105,13 @@ fn digest_files(files: Vec<PathBuf>) -> DiskFingerprint {
         }
         hasher.update([0]);
     }
-    DiskFingerprint::Digest(format!("{:x}", hasher.finalize()))
+    DiskFingerprint::Digest(
+        hasher
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+    )
 }
 
 pub fn resolve(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {

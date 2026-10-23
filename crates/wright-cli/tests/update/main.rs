@@ -3,8 +3,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use sha2::Digest;
-
 mod server;
 
 use server::MockServer;
@@ -29,18 +27,9 @@ fn release(version: &str) -> Release {
     files.insert(format!("/releases/{version}/{name}"), archive.clone());
     files.insert(
         format!("/releases/{version}/{name}.sha256"),
-        format!("{}  {name}\n", sha256_hex(&archive)).into_bytes(),
+        format!("{}  {name}\n", wright_driver::sha256_hex(&archive)).into_bytes(),
     );
     Release { files }
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    let digest = sha2::Sha256::digest(bytes);
-    digest.iter().fold(String::new(), |mut output, byte| {
-        use std::fmt::Write as _;
-        let _ = write!(output, "{byte:02x}");
-        output
-    })
 }
 
 fn build_archive(version: &str) -> Vec<u8> {
@@ -134,7 +123,7 @@ fn provider_release(version: &str, files: &mut HashMap<String, Vec<u8>>) {
     );
     files.insert(
         format!("/opy-rs/releases/{version}/{name}.sha256"),
-        format!("{}  {name}\n", sha256_hex(&archive)).into_bytes(),
+        format!("{}  {name}\n", wright_driver::sha256_hex(&archive)).into_bytes(),
     );
 }
 
@@ -415,7 +404,11 @@ fn checksum_mismatch_is_rejected_before_any_change() {
     let name = format!("wright-{RELEASE}-{TRIPLE}.tar.gz");
     mock.files.insert(
         format!("/releases/{RELEASE}/{name}.sha256"),
-        format!("{}  {name}\n", sha256_hex(b"not the archive")).into_bytes(),
+        format!(
+            "{}  {name}\n",
+            wright_driver::sha256_hex(b"not the archive")
+        )
+        .into_bytes(),
     );
     let server = MockServer::new(mock.files);
     let dir = install_dir("update-badsum");
@@ -970,7 +963,7 @@ fn windows_zip_release_replaces_both_exe_binaries() {
     files.insert(format!("/releases/{RELEASE}/{name}"), archive.clone());
     files.insert(
         format!("/releases/{RELEASE}/{name}.sha256"),
-        format!("{}  {name}\n", sha256_hex(&archive)).into_bytes(),
+        format!("{}  {name}\n", wright_driver::sha256_hex(&archive)).into_bytes(),
     );
     let server = MockServer::new(files);
 

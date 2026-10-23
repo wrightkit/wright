@@ -213,8 +213,7 @@ fn run_in(dir: &Path, args: &[&str]) -> std::process::Output {
 }
 
 fn sha256_of(path: &Path) -> String {
-    use sha2::{Digest, Sha256};
-    format!("{:x}", Sha256::digest(std::fs::read(path).unwrap()))
+    wright_driver::sha256_hex(&std::fs::read(path).unwrap())
 }
 
 #[test]
