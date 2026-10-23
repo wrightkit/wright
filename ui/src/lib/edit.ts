@@ -13,8 +13,8 @@ import type {
 } from './types/generated/wright-agent-v1'
 import type { SpannedAction, SpannedCondition } from './view'
 
-/** The pending-dialog tags (design.md): a toggle is a `change`, a removal a `delete`. */
-export type PendingTag = 'change' | 'delete'
+/** The pending-dialog tags (design.md): a new statement is an `insert`, a toggle a `change`, a removal a `delete`. */
+export type PendingTag = 'change' | 'delete' | 'insert'
 
 /** The two `rule-content-v1` statement lists an edit addresses. */
 export type StatementList = 'conditions' | 'actions'
@@ -33,12 +33,28 @@ export interface PendingChange {
   tag: PendingTag
   /** The `change` edit's replacement statement — spans stripped, `disabled` set or removed. */
   statement?: RuleContentStatement
+  /**
+   * An `insert`'s staged statements — `editStatements` takes them in
+   * order at `index` (`index == list length` appends, ADR-0029).
+   */
+  statements?: RuleContentStatement[]
+  /**
+   * The `before` marker of an `insert` — the placeholder the column
+   * renders where the new row lands (docs/ui/selection.md § Pending
+   * marks). It carries no edit content; `buildRequest` skips it.
+   */
+  position?: 'before'
 }
 
 export type StatementNode = SpannedCondition | SpannedAction
 
 export function keyFor(rule: number, list: string, index: number): string {
   return `${rule}:${list}:${index}`
+}
+
+/** The pending-map key of the placeholder row an `insert` at `index` adds. */
+export function insertMarkKey(rule: number, list: string, index: number): string {
+  return `${rule}:${list}:${index}:new`
 }
 
 /** `span`/`spans` are output-only read keys; the `disabled` modifier is set deliberately. */
@@ -130,6 +146,48 @@ export function stageDeletes(
 }
 
 /**
+ * The position a column's `+` targets (docs/ui/editor.md § Form ·
+ * Insert): after the selected row when exactly one row is selected,
+ * else the column end. As an `editStatements` address that is the row's
+ * index + 1, or the list length — the flat index space `rules` reports,
+ * hidden `end` markers included.
+ */
+export function insertAddress(length: number, selected: readonly number[]): number {
+  return selected.length === 1 ? selected[0] + 1 : length
+}
+
+/**
+ * Stage an `insert`: the new statements at `index`, plus a `before`
+ * marker entry the column renders as the pending row where the insert
+ * lands — after the row at `index - 1`, or at the column end.
+ */
+export function stageInsert(
+  pending: Map<string, PendingChange>,
+  rule: number,
+  ruleName: string,
+  list: StatementList,
+  index: number,
+  statements: RuleContentStatement[],
+): void {
+  pending.set(keyFor(rule, list, index), {
+    rule,
+    ruleName,
+    list,
+    index,
+    tag: 'insert',
+    statements,
+  })
+  pending.set(insertMarkKey(rule, list, index), {
+    rule,
+    ruleName,
+    list,
+    index,
+    tag: 'insert',
+    position: 'before',
+  })
+}
+
+/**
  * The `editStatements` request for every staged change: `inputIdentity`
  * is the `project` digest the page read the program at, `snapshot` the
  * generation that issued the numeric rule ids.
@@ -139,17 +197,33 @@ export function buildRequest(
   inputIdentity: string,
   snapshot: number | undefined,
 ): EditStatementsRequest {
-  const edits: StatementEdit[] = [...pending.values()].map((change) =>
-    change.tag === 'delete'
-      ? { rule: change.rule, list: change.list, index: change.index, change: 'delete' }
-      : {
+  const edits: StatementEdit[] = [...pending.values()].flatMap((change): StatementEdit[] => {
+    // The `before` marker rows the view renders are placeholders, not edits.
+    if (change.position === 'before') return []
+    if (change.tag === 'delete') {
+      return [{ rule: change.rule, list: change.list, index: change.index, change: 'delete' }]
+    }
+    if (change.tag === 'insert') {
+      return [
+        {
           rule: change.rule,
           list: change.list,
           index: change.index,
-          change: 'replace',
-          statement: change.statement,
+          change: 'insert',
+          statements: (change.statements ?? []) as [RuleContentStatement, ...RuleContentStatement[]],
         },
-  )
+      ]
+    }
+    return [
+      {
+        rule: change.rule,
+        list: change.list,
+        index: change.index,
+        change: 'replace',
+        statement: change.statement,
+      },
+    ]
+  })
   return {
     op: 'editStatements',
     inputIdentity,

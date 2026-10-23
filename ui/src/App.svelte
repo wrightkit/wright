@@ -36,10 +36,12 @@
     buildRequest,
     clean,
     effectiveDisabled,
+    insertAddress,
     isStale,
     keyFor,
     setDisabled,
     stageDeletes,
+    stageInsert,
     stageStatement,
     type BatchAction,
     type PendingChange,
@@ -163,6 +165,12 @@
     index: number
     /** The clicked argument's `args` path, when the editor opens on it. */
     argPath?: number[]
+    /**
+     * Set when the target is a new statement (docs/ui/editor.md § Form ·
+     * Insert): `afterRow` is the selected row the insert follows, `null`
+     * for the column end.
+     */
+    insert?: { index: number; afterRow: number | null }
   } | null>(null)
   let submitting = $state(false)
   let submitRefusal = $state<Refusal[] | null>(null)
@@ -223,19 +231,28 @@
 
   const editNode = $derived.by(() => {
     if (editTarget === null || !editEntry || editEntry.state.phase !== 'ready') return null
+    if (editTarget.insert) {
+      // The `+` form edits an empty statement: no node exists at the
+      // insert position yet (docs/ui/editor.md § Form · Insert).
+      const node =
+        editTarget.list === 'actions'
+          ? ({ call: '', args: [] } as StatementNode)
+          : ({ value: null } as StatementNode)
+      return { ...editTarget, node }
+    }
     const node = editEntry.state.content[editTarget.list][editTarget.index] as
       | StatementNode
       | undefined
     return node ? { ...editTarget, node } : null
   })
   const editDisabled = $derived(
-    editNode && editEntry && editTarget
+    editNode && editEntry && editTarget && !editTarget.insert
       ? effectiveDisabled(pending, editEntry.summary.id, editTarget.list, editTarget.index, editNode.node)
       : false,
   )
   /** The staged `change` at the open target, so the editor shows it. */
   const editStaged = $derived(
-    editNode && editEntry && editTarget
+    editNode && editEntry && editTarget && !editTarget.insert
       ? pending.get(keyFor(editEntry.summary.id, editTarget.list, editTarget.index))
       : undefined,
   )
@@ -243,6 +260,16 @@
     debug && dialog === 'pending' && inputIdentity !== null
       ? buildRequest(pending, inputIdentity, snapshot)
       : null,
+  )
+  /**
+   * The staged-edit count the badge shows: insert placeholder marks are
+   * view state in the same map, not edits.
+   */
+  const pendingCount = $derived(
+    [...pending.values()].filter((change) => change.position !== 'before').length,
+  )
+  const pendingChanges = $derived(
+    [...pending.values()].filter((change) => change.position !== 'before'),
   )
 
   async function loadOne(id: number, generation?: number): Promise<RuleState> {
@@ -596,11 +623,28 @@
         if (node) setDisabled(pending, rule, entry.summary.name, list, index, node, target)
       }
     },
+    /**
+     * The heading `+` (docs/ui/editor.md § Form · Insert): the editor
+     * opens on an empty statement, staged at the column end or after
+     * the one selected row.
+     */
+    insert: (list: StatementList, selected: number[], length: number) => {
+      const index = insertAddress(length, selected)
+      editTarget = {
+        rule,
+        list,
+        index,
+        insert: { index, afterRow: selected.length === 1 ? selected[0] : null },
+      }
+    },
   })
 
-  function editorSave(disabled: boolean, args?: Node[], value?: Node) {
+  function editorSave(disabled: boolean, args?: Node[], value?: Node, call?: string) {
     if (!editNode || !editEntry || !editTarget) return
     const statement = clean(editNode.node)
+    if (call !== undefined && editTarget.list === 'actions') {
+      ;(statement as { call?: string }).call = call
+    }
     if (args !== undefined && editTarget.list === 'actions') {
       ;(statement as { args?: Node[] }).args = args
     }
@@ -608,6 +652,20 @@
       ;(statement as { value?: Node }).value = value
     }
     if (disabled) statement.disabled = true
+    if (editTarget.insert) {
+      // A column `+` save stages the new statement at its position
+      // (docs/ui/editor.md § Form · Insert); the mark renders where the
+      // row lands — after the selected row or at the column end.
+      stageInsert(
+        pending,
+        editEntry.summary.id,
+        editEntry.summary.name,
+        editTarget.list,
+        editTarget.insert.index,
+        [statement],
+      )
+      return
+    }
     stageStatement(
       pending,
       editEntry.summary.id,
@@ -732,7 +790,7 @@
       <SqButton
         title={t.pendingChanges}
         icon={FileText}
-        badge={pending.size}
+        badge={pendingCount}
         onclick={() => {
           submitRefusal = null
           dialog = 'pending'
@@ -818,7 +876,7 @@
 
   <PendingChanges
     open={dialog === 'pending'}
-    changes={[...pending.values()]}
+    changes={pendingChanges}
     refusal={submitRefusal}
     {submitting}
     request={pendingRequest}
@@ -840,6 +898,7 @@
     {t}
     locale={sessionLocale}
     focusPath={editTarget?.argPath ?? null}
+    isInsert={editTarget?.insert !== undefined}
     onsave={editorSave}
     onclose={() => (editTarget = null)}
   />

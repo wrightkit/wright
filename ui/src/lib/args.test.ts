@@ -5,6 +5,7 @@ import {
   argFields,
   conditionFields,
   currentId,
+  defaultArgs,
   defaultNode,
   enumNode,
   fillGaps,
@@ -143,6 +144,37 @@ describe('node constructors', () => {
     })
     // A `String` slot keeps the string reading (`customString`'s `Hello`).
     expect(defaultNode('Hello', { type: 'String' })).toEqual({ string: 'Hello' })
+  })
+})
+
+describe('defaultArgs', () => {
+  it('seeds lookup defaults and leaves required slots empty', () => {
+    // `wait`: a required duration with no default, then an optional
+    // enum whose `lookup` default fills in on pick (§ Form).
+    const args = defaultArgs([
+      { name: 'time', type: 'Any', required: true },
+      {
+        name: 'waitBehavior',
+        type: 'Wait',
+        required: false,
+        default: 'Wait.IGNORE_CONDITION',
+        enum: { domain: 'Wait' },
+      },
+    ])
+    expect(args).toHaveLength(2)
+    expect(args[0]).toBeUndefined()
+    expect(args[1]).toEqual({ enum: 'Wait', member: 'IGNORE_CONDITION' })
+  })
+
+  it('omits a trailing run of unset slots', () => {
+    // Unset positions past the last default carry nothing — `argAt`
+    // still reads them as unset, so OK stays disabled until filled.
+    const args = defaultArgs([
+      { name: 'a', type: 'Any', required: true },
+      { name: 'b', type: 'Any', required: false },
+      { name: 'c', type: 'Any', required: false },
+    ])
+    expect(args).toHaveLength(0)
   })
 })
 

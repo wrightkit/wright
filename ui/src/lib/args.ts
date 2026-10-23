@@ -434,6 +434,47 @@ export function stringNode(text: string): Node {
 }
 
 /**
+ * The initial args for a call the form just picked (docs/ui/editor.md §
+ * Form: "a default from `lookup` is filled in when a call is chosen"):
+ * one position per non-fold parameter, holding its declared `default`
+ * node; a required slot with none stays empty (its `undefined` reads as
+ * unset, so OK stays disabled until it is filled). Optional slots past
+ * the first all-empty tail stay omitted — `Wait`'s optional
+ * `waitBehavior` materializes only when `lookup` defaults it. Fold-group
+ * members share their folded call's position, so a variable-target
+ * action seeds its `globalVariable`/`playerVariable` shell.
+ */
+export function defaultArgs(params: readonly ParamFact[]): Node[] {
+  const args: Node[] = []
+  // A fold group's first member claims one position for the folded call.
+  let foldPos = -1
+  for (let i = 0; i < params.length; i += 1) {
+    const param = params[i]
+    const foldCall = param.content?.fold?.call
+    const foldArg = param.content?.fold?.arg
+    if (typeof foldCall === 'string' && typeof foldArg === 'number') {
+      if (params[i - 1]?.content?.fold?.call !== foldCall) {
+        foldPos = args.length
+        args.push({ call: foldCall, args: [] })
+      }
+      const node = defaultNode(param.default, param)
+      if (node === undefined) continue
+      const shell = args[foldPos]
+      if (isObject(shell) && 'call' in shell && Array.isArray(shell.args)) {
+        const inner = grow(shell.args as Node[], foldArg)
+        inner[foldArg] = node
+        shell.args = inner
+      }
+      continue
+    }
+    args.push(defaultNode(param.default, param) ?? undefined as unknown as Node)
+  }
+  // A trailing run of empty slots carries no information the emitter needs.
+  while (args.length > 0 && args[args.length - 1] === undefined) args.pop()
+  return args
+}
+
+/**
  * The picker `id` matching the node currently at a field's position.
  * Literal fields map `true`/`false` to their picker ids.
  */

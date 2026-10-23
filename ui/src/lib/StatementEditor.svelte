@@ -19,6 +19,7 @@
     argFields,
     conditionFields,
     currentId,
+    defaultArgs,
     enumNode,
     fillGaps,
     operationNode,
@@ -53,6 +54,7 @@
     t,
     locale,
     focusPath = null,
+    isInsert = false,
     onsave,
     onclose,
   }: {
@@ -68,7 +70,12 @@
     locale: string
     /** The clicked argument's `args` path; its control gets focus. */
     focusPath?: number[] | null
-    onsave: (disabled: boolean, args?: Node[], value?: Node) => void
+    /**
+     * The `+` form (docs/ui/editor.md § Form · Insert): the target is an
+     * empty statement — no disable toggle, OK stages an `insert`.
+     */
+    isInsert?: boolean
+    onsave: (disabled: boolean, args?: Node[], value?: Node, call?: string) => void
     onclose: () => void
   } = $props()
 
@@ -93,6 +100,14 @@
   const enumLoading = new Set<string>()
   const nestedLoading = new Set<string>()
   let symbolsLoading = false
+  /**
+   * The `+` form's Action row options — every catalog action
+   * `listEntries` returns (docs/ui/editor.md § Form · First row) — and
+   * the call the user picked, which replaces the empty node's `call`.
+   */
+  let actionOptions = $state<{ id: string; label: string }[] | null>(null)
+  let chosenCall = $state<string | null>(null)
+  let actionsLoading = false
   /** The locale the option caches below were loaded under. */
   let optionsLocale = ''
   let root: HTMLElement | undefined = $state()
@@ -106,7 +121,10 @@
    */
   const sourceAction = $derived.by((): Action | null => {
     if (target === null) return null
-    if (!isCondition) return target.node as SpannedAction
+    if (!isCondition) {
+      const action = target.node as SpannedAction
+      return chosenCall !== null ? { ...action, call: chosenCall } : action
+    }
     const value = (target.node as SpannedCondition).value
     if (value !== null && typeof value === 'object' && 'call' in value) {
       return { call: value.call as string, args: (value.args as Node[]) ?? [] }
@@ -140,6 +158,24 @@
     return argFields(paramFacts(callableEntry), shownAction, nestedFacts)
   })
   const missing = $derived(shownAction ? unsetRequired(shownAction, fields) : [])
+  /**
+   * OK stays disabled while a required slot is unset — and, on the `+`
+   * form, while the statement has no call yet: an action needs the
+   * Action row's pick, a condition a value (`null` is the empty form).
+   */
+  const canSave = $derived(
+    missing.length === 0 &&
+      (!isInsert ||
+        (isCondition
+          ? editedArgs !== null &&
+            editedArgs[0] !== null &&
+            editedArgs[0] !== undefined
+          : chosenCall !== null &&
+            // The call's `lookup` entry holds the parameter facts the
+            // required-slot check needs; before it lands OK would
+            // stage a bare `{call, args: []}`. */
+            callableEntry !== null)),
+  )
 
   $effect(() => {
     if (target === null) {
@@ -152,6 +188,9 @@
     focusedFor = null
     callableEntry = null
     valueEntry = null
+    actionOptions = null
+    chosenCall = null
+    actionsLoading = false
     // A staged `change` seeds the form, so reopening shows it.
     const stagedValue = staged?.value as Node | undefined
     const seed =
@@ -200,12 +239,16 @@
       }
     } else {
       const callId = (target.node as SpannedAction).call
-      void names.entries(callId).then((entries) => {
-        if (shownFor === target) {
-          callableEntry =
-            entries.find((entry) => STATEMENT_KINDS.includes(entry.kind)) ?? entries[0] ?? null
-        }
-      })
+      // The `+` form's empty action has no call to look up until the
+      // Action row picks one (`chooseAction` fetches the entry then).
+      if (callId !== '') {
+        void names.entries(callId).then((entries) => {
+          if (shownFor === target) {
+            callableEntry =
+              entries.find((entry) => STATEMENT_KINDS.includes(entry.kind)) ?? entries[0] ?? null
+          }
+        })
+      }
     }
   })
 
@@ -328,12 +371,62 @@
 
   const title = $derived.by(() => {
     if (!target) return ''
+    // The `+` form has no statement to name: the heading reads like the
+    // button that opened it.
+    if (isInsert) return t.addStatement(isCondition ? t.conditionNoun : t.actionNoun)
     if (!isCondition) {
       const action = target.node as SpannedAction
       return names.peek(action.call, STATEMENT_KINDS)?.name ?? action.call
     }
     return t.conditionTitle
   })
+
+  // The `+` form's Action row options list once, lazily — the picker
+  // opens on the same `listEntries` source the other option lists use.
+  $effect(() => {
+    if (!isInsert || isCondition || target === null) return
+    if (actionOptions !== null || actionsLoading) return
+    actionsLoading = true
+    const requestLocale = locale
+    void call({
+      op: 'listEntries',
+      language: 'workshop',
+      kind: 'action',
+      locale: requestLocale,
+      pageSize: 500,
+    })
+      .then((response) => {
+        if ('result' in response && requestLocale === optionsLocale) {
+          const entries = (response.result as ListEntriesResult).entries ?? []
+          actionOptions = entries.map((entry) => ({
+            id: entry.identity,
+            label: entry.displayName,
+          }))
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        actionsLoading = false
+      })
+  })
+
+  /**
+   * The `+` form's Action row: choosing the call seeds its `lookup`
+   * defaults and refetches the entry so the parameter rows rebuild
+   * (docs/ui/editor.md § Form: defaults fill in when a call is chosen).
+   */
+  function chooseAction(id: string) {
+    if (!isInsert || isCondition || !target) return
+    callableEntry = null
+    chosenCall = id
+    editedArgs = []
+    void names.entries(id).then((entries) => {
+      if (shownFor !== target) return
+      callableEntry =
+        entries.find((entry) => STATEMENT_KINDS.includes(entry.kind)) ?? entries[0] ?? null
+      editedArgs = defaultArgs(paramFacts(callableEntry))
+    })
+  }
 
   function optionsFor(field: ArgField): { id: string; label: string }[] {
     if (field.kind === 'boolean') {
@@ -400,7 +493,14 @@
 
   function setLiteral(field: ArgField, text: string) {
     if (!shownAction || text === '') return
-    const node = field.kind === 'number' ? Number(text) : stringNode(text)
+    const node =
+      field.kind === 'number'
+        ? Number(text)
+        : field.kind === 'other'
+          ? /^-?\d+(\.\d+)?$/.test(text)
+            ? Number(text)
+            : stringNode(text)
+          : stringNode(text)
     const filled = fillGaps(shownAction, fields, field.path)
     editedArgs = withArg(filled, field.path, node).args
   }
@@ -409,10 +509,27 @@
 <Dialog open={target !== null} {onclose} class="editor" {title} titleClass="editor-title">
   {#if target}
     <div class="editor-root" bind:this={root}>
-      <label class="editor-disable">
-        <input type="checkbox" bind:checked={checked} data-testid="editor-disable" />
-        {t.disabled}
-      </label>
+      {#if !isInsert}
+        <label class="editor-disable">
+          <input type="checkbox" bind:checked={checked} data-testid="editor-disable" />
+          {t.disabled}
+        </label>
+      {/if}
+      {#if isInsert && !isCondition}
+        <!-- § Form · First row: the Action picker over every catalog
+             action; choosing one seeds the parameter rows from
+             `lookup` defaults. -->
+        <div class="editor-arg" data-arg-control="action">
+          <span class="editor-arg-label">{t.actionLabel}</span>
+          <Picker
+            options={actionOptions ?? []}
+            selected={chosenCall}
+            placeholder={t.unset}
+            ariaLabel={t.actionNoun}
+            onselect={chooseAction}
+          />
+        </div>
+      {/if}
       {#if fields.length > 0}
         <div class="editor-args">
           {@render rows(fields)}
@@ -423,7 +540,7 @@
         <button
           type="button"
           class="ok"
-          disabled={missing.length > 0}
+          disabled={!canSave}
           onclick={() => {
             if (isCondition) {
               const call =
@@ -436,7 +553,7 @@
                   : (shownAction?.args?.[0] as Node | undefined)
               onsave(checked, undefined, value)
             } else {
-              onsave(checked, editedArgs ?? undefined)
+              onsave(checked, editedArgs ?? undefined, undefined, chosenCall ?? undefined)
             }
             onclose()
           }}>{t.ok}</button
@@ -478,6 +595,24 @@
         />
       {:else if field.kind === 'call'}
         <span class="editor-arg-value">{callLabel(node, field)}</span>
+      {:else if field.kind === 'other' && isInsert}
+        <!-- An untyped slot on the `+` form (`Any` and friends) takes a
+             literal text input until #919's value picker lands: a
+             numeric spelling writes the number literal, anything else
+             a `{"string"}` node — both `rule-content-v1` nodes
+             `editStatements` validates, never Workshop text. -->
+        <input
+          class="editor-input"
+          type="text"
+          value={typeof node === 'number'
+            ? String(node)
+            : node !== undefined && node !== null && typeof node === 'object' && 'string' in node
+              ? (node.string as string)
+              : ''}
+          placeholder={unset ? t.unset : ''}
+          aria-label={field.label}
+          oninput={(event) => setLiteral(field, event.currentTarget.value)}
+        />
       {:else if field.kind === 'other'}
         <span class="editor-arg-value" class:warn={unset}>
           {unset ? t.unset : node !== undefined ? statementText(node, names, VALUE_KINDS) : ''}

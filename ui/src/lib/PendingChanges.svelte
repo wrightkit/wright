@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
    * The pending-changes dialog (ADR-0032 editing layer): staged statement
-   * edits grouped by rule, tagged change/delete, submitted through
+   * edits grouped by rule, tagged insert/change/delete, submitted through
    * `editStatements` and the host `/apply` write path. A refusal —
    * including a stale identity — renders here and writes nothing; a stale
    * refusal also clears the staged edits, which addressed a program the

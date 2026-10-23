@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest'
 import {
   buildRequest,
   effectiveDisabled,
+  insertAddress,
+  insertMarkKey,
   isStale,
   keyFor,
   setDisabled,
   stageDeletes,
+  stageInsert,
   type PendingChange,
   type StatementNode,
 } from './edit'
@@ -93,6 +96,32 @@ describe('stageDeletes', () => {
   })
 })
 
+describe('insertAddress', () => {
+  it('appends at the column end with no selection', () => {
+    expect(insertAddress(3, [])).toBe(3)
+  })
+
+  it('targets after the one selected row', () => {
+    expect(insertAddress(3, [1])).toBe(2)
+    expect(insertAddress(3, [2])).toBe(3)
+  })
+
+  it('appends at the column end when more than one row is selected', () => {
+    expect(insertAddress(3, [0, 1])).toBe(3)
+  })
+})
+
+describe('stageInsert', () => {
+  it('stages the statement plus its placeholder mark', () => {
+    const map = pending()
+    stageInsert(map, 2, 'setup', 'actions', 1, [{ call: 'wait', args: [0.25] }])
+    const change = map.get(keyFor(2, 'actions', 1))
+    expect(change?.tag).toBe('insert')
+    expect(change?.statements).toEqual([{ call: 'wait', args: [0.25] }])
+    expect(map.get(insertMarkKey(2, 'actions', 1))?.position).toBe('before')
+  })
+})
+
 describe('buildRequest', () => {
   it('carries the freshness pair and one edit per staged change', () => {
     const map = pending()
@@ -115,6 +144,23 @@ describe('buildRequest', () => {
         { rule: 1, list: 'actions', index: 2, change: 'delete' },
       ],
     })
+  })
+
+  it('emits an insert at its address and skips the placeholder mark', () => {
+    const map = pending()
+    stageInsert(map, 2, 'setup', 'actions', 1, [
+      { call: 'wait', args: [0.25, { enum: 'Wait', member: 'IGNORE_CONDITION' }] },
+    ])
+    const request = buildRequest(map, 'sha256:abc', 4)
+    expect(request.edits).toEqual([
+      {
+        rule: 2,
+        list: 'actions',
+        index: 1,
+        change: 'insert',
+        statements: [{ call: 'wait', args: [0.25, { enum: 'Wait', member: 'IGNORE_CONDITION' }] }],
+      },
+    ])
   })
 })
 

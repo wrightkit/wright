@@ -977,6 +977,14 @@ details.debug pre {
   background: color-mix(in srgb, var(--gold) 7%, transparent);
 }
 
+/* A staged insert's placeholder row (docs/ui/selection.md § Pending
+   marks): the gold pending mark, no click target or checkbox. */
+.statement.pending-insert {
+  min-height: 1.7rem;
+  color: var(--muted);
+  cursor: default;
+}
+
 /* docs/ui/selection.md § Pending marks: the pending state owns the left
    bar, so a pending row keeps the bar even while selected. */
 .statement.has-findings.selected.pending-change {
@@ -1023,7 +1031,8 @@ details.debug pre {
   margin-left: 0.5rem;
 }
 
-.pending-tag.change {
+.pending-tag.change,
+.pending-tag.insert {
   color: var(--gold);
   border: 1px solid var(--gold);
 }

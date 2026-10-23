@@ -10,6 +10,7 @@
   import type { Names } from './names'
   import { mostSevere, SEVERITY_TOKEN, type RuleFindings } from './findings'
   import {
+    insertMarkKey,
     keyFor,
     type BatchAction,
     type PendingChange,
@@ -57,6 +58,8 @@
     onedit: {
       open: (list: StatementList, index: number, argPath?: number[]) => void
       batch: (list: StatementList, indices: number[], action: BatchAction) => void
+      /** The heading `+`: open the editor for a new statement in `list`. */
+      insert: (list: StatementList, selected: number[], length: number) => void
     }
   } = $props()
 
@@ -390,6 +393,20 @@
   </RowMenu>
 {/snippet}
 
+<!-- The placeholder a staged `insert` renders: the gold pending mark
+     (docs/ui/selection.md § Pending marks) and the tag, sitting where
+     the new row lands — after the selected row, or at the column end.
+     It is not a statement row: no checkbox, no click target. -->
+{#snippet pendingInsertRow(depth: number)}
+  <li
+    class="statement pending-insert pending-change"
+    data-insert-mark
+    style="--depth: {depth};"
+  >
+    <span class="pending-tag insert">insert</span>
+  </li>
+{/snippet}
+
 {#snippet columnActions(list: StatementList, hidden: number)}
   {@const set = sel(list)}
   <span class="column-actions">
@@ -401,9 +418,17 @@
       <SqButton icon={Play} title={t.enable} onclick={() => onedit.batch(list, [...set], 'enable')} />
       <SqButton icon={Trash2} title={t.delete} onclick={() => onedit.batch(list, [...set], 'delete')} />
       <SqButton icon={X} title={t.clear} onclick={() => clearSelection(list)} />
-    {:else}
-      <SqButton icon={Plus} title={t.addStatementTitle(noun(list))} label={t.addStatement(noun(list))} disabled />
     {/if}
+    <!-- docs/ui/selection.md: with no selection the right side is the
+         `+` alone; a selection brings the batch row in beside it — the
+         `+` stays so one selected row can still take an insert after it
+         (docs/ui/editor.md § Form · Insert). -->
+    <SqButton
+      icon={Plus}
+      title={t.addStatementTitle(noun(list))}
+      label={t.addStatement(noun(list))}
+      onclick={() => onedit.insert(list, [...set], rowNodes(list).length)}
+    />
   </span>
 {/snippet}
 
@@ -494,7 +519,15 @@
               condition.disabled,
               condition.span?.start.line ?? '?',
             )}
+            {#if pending.has(insertMarkKey(summary.id, 'conditions', i + 1))}
+              {@render pendingInsertRow(0)}
+            {/if}
           {/each}
+          {#if
+            content.conditions.length === 0 &&
+            pending.has(insertMarkKey(summary.id, 'conditions', 0))}
+            {@render pendingInsertRow(0)}
+          {/if}
           {#if content.conditions.length === 0}
             <li class="none">{t.none}</li>
           {/if}
@@ -544,7 +577,13 @@
               action.disabled,
               action.span?.start.line ?? '?',
             )}
+            {#if pending.has(insertMarkKey(summary.id, 'actions', i + 1))}
+              {@render pendingInsertRow(actDepths[i]!)}
+            {/if}
           {/each}
+          {#if actVisible.length === 0 && pending.has(insertMarkKey(summary.id, 'actions', 0))}
+            {@render pendingInsertRow(0)}
+          {/if}
           {#if actVisible.length === 0}
             <li class="none">{t.none}</li>
           {/if}

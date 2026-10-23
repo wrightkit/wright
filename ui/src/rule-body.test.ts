@@ -414,17 +414,19 @@ describe('column selection', () => {
     flushSync()
   }
 
-  it.each(['conditions', 'actions'] as const)('replaces + with the count and square batch controls in the %s heading', async (list) => {
+  it.each(['conditions', 'actions'] as const)('adds the count and square batch controls beside + in the %s heading', async (list) => {
     await setup()
     const head = column(list).querySelector('h3')!
-    const add = head.querySelector<HTMLButtonElement>('button')!
+    const add = head.querySelector<HTMLButtonElement>('button[aria-label^="Add"]')!
     expect(add.getAttribute('aria-label')).toBe(`Add ${list === 'actions' ? 'action' : 'condition'}`)
-    expect(add.disabled).toBe(true)
+    expect(add.disabled).toBe(false)
     click(checks(list)[0]!)
     expect(head.querySelector('.sel-count')?.textContent).toBe('1 selected')
+    // docs/ui/editor.md § Form · Insert: `+` stays beside the batch
+    // actions so one selected row can take an insert after it.
     expect([...head.querySelectorAll('button')].map((button) => button.getAttribute('aria-label')))
-      .toEqual(['Disable', 'Enable', 'Delete', 'Clear'])
-    expect(head.querySelectorAll('button.sq')).toHaveLength(4)
+      .toEqual(['Disable', 'Enable', 'Delete', 'Clear', `Add ${list === 'actions' ? 'action' : 'condition'}`])
+    expect(head.querySelectorAll('button.sq')).toHaveLength(5)
     expect(slot(1)!.querySelector('.sel-bar')).toBeNull()
     click(head.querySelector('button[aria-label="Clear"]')! as HTMLElement)
     expect(head.querySelector('.sel-count')).toBeNull()

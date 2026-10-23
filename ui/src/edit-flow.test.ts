@@ -59,6 +59,27 @@ const contentFor = (actions: RuleContent['actions']): RuleContent => ({
 const summaryFor = (id: number, name: string, content?: RuleContent): RuleSummary =>
   ({ id, name, span: null, ...(content ? { content } : {}) }) as unknown as RuleSummary
 
+/** The `lookup` row the `+` form's Action pick resolves `wait` to. */
+const WAIT_ENTRY = {
+  identity: 'wait',
+  kind: 'action',
+  spelling: 'Wait',
+  displayName: 'Wait',
+  callable: {
+    parameters: [
+      { name: 'time', displayName: 'Duration', type: 'Any', required: true },
+      {
+        name: 'waitBehavior',
+        displayName: 'Wait Behavior',
+        type: 'Wait',
+        required: false,
+        default: 'Wait.IGNORE_CONDITION',
+        enum: { domain: 'Wait' },
+      },
+    ],
+  },
+}
+
 const statements = (): ToolResponse => ({
   result: {
     ok: true,
@@ -98,6 +119,22 @@ function mountApp(): void {
 
 const click = (el: Element) => {
   el.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  flushSync()
+}
+
+/** Bits UI opens its popover on pointerdown and selects on pointerup. */
+const pointerDown = (el: Element) => {
+  el.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
+  flushSync()
+}
+const pick = (el: Element) => {
+  el.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
+  el.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }))
+  flushSync()
+}
+const type = (el: HTMLInputElement, value: string) => {
+  el.value = value
+  el.dispatchEvent(new Event('input', { bubbles: true }))
   flushSync()
 }
 
@@ -345,5 +382,201 @@ describe('the editing layer', () => {
     expect(document.body.querySelector('.dialog.editor'), 'the editor closed').toBeNull()
     expect(pendingBadge()).toBe('1')
     expect(rows()[0].classList.contains('pending-change')).toBe(true)
+  })
+
+  it('stages an insert at the column end from the heading +', async () => {
+    const summaries = [
+      summaryFor(1, 'setup', contentFor([action('wait', [0.016]), action('kill', [])])),
+    ]
+    let editRequest: ToolRequest | null = null
+    api.handler = (request) => {
+      if (request.op === 'project') {
+        return Promise.resolve({ result: { inputIdentity: 'id-1' } } as ToolResponse)
+      }
+      if (request.op === 'rules') {
+        return Promise.resolve({ result: { rules: summaries, snapshot: 1 } } as ToolResponse)
+      }
+      if (request.op === 'lookup') {
+        return Promise.resolve({
+          result: {
+            language: 'workshop',
+            owner: 'workshop-rs',
+            entries: request.query === 'wait' ? [WAIT_ENTRY] : [],
+          },
+        } as ToolResponse)
+      }
+      if (request.op === 'listEntries') {
+        return Promise.resolve({
+          result: {
+            language: 'workshop',
+            owner: 'workshop-rs',
+            entries:
+              request.kind === 'action'
+                ? [{ identity: 'wait', kind: 'action', spelling: 'Wait', displayName: 'Wait' }]
+                : [],
+            total: 1,
+          },
+        } as ToolResponse)
+      }
+      if (request.op === 'editStatements') {
+        editRequest = request
+        return Promise.resolve(statements())
+      }
+      return Promise.reject(new Error(`unexpected request: ${JSON.stringify(request)}`))
+    }
+    api.apply = () => Promise.resolve({ ok: true, exit: 0, diagnostics: [] })
+
+    mountApp()
+    await settle()
+    await openRule(1)
+
+    // The heading + opens the editor on an empty action; OK is disabled
+    // until the Action pick lands and every required slot is set.
+    click(host.querySelector('.col[data-list="actions"] .column-actions button')!)
+    await settle()
+    const editor = document.body.querySelector<HTMLElement>('.dialog.editor')!
+    expect(editor, 'the editor dialog is open').not.toBeNull()
+    const ok = buttonByText(editor, 'OK') as HTMLButtonElement
+    expect(ok.disabled, 'OK is disabled before an action is picked').toBe(true)
+
+    pointerDown(editor.querySelector('[data-arg-control="action"] .picker-ctl')!)
+    await settle()
+    const option = [...document.body.querySelectorAll<HTMLElement>('.picker-option')].find(
+      (el) => el.textContent?.trim() === 'Wait',
+    )!
+    pick(option)
+    await settle()
+
+    // Wait's required Duration is unset until typed; the lookup default
+    // filled Wait Behavior already.
+    expect(editor.textContent).toContain('Duration')
+    type(
+      editor.querySelector<HTMLInputElement>('[data-arg-control="0"] input')!,
+      '0.25',
+    )
+    await settle()
+    expect(ok.disabled).toBe(false)
+    click(ok)
+    await settle()
+
+    // The new row's gold pending mark sits at the column end.
+    const mark = host.querySelector('.col[data-list="actions"] .statement.pending-insert')
+    expect(mark, 'the insert placeholder rendered').not.toBeNull()
+    expect(mark!.querySelector('.pending-tag')!.textContent).toBe('insert')
+    expect(pendingBadge()).toBe('1')
+
+    click(pendingButton())
+    await settle()
+    click(buttonByText(dialog(), 'Submit'))
+    await settle()
+
+    const request = editRequest as unknown as { edits: Record<string, unknown>[] }
+    expect(request.edits).toEqual([
+      {
+        rule: 1,
+        list: 'actions',
+        index: 2,
+        change: 'insert',
+        statements: [
+          { call: 'wait', args: [0.25, { enum: 'Wait', member: 'IGNORE_CONDITION' }] },
+        ],
+      },
+    ])
+  })
+
+  it('stages an insert after the one selected row', async () => {
+    const summaries = [
+      summaryFor(1, 'setup', contentFor([action('wait', [0.016]), action('kill', [])])),
+    ]
+    let editRequest: ToolRequest | null = null
+    api.handler = (request) => {
+      if (request.op === 'project') {
+        return Promise.resolve({ result: { inputIdentity: 'id-1' } } as ToolResponse)
+      }
+      if (request.op === 'rules') {
+        return Promise.resolve({ result: { rules: summaries, snapshot: 1 } } as ToolResponse)
+      }
+      if (request.op === 'lookup') {
+        return Promise.resolve({
+          result: {
+            language: 'workshop',
+            owner: 'workshop-rs',
+            entries: request.query === 'kill' ? [] : [WAIT_ENTRY],
+          },
+        } as ToolResponse)
+      }
+      if (request.op === 'listEntries') {
+        return Promise.resolve({
+          result: {
+            language: 'workshop',
+            owner: 'workshop-rs',
+            entries:
+              request.kind === 'action'
+                ? [{ identity: 'wait', kind: 'action', spelling: 'Wait', displayName: 'Wait' }]
+                : [],
+            total: 1,
+          },
+        } as ToolResponse)
+      }
+      if (request.op === 'editStatements') {
+        editRequest = request
+        return Promise.resolve(statements())
+      }
+      return Promise.reject(new Error(`unexpected request: ${JSON.stringify(request)}`))
+    }
+    api.apply = () => Promise.resolve({ ok: true, exit: 0, diagnostics: [] })
+
+    mountApp()
+    await settle()
+    await openRule(1)
+
+    // One selected row keeps the heading + beside the batch actions;
+    // the insert lands after the row, not at the column end.
+    click(checkbox(rows()[0]))
+    await settle()
+    click(host.querySelector('.col[data-list="actions"] .column-actions button[aria-label="Add action"]')!)
+    await settle()
+    const editor = document.body.querySelector<HTMLElement>('.dialog.editor')!
+    expect(editor, 'the editor dialog is open').not.toBeNull()
+
+    pointerDown(editor.querySelector('[data-arg-control="action"] .picker-ctl')!)
+    await settle()
+    const option = [...document.body.querySelectorAll<HTMLElement>('.picker-option')].find(
+      (el) => el.textContent?.trim() === 'Wait',
+    )!
+    pick(option)
+    await settle()
+    type(
+      editor.querySelector<HTMLInputElement>('[data-arg-control="0"] input')!,
+      '0.25',
+    )
+    click(buttonByText(editor, 'OK'))
+    await settle()
+
+    // The placeholder sits between the two rows — after the selected
+    // row 0, before row 1.
+    const items = [
+      ...host.querySelectorAll('.col[data-list="actions"] .statement'),
+    ]
+    const markAt = items.findIndex((el) => el.classList.contains('pending-insert'))
+    expect(markAt, 'the insert placeholder rendered between the rows').toBe(1)
+
+    click(pendingButton())
+    await settle()
+    click(buttonByText(dialog(), 'Submit'))
+    await settle()
+
+    const request = editRequest as unknown as { edits: Record<string, unknown>[] }
+    expect(request.edits).toEqual([
+      {
+        rule: 1,
+        list: 'actions',
+        index: 1,
+        change: 'insert',
+        statements: [
+          { call: 'wait', args: [0.25, { enum: 'Wait', member: 'IGNORE_CONDITION' }] },
+        ],
+      },
+    ])
   })
 })
