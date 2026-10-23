@@ -40,6 +40,15 @@ addressing, freshness, the assembled transaction, and its validation.
   `validateEditTransaction` payload (`ok`, `exit`, `diagnostics`, and
   `preview` when the transaction validates). Nothing is written and the
   served program is never mutated.
+* An edit whose result leaves a rule's `actions` block structure
+  unbalanced refuses `unbalanced-block` — the same structured error for
+  every block form — naming the unbalanced statement at its index in the
+  result. Each `if`, `while`, `forGlobalVariable`, and
+  `forPlayerVariable` needs a matching `end`, and `else`/`elseIf` sit
+  only inside an open `if`. Balance is judged on the request's combined
+  result per rule, not per edit: an `if` at one index and its `end` at
+  another are accepted together while either alone is refused. A refusal
+  writes nothing and leaves the `inputIdentity` unchanged.
 * Raw Workshop input only: OPY refuses `edit-requires-provider` naming
   `providerValidateEdit`, and kinds without a shipped provider keep their
   `source-provider-unavailable` refusal — both reported inside the result
