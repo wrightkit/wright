@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.35.1](https://github.com/wrightkit/wright/compare/v0.35.0...v0.35.1) (2026-10-23)
+
+
+### Code Refactoring
+
+* **ui:** move component styles out of app.css into scoped style blocks ([#963](https://github.com/wrightkit/wright/issues/963)) ([db4b779](https://github.com/wrightkit/wright/commit/db4b7794f29dc0de1c938dc27c974b2efb1c7b11)), closes [#928](https://github.com/wrightkit/wright/issues/928)
+
 ## [0.35.0](https://github.com/wrightkit/wright/compare/v0.34.0...v0.35.0) (2026-10-23)
 
 
