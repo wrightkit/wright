@@ -5,6 +5,7 @@ import {
   argFields,
   conditionFields,
   currentId,
+  defaultArgs,
   defaultNode,
   enumNode,
   fillGaps,
@@ -12,6 +13,7 @@ import {
   paramFacts,
   slotSet,
   stringNode,
+  subroutineNode,
   unsetRequired,
   variableNode,
   withArg,
@@ -91,6 +93,66 @@ describe('argFields', () => {
       variable: 'x',
     })
   })
+
+  it('flags the slots only #919\'s pickers can fill', () => {
+    const params: ParamFact[] = [
+      { name: 'variable', type: 'Variable' },
+      {
+        name: 'operation',
+        type: 'Operation',
+        content: { operations: ['add', 'subtract'] },
+      },
+      { name: 'value', type: 'Any' },
+    ]
+    const empty = argFields(params, { call: 'modifyGlobalVariable', args: [] })
+    expect(empty.map((field) => field.insertable)).toEqual([false, false, undefined])
+    const filled = argFields(params, {
+      call: 'modifyGlobalVariable',
+      args: [{ variable: 'x' }, { call: 'add', args: [] }, 1],
+    })
+    expect(filled.map((field) => field.insertable)).toEqual([undefined, undefined, undefined])
+    const literal = argFields(params, {
+      call: 'modifyGlobalVariable',
+      args: [{ string: 'x' }, { call: 'drop', args: [] }, 1],
+    })
+    expect(literal.map((field) => field.insertable)).toEqual([false, false, undefined])
+    const folded = argFields(
+      [
+        { name: 'player', type: 'Player|Array', content: { fold: { call: 'playerVariable', arg: 0 } } },
+        { name: 'variable', type: 'Variable', content: { fold: { call: 'playerVariable', arg: 1 } } },
+        { name: 'value', type: 'Any' },
+      ],
+      { call: 'setPlayerVariableAtIndex', args: [] },
+    )
+    expect(folded.map((field) => field.insertable)).toEqual([undefined, false, undefined])
+  })
+
+  it('flags a Subroutine slot unless the program declares subroutines', () => {
+    const params: ParamFact[] = [{ name: 'subroutine', type: 'Subroutine' }]
+    const noSubs = argFields(params, { call: 'startRule', args: [] }, undefined, false)
+    expect(noSubs[0].insertable).toBe(false)
+    const withSubs = argFields(params, { call: 'startRule', args: [] }, undefined, true)
+    expect(withSubs[0].insertable).toBeUndefined()
+    const filled = argFields(params, { call: 'startRule', args: [{ subroutine: 'addScore' }] })
+    expect(filled[0].insertable).toBeUndefined()
+  })
+
+  it('flags a bare Variable and a folded global variable position alike', () => {
+    const params: ParamFact[] = [
+      { name: 'variable', type: 'Variable' },
+      { name: 'globalVariable', type: 'Global Variable' },
+      { name: 'playerVariable', type: 'Player Variable' },
+    ]
+    const fields = argFields(params, { call: 'demo', args: [] })
+    expect(fields.map((field) => field.insertable)).toEqual([false, false, false])
+    const folded = argFields(
+      [
+        { name: 'variable', type: 'Variable', content: { fold: { call: 'globalVariable', arg: 0 } } },
+      ],
+      { call: 'chaseAtRate', args: [{ call: 'globalVariable', args: [] }] },
+    )
+    expect(folded[0].insertable).toBe(false)
+  })
 })
 
 describe('withArg', () => {
@@ -128,6 +190,8 @@ describe('node constructors', () => {
     expect(defaultNode('0.5')).toBe(0.5)
     expect(defaultNode('null')).toBeNull()
     expect(defaultNode('Free-form')).toEqual({ string: 'Free-form' })
+    expect(stringNode('x')).toEqual({ string: 'x' })
+    expect(subroutineNode('addScore')).toEqual({ subroutine: 'addScore' })
   })
 
   it('reads a call-id default on a non-String parameter as a call node', () => {
@@ -140,6 +204,44 @@ describe('node constructors', () => {
       args: [],
     })
     expect(defaultNode('Hello', { type: 'String' })).toEqual({ string: 'Hello' })
+  })
+})
+
+describe('defaultArgs', () => {
+  it('seeds lookup defaults and leaves required slots empty', () => {
+    const args = defaultArgs([
+      { name: 'time', type: 'Any', required: true },
+      {
+        name: 'waitBehavior',
+        type: 'Wait',
+        required: false,
+        default: 'Wait.IGNORE_CONDITION',
+        enum: { domain: 'Wait' },
+      },
+    ])
+    expect(args).toHaveLength(2)
+    expect(args[0]).toBeUndefined()
+    expect(args[1]).toEqual({ enum: 'Wait', member: 'IGNORE_CONDITION' })
+  })
+
+  it('omits a trailing run of unset slots', () => {
+    const args = defaultArgs([
+      { name: 'a', type: 'Any', required: true },
+      { name: 'b', type: 'Any', required: false },
+      { name: 'c', type: 'Any', required: false },
+    ])
+    expect(args).toHaveLength(0)
+  })
+
+  it('materializes the folded call a variable-target action seeds', () => {
+    const args = defaultArgs([
+      { name: 'player', type: 'Player|Array', content: { fold: { call: 'playerVariable', arg: 0 } } },
+      { name: 'variable', type: 'Variable', content: { fold: { call: 'playerVariable', arg: 1 } } },
+      { name: 'index', type: 'Number|Boolean' },
+      { name: 'value', type: 'Object|Array' },
+    ])
+    expect(args).toHaveLength(1)
+    expect(args[0]).toEqual({ call: 'playerVariable', args: [] })
   })
 })
 

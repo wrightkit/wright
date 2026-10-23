@@ -64,6 +64,8 @@ export interface ChromeStrings {
   submit: string
   applying: string
   conditionTitle: string
+  /** The `+` form's action picker row label (docs/ui/editor.md § First row). */
+  actionLabel: string
   disabled: string
   ok: string
   unset: string
@@ -116,7 +118,7 @@ const enUS: ChromeStrings = {
   selectAll: (noun) => `select all ${noun}s`,
   selectRow: (noun, index) => `select ${noun} ${index}`,
   addStatement: (noun) => `Add ${noun}`,
-  addStatementTitle: (noun) => `Add ${noun}: insertion is not available`,
+  addStatementTitle: (noun) => `Add ${noun}`,
   selectedCount: (count) => `${count} selected`,
   selectedHiddenCount: (count, hidden) => `${count} selected (${hidden} hidden)`,
   filterColumn: (noun) => `Filter ${noun}s…`,
@@ -145,6 +147,7 @@ const enUS: ChromeStrings = {
   submit: 'Submit',
   applying: 'Applying…',
   conditionTitle: 'Condition',
+  actionLabel: 'Action',
   disabled: 'Disabled',
   ok: 'OK',
   unset: 'unset',
@@ -197,7 +200,7 @@ const zhCN: ChromeStrings = {
   selectAll: (noun) => `选择所有${noun}`,
   selectRow: (noun, index) => `选择${noun} ${index}`,
   addStatement: (noun) => `添加${noun}`,
-  addStatementTitle: (noun) => `添加${noun}：插入功能不可用`,
+  addStatementTitle: (noun) => `添加${noun}`,
   selectedCount: (count) => `已选择 ${count} 项`,
   selectedHiddenCount: (count, hidden) => `已选择 ${count} 项（${hidden} 项已隐藏）`,
   filterColumn: (noun) => `筛选${noun}…`,
@@ -225,6 +228,7 @@ const zhCN: ChromeStrings = {
   submit: '提交',
   applying: '正在应用…',
   conditionTitle: '条件',
+  actionLabel: '动作',
   disabled: '禁用',
   ok: '确定',
   unset: '未设置',

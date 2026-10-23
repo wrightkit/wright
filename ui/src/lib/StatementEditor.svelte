@@ -6,12 +6,14 @@
     argFields,
     conditionFields,
     currentId,
+    defaultArgs,
     enumNode,
     fillGaps,
     operationNode,
     paramFacts,
     slotSet,
     stringNode,
+    subroutineNode,
     unsetRequired,
     variableNode,
     withArg,
@@ -40,6 +42,7 @@
     t,
     locale,
     focusPath = null,
+    isInsert = false,
     onsave,
     onclose,
   }: {
@@ -50,7 +53,9 @@
     t: ChromeStrings
     locale: string
     focusPath?: number[] | null
-    onsave: (disabled: boolean, args?: Node[], value?: Node) => void
+    /** Whether the form stages a `+` insert instead of a `replace`. */
+    isInsert?: boolean
+    onsave: (disabled: boolean, args?: Node[], value?: Node, call?: string) => void
     onclose: () => void
   } = $props()
 
@@ -67,12 +72,22 @@
   let symbolsLoading = false
   let optionsLocale = ''
   let root: HTMLElement | undefined = $state()
+  /** The `+` form's action catalog and the picked call (an insert action). */
+  let actionOptions = $state<{ id: string; label: string }[] | null>(null)
+  let chosenCall = $state<string | null>(null)
+  let actionsLoading = false
+  /** The `+` form's declared subroutines, for the `Subroutine` slot. */
+  let subroutineSymbols = $state<Symbol[] | null>(null)
+  let subroutinesLoading = false
 
   const isCondition = $derived(target?.list === 'conditions')
 
   const sourceAction = $derived.by((): Action | null => {
     if (target === null) return null
-    if (!isCondition) return target.node as SpannedAction
+    if (!isCondition) {
+      const action = target.node as SpannedAction
+      return chosenCall !== null ? { ...action, call: chosenCall } : action
+    }
     const value = (target.node as SpannedCondition).value
     if (value !== null && typeof value === 'object' && 'call' in value) {
       return { call: value.call as string, args: (value.args as Node[]) ?? [] }
@@ -101,9 +116,31 @@
         nestedFacts,
       )
     }
-    return argFields(paramFacts(callableEntry), shownAction, nestedFacts)
+    return argFields(
+      paramFacts(callableEntry),
+      shownAction,
+      nestedFacts,
+      subroutineSymbols !== null && subroutineSymbols.length > 0,
+    )
   })
   const missing = $derived(shownAction ? unsetRequired(shownAction, fields) : [])
+  const flatFields = (list: ArgField[]): ArgField[] =>
+    list.flatMap((field) => (field.nested ? [field, ...flatFields(field.nested)] : [field]))
+  /**
+   * OK stays disabled while a slot is unset (`missing`) or holds a
+   * position only #919's pickers can fill (`insertable === false`) — a
+   * staged insert must submit a node `editStatements` accepts, and the
+   * `+` form's controls cannot write a `{"variable"}`, `{"subroutine"}`,
+   * or modify-operation shape the slot requires.
+   */
+  const canSave = $derived(
+    missing.length === 0 &&
+      (!isInsert ||
+        (flatFields(fields).every((field) => field.insertable !== false) &&
+          (isCondition
+            ? editedArgs !== null && editedArgs[0] !== null && editedArgs[0] !== undefined
+            : chosenCall !== null && callableEntry !== null))),
+  )
 
   $effect(() => {
     if (target === null) {
@@ -116,6 +153,11 @@
     focusedFor = null
     callableEntry = null
     valueEntry = null
+    actionOptions = null
+    chosenCall = null
+    actionsLoading = false
+    subroutineSymbols = null
+    subroutinesLoading = false
     const stagedValue = staged?.value as Node | undefined
     const seed =
       target.list === 'actions'
@@ -163,12 +205,14 @@
       }
     } else {
       const callId = (target.node as SpannedAction).call
-      void names.entries(callId).then((entries) => {
-        if (shownFor === target) {
-          callableEntry =
-            entries.find((entry) => STATEMENT_KINDS.includes(entry.kind)) ?? entries[0] ?? null
-        }
-      })
+      if (callId !== '') {
+        void names.entries(callId).then((entries) => {
+          if (shownFor === target) {
+            callableEntry =
+              entries.find((entry) => STATEMENT_KINDS.includes(entry.kind)) ?? entries[0] ?? null
+          }
+        })
+      }
     }
   })
 
@@ -275,6 +319,7 @@
 
   const title = $derived.by(() => {
     if (!target) return ''
+    if (isInsert) return t.addStatement(isCondition ? t.conditionNoun : t.actionNoun)
     if (!isCondition) {
       const action = target.node as SpannedAction
       return names.peek(action.call, STATEMENT_KINDS)?.name ?? action.call
@@ -325,6 +370,83 @@
     return names.peek(callId, VALUE_KINDS)?.name ?? callId
   }
 
+  /** The `+` form's action catalog loads once per open (§ Form · Insert). */
+  $effect(() => {
+    if (!isInsert || isCondition || target === null) return
+    if (actionOptions !== null || actionsLoading) return
+    actionsLoading = true
+    const requestLocale = locale
+    void call({
+      op: 'listEntries',
+      language: 'workshop',
+      kind: 'action',
+      locale: requestLocale,
+      pageSize: 500,
+    })
+      .then((response) => {
+        if ('result' in response && requestLocale === optionsLocale) {
+          const entries = (response.result as ListEntriesResult).entries ?? []
+          // `__…__`-mangled ids are internal sentinels — a block opener's
+          // surface form needs the sibling `end` a single `+` insert
+          // cannot stage, so the picker does not offer it.
+          actionOptions = entries
+            .filter(
+              (entry) => !(entry.identity.startsWith('__') && entry.identity.endsWith('__')),
+            )
+            .map((entry) => ({
+              id: entry.identity,
+              label: entry.displayName,
+            }))
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        actionsLoading = false
+      })
+  })
+
+  /** The `+` form's declared subroutines load when a `Subroutine` slot appears. */
+  $effect(() => {
+    if (!isInsert || target === null) return
+    if (!flatFields(fields).some((field) => field.type === 'Subroutine')) return
+    if (subroutineSymbols !== null || subroutinesLoading) return
+    subroutinesLoading = true
+    void call({ op: 'symbols', kind: 'subroutine', all: true })
+      .then((response) => {
+        if ('result' in response) {
+          const result = response.result
+          subroutineSymbols = (Array.isArray(result)
+            ? result
+            : ((result as { symbols?: Symbol[] }).symbols ?? [])) as Symbol[]
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        subroutinesLoading = false
+      })
+  })
+
+  /**
+   * Pick the `+` form's action: the picker lists every `listEntries`
+   * action, and choosing one seeds the parameter rows from `lookup`
+   * defaults (§ Form · First row). Picking a call whose slots need a
+   * `{"variable"}`/`{"subroutine"}`/operation node keeps OK disabled
+   * until #919's pickers can fill it — an action the form cannot
+   * complete can stage no insert `editStatements` must refuse.
+   */
+  function chooseAction(id: string) {
+    if (!isInsert || isCondition || !target) return
+    callableEntry = null
+    chosenCall = id
+    editedArgs = []
+    void names.entries(id).then((entries) => {
+      if (shownFor !== target) return
+      callableEntry =
+        entries.find((entry) => STATEMENT_KINDS.includes(entry.kind)) ?? entries[0] ?? null
+      editedArgs = defaultArgs(paramFacts(callableEntry))
+    })
+  }
+
   function choose(field: ArgField, id: string) {
     if (!shownAction) return
     const node =
@@ -341,19 +463,48 @@
 
   function setLiteral(field: ArgField, text: string) {
     if (!shownAction || text === '') return
-    const node = field.kind === 'number' ? Number(text) : stringNode(text)
+    const node =
+      field.kind === 'number'
+        ? Number(text)
+        : field.kind === 'other' && /^-?\d+(\.\d+)?$/.test(text)
+          ? Number(text)
+          : stringNode(text)
     const filled = fillGaps(shownAction, fields, field.path)
     editedArgs = withArg(filled, field.path, node).args
+  }
+
+  /** A `Subroutine` slot's declared-name pick, a `{"subroutine"}` node. */
+  function chooseSubroutine(field: ArgField, name: string) {
+    if (!shownAction) return
+    const filled = fillGaps(shownAction, fields, field.path)
+    editedArgs = withArg(filled, field.path, subroutineNode(name)).args
   }
 </script>
 
 <Dialog open={target !== null} {onclose} class="editor" {title} titleClass="editor-title">
   {#if target}
     <div class="editor-root" bind:this={root}>
-      <label class="editor-disable">
-        <input type="checkbox" bind:checked={checked} data-testid="editor-disable" />
-        {t.disabled}
-      </label>
+      {#if !isInsert}
+        <label class="editor-disable">
+          <input type="checkbox" bind:checked={checked} data-testid="editor-disable" />
+          {t.disabled}
+        </label>
+      {/if}
+      {#if isInsert && !isCondition}
+        <!-- § Form · First row: the Action picker over every catalog
+             action; choosing one seeds the parameter rows from
+             `lookup` defaults. -->
+        <div class="editor-arg" data-arg-control="action">
+          <span class="editor-arg-label">{t.actionLabel}</span>
+          <Picker
+            options={actionOptions ?? []}
+            selected={chosenCall}
+            placeholder={t.unset}
+            ariaLabel={t.actionNoun}
+            onselect={chooseAction}
+          />
+        </div>
+      {/if}
       {#if fields.length > 0}
         <div class="editor-args">
           {@render rows(fields)}
@@ -364,7 +515,7 @@
         <button
           type="button"
           class="ok"
-          disabled={missing.length > 0}
+          disabled={!canSave}
           onclick={() => {
             if (isCondition) {
               const call =
@@ -377,7 +528,7 @@
                   : (shownAction?.args?.[0] as Node | undefined)
               onsave(checked, undefined, value)
             } else {
-              onsave(checked, editedArgs ?? undefined)
+              onsave(checked, editedArgs ?? undefined, undefined, chosenCall ?? undefined)
             }
             onclose()
           }}>{t.ok}</button
@@ -419,6 +570,36 @@
         />
       {:else if field.kind === 'call'}
         <span class="editor-arg-value">{callLabel(node, field)}</span>
+      {:else if field.kind === 'other' && isInsert && field.type === 'Subroutine'}
+        <!-- A `Subroutine` slot takes a `{"subroutine"}` node bound to a
+             declared name; the `+` form lists the project's subroutines
+             so the pick is always valid. With none declared the slot
+             stays `insertable: false` and OK blocks (#920 review). -->
+        <Picker
+          options={(subroutineSymbols ?? []).map((symbol) => ({ id: symbol.name, label: symbol.name }))}
+          selected={node !== undefined && node !== null && typeof node === 'object' && 'subroutine' in node ? (node.subroutine as string) : null}
+          placeholder={unset ? t.unset : field.label}
+          ariaLabel={field.label}
+          onselect={(name) => chooseSubroutine(field, name)}
+        />
+      {:else if field.kind === 'other' && isInsert && field.insertable !== false}
+        <!-- An untyped slot on the `+` form (`Any` and friends) takes a
+             literal text input until #919's value picker lands: a
+             numeric spelling writes the number literal, anything else a
+             `{"string"}` node — both `rule-content-v1` nodes
+             `editStatements` validates, never Workshop text. -->
+        <input
+          class="editor-input"
+          type="text"
+          value={typeof node === 'number'
+            ? String(node)
+            : node !== undefined && node !== null && typeof node === 'object' && 'string' in node
+              ? (node.string as string)
+              : ''}
+          placeholder={unset ? t.unset : ''}
+          aria-label={field.label}
+          oninput={(event) => setLiteral(field, event.currentTarget.value)}
+        />
       {:else if field.kind === 'other'}
         <span class="editor-arg-value" class:warn={unset}>
           {unset ? t.unset : node !== undefined ? statementText(node, names, VALUE_KINDS) : ''}
