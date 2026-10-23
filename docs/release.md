@@ -282,10 +282,46 @@ command, and runs the same native smoke against the installed binaries. These
 channel checks are labelled separately from the native runtime smoke and do
 not publish or modify any external package-manager repository.
 
+### WebAssembly core
+
+Every `wright` release also produces the WebAssembly build of the Wright
+core as the npm package `@wrightkit/core` (ADR-0037 decision 2, #960).
+The package version equals the `wright` release version. It contains the
+`wasm32-unknown-unknown` core (`wright-core.wasm`), the ESM entry
+`wright-core.mjs` with its TypeScript declarations, the `wright-agent/v1`
+types generated from the committed `schemas/` by
+`scripts/generate-core-types.mjs`, and the `wright-agent/v1` schema JSON.
+The `agent_contract` field of its `package.json` records the contract
+version the core carries.
+
+The `core-package` job of `release.yml` runs for every workflow
+invocation, nightly and stable alike: it builds the core from the release
+commit, regenerates the shipped types — refusing to pack when the
+committed generated file differs from a fresh generation — packs the
+tarball, and smoke-checks it by installing it in a clean directory,
+type-checking a `request` call against the shipped types, and running it
+in Node. Only stable releases publish: `publish-npm` uploads the
+checksum-verified tarball to npm with the `NPM_TOKEN` secret.
+
+Consumers pin the exact release version:
+
+```sh
+npm install @wrightkit/core@0.36.0
+```
+
+```js
+import { createCore, wasmUrl } from '@wrightkit/core'
+import { readFileSync } from 'node:fs'
+
+const core = await createCore(readFileSync(wasmUrl), sourceText, 'main.ow')
+const project = core.request({ op: 'project' })
+```
+
 ### Repository configuration
 
 Create a protected `release` environment if publication approval is required;
-the stable `publish-release` job is the only job that uses it.
+the stable `publish-release` and `publish-npm` jobs are the only jobs that
+use it.
 
 Configure these optional/required environment secrets:
 
@@ -302,6 +338,8 @@ Configure these optional/required environment secrets:
   `releases.wrightkit.dev` and `install.wrightkit.dev` as production custom
   domains before stable publication; the workflow verifies the public routes
   during publication.
+* `NPM_TOKEN` is the organization secret granting the stable `publish-npm`
+  job publish access to `@wrightkit/core` on npm (#960).
 
 ## Supported installation channels
 

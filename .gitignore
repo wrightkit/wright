@@ -15,6 +15,10 @@ Icon
 
 target/
 
+scripts/node_modules/
+
+dist/wrightkit-core-*
+
 **/*.rs.bk
 
 **/__pycache__/

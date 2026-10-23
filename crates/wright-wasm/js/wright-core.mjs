@@ -13,6 +13,10 @@
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 
+// The packaged `wright-core.wasm` next to this module — the asset URL
+// a Node or bundler host reads the core bytes from (#960).
+export const wasmUrl = new URL('./wright-core.wasm', import.meta.url)
+
 /**
  * Instantiate the module and create the core over `sourceText`, the
  * host's in-memory Workshop source. `name` gives the source its file

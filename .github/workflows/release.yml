@@ -247,6 +247,64 @@ jobs:
             dist/wright-*.zip.sha256
             dist/wright-*.build.json
 
+  core-package:
+    name: Package @wrightkit/core
+    needs:
+      - release-identity
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ needs.release-identity.outputs.version }}
+      RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
+      RELEASE_COMMIT: ${{ needs.release-identity.outputs.commit }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-identity.outputs.commit }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
+
+      - name: Set up Rust
+        uses: wrightkit/.github/.github/actions/setup-rust@main
+        with:
+          toolchain: 1.97.1
+          targets: wasm32-unknown-unknown
+          cache-shared-key: release-wasm-core
+          cache-targets: false
+          cache-save: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install release tooling dependencies
+        run: npm ci --prefix scripts
+
+      - name: Build the wasm core
+        run: >-
+          cargo build --locked --release
+          --target wasm32-unknown-unknown -p wright-wasm --lib
+
+      - name: Pack @wrightkit/core
+        run: >-
+          node scripts/package-core.mjs
+          --version "$RELEASE_VERSION"
+          --tag "$RELEASE_TAG"
+          --commit "$RELEASE_COMMIT"
+
+      - name: Smoke check the packed core
+        run: >-
+          node scripts/smoke-core-package.mjs
+          --tarball "dist/wrightkit-core-${RELEASE_VERSION}.tgz"
+
+      - name: Upload core package
+        uses: actions/upload-artifact@v7
+        with:
+          name: wright-core-package
+          path: dist/wrightkit-core-*
+          if-no-files-found: error
+
   release-assets:
     name: Verify native release artifacts
     needs:
@@ -483,6 +541,35 @@ jobs:
               --draft=false \
               --latest
           fi
+
+  publish-npm:
+    name: Publish @wrightkit/core to npm
+    needs:
+      - release-identity
+      - core-package
+    if: needs.release-identity.outputs.channel == 'stable'
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - name: Download core package
+        uses: actions/download-artifact@v8
+        with:
+          name: wright-core-package
+          path: package
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Verify core package checksum
+        run: (cd package && sha256sum -c wrightkit-core-*.tgz.sha256)
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish ./package/wrightkit-core-*.tgz
 
   publish-r2:
     name: Publish ${{ needs.release-identity.outputs.channel }} distribution to R2

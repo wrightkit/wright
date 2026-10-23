@@ -668,9 +668,16 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 24
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
 
       - name: Add the wasm target
         run: rustup target add wasm32-unknown-unknown
+
+      - name: Check generated core types are fresh
+        run: |
+          npm ci --prefix scripts
+          node scripts/generate-core-types.mjs --check
 
       - name: Build the wasm core and the native parity driver
         run: |
