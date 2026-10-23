@@ -39,6 +39,16 @@
     void tick().then(() => inputEl?.focus())
   })
 
+  // Bits only invokes onOpenChange when its own open setter runs; our
+  // onValueChange close (same-value keyboard reselect) bypasses it.
+  let wasOpen = false
+  $effect(() => {
+    const isOpen = open
+    const closed = wasOpen && !isOpen
+    wasOpen = isOpen
+    if (closed) void tick().then(restoreFocus)
+  })
+
   const filtered = $derived.by(() => {
     const needle = filter.trim().toLowerCase()
     if (!needle) return options
@@ -72,9 +82,6 @@
   bind:value={sel}
   inputValue={filter}
   {onValueChange}
-  onOpenChange={(next) => {
-    if (!next) void tick().then(restoreFocus)
-  }}
 >
   <Combobox.Trigger bind:ref={triggerEl} class="picker-ctl" aria-label={ariaLabel}>
     <span class="picker-value" class:placeholder={selected === null}>

@@ -210,6 +210,24 @@ describe('the Picker wrapper', () => {
     expect(popover(), 'Esc closed the popover').toBeNull()
     expect(document.activeElement, 'focus returned to the control').toBe(trigger)
   })
+
+  it('returns focus to its control when Enter reselects the current option', async () => {
+    const { onselect } = mountPicker('a')
+    const trigger = host.querySelector<HTMLButtonElement>('.picker-ctl')!
+    pointerDown(trigger)
+    await settle()
+    expect(popover()).not.toBeNull()
+
+    const filter = popover()!.querySelector<HTMLInputElement>('.picker-filter')!
+    filter.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+    )
+    await settle()
+
+    expect(onselect).toHaveBeenCalledWith('a')
+    expect(popover(), 'the popover closed on reselect').toBeNull()
+    expect(document.activeElement, 'focus returned to the control').toBe(trigger)
+  })
 })
 
 describe('nested Esc layering', () => {
