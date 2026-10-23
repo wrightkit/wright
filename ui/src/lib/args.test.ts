@@ -61,6 +61,48 @@ describe('argFields', () => {
     expect(fields[1].operations).toEqual(['add', 'subtract', 'removeFromArrayByIndex'])
   })
 
+  it('flags the slots only #919\'s pickers can fill', () => {
+    // A `{"variable"}` or modify-operation slot takes a node the `+`
+    // form's literal input cannot write, so it is flagged
+    // non-insertable and OK stays disabled (#920 review); a slot
+    // already holding the node it accepts submits as-is.
+    const params: ParamFact[] = [
+      { name: 'variable', type: 'Variable' },
+      {
+        name: 'operation',
+        type: 'Operation',
+        content: { operations: ['add', 'subtract'] },
+      },
+      { name: 'value', type: 'Any' },
+    ]
+    const empty = argFields(params, { call: 'modifyGlobalVariable', args: [] })
+    expect(empty.map((field) => field.insertable)).toEqual([false, false, undefined])
+    const filled = argFields(params, {
+      call: 'modifyGlobalVariable',
+      args: [{ variable: 'x' }, { call: 'add', args: [] }, 1],
+    })
+    expect(filled.map((field) => field.insertable)).toEqual([undefined, undefined, undefined])
+    // A wrong-shape node — a typed literal — does not clear the flag:
+    // `editStatements` still refuses it at a variable/operation slot.
+    const literal = argFields(params, {
+      call: 'modifyGlobalVariable',
+      args: [{ string: 'x' }, { call: 'drop', args: [] }, 1],
+    })
+    expect(literal.map((field) => field.insertable)).toEqual([false, false, undefined])
+    // A fold group flags only its `{"variable"}` member: the folded
+    // `playerVariable`'s player arg takes a value node the literal
+    // input can write, its variable arg does not.
+    const folded = argFields(
+      [
+        { name: 'player', type: 'Player|Array', content: { fold: { call: 'playerVariable', arg: 0 } } },
+        { name: 'variable', type: 'Variable', content: { fold: { call: 'playerVariable', arg: 1 } } },
+        { name: 'value', type: 'Any' },
+      ],
+      { call: 'setPlayerVariableAtIndex', args: [] },
+    )
+    expect(folded.map((field) => field.insertable)).toEqual([undefined, false, undefined])
+  })
+
   it('maps fold members inside the folded target call', () => {
     const fields = argFields(
       [

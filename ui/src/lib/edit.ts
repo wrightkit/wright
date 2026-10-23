@@ -52,6 +52,16 @@ export function keyFor(rule: number, list: string, index: number): string {
   return `${rule}:${list}:${index}`
 }
 
+/**
+ * The pending-map key of an `insert` staged at `index` — namespaced so
+ * the insert edit never collides with the `change`/`delete` `keyFor`
+ * addresses an existing row at the same index (#920 review): a `+` at N
+ * and a delete of row N stage side by side instead of clobbering.
+ */
+export function insertKey(rule: number, list: string, index: number): string {
+  return `insert:${rule}:${list}:${index}`
+}
+
 /** The pending-map key of the placeholder row an `insert` at `index` adds. */
 export function insertMarkKey(rule: number, list: string, index: number): string {
   return `${rule}:${list}:${index}:new`
@@ -141,6 +151,9 @@ export function stageDeletes(
   indices: Iterable<number>,
 ): void {
   for (const index of indices) {
+    // Only a `change`/`delete` lives at the row key — a staged `insert`
+    // at the same index keeps its own entry under `insertKey`.
+    if (pending.get(keyFor(rule, list, index))?.tag === 'insert') continue
     pending.set(keyFor(rule, list, index), { rule, ruleName, list, index, tag: 'delete' })
   }
 }
@@ -169,7 +182,7 @@ export function stageInsert(
   index: number,
   statements: RuleContentStatement[],
 ): void {
-  pending.set(keyFor(rule, list, index), {
+  pending.set(insertKey(rule, list, index), {
     rule,
     ruleName,
     list,

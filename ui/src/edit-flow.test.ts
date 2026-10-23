@@ -80,6 +80,27 @@ const WAIT_ENTRY = {
   },
 }
 
+/** An action whose slots the `+` form cannot fill until #919's pickers. */
+const MODIFY_ENTRY = {
+  identity: 'modifyGlobalVariable',
+  kind: 'action',
+  spelling: 'Modify Global Variable',
+  displayName: 'Modify Global Variable',
+  callable: {
+    parameters: [
+      { name: 'variable', displayName: 'Variable', type: 'Variable', required: true },
+      {
+        name: 'operation',
+        displayName: 'Operation',
+        type: 'Operation',
+        required: true,
+        content: { operations: ['add', 'subtract'] },
+      },
+      { name: 'value', displayName: 'Value', type: 'Any', required: true },
+    ],
+  },
+}
+
 const statements = (): ToolResponse => ({
   result: {
     ok: true,
@@ -578,5 +599,92 @@ describe('the editing layer', () => {
         ],
       },
     ])
+  })
+
+  it('keeps OK disabled for a call whose slots need #919\'s pickers', async () => {
+    // `modifyGlobalVariable`'s Variable and Operation slots take the
+    // pickers #919 adds; until then the `+` form cannot produce their
+    // nodes, so OK stays disabled rather than stage an insert
+    // `editStatements` must refuse (#920 review).
+    const summaries = [
+      summaryFor(1, 'setup', contentFor([action('wait', [0.016]), action('kill', [])])),
+    ]
+    let editRequest: ToolRequest | null = null
+    api.handler = (request) => {
+      if (request.op === 'project') {
+        return Promise.resolve({ result: { inputIdentity: 'id-1' } } as ToolResponse)
+      }
+      if (request.op === 'rules') {
+        return Promise.resolve({ result: { rules: summaries, snapshot: 1 } } as ToolResponse)
+      }
+      if (request.op === 'lookup') {
+        return Promise.resolve({
+          result: {
+            language: 'workshop',
+            owner: 'workshop-rs',
+            entries: request.query === 'modifyGlobalVariable' ? [MODIFY_ENTRY] : [],
+          },
+        } as ToolResponse)
+      }
+      if (request.op === 'listEntries') {
+        return Promise.resolve({
+          result: {
+            language: 'workshop',
+            owner: 'workshop-rs',
+            entries:
+              request.kind === 'action'
+                ? [
+                    {
+                      identity: 'modifyGlobalVariable',
+                      kind: 'action',
+                      spelling: 'Modify Global Variable',
+                      displayName: 'Modify Global Variable',
+                    },
+                  ]
+                : [],
+            total: 1,
+          },
+        } as ToolResponse)
+      }
+      if (request.op === 'symbols') {
+        return Promise.resolve({ result: { symbols: [] } } as unknown as ToolResponse)
+      }
+      if (request.op === 'editStatements') {
+        editRequest = request
+        return Promise.resolve(statements())
+      }
+      return Promise.reject(new Error(`unexpected request: ${JSON.stringify(request)}`))
+    }
+    api.apply = () => Promise.resolve({ ok: true, exit: 0, diagnostics: [] })
+
+    mountApp()
+    await settle()
+    await openRule(1)
+
+    click(host.querySelector('.col[data-list="actions"] .column-actions button')!)
+    await settle()
+    const editor = document.body.querySelector<HTMLElement>('.dialog.editor')!
+    const ok = buttonByText(editor, 'OK') as HTMLButtonElement
+
+    pointerDown(editor.querySelector('[data-arg-control="action"] .picker-ctl')!)
+    await settle()
+    pick(
+      [...document.body.querySelectorAll<HTMLElement>('.picker-option')].find(
+        (el) => el.textContent?.trim() === 'Modify Global Variable',
+      )!,
+    )
+    await settle()
+
+    // Filling the value slot's literal input still leaves the
+    // picker-bound variable/operation slots un-producible, so OK stays
+    // disabled — a staged insert can never be submitted (a synthetic
+    // click on the disabled button is a jsdom artifact, so the test
+    // stops at the control state).
+    type(editor.querySelector<HTMLInputElement>('[data-arg-control="2"] input')!, '1')
+    await settle()
+    expect(ok.disabled, 'OK is disabled on a picker-bound call').toBe(true)
+    click(buttonByText(editor, 'Cancel'))
+    await settle()
+    expect(pendingBadge(), 'no insert was staged').toBeNull()
   })
 })

@@ -158,23 +158,31 @@
     return argFields(paramFacts(callableEntry), shownAction, nestedFacts)
   })
   const missing = $derived(shownAction ? unsetRequired(shownAction, fields) : [])
+  /** Every field the form shows, nested `call` rows included. */
+  const flatFields = (list: ArgField[]): ArgField[] =>
+    list.flatMap((field) => (field.nested ? [field, ...flatFields(field.nested)] : [field]))
   /**
    * OK stays disabled while a required slot is unset — and, on the `+`
    * form, while the statement has no call yet: an action needs the
    * Action row's pick, a condition a value (`null` is the empty form).
+   * It also stays disabled while the form holds a slot the `+` controls
+   * cannot fill — a `{"variable"}` or modify-operation slot whose picker
+   * is #919's — since the only node the form could stage there would
+   * fail `editStatements` validation.
    */
   const canSave = $derived(
     missing.length === 0 &&
       (!isInsert ||
-        (isCondition
-          ? editedArgs !== null &&
-            editedArgs[0] !== null &&
-            editedArgs[0] !== undefined
-          : chosenCall !== null &&
-            // The call's `lookup` entry holds the parameter facts the
-            // required-slot check needs; before it lands OK would
-            // stage a bare `{call, args: []}`. */
-            callableEntry !== null)),
+        (flatFields(fields).every((field) => field.insertable !== false) &&
+          (isCondition
+            ? editedArgs !== null &&
+              editedArgs[0] !== null &&
+              editedArgs[0] !== undefined
+            : chosenCall !== null &&
+              // The call's `lookup` entry holds the parameter facts the
+              // required-slot check needs; before it lands OK would
+              // stage a bare `{call, args: []}`. */
+              callableEntry !== null))),
   )
 
   $effect(() => {
@@ -286,9 +294,7 @@
       symbolsLoading = false
       optionsLocale = locale
     }
-    const allFields = (list: ArgField[]): ArgField[] =>
-      list.flatMap((field) => (field.nested ? [field, ...allFields(field.nested)] : [field]))
-    const flat = allFields(fields)
+    const flat = flatFields(fields)
     const operationIds = flat.flatMap((field) => field.operations ?? [])
     if (operationIds.length > 0) void names.warm(operationIds)
     const domains = new Set(

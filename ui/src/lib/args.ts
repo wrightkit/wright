@@ -52,6 +52,13 @@ export interface ArgField {
   kind: ArgFieldKind
   /** Whether an empty slot disables OK (a required parameter). */
   required: boolean
+  /**
+   * Whether the `+` form can produce this slot's node yet (docs/ui/editor.md
+   * § Insert): a `{"variable"}` or modify-operation slot takes the pickers
+   * #919 adds — until then OK stays disabled rather than stage a node
+   * `editStatements` must refuse.
+   */
+  insertable?: boolean
   /** Which `symbols` kind a `variable` field's picker lists. */
   scope?: 'globalVariable' | 'playerVariable'
   /** The enum domain an `enum` field lists members of via `listEntries`. */
@@ -93,6 +100,38 @@ export function paramFacts(entry: LookupEntry | null | undefined): ParamFact[] {
 
 function isObject(node: unknown): node is Record<string, unknown> {
   return typeof node === 'object' && node !== null && !Array.isArray(node)
+}
+
+/**
+ * Whether the `+` form can produce a node for this slot (docs/ui/editor.md
+ * § Insert). The `+` controls write literals (`number`, `{"string"}`) and
+ * picker literals — until #919's pickers land no control produces a
+ * `{"variable"}` node or a declared modify-operation call, so a slot
+ * `editStatements` validates against one stays flagged and OK stays
+ * disabled. A slot already holding the node it accepts submits as-is.
+ */
+function needsPicker(param: ParamFact, node: Node | undefined): boolean {
+  // A modify-operation position accepts exactly its declared call ids;
+  // an operations node already in place is one of them.
+  const operations = param.content?.operations ?? []
+  if (operations.length > 0) {
+    return !(
+      isObject(node) && 'call' in node && operations.includes(node.call as string)
+    )
+  }
+  // A variable position — a `Variable`-typed parameter, or a fold
+  // member feeding the folded call's `{"variable"}` arg — accepts only
+  // the `{"variable"}` node. The fold's other args are value nodes the
+  // literal input can write, so only the tagged-variable arg flags:
+  // `globalVariable`'s single arg, `playerVariable`'s second.
+  const foldsVariable =
+    /^(Global |Player )?Variable$/.test(param.type ?? '') ||
+    (param.content?.fold !== undefined &&
+      (param.content.fold.call === 'globalVariable'
+        ? param.content.fold.arg === 0
+        : param.content.fold.arg === 1))
+  if (!foldsVariable) return false
+  return !(isObject(node) && 'variable' in node)
 }
 
 /** The node at `path`, descending into call args; `[]` reads the root. */
@@ -188,6 +227,7 @@ function fieldFor(
       param.enum?.domain ??
       (isObject(node) && typeof node.enum === 'string' ? node.enum : undefined)
   }
+  if (needsPicker(param, node)) field.insertable = false
   return field
 }
 

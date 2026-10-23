@@ -105,7 +105,11 @@
   const sel = (list: StatementList) => selection[list]
 
   function tagFor(list: StatementList, index: number) {
-    return pending.get(keyFor(summary.id, list, index))?.tag
+    // An `insert`'s own key can't collide with the row key, but guard
+    // anyway: the existing row's mark is `change`/`delete` only — the
+    // `insert` badge belongs to the `:new` placeholder row.
+    const tag = pending.get(keyFor(summary.id, list, index))?.tag
+    return tag === 'insert' ? undefined : tag
   }
 
   /** A checkbox click: shift+click extends from the anchor to a range. */

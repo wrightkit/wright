@@ -3,12 +3,14 @@ import {
   buildRequest,
   effectiveDisabled,
   insertAddress,
+  insertKey,
   insertMarkKey,
   isStale,
   keyFor,
   setDisabled,
   stageDeletes,
   stageInsert,
+  stageStatement,
   type PendingChange,
   type StatementNode,
 } from './edit'
@@ -115,10 +117,44 @@ describe('stageInsert', () => {
   it('stages the statement plus its placeholder mark', () => {
     const map = pending()
     stageInsert(map, 2, 'setup', 'actions', 1, [{ call: 'wait', args: [0.25] }])
-    const change = map.get(keyFor(2, 'actions', 1))
+    const change = map.get(insertKey(2, 'actions', 1))
     expect(change?.tag).toBe('insert')
     expect(change?.statements).toEqual([{ call: 'wait', args: [0.25] }])
     expect(map.get(insertMarkKey(2, 'actions', 1))?.position).toBe('before')
+  })
+
+  it('does not collide with a change or delete on the row at the index', () => {
+    // An insert at N and a delete of row N address different entries:
+    // the request carries both, and row N keeps its own pending mark
+    // while the `:new` placeholder renders the insert's.
+    const map = pending()
+    stageInsert(map, 1, 'r', 'actions', 1, [{ call: 'wait', args: [1] }])
+    stageDeletes(map, 1, 'r', 'actions', [1])
+    expect(buildRequest(map, 'digest', 0).edits).toEqual([
+      {
+        rule: 1,
+        list: 'actions',
+        index: 1,
+        change: 'insert',
+        statements: [{ call: 'wait', args: [1] }],
+      },
+      { rule: 1, list: 'actions', index: 1, change: 'delete' },
+    ])
+    expect(map.get(keyFor(1, 'actions', 1))?.tag).toBe('delete')
+    expect(map.get(insertKey(1, 'actions', 1))?.tag).toBe('insert')
+
+    // The reverse order: a staged delete survives a later insert at
+    // the same index, and a staged change is not clobbered either.
+    const second = pending()
+    stageDeletes(second, 1, 'r', 'actions', [1])
+    stageInsert(second, 1, 'r', 'actions', 1, [{ call: 'wait', args: [1] }])
+    expect(second.get(keyFor(1, 'actions', 1))?.tag).toBe('delete')
+    expect(buildRequest(second, 'digest', 0).edits).toHaveLength(2)
+
+    const third = pending()
+    setDisabled(third, 1, 'r', 'actions', 1, node(), true)
+    stageInsert(third, 1, 'r', 'actions', 1, [{ call: 'wait', args: [1] }])
+    expect(third.get(keyFor(1, 'actions', 1))?.tag).toBe('change')
   })
 })
 
