@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.0](https://github.com/wrightkit/wright/compare/v0.36.0...v0.37.0) (2026-10-23)
+
+
+### Features
+
+* **driver:** refuse unbalanced block structure in editStatements ([#974](https://github.com/wrightkit/wright/issues/974)) ([4948f84](https://github.com/wrightkit/wright/commit/4948f84d3382e06bf5223936b418016517781ea0)), closes [#962](https://github.com/wrightkit/wright/issues/962)
+
 ## [0.36.0](https://github.com/wrightkit/wright/compare/v0.35.1...v0.36.0) (2026-10-23)
 
 
