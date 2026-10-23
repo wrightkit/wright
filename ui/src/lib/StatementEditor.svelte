@@ -1,29 +1,39 @@
 <script lang="ts">
   /**
-   * The statement editor (ADR-0032 editing layer): opened by clicking a
-   * statement row. The disable toggle and the argument form stage a
-   * `replace` edit through the pending-changes model; a variable,
-   * modify-operation, or enum argument's choices are the project's own
-   * symbols and what `lookup`/`listEntries` declare — the dialog composes
-   * no Workshop text.
+   * The statement editor (ADR-0032 editing layer, #918): opened by clicking
+   * a statement row — or an argument inside it, which focuses that slot's
+   * control and scrolls it into view (docs/ui/editor.md § Form · Open).
+   * The title is the call's session-locale name; each `lookup` parameter
+   * gets one `--lbl` label cell and the control its slot type calls for:
+   * a numeric input, a text input, the two-literal boolean picker, or a
+   * call argument's plain-text name with the call's own parameters as
+   * nested rows (#919 adds the action/enum/value/variable/operator
+   * pickers). A required slot with no value reads "unset" in `--warn` and
+   * disables OK. OK stages one `replace` edit through the pending-changes
+   * model; Cancel stages nothing. The dialog composes no Workshop text.
    */
   import { call } from './api'
   import {
     type ArgField,
     argAt,
     argFields,
+    conditionFields,
     currentId,
     enumNode,
+    fillGaps,
     operationNode,
     paramFacts,
+    slotSet,
+    stringNode,
+    unsetRequired,
     variableNode,
     withArg,
+    type ParamFact,
   } from './args'
   import Dialog from './components/Dialog.svelte'
-  import Expr from './Expr.svelte'
   import type { ChromeStrings } from './chrome'
   import type { Names } from './names'
-  import { STATEMENT_KINDS } from './nodes'
+  import { statementText, STATEMENT_KINDS, VALUE_KINDS } from './nodes'
   import Picker from './components/Picker.svelte'
   import type { StatementNode } from './edit'
   import type { Action, Node } from './types/generated/rule-content-v1'
@@ -42,6 +52,7 @@
     staged,
     t,
     locale,
+    focusPath = null,
     onsave,
     onclose,
   }: {
@@ -55,35 +66,80 @@
     t: ChromeStrings
     /** The session locale, for `listEntries`. */
     locale: string
-    onsave: (disabled: boolean, args?: Node[]) => void
+    /** The clicked argument's `args` path; its control gets focus. */
+    focusPath?: number[] | null
+    onsave: (disabled: boolean, args?: Node[], value?: Node) => void
     onclose: () => void
   } = $props()
 
   let checked = $state(false)
   let shownFor: unknown = null
-  /** The callable's `lookup` entry, fetched when an action opens. */
+  /** The callable's `lookup` entry — an action's, or `compare` for a condition. */
   let callableEntry = $state<LookupEntry | null>(null)
+  /** A condition's own `value.call` entry — its parameters decompose the value's args. */
+  let valueEntry = $state<LookupEntry | null>(null)
   /** The form's staged args, replacing the statement's on save. */
   let editedArgs = $state<Node[] | null>(null)
   /** `listEntries` results per enum domain the form touches. */
   let enumOptions = $state<Record<string, { id: string; label: string }[]>>({})
   /** The project's declared variables, for `variable` fields. */
   let variableSymbols = $state<Symbol[] | null>(null)
+  /**
+   * `lookup` entries per nested call id — a `call` field's own parameter
+   * facts for its indented rows.
+   */
+  let nestedEntries = $state<Record<string, LookupEntry | null>>({})
   /** In-flight option fetches, so a `fields` recompute can't duplicate them. */
   const enumLoading = new Set<string>()
+  const nestedLoading = new Set<string>()
   let symbolsLoading = false
   /** The locale the option caches below were loaded under. */
   let optionsLocale = ''
+  let root: HTMLElement | undefined = $state()
 
-  const actionNode = $derived(
-    target?.list === 'actions' ? (target.node as SpannedAction) : null,
-  )
+  const isCondition = $derived(target?.list === 'conditions')
+
+  /**
+   * The args-tree the form edits: an action's own `args`, or a condition's
+   * `value` dressed as a call — `value.call`/`value.args` — so one field
+   * model serves both. A plain (non-call) condition value keeps no args.
+   */
+  const sourceAction = $derived.by((): Action | null => {
+    if (target === null) return null
+    if (!isCondition) return target.node as SpannedAction
+    const value = (target.node as SpannedCondition).value
+    if (value !== null && typeof value === 'object' && 'call' in value) {
+      return { call: value.call as string, args: (value.args as Node[]) ?? [] }
+    }
+    return { call: '', args: value === undefined ? [] : [value] }
+  })
   const shownAction = $derived(
-    actionNode && editedArgs ? { ...actionNode, args: editedArgs } : actionNode,
+    sourceAction && editedArgs ? { ...sourceAction, args: editedArgs } : sourceAction,
   )
-  const fields = $derived(
-    shownAction ? argFields(paramFacts(callableEntry), shownAction) : [],
-  )
+
+  /** A nested call's parameters, once its `lookup` entry landed. */
+  const nestedFactsFor = (callId: string): ParamFact[] => paramFacts(nestedEntries[callId])
+  const nestedFacts = (callId: string): ParamFact[] | null =>
+    nestedEntries[callId] === undefined ? null : nestedFactsFor(callId)
+
+  const fields = $derived.by((): ArgField[] => {
+    if (shownAction === null) return []
+    if (isCondition) {
+      // The condition's live value node — staged edits replace inside it.
+      const value =
+        (shownAction.call as string) !== ''
+          ? ({ call: shownAction.call, args: shownAction.args } as Node)
+          : (shownAction.args[0] ?? (target as { node: SpannedCondition }).node.value)
+      return conditionFields(
+        paramFacts(valueEntry),
+        paramFacts(callableEntry),
+        value,
+        nestedFacts,
+      )
+    }
+    return argFields(paramFacts(callableEntry), shownAction, nestedFacts)
+  })
+  const missing = $derived(shownAction ? unsetRequired(shownAction, fields) : [])
 
   $effect(() => {
     if (target === null) {
@@ -93,44 +149,107 @@
     if (shownFor === target) return
     checked = disabled
     shownFor = target
+    focusedFor = null
     callableEntry = null
+    valueEntry = null
     // A staged `change` seeds the form, so reopening shows it.
-    editedArgs = Array.isArray(staged?.args) ? (staged.args as Node[]) : null
+    const stagedValue = staged?.value as Node | undefined
+    const seed =
+      target.list === 'actions'
+        ? Array.isArray(staged?.args)
+          ? (staged.args as Node[])
+          : null
+        : stagedValue === undefined
+          ? null
+          : typeof stagedValue === 'object' &&
+              stagedValue !== null &&
+              'call' in stagedValue &&
+              Array.isArray((stagedValue as { args?: Node[] }).args)
+            ? ((stagedValue as { args: Node[] }).args ?? null)
+            : [stagedValue]
+    editedArgs = seed
     enumOptions = {}
     variableSymbols = null
+    nestedEntries = {}
     enumLoading.clear()
+    nestedLoading.clear()
     symbolsLoading = false
     optionsLocale = locale
-    const callId = target.list === 'actions' ? (target.node as SpannedAction).call : null
-    if (callId !== null) {
+    if (isCondition) {
+      const value = (target.node as SpannedCondition).value
+      const ids = [
+        'compare',
+        typeof value === 'object' && value !== null && 'call' in value
+          ? (value.call as string)
+          : null,
+      ].filter((id): id is string => id !== null)
+      void names.entries('compare').then((entries) => {
+        if (shownFor === target) {
+          callableEntry =
+            entries.find((entry) => VALUE_KINDS.includes(entry.kind)) ?? entries[0] ?? null
+        }
+      })
+      const valueCall = ids[1]
+      if (valueCall) {
+        void names.entries(valueCall).then((entries) => {
+          if (shownFor === target) {
+            valueEntry =
+              entries.find((entry) => VALUE_KINDS.includes(entry.kind)) ?? entries[0] ?? null
+          }
+        })
+      }
+    } else {
+      const callId = (target.node as SpannedAction).call
       void names.entries(callId).then((entries) => {
         if (shownFor === target) {
           callableEntry =
-            entries.find((entry) => STATEMENT_KINDS.includes(entry.kind)) ??
-            entries[0] ??
-            null
+            entries.find((entry) => STATEMENT_KINDS.includes(entry.kind)) ?? entries[0] ?? null
         }
       })
     }
   })
 
+  /**
+   * Focus the clicked argument's control once the form renders — its row
+   * carries `data-arg-control` keyed by the `args` path and scrolls into
+   * view (§ Form · Open). Runs once per open so a re-render mid-edit
+   * never steals focus back.
+   */
+  let focusedFor: unknown = null
+  $effect(() => {
+    if (target === null || focusPath === null || fields.length === 0) return
+    if (focusedFor === target) return
+    const el = root?.querySelector<HTMLElement>(`[data-arg-control="${focusPath.join('.')}"]`)
+    if (!el) return
+    focusedFor = target
+    el.scrollIntoView?.({ block: 'nearest' })
+    ;(el.querySelector<HTMLElement>('input,button') ?? el).focus()
+  })
+
   // The form's option sources load once the callable's facts arrive:
   // operation spellings warm the names cache, enum domains list their
-  // members, and a variable field pulls the project's declared symbols.
-  // A locale switch invalidates the caches so the next pass refetches.
+  // members, a variable field pulls the project's declared symbols, and a
+  // nested `call` field fetches its own callable's `lookup` entry for its
+  // indented rows. A locale switch invalidates the caches so the next
+  // pass refetches.
   $effect(() => {
     if (fields.length === 0) return
     if (optionsLocale !== locale) {
       enumOptions = {}
       variableSymbols = null
+      nestedEntries = {}
       enumLoading.clear()
+      nestedLoading.clear()
       symbolsLoading = false
       optionsLocale = locale
     }
-    const operationIds = fields.flatMap((field) => field.operations ?? [])
+    const allFields = (list: ArgField[]): ArgField[] =>
+      list.flatMap((field) => (field.nested ? [field, ...allFields(field.nested)] : [field]))
+    const flat = allFields(fields)
+    const operationIds = flat.flatMap((field) => field.operations ?? [])
     if (operationIds.length > 0) void names.warm(operationIds)
     const domains = new Set(
-      fields.map((field) => field.domain).filter((domain): domain is string => !!domain),
+      flat.map((field) => field.domain).filter((domain): domain is string => !!domain),
     )
     for (const domain of domains) {
       if (enumOptions[domain] || enumLoading.has(domain)) continue
@@ -162,7 +281,7 @@
         .finally(() => enumLoading.delete(domain))
     }
     if (
-      fields.some((field) => field.kind === 'variable') &&
+      flat.some((field) => field.kind === 'variable') &&
       variableSymbols === null &&
       !symbolsLoading
     ) {
@@ -181,26 +300,48 @@
           symbolsLoading = false
         })
     }
+    // A `call` field's nested rows need the chosen call's own `lookup`
+    // parameters; the field recomputes when the entry lands.
+    for (const field of flat) {
+      if (field.kind !== 'call' || !shownAction) continue
+      const node =
+        field.path.length > 0 ? argAt(shownAction.args, field.path) : undefined
+      const callId =
+        node !== undefined && node !== null && typeof node === 'object' && 'call' in node
+          ? (node.call as string)
+          : (field.call ?? null)
+      if (callId === null || callId in nestedEntries || nestedLoading.has(callId)) continue
+      nestedLoading.add(callId)
+      const requestLocale = locale
+      void names
+        .entries(callId)
+        .then((entries) => {
+          if (requestLocale !== optionsLocale) return
+          const entry =
+            entries.find((item) => VALUE_KINDS.includes(item.kind)) ?? entries[0] ?? null
+          nestedEntries = { ...nestedEntries, [callId]: entry }
+        })
+        .catch(() => {})
+        .finally(() => nestedLoading.delete(callId))
+    }
   })
 
   const title = $derived.by(() => {
     if (!target) return ''
-    if (target.list === 'actions') {
+    if (!isCondition) {
       const action = target.node as SpannedAction
       return names.peek(action.call, STATEMENT_KINDS)?.name ?? action.call
     }
     return t.conditionTitle
   })
 
-  const exprNode = $derived(
-    target === null
-      ? undefined
-      : target.list === 'conditions'
-        ? (target.node as SpannedCondition).value
-        : (shownAction as Node),
-  )
-
   function optionsFor(field: ArgField): { id: string; label: string }[] {
+    if (field.kind === 'boolean') {
+      return [
+        { id: 'true', label: t.trueLiteral },
+        { id: 'false', label: t.falseLiteral },
+      ]
+    }
     if (field.kind === 'variable') {
       return (variableSymbols ?? [])
         .filter((symbol) => symbol.kind === field.scope)
@@ -215,68 +356,146 @@
     return enumOptions[field.domain ?? ''] ?? []
   }
 
+  /**
+   * The plain text a `call` row shows — the session-locale call name for a
+   * catalog call, or the variable-access text a reserved call renders as.
+   */
+  function callLabel(node: Node | undefined, field: ArgField): string {
+    // A pseudo-field with no arg position names its node on the field
+    // itself (the condition's single `call` row carries the whole value).
+    const subject = node ?? field.node
+    const callId =
+      subject !== undefined &&
+      subject !== null &&
+      typeof subject === 'object' &&
+      'call' in subject
+        ? (subject.call as string)
+        : field.call
+    if (callId === undefined) return ''
+    if (
+      subject !== undefined &&
+      subject !== null &&
+      typeof subject === 'object' &&
+      'call' in subject &&
+      ['globalVariable', 'playerVariable', 'memberAccess'].includes(subject.call as string)
+    ) {
+      return statementText(subject, names, VALUE_KINDS)
+    }
+    return names.peek(callId, VALUE_KINDS)?.name ?? callId
+  }
+
   function choose(field: ArgField, id: string) {
     if (!shownAction) return
     const node =
-      field.kind === 'variable'
-        ? variableNode(id)
-        : field.kind === 'operation'
-          ? operationNode(id)
-          : enumNode(id)
-    editedArgs = withArg(shownAction, field.path, node).args
+      field.kind === 'boolean'
+        ? id === 'true'
+        : field.kind === 'variable'
+          ? variableNode(id)
+          : field.kind === 'operation'
+            ? operationNode(id)
+            : enumNode(id)
+    const filled = fillGaps(shownAction, fields, field.path)
+    editedArgs = withArg(filled, field.path, node).args
+  }
+
+  function setLiteral(field: ArgField, text: string) {
+    if (!shownAction || text === '') return
+    const node = field.kind === 'number' ? Number(text) : stringNode(text)
+    const filled = fillGaps(shownAction, fields, field.path)
+    editedArgs = withArg(filled, field.path, node).args
   }
 </script>
 
 <Dialog open={target !== null} {onclose} class="editor" {title} titleClass="editor-title">
   {#if target}
-    <label class="editor-disable">
-      <input type="checkbox" bind:checked={checked} data-testid="editor-disable" />
-      {t.disabled}
-    </label>
-    <div class="editor-statement">
-      {#if exprNode !== undefined}
-        <Expr
-          node={exprNode}
-          {names}
-          kinds={target.list === 'actions' ? STATEMENT_KINDS : undefined}
-        />
+    <div class="editor-root" bind:this={root}>
+      <label class="editor-disable">
+        <input type="checkbox" bind:checked={checked} data-testid="editor-disable" />
+        {t.disabled}
+      </label>
+      {#if fields.length > 0}
+        <div class="editor-args">
+          {@render rows(fields)}
+        </div>
       {/if}
-    </div>
-    {#if fields.length > 0}
-      <div class="editor-args">
-        {#each fields as field (field.label + field.path.join('.'))}
-          {@const node = shownAction ? argAt(shownAction.args, field.path) : undefined}
-          {#if field.kind !== 'other' || node !== undefined}
-            <div class="editor-arg">
-            <span class="editor-arg-label">{field.label}</span>
-            {#if field.kind === 'other'}
-              <span class="editor-arg-value">
-                {#if node !== undefined}<Expr {node} {names} />{/if}
-              </span>
-            {:else}
-              <Picker
-                options={optionsFor(field)}
-                selected={currentId(node)}
-                placeholder={field.label}
-                ariaLabel={field.label}
-                onselect={(id) => choose(field, id)}
-              />
-            {/if}
-            </div>
-          {/if}
-        {/each}
+      <div class="editor-foot">
+        <button type="button" class="cancel" onclick={onclose}>{t.cancel}</button>
+        <button
+          type="button"
+          class="ok"
+          disabled={missing.length > 0}
+          onclick={() => {
+            if (isCondition) {
+              const call =
+                typeof sourceAction?.call === 'string' && sourceAction.call !== ''
+                  ? sourceAction.call
+                  : null
+              const value =
+                call !== null && shownAction
+                  ? ({ call, args: shownAction.args } as Node)
+                  : (shownAction?.args?.[0] as Node | undefined)
+              onsave(checked, undefined, value)
+            } else {
+              onsave(checked, editedArgs ?? undefined)
+            }
+            onclose()
+          }}>{t.ok}</button
+        >
       </div>
-    {/if}
-    <div class="editor-foot">
-      <button type="button" class="cancel" onclick={onclose}>{t.cancel}</button>
-      <button
-        type="button"
-        class="ok"
-        onclick={() => {
-          onsave(checked, editedArgs ?? undefined)
-          onclose()
-        }}>{t.ok}</button
-      >
     </div>
   {/if}
 </Dialog>
+
+{#snippet rows(list: ArgField[])}
+  {#each list as field (field.label + field.path.join('.'))}
+    {@const node =
+      shownAction && field.path.length > 0
+        ? argAt(shownAction.args, field.path)
+        : undefined}
+    {@const unset = field.required && !slotSet(shownAction ?? { call: '', args: [] }, field)}
+    <div class="editor-arg" class:unset data-arg-control={field.path.join('.')}>
+      <span class="editor-arg-label">{field.label}</span>
+      {#if field.kind === 'number'}
+        <input
+          class="editor-input"
+          type="number"
+          step="any"
+          value={typeof node === 'number' ? node : ''}
+          placeholder={unset ? t.unset : ''}
+          aria-label={field.label}
+          oninput={(event) => setLiteral(field, event.currentTarget.value)}
+        />
+      {:else if field.kind === 'string'}
+        <input
+          class="editor-input"
+          type="text"
+          value={node !== undefined && node !== null && typeof node === 'object' && 'string' in node
+            ? (node.string as string)
+            : ''}
+          placeholder={unset ? t.unset : ''}
+          aria-label={field.label}
+          oninput={(event) => setLiteral(field, event.currentTarget.value)}
+        />
+      {:else if field.kind === 'call'}
+        <span class="editor-arg-value">{callLabel(node, field)}</span>
+      {:else if field.kind === 'other'}
+        <span class="editor-arg-value" class:warn={unset}>
+          {unset ? t.unset : node !== undefined ? statementText(node, names, VALUE_KINDS) : ''}
+        </span>
+      {:else}
+        <Picker
+          options={optionsFor(field)}
+          selected={currentId(node)}
+          placeholder={unset ? t.unset : field.label}
+          ariaLabel={field.label}
+          onselect={(id) => choose(field, id)}
+        />
+      {/if}
+    </div>
+    {#if field.nested}
+      <div class="editor-nested">
+        {@render rows(field.nested)}
+      </div>
+    {/if}
+  {/each}
+{/snippet}
