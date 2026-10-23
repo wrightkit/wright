@@ -22,8 +22,41 @@ export type ArgFieldKind =
   | 'enum'
   | 'variable'
   | 'operation'
+  | 'comparison'
   | 'call'
   | 'other'
+
+/**
+ * The comparison operator call ids `rule-content-v1` documents for the
+ * condition's operator slot and the `__Operator__` parameter type — the
+ * `CallId` contract's `==`, `!=`, `<`, `<=`, `>`, `>=`. `lookup` resolves
+ * each as an `operator` entry; the kind is not listable, so the picker
+ * names this documented set (docs/ui/editor.md § Pickers).
+ */
+export const COMPARISON_OPERATORS = ['==', '!=', '<', '<=', '>', '>='] as const
+
+/**
+ * Parameter `type`s a `{"variable": name}` slot declares — the
+ * variable-target surface parameters and the folded `globalVariable`/
+ * `playerVariable` members (docs/ui/editor.md § Controls by slot type:
+ * a variable slot is a picker over the scope's declared `symbols`).
+ */
+const VARIABLE_PARAM_TYPES = new Set(['Variable', 'Global Variable', 'Player Variable'])
+
+/**
+ * Parameter `type`s that name no value picker: literal-pinned and
+ * non-value slots. Every other declared type (`Any`, `Object|Array`,
+ * `Player`, `Vector`, …) admits value calls, so an empty such slot is a
+ * `call` field — the picker the spec's value slot assigns.
+ */
+const NON_CALL_PARAM_TYPES = new Set([
+  'Variable',
+  'Global Variable',
+  'Player Variable',
+  'Subroutine',
+  '__Operator__',
+  'Operation',
+])
 
 export interface ArgField {
   path: number[]
@@ -125,15 +158,9 @@ function variableScope(foldCall: string | undefined, callId: string): ArgField['
 
 function fieldKind(param: ParamFact, node: Node | undefined): ArgFieldKind {
   if (isObject(node) && 'variable' in node) return 'variable'
-  if (
-    isObject(node) &&
-    'call' in node &&
-    Array.isArray(node.args) &&
-    node.args.length === 0 &&
-    (param.content?.operations?.length ?? 0) > 0
-  ) {
-    return 'operation'
-  }
+  // The position declares its modify-operation choices regardless of the
+  // node currently occupying it.
+  if ((param.content?.operations?.length ?? 0) > 0) return 'operation'
   if (typeof param.enum?.domain === 'string' || (isObject(node) && 'enum' in node)) {
     return 'enum'
   }
@@ -150,6 +177,15 @@ function fieldKind(param: ParamFact, node: Node | undefined): ArgFieldKind {
     return 'string'
   }
   if (isObject(node) && 'call' in node) return 'call'
+  // A JSON `null` is a pad `defaultArgs`/`fillGaps`/`grow` left where a
+  // filled later position crosses an unset one — it is no value, so the
+  // slot falls through to its declared control below rather than
+  // rendering an uneditable static `null`. The picked Null literal is
+  // the `{call:"null"}` node this never masks.
+  if (node !== undefined && node !== null) return 'other'
+  if (VARIABLE_PARAM_TYPES.has(param.type ?? '')) return 'variable'
+  if (param.type === '__Operator__') return 'comparison'
+  if (param.type !== undefined && !NON_CALL_PARAM_TYPES.has(param.type)) return 'call'
   return 'other'
 }
 
@@ -173,6 +209,8 @@ function fieldFor(
     field.scope = variableScope(foldCall, '')
   } else if (field.kind === 'operation') {
     field.operations = param.content?.operations ?? []
+  } else if (field.kind === 'comparison') {
+    field.operations = [...COMPARISON_OPERATORS]
   } else if (field.kind === 'enum') {
     field.domain =
       param.enum?.domain ??
@@ -258,11 +296,19 @@ export function conditionFields(
       if (labels[0]) left.label = labels[0]
       const right = fieldFor(compare[2] ?? compare[1] ?? {}, [1], value.args[1], undefined)
       if (labels[2] ?? labels[1]) right.label = labels[2] ?? labels[1]
+      const isComparison = (COMPARISON_OPERATORS as readonly string[]).includes(
+        value.call as string,
+      )
       const operator: ArgField = {
         path: [],
         label: labels[1] ?? '',
-        kind: 'call',
+        // A comparison operator id gets the comparison picker; a reserved
+        // two-arg call (`playerVariable`, `memberAccess`) stays a `call`
+        // row so its picker lists the admitted values and its statement
+        // text renders `Global.name`-style, not the raw id.
+        kind: isComparison ? 'comparison' : 'call',
         required: true,
+        operations: isComparison ? [...COMPARISON_OPERATORS] : undefined,
         call: value.call as string,
         node: value,
       }
@@ -271,7 +317,7 @@ export function conditionFields(
       return [left, operator, right]
     }
   }
-  const single =
+      const single =
     isObject(value) && 'call' in value
       ? {
           path: [],
@@ -322,6 +368,9 @@ export function defaultNode(
   if (/^-?\d+(\.\d+)?$/.test(declared)) return Number(declared)
   const split = declared.lastIndexOf('.')
   if (split > 0) return enumNode(declared)
+  if (param !== undefined && VARIABLE_PARAM_TYPES.has(param.type ?? '')) {
+    return variableNode(declared)
+  }
   if (param?.type !== 'String' && /^[a-z][A-Za-z0-9_]*$/.test(declared)) {
     return { call: declared, args: [] }
   }
@@ -425,43 +474,81 @@ export function subroutineNode(name: string): Node {
 }
 
 /**
- * The initial args for a call the form just picked (docs/ui/editor.md §
- * Form: "a default from `lookup` is filled in when a call is chosen"):
- * one position per non-fold parameter, holding its declared `default`
- * node; a required slot with none stays empty (its `undefined` reads as
- * unset, so OK stays disabled until it is filled). Optional slots past
- * the first all-empty tail stay omitted — `Wait`'s optional
- * `waitBehavior` materializes only when `lookup` defaults it. Fold-group
- * members share their folded call's position, so a variable-target
- * action seeds its `globalVariable`/`playerVariable` shell.
+ * Whether a value entry's declared `returns` fits a slot's declared
+ * parameter `type` — the same union-membership the owner's acceptance
+ * rules apply (`semantic_types_compatible`): `Any`/`Unknown` on either
+ * side admits, `Object` admits any non-`Array`/`Void` actual, and
+ * `returns`'s own `|` union splits like the slot's. A value with no
+ * declared `returns` is admitted (the owner declares none to limit).
+ */
+export function admitsCall(slotType: string | undefined, returns: string | undefined): boolean {
+  if (returns === undefined) return true
+  return (slotType ?? 'Any').split('|').some((expected) =>
+    returns.split('|').some(
+      (actual) =>
+        expected === 'Any' ||
+        expected === 'Unknown' ||
+        actual === 'Any' ||
+        actual === 'Unknown' ||
+        actual === expected ||
+        (expected === 'Object' && actual !== 'Array' && actual !== 'Void') ||
+        actual === 'Object',
+    ),
+  )
+}
+
+/**
+ * The argument array a freshly chosen call gets: every parameter position
+ * that declares a `lookup` default is filled with `defaultNode` (a
+ * declared `null` is the Null literal), fold groups materialize their
+ * folded `globalVariable`/`playerVariable` call so member writes have a
+ * call to land in, and positions the facts leave unset stay absent — a
+ * `null` pad appears only where a filled later position crosses them,
+ * matching `fillGaps`. Positions past the last fill are omitted so an
+ * unset required slot reads "unset" and an omitted optional keeps the
+ * catalog default (docs/ui/editor.md § Controls: "A default from `lookup`
+ * is filled in when a call is chosen").
  */
 export function defaultArgs(params: readonly ParamFact[]): Node[] {
+  let last = -1
+  params.forEach((param, index) => {
+    if (param.default !== undefined || param.content?.fold !== undefined) last = index
+  })
   const args: Node[] = []
-  let foldPos = -1
-  for (let i = 0; i < params.length; i += 1) {
+  let pos = 0
+  let foldPos = 0
+  for (let i = 0; i <= last; i += 1) {
     const param = params[i]
-    const foldCall = param.content?.fold?.call
-    const foldArg = param.content?.fold?.arg
-    if (typeof foldCall === 'string' && typeof foldArg === 'number') {
-      if (params[i - 1]?.content?.fold?.call !== foldCall) {
-        foldPos = args.length
-        args.push({ call: foldCall, args: [] })
+    const fold = param.content?.fold
+    if (typeof fold?.call === 'string' && typeof fold.arg === 'number') {
+      if (params[i - 1]?.content?.fold?.call !== fold.call) {
+        foldPos = pos
+        pos += 1
       }
-      const node = defaultNode(param.default, param)
-      if (node === undefined) continue
-      const shell = args[foldPos]
-      if (isObject(shell) && 'call' in shell && Array.isArray(shell.args)) {
-        const inner = grow(shell.args as Node[], foldArg)
-        inner[foldArg] = node
-        shell.args = inner
+      const current = args[foldPos]
+      const inner: Node[] =
+        isObject(current) && current.call === fold.call && Array.isArray(current.args)
+          ? [...(current.args as Node[])]
+          : []
+      if (param.default !== undefined) {
+        while (inner.length <= fold.arg) inner.push(null)
+        inner[fold.arg] = defaultNode(param.default, param) ?? null
       }
-      continue
+      args[foldPos] = { call: fold.call, args: inner }
+    } else {
+      args[pos] =
+        param.default === undefined ? null : (defaultNode(param.default, param) ?? null)
+      pos += 1
     }
-    args.push(defaultNode(param.default, param) ?? (undefined as unknown as Node))
   }
-  while (args.length > 0 && args[args.length - 1] === undefined) args.pop()
   return args
 }
+
+/** The `{"call": id, "args": defaults}` node a `call` picker's selection produces. */
+export function callNode(call: string, params: readonly ParamFact[]): Node {
+  return { call, args: defaultArgs(params) }
+}
+
 
 /**
  * The picker `id` matching the node currently at a field's position.
@@ -479,8 +566,13 @@ export function currentId(node: Node | undefined): string | null {
 
 /** Whether the slot a field edits holds a value; an unset required slot disables OK. */
 export function slotSet(action: Action, field: ArgField): boolean {
-  if (field.path.length === 0) return field.kind === 'call' ? field.call !== undefined : false
-  return argAt(action.args, field.path) !== undefined
+  if (field.path.length === 0) {
+    return field.kind === 'call' || field.kind === 'comparison'
+      ? field.call !== undefined
+      : false
+  }
+  // A JSON `null` pad is not a value — the slot it occupies is unset.
+  return argAt(action.args, field.path) != null
 }
 
 /** Every unset required field under `action`, nested `call` rows included. */

@@ -75,6 +75,15 @@ const WAIT_ENTRY = {
   },
 }
 
+/** A zero-argument `Number` value the `Any` Duration slot can pick. */
+const GAME_TIME_ENTRY = {
+  identity: 'gameTime',
+  kind: 'value',
+  spelling: 'Game Time',
+  displayName: 'Game Time',
+  callable: { returns: 'Number' },
+}
+
 let host: HTMLDivElement
 let app: ReturnType<typeof mount> | undefined
 let editRequest: ToolRequest | null
@@ -113,7 +122,9 @@ const handlerFor =
           entries:
             request.kind === 'action'
               ? [{ identity: 'wait', kind: 'action', spelling: 'Wait', displayName: 'Wait' }]
-              : [],
+              : request.kind === 'value'
+                ? [GAME_TIME_ENTRY]
+                : [],
           total: 1,
         },
       } as ToolResponse)
@@ -132,11 +143,6 @@ const click = (el: Element) => {
 const pick = (el: Element) => {
   el.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
   el.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }))
-  flushSync()
-}
-const type = (el: HTMLInputElement, value: string) => {
-  el.value = value
-  el.dispatchEvent(new Event('input', { bubbles: true }))
   flushSync()
 }
 
@@ -162,7 +168,18 @@ async function stageWaitInsert(): Promise<void> {
     )!,
   )
   await settle()
-  type(editor.querySelector<HTMLInputElement>('[data-arg-control="0"] input')!, '0.25')
+  // Duration is a value picker over `Any`; pick the zero-arg Number
+  // call the fixture lists.
+  editor.querySelector('[data-arg-control="0"] .picker-ctl')!.dispatchEvent(
+    new MouseEvent('pointerdown', { bubbles: true }),
+  )
+  await settle()
+  pick(
+    [...document.body.querySelectorAll<HTMLElement>('.picker-option')].find(
+      (el) => el.textContent?.trim() === 'Game Time',
+    )!,
+  )
+  await settle()
   click(buttonByText(editor, 'OK'))
   await settle()
 }

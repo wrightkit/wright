@@ -69,6 +69,7 @@ export interface ChromeStrings {
   disabled: string
   ok: string
   unset: string
+  actionPickerLabel: string
   trueLiteral: string
   falseLiteral: string
   /** The argument hover card's slot line for a call parameter (§ Hover card). */
@@ -159,6 +160,7 @@ const enUS: ChromeStrings = {
   disabled: 'Disabled',
   ok: 'OK',
   unset: 'unset',
+  actionPickerLabel: 'Action',
   trueLiteral: 'True',
   falseLiteral: 'False',
   argParameterSlot: (index, label, call) =>
@@ -245,6 +247,7 @@ const zhCN: ChromeStrings = {
   disabled: '禁用',
   ok: '确定',
   unset: '未设置',
+  actionPickerLabel: '动作',
   trueLiteral: '真',
   falseLiteral: '假',
   argParameterSlot: (index, label, call) =>

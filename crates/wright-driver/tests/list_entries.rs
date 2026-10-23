@@ -270,6 +270,64 @@ fn malformed_requests_are_refused_without_a_listing() {
 }
 
 #[test]
+fn structural_listing_carries_the_forms_lookup_resolves() {
+    let catalog = Catalog::builtin().unwrap();
+    let mut owned = session(workshop_path());
+    let mut service = ToolService::new(&mut owned).unwrap();
+
+    let expected: Vec<String> = catalog
+        .entries_of(Kind::Structural)
+        .filter(|entry| {
+            catalog
+                .lookup(&catalog.primary_locale().clone(), &entry.id)
+                .map(|matches| {
+                    matches.iter().any(|found| {
+                        matches!(
+                            found,
+                            workshop_rs::lookup::LookupMatch::Builtin {
+                                kind: Kind::Structural,
+                                id,
+                                signature: Some(_),
+                                ..
+                            } if *id == entry.id
+                        )
+                    })
+                })
+                .unwrap_or(false)
+        })
+        .map(|entry| entry.id.clone())
+        .collect();
+    let (entries, total, _) = all_pages(&mut service, "structural", None, 500);
+    let identities: Vec<String> = entries
+        .iter()
+        .map(|entry| entry["identity"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        identities, expected,
+        "structural identities, in owner order"
+    );
+    assert_eq!(total as usize, expected.len());
+    assert!(
+        entries.iter().all(|entry| entry["kind"] == "structural"),
+        "every listed entry is kind 'structural'"
+    );
+
+    // A callable structural form carries the same `callable` parameter
+    // facts `lookup` emits — `setGlobalVariable`'s Variable/Value
+    // signature — so a picker can rebuild rows without a second call.
+    let set_global = entries
+        .iter()
+        .find(|entry| entry["identity"] == "setGlobalVariable")
+        .expect("setGlobalVariable listed");
+    let parameters = set_global["callable"]["parameters"]
+        .as_array()
+        .expect("setGlobalVariable signature");
+    assert_eq!(parameters.len(), 2);
+    assert_eq!(parameters[0]["type"], "Variable");
+    assert_eq!(parameters[1]["type"], "Object|Array");
+}
+
+#[test]
 fn page_size_bounds_a_page_and_the_default_is_one_hundred() {
     let mut owned = session(workshop_path());
     let mut service = ToolService::new(&mut owned).unwrap();

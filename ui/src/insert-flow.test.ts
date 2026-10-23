@@ -102,11 +102,6 @@ const pick = (el: Element) => {
   el.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }))
   flushSync()
 }
-const type = (el: HTMLInputElement, value: string) => {
-  el.value = value
-  el.dispatchEvent(new Event('input', { bubbles: true }))
-  flushSync()
-}
 
 const WAIT_ENTRY = {
   identity: 'wait',
@@ -126,6 +121,15 @@ const WAIT_ENTRY = {
       },
     ],
   },
+}
+
+/** A zero-argument `Number` value the `Any` Duration slot can pick. */
+const GAME_TIME_ENTRY = {
+  identity: 'gameTime',
+  kind: 'value',
+  spelling: 'Game Time',
+  displayName: 'Game Time',
+  callable: { returns: 'Number' },
 }
 
 const MODIFY_ENTRY = {
@@ -217,7 +221,9 @@ describe('inserting a statement from the column heading', () => {
             entries:
               request.kind === 'action'
                 ? [{ identity: 'wait', kind: 'action', spelling: 'Wait', displayName: 'Wait' }]
-                : [],
+                : request.kind === 'value'
+                  ? [GAME_TIME_ENTRY]
+                  : [],
             total: 1,
           },
         } as ToolResponse)
@@ -250,7 +256,13 @@ describe('inserting a statement from the column heading', () => {
     await settle()
 
     expect(editor.textContent).toContain('Duration')
-    type(editor.querySelector<HTMLInputElement>('[data-arg-control="0"] input')!, '0.25')
+    pointerDown(editor.querySelector('[data-arg-control="0"] .picker-ctl')!)
+    await settle()
+    pick(
+      [...document.body.querySelectorAll<HTMLElement>('.picker-option')].find(
+        (el) => el.textContent?.trim() === 'Game Time',
+      )!,
+    )
     await settle()
     expect(ok.disabled).toBe(false)
     click(ok)
@@ -274,7 +286,10 @@ describe('inserting a statement from the column heading', () => {
         index: 2,
         change: 'insert',
         statements: [
-          { call: 'wait', args: [0.25, { enum: 'Wait', member: 'IGNORE_CONDITION' }] },
+          {
+            call: 'wait',
+            args: [{ call: 'gameTime', args: [] }, { enum: 'Wait', member: 'IGNORE_CONDITION' }],
+          },
         ],
       },
     ])
@@ -309,7 +324,9 @@ describe('inserting a statement from the column heading', () => {
             entries:
               request.kind === 'action'
                 ? [{ identity: 'wait', kind: 'action', spelling: 'Wait', displayName: 'Wait' }]
-                : [],
+                : request.kind === 'value'
+                  ? [GAME_TIME_ENTRY]
+                  : [],
             total: 1,
           },
         } as ToolResponse)
@@ -340,7 +357,13 @@ describe('inserting a statement from the column heading', () => {
     )!
     pick(option)
     await settle()
-    type(editor.querySelector<HTMLInputElement>('[data-arg-control="0"] input')!, '0.25')
+    pointerDown(editor.querySelector('[data-arg-control="0"] .picker-ctl')!)
+    await settle()
+    pick(
+      [...document.body.querySelectorAll<HTMLElement>('.picker-option')].find(
+        (el) => el.textContent?.trim() === 'Game Time',
+      )!,
+    )
     click(buttonByText(editor, 'OK'))
     await settle()
 
@@ -361,7 +384,10 @@ describe('inserting a statement from the column heading', () => {
         index: 1,
         change: 'insert',
         statements: [
-          { call: 'wait', args: [0.25, { enum: 'Wait', member: 'IGNORE_CONDITION' }] },
+          {
+            call: 'wait',
+            args: [{ call: 'gameTime', args: [] }, { enum: 'Wait', member: 'IGNORE_CONDITION' }],
+          },
         ],
       },
     ])
@@ -402,7 +428,9 @@ describe('inserting a statement from the column heading', () => {
                       displayName: 'Modify Global Variable',
                     },
                   ]
-                : [],
+                : request.kind === 'value'
+                  ? [GAME_TIME_ENTRY]
+                  : [],
             total: 1,
           },
         } as ToolResponse)
@@ -431,7 +459,16 @@ describe('inserting a statement from the column heading', () => {
     )
     await settle()
 
-    type(editor.querySelector<HTMLInputElement>('[data-arg-control="2"] input')!, '1')
+    // Slot 2 (`Value`, `Any`) is a value picker — pick a Number value;
+    // the Variable and Operation slots stay picker-bound and unset, so
+    // OK stays disabled.
+    pointerDown(editor.querySelector('[data-arg-control="2"] .picker-ctl')!)
+    await settle()
+    pick(
+      [...document.body.querySelectorAll<HTMLElement>('.picker-option')].find(
+        (el) => el.textContent?.trim() === 'Game Time',
+      )!,
+    )
     await settle()
     expect(ok.disabled, 'OK is disabled on a picker-bound call').toBe(true)
     click(buttonByText(editor, 'Cancel'))
@@ -621,7 +658,9 @@ describe('inserting a statement from the column heading', () => {
             entries:
               request.kind === 'action'
                 ? [{ identity: 'wait', kind: 'action', spelling: 'Wait', displayName: 'Wait' }]
-                : [],
+                : request.kind === 'value'
+                  ? [GAME_TIME_ENTRY]
+                  : [],
             total: 1,
           },
         } as ToolResponse)
@@ -652,7 +691,13 @@ describe('inserting a statement from the column heading', () => {
       )!,
     )
     await settle()
-    type(editor.querySelector<HTMLInputElement>('[data-arg-control="0"] input')!, '0.25')
+    pointerDown(editor.querySelector('[data-arg-control="0"] .picker-ctl')!)
+    await settle()
+    pick(
+      [...document.body.querySelectorAll<HTMLElement>('.picker-option')].find(
+        (el) => el.textContent?.trim() === 'Game Time',
+      )!,
+    )
     click(buttonByText(editor, 'OK'))
     await settle()
 

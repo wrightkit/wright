@@ -1488,7 +1488,7 @@
       "properties": {
         "op": { "const": "listEntries" },
         "language": { "enum": ["workshop", "opy"] },
-        "kind": { "enum": ["action", "value", "event", "enum", "enumMember"] },
+        "kind": { "enum": ["action", "value", "event", "enum", "enumMember", "structural"] },
         "within": { "type": ["string", "null"], "description": "An enum domain identity as `lookup` returns it. Required for `enumMember`, refused for other kinds." },
         "locale": { "type": ["string", "null"] },
         "pageSize": { "type": ["integer", "null"], "minimum": 1, "maximum": 500, "description": "Entries per page; default 100." },

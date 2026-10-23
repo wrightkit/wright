@@ -11,7 +11,14 @@ use crate::service::{ToolResponse, carried_refusal, refusal};
 const LIST_ENTRIES_CAPABILITY: &str = "listEntries";
 const DEFAULT_PAGE_SIZE: usize = 100;
 const MAX_PAGE_SIZE: usize = 500;
-const LISTABLE_KINDS: [&str; 5] = ["action", "value", "event", "enum", "enumMember"];
+const LISTABLE_KINDS: [&str; 6] = [
+    "action",
+    "value",
+    "event",
+    "enum",
+    "enumMember",
+    "structural",
+];
 
 pub(crate) fn list_entries(
     session: &CompilerSession,
@@ -50,6 +57,7 @@ pub(crate) fn list_entries(
         "value" => Some(Kind::Value),
         "event" => Some(Kind::Event),
         "enum" => Some(Kind::Enum),
+        "structural" => Some(Kind::Structural),
         "enumMember" => None,
         _ => {
             return refusal(
@@ -95,6 +103,34 @@ pub(crate) fn list_entries(
         );
     };
     let entries: Vec<Value> = match list_kind {
+        // The owner lists `Kind::Action`, `Kind::Value`, `Kind::Event`,
+        // and enum domains through `lookup_entries`; `Kind::Structural`
+        // has no listing surface there (workshop-rs
+        // `Catalog::lookup_entries` rejects it), so the callable
+        // structural forms — the signature-bearing ones, not the
+        // section/suffix keywords — resolve one `lookup` each, the same
+        // `LookupMatch::Builtin` and signature `lookup` emits for them.
+        Some(Kind::Structural) => catalog
+            .entries_of(Kind::Structural)
+            .filter_map(|entry| {
+                catalog
+                    .lookup(&locale, &entry.id)
+                    .ok()?
+                    .into_iter()
+                    .find(|found| {
+                        matches!(
+                            found,
+                            workshop_rs::lookup::LookupMatch::Builtin {
+                                kind: Kind::Structural,
+                                id,
+                                signature: Some(_),
+                                ..
+                            } if id == &entry.id
+                        )
+                    })
+                    .and_then(|found| workshop_entry(catalog, &locale, found))
+            })
+            .collect(),
         Some(list_kind) => match catalog.lookup_entries(&locale, list_kind) {
             Ok(matches) => matches
                 .into_iter()

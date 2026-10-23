@@ -580,7 +580,7 @@ export interface LookupRequest {
 export interface ListEntriesRequest {
   op: 'listEntries'
   language: 'workshop' | 'opy'
-  kind: 'action' | 'value' | 'event' | 'enum' | 'enumMember'
+  kind: 'action' | 'value' | 'event' | 'enum' | 'enumMember' | 'structural'
   /**
    * An enum domain identity as `lookup` returns it. Required for `enumMember`, refused for other kinds.
    */

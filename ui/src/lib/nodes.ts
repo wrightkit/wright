@@ -270,3 +270,34 @@ function collectNode(node: Node, out: { identity: string; kinds: string[] }[]): 
 export const STATEMENT_KINDS = ['action', 'structural', 'value', 'operator']
 /** `lookup` kind preference for a call id used in value position. */
 export const VALUE_KINDS = ['value', 'operator', 'structural', 'action', 'enumMember']
+
+/**
+ * The option identities a rule content uses — call ids, enum member
+ * identities, and the declared names variable/subroutine slots hold — so
+ * a picker can order the options the project already uses first
+ * (docs/ui/editor.md § Pickers).
+ */
+export function collectUsed(
+  content: { conditions: Condition[]; actions: Action[] },
+  out: Set<string>,
+): void {
+  for (const condition of content.conditions) collectUsedNode(condition.value, out)
+  for (const action of content.actions) {
+    out.add(action.call)
+    for (const arg of action.args) collectUsedNode(arg, out)
+  }
+}
+
+function collectUsedNode(node: Node, out: Set<string>): void {
+  if (node === null || typeof node !== 'object') return
+  if ('enum' in node) {
+    out.add(enumIdentity(node))
+  } else if ('variable' in node && typeof node.variable === 'string') {
+    out.add(node.variable)
+  } else if ('subroutine' in node && typeof node.subroutine === 'string') {
+    out.add(node.subroutine)
+  } else if ('call' in node && typeof node.call === 'string') {
+    out.add(node.call)
+    for (const arg of node.args) collectUsedNode(arg, out)
+  }
+}
