@@ -6,7 +6,13 @@ fn wright() -> &'static str {
 }
 
 fn temp_file(name: &str, content: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("wright-refs-{}", std::process::id()));
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "wright-refs-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::SeqCst)
+    ));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join(name);
     std::fs::write(&path, content).unwrap();
