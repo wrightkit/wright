@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.33.0](https://github.com/wrightkit/wright/compare/v0.32.0...v0.33.0) (2026-10-22)
+
+
+### Features
+
+* **analyzer:** give references a statement-span fallback ([#892](https://github.com/wrightkit/wright/issues/892)) ([cab8444](https://github.com/wrightkit/wright/commit/cab84444fe3ce17c8c10270176953401b0cf9018))
+* **ui:** keep column batch actions in sticky headings ([#940](https://github.com/wrightkit/wright/issues/940)) ([fa95feb](https://github.com/wrightkit/wright/commit/fa95feb9cbbd4acc3ad55802643e5981f2ec7df4)), closes [#915](https://github.com/wrightkit/wright/issues/915)
+* **ui:** replace hand-drawn icons with Lucide ([#937](https://github.com/wrightkit/wright/issues/937)) ([6cd01d4](https://github.com/wrightkit/wright/commit/6cd01d48ed545caf51db39a4e282f7654a8d3d44)), closes [#929](https://github.com/wrightkit/wright/issues/929)
+* **ui:** severity levels in the toolbar and the Diagnostics dialog ([#946](https://github.com/wrightkit/wright/issues/946)) ([7c0ceb4](https://github.com/wrightkit/wright/commit/7c0ceb49edac41d74853fbff3fb5a033ff350431)), closes [#922](https://github.com/wrightkit/wright/issues/922)
+* **ui:** show findings on rule bars and statement rows ([#943](https://github.com/wrightkit/wright/issues/943)) ([06c2019](https://github.com/wrightkit/wright/commit/06c201909a24a9aa5edc92783401f9fc51af5dab)), closes [#921](https://github.com/wrightkit/wright/issues/921)
+
+
+### Bug Fixes
+
+* **cli:** put a failed result's diagnostics on stdout ([#891](https://github.com/wrightkit/wright/issues/891)) ([54f50f4](https://github.com/wrightkit/wright/commit/54f50f43705eb6bd43faa866c5028554926913d0))
+* **ui:** scope column keyboard gestures to the owning rule ([#945](https://github.com/wrightkit/wright/issues/945)) ([57fe268](https://github.com/wrightkit/wright/commit/57fe2680fc5f0ca4e4bf93a234fc47cf0cb98bfc)), closes [#916](https://github.com/wrightkit/wright/issues/916)
+
+
+### Dependencies
+
+* consume whole-statement spans from workshop-rs ([#938](https://github.com/wrightkit/wright/issues/938)) ([f9c6e79](https://github.com/wrightkit/wright/commit/f9c6e79667337e29a4575c386f592e7ce5279856)), closes [#925](https://github.com/wrightkit/wright/issues/925)
+
+
+### Code Refactoring
+
+* state comment-only behavior in names, types, and CI ([#944](https://github.com/wrightkit/wright/issues/944)) ([666e689](https://github.com/wrightkit/wright/commit/666e6890888b2309c97a5b9c2801e7b8095654f7)), closes [#874](https://github.com/wrightkit/wright/issues/874)
+
 ## [0.32.0](https://github.com/wrightkit/wright/compare/v0.31.0...v0.32.0) (2026-10-22)
 
 
