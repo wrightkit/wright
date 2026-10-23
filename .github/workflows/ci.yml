@@ -648,6 +648,41 @@ jobs:
         working-directory: ui
         run: npm run check:size
 
+  wasm-core:
+    name: Wasm core
+    needs: paths
+    if: needs.paths.outputs.rust_core == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Rust
+        uses: wrightkit/.github/.github/actions/setup-rust@main
+        with:
+          toolchain: 1.97.1
+          cache-shared-key: linux-wasm-stable-release
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Add the wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Build the wasm core and the native parity driver
+        run: |
+          cargo build --locked --release --target wasm32-unknown-unknown -p wright-wasm --lib
+          cargo build --locked --release -p wright-wasm --bin wright-core-parity
+
+      # Native/wasm response-body parity over the ten agent operations,
+      # the ADR-0037 apply round-trip + stale refusal, the capability
+      # refusals, and the 2048 KiB gzipped size budget.
+      - name: Run wasm core parity and budget checks
+        run: node crates/wright-wasm/js/wright-core.test.mjs
+
   ci-result:
     name: CI result
     if: always()
@@ -665,6 +700,7 @@ jobs:
       - dist-validation
       - agent-guide
       - ui
+      - wasm-core
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
