@@ -199,32 +199,6 @@ impl<'a> ToolService<'a> {
         )
     }
 
-    /// The `wright ui` host write path (ADR-0032 decision 5 — host
-    /// behaviour, not a `wright-agent/v1` operation): the transaction an
-    /// `editStatements` result carried is re-validated against the files
-    /// on disk — the freshness recheck — before the atomic write stages.
-    /// A stale or invalid transaction refuses with diagnostics and writes
-    /// nothing; a successful write refreshes the served snapshot so the
-    /// next read sees the edited program. The caller never supplies
-    /// `sources` here: the host always edits the disk-loaded input.
-    pub fn apply_edit_transaction(&mut self, transaction: &EditTransaction) -> EditValidation {
-        let validation = self.session.validate_edit_transaction(None, transaction);
-        if !validation.ok {
-            return validation;
-        }
-        let previews = validation.preview.clone().unwrap_or_default();
-        if let Some(refusal) = Self::uncovered_preview_refusal(&previews, transaction) {
-            return refusal;
-        }
-        if let Err(diagnostic) = crate::edit::write_previews(&previews, transaction) {
-            return EditValidation::refused(vec![diagnostic]);
-        }
-        if let Some(refusal) = self.refresh_refusal() {
-            return refusal;
-        }
-        validation
-    }
-
     /// The WebAssembly host write path (#959, ADR-0037 decision 3 — host
     /// behaviour, not a `wright-agent/v1` operation): the transaction an
     /// `editStatements` result carried is re-validated against `sources`,

@@ -333,7 +333,6 @@ fn removed_selector_spellings_are_usage_errors() {
     for args in [
         &["lint", "--rule", "rules.yaml", input][..],
         &["serve", "--rule", "rules.yaml", input][..],
-        &["ui", "--rule", "rules.yaml", input][..],
         &["inspect", "rules", "--only", "player starts", input][..],
         &["lookup", "--kind", "action"][..],
     ] {
@@ -346,17 +345,6 @@ fn removed_selector_spellings_are_usage_errors() {
         );
         assert!(output.stdout.is_empty(), "usage errors write stderr only");
     }
-}
-
-#[test]
-fn ui_help_documents_the_rule_file_flag() {
-    let output = run(&["ui", "--help"]);
-    assert!(output.status.success());
-    let help = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        help.contains("--rule-file"),
-        "ui documents --rule-file: {help}"
-    );
 }
 
 #[test]

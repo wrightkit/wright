@@ -196,15 +196,23 @@ fn edit_statements_refuses_partial_block_deletes() {
 
 #[test]
 fn edit_statements_accepts_a_balanced_block_insert() {
-    let dir = std::env::temp_dir().join(format!("wright-962-block-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("block.ws");
-    std::fs::write(
-        &path,
-        "variables {\n    global:\n        0: index\n}\n\nrule (\"branch\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(index, 1);\n    }\n}\n",
-    )
+    let text = "variables {\n    global:\n        0: index\n}\n\nrule (\"branch\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(index, 1);\n    }\n}\n";
+    // An absolute virtual path keeps the display form equal to the edit
+    // source the session emits — the same_source check compares them.
+    let path = std::env::temp_dir()
+        .join(format!("wright-962-block-{}", std::process::id()))
+        .join("block.ws");
+    let name = path.to_string_lossy().to_string();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Text {
+            text: text.to_string(),
+            path: Some(path),
+        },
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
     .unwrap();
-    let (mut session, identity) = service(&path);
+    let identity = sha256_hex(text.as_bytes());
     let mut service = ToolService::new(&mut session).unwrap();
     let response = service.handle(&request(
         json!([{
@@ -228,7 +236,8 @@ fn edit_statements_accepts_a_balanced_block_insert() {
         result["transaction"].clone(),
     )
     .unwrap();
-    let applied = service.apply_edit_transaction(&transaction);
+    let mut sources = std::collections::BTreeMap::from([(name, text.to_string())]);
+    let applied = service.apply_text_edit_transaction(&transaction, &mut sources);
     assert!(applied.ok, "{applied:?}");
     let ToolResponse::Ok { result } =
         service.handle(&serde_json::from_value(json!({"op": "rules", "content": true})).unwrap())
@@ -244,7 +253,6 @@ fn edit_statements_accepts_a_balanced_block_insert() {
         calls,
         ["setGlobalVariable", "if", "setGlobalVariable", "end"]
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

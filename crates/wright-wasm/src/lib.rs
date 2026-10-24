@@ -6,8 +6,8 @@
 //! The browser host holds the in-memory source text, the core holds the
 //! session; the host write path (`wright_apply`) re-validates the
 //! `EditTransaction` an `editStatements` result produced, rewrites the
-//! held text, and reloads — mirroring `wright ui`'s `/apply` on disk
-//! (ADR-0032 decision 5).
+//! held text, and reloads — the host write path of ADR-0037 decision 3,
+//! the editor's counterpart of the retired `wright ui` on-disk host.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -51,7 +51,7 @@ impl WrightCore {
     }
 
     /// One `wright-agent/v1` request body in, the `ToolService` response
-    /// body out — identical bytes to what `serve`/`ui` write on the wire.
+    /// body out — identical bytes to what `serve` writes on the wire.
     pub fn request(&mut self, body: &str) -> String {
         let request: ToolRequest = match serde_json::from_str(body) {
             Ok(request) => request,
@@ -69,7 +69,7 @@ impl WrightCore {
     /// The ADR-0037 host write path: apply `transaction` — an
     /// `editStatements` result — to `sources`, the host's current
     /// in-memory text keyed by source name. The answer is the
-    /// `EditValidation` payload `wright ui`'s `/apply` returns plus the
+    /// `EditValidation` payload the apply path returns plus the
     /// authoritative `sources` map after the call: on refusal every
     /// identity recheck failed and nothing changed; on success the map
     /// carries the rewritten text the core now serves.
