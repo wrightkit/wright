@@ -27,7 +27,10 @@ permissions:
   contents: write
 
 concurrency:
-  group: wright-${{ github.event_name == 'push' && github.ref_name || inputs.tag || inputs.channel || 'nightly' }}
+  # Stable runs serialize so concurrent releases cannot interleave `latest`
+  # promotion; a pending run is replaced by a newer one. Nightly keeps its
+  # single group and cancels in-progress runs.
+  group: ${{ (github.event_name == 'push' || inputs.channel == 'stable') && 'wright-stable' || 'wright-nightly' }}
   cancel-in-progress: ${{ github.event_name == 'workflow_run' || inputs.channel == 'nightly' }}
 
 jobs:
@@ -38,6 +41,10 @@ jobs:
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == github.event.repository.default_branch)
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      checks: read
     outputs:
       channel: ${{ steps.identity.outputs.channel }}
       commit: ${{ steps.identity.outputs.commit }}
@@ -109,6 +116,104 @@ jobs:
             echo "tag=$tag"
           } >> "$GITHUB_OUTPUT"
 
+      # Nightly is already CI-gated by its workflow_run trigger; stable needs
+      # the same-revision gate here because nothing else in the workflow proves
+      # the tagged revision passed the required checks.
+      - name: Require CI success on the release revision
+        if: steps.resolve.outputs.channel == 'stable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ steps.resolve.outputs.commit }}
+          REQUIRED_CHECKS: CI result
+        run: |
+          set -euo pipefail
+          deadline=$(( SECONDS + 2400 ))
+          pending_file="$(mktemp)"
+          trap 'rm -f "$pending_file"' EXIT
+          if [ "$REQUIRED_CHECKS" != "${REQUIRED_CHECKS//$'\n'/,}" ]; then
+            echo "REQUIRED_CHECKS must be a single comma-separated line" >&2
+            exit 1
+          fi
+          IFS=',' read -r -a names <<< "$REQUIRED_CHECKS"
+          count=0
+          for raw in "${names[@]}"; do
+            name="$(echo "$raw" | xargs)"
+            if [ -n "$name" ]; then
+              printf '%s\n' "$name" >> "$pending_file"
+              count=$(( count + 1 ))
+            fi
+          done
+          if [ "$count" -eq 0 ]; then
+            echo "REQUIRED_CHECKS resolved to an empty set; refusing to publish" >&2
+            exit 1
+          fi
+          while [ -s "$pending_file" ]; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "Timed out waiting for release-revision checks:" >&2
+              cat "$pending_file" >&2
+              exit 1
+            fi
+            sleep 30
+            keep=""
+            while IFS= read -r name; do
+              [ -z "$name" ] && continue
+              if ! out="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_COMMIT/check-runs" \
+                -f "check_name=$name" \
+                --jq '(.check_runs | sort_by(.id) | last) // {status: "missing", conclusion: "", html_url: ""} | "\(.status) \(.conclusion // "-") \(.html_url // "-")"' 2>&1)"; then
+                echo "check-runs API call failed for '$name': $out" >&2
+                exit 1
+              fi
+              status="${out%% *}"
+              rest="${out#* }"
+              conclusion="${rest%% *}"
+              case "$status" in
+                completed)
+                  if [ "$conclusion" = "success" ]; then
+                    echo "PASS $name"
+                  else
+                    echo "FAIL $name concluded '$conclusion' ($out)" >&2
+                    exit 1
+                  fi ;;
+                *)
+                  keep="${keep}${name}"$'\n'
+                  echo "WAIT $name ($status)" ;;
+              esac
+            done < "$pending_file"
+            printf '%s' "$keep" > "$pending_file"
+          done
+          echo "All required checks succeeded on $RELEASE_COMMIT"
+
+      # Stable runs serialize through the `wright-stable` concurrency group, so
+      # this check runs inside the serialized section: an older tag pushed after
+      # a newer release cannot regress `latest`.
+      - name: Guard latest promotion order
+        if: steps.resolve.outputs.channel == 'stable'
+        env:
+          RELEASE_TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          body="$(mktemp)"
+          trap 'rm -f "$body"' EXIT
+          http_code="$(curl --http2 --silent --show-error --location \
+            -o "$body" -w '%{http_code}' \
+            https://releases.wrightkit.dev/wright/latest/version)"
+          if [ "$http_code" = 404 ]; then
+            echo "no published latest version; $version becomes the first"
+            exit 0
+          fi
+          if [ "$http_code" != 200 ]; then
+            echo "cannot read wright/latest/version (HTTP $http_code); refusing to promote" >&2
+            exit 1
+          fi
+          current="$(tr -d '[:space:]' < "$body")"
+          lowest="$(printf '%s\n%s\n' "$current" "$version" | sort -V | head -n1)"
+          if [ "$lowest" = "$version" ] && [ "$current" != "$version" ]; then
+            echo "refusing to publish $RELEASE_TAG: published latest is $current" >&2
+            exit 1
+          fi
+          echo "latest guard passed: $version >= $current"
+
       - name: Check out repository
         uses: actions/checkout@v7
         with:
@@ -154,6 +259,7 @@ jobs:
     name: Build ${{ matrix.target }}
     needs: release-identity
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -240,6 +346,7 @@ jobs:
     needs:
       - release-identity
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       RELEASE_VERSION: ${{ needs.release-identity.outputs.version }}
       RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
@@ -299,6 +406,7 @@ jobs:
       - release-identity
       - build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       RELEASE_VERSION: ${{ needs.release-identity.outputs.version }}
       RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
@@ -360,6 +468,7 @@ jobs:
       - release-assets
     if: needs.release-identity.outputs.channel == 'stable'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       RELEASE_VERSION: ${{ needs.release-identity.outputs.version }}
       RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
@@ -398,6 +507,7 @@ jobs:
       - release-assets
     if: needs.release-identity.outputs.channel == 'stable'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     env:
       RELEASE_VERSION: ${{ needs.release-identity.outputs.version }}
     steps:
@@ -434,6 +544,8 @@ jobs:
       - publish-release
     if: needs.release-identity.outputs.channel == 'stable'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
     env:
       RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
     steps:
@@ -470,6 +582,7 @@ jobs:
       - release-metrics
     if: needs.release-identity.outputs.channel == 'stable'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: release
     steps:
       - name: Download verified release assets
@@ -515,8 +628,11 @@ jobs:
               --generate-notes \
               --draft
             draft=true
+          elif [[ "$draft" == true ]]; then
+            echo "found existing draft release $RELEASE_TAG"
           else
-            echo "found existing $([[ "$draft" == true ]] && echo draft || echo public) release $RELEASE_TAG"
+            echo "release $RELEASE_TAG already exists as public; refusing to continue" >&2
+            exit 1
           fi
 
           if [[ "$draft" == true ]]; then
@@ -538,6 +654,7 @@ jobs:
       - publish-release
     if: needs.release-identity.outputs.channel == 'stable'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: release
     steps:
       - name: Download core package
@@ -566,6 +683,8 @@ jobs:
       - release-identity
       - release-assets
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
     if: always() && needs.release-assets.result == 'success'
     env:
       RELEASE_CHANNEL: ${{ needs.release-identity.outputs.channel }}
@@ -609,6 +728,8 @@ jobs:
       - publish-release
     if: needs.release-identity.outputs.channel == 'stable'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
     env:
       RELEASE_CHANNEL: ${{ needs.release-identity.outputs.channel }}
       RELEASE_VERSION: ${{ needs.release-identity.outputs.version }}
