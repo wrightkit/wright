@@ -23,8 +23,9 @@ pub(crate) fn subject(args: &[std::ffi::OsString], error: &clap::Error) -> Strin
     if let Some(path) = usage_path(error) {
         return path.get(1).cloned().unwrap_or_else(|| CLI_NAME.to_string());
     }
-    // DisplayHelp/DisplayVersion carry no usage context; resolve the first
-    // positional token, which is where clap expects the subcommand name.
+    // Help/version and value-validation errors carry no usage context;
+    // resolve the first positional token, which is where clap expects the
+    // subcommand name.
     let names: Vec<String> = Cli::command()
         .get_subcommands()
         .map(|command| command.get_name().to_string())
