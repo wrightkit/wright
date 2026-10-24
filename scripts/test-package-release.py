@@ -55,7 +55,7 @@ def main() -> int:
                     "--runner-os",
                     runner_os,
                     "--features",
-                    "wright-cli/ui",
+                    "wright-cli/alpha wright-cli/beta",
                     "--output-dir",
                     str(output_dir),
                 ],
@@ -76,7 +76,7 @@ def main() -> int:
                 identity["revision"] != commit
                 or identity["tag"] != tag
                 or identity["target"] != target
-                or identity["features"] != ["wright-cli/ui"]
+                or identity["features"] != ["wright-cli/alpha", "wright-cli/beta"]
             ):
                 raise SystemExit("release package identity does not match smoke input")
 

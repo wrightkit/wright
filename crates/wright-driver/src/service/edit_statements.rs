@@ -199,7 +199,7 @@ impl<'a> ToolService<'a> {
         )
     }
 
-    /// The `wright ui` host write path (ADR-0032 decision 5 — host
+    /// The on-disk host write path (ADR-0032 decision 5 — host
     /// behaviour, not a `wright-agent/v1` operation): the transaction an
     /// `editStatements` result carried is re-validated against the files
     /// on disk — the freshness recheck — before the atomic write stages.

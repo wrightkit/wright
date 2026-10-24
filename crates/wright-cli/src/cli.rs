@@ -6,7 +6,6 @@ pub(crate) use inspect::*;
 pub(crate) use lint::*;
 
 use crate::serve::ServeArgs;
-use crate::ui::UiArgs;
 use crate::update::UpdateArgs;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
@@ -44,8 +43,7 @@ callgraph, cost) expose each detail area. `compile` writes the program to
 `<input stem>.ow` and reports only status and problems; `-o -` prints the
 program to stdout. `convert` keeps its source artifact stdout contract; JSON
 mode prints only one wright-result/v1 envelope to stdout. `serve` exposes the versioned
-wright-agent/v1 session contract over stdio, JSON-RPC 2.0, or MCP. `ui` opens the
-local read-only project view in the default browser.
+wright-agent/v1 session contract over stdio, JSON-RPC 2.0, or MCP.
 `agent install` writes the canonical Wright agent guide into a project's
 agent skills directory.
 
@@ -129,9 +127,6 @@ pub(crate) enum Command {
     Agent(AgentArgs),
     /// Serve the versioned agent contract over stdio, JSON-RPC 2.0, or MCP.
     Serve(ServeArgs),
-    /// Open the local read-only view of a raw Workshop project in the
-    /// default browser; serves until interrupted (ADR-0032).
-    Ui(UiArgs),
     /// Compare two Workshop texts using canonical WIR semantics (internal gate command).
     #[command(name = "semantic-compare", hide = true)]
     SemanticCompare(SemanticCompareArgs),
