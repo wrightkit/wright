@@ -69,13 +69,6 @@ pub fn semantic_rename(
     )
 }
 
-fn is_refusal(error: &wright_lpp::ProviderError) -> bool {
-    matches!(
-        error,
-        wright_lpp::ProviderError::Lpp(error) if error.kind == wright_lpp::LppErrorKind::Refusal
-    )
-}
-
 fn rename_result(
     provider: &mut dyn wright_lpp::LanguageProvider,
     documents: &wright_lpp::DocumentSet,
@@ -344,7 +337,14 @@ fn to_edit_range(text: &str, range: wright_lpp::Range) -> Result<EditRange, Diag
     let start = position_to_column(&lines, range.start, "range start")?;
     let end = position_to_column(&lines, range.end, "range end")?;
     if (start.0, start.1) > (end.0, end.1) {
-        return Err(edit_invalid_range(range));
+        return Err(Diagnostic::error(
+            "edit-invalid-range",
+            Stage::Discovery,
+            format!(
+                "the provider edit range {}-{}:{}-{} is not a valid range of the document",
+                range.start.line, range.start.character, range.end.line, range.end.character
+            ),
+        ));
     }
     Ok(EditRange {
         start_line: start.0,
@@ -364,21 +364,13 @@ fn to_text_edit(text: &str, edit: &SourceEdit) -> Result<wright_lpp::TextEdit, D
     })
 }
 
-fn edit_invalid_range(range: wright_lpp::Range) -> Diagnostic {
-    Diagnostic::error(
-        "edit-invalid-range",
-        Stage::Discovery,
-        format!(
-            "the provider edit range {}-{}:{}-{} is not a valid range of the document",
-            range.start.line, range.start.character, range.end.line, range.end.character
-        ),
-    )
-}
-
 fn provider_diagnostic(error: &wright_lpp::ProviderError) -> Diagnostic {
     let code = crate::source_provider::provider_failure_code(error);
     let stage = crate::source_provider::provider_failure_stage(error);
-    let refused = is_refusal(error);
+    let refused = matches!(
+        error,
+        wright_lpp::ProviderError::Lpp(error) if error.kind == wright_lpp::LppErrorKind::Refusal
+    );
     let message = match (refused, error.refusal_code()) {
         (true, Some(refusal)) => {
             format!(

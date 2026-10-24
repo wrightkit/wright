@@ -46,11 +46,6 @@ impl ChildProcess {
         self.child.try_wait().ok().flatten().map(exit_code)
     }
 
-    /// Block until the provider exits and return its exit code.
-    pub fn wait(&mut self) -> Option<i32> {
-        self.child.wait().ok().map(exit_code)
-    }
-
     /// Kill the provider immediately.
     pub fn kill(&mut self) {
         let _ = self.child.kill();
@@ -72,7 +67,7 @@ impl ChildProcess {
             std::thread::sleep(Duration::from_millis(10));
         }
         self.kill();
-        self.wait()
+        self.child.wait().ok().map(exit_code)
     }
 }
 

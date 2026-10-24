@@ -36,6 +36,14 @@ fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
+fn write_input(source: &str, tag: &str) -> Result<PathBuf, String> {
+    let input_dir = workspace_root().join("target/wright-bench-inputs");
+    std::fs::create_dir_all(&input_dir).map_err(|e| e.to_string())?;
+    let path = input_dir.join(format!("wright-bench-{}-{tag}.ws", std::process::id()));
+    std::fs::write(&path, source).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
 fn benchmark_cases() -> Vec<(&'static str, PathBuf)> {
     [
         "synthetic/basic-rule",
@@ -255,14 +263,7 @@ fn semantic_query_trial(
     root: &Path,
     repeats: usize,
 ) -> Result<(Duration, Duration), String> {
-    let safe_name = fixture.replace('/', "-");
-    let input_dir = workspace_root().join("target/wright-bench-inputs");
-    std::fs::create_dir_all(&input_dir).map_err(|e| e.to_string())?;
-    let path = input_dir.join(format!(
-        "wright-bench-{}-semantic-{safe_name}.ws",
-        std::process::id()
-    ));
-    std::fs::write(&path, source).map_err(|e| e.to_string())?;
+    let path = write_input(source, &format!("semantic-{}", fixture.replace('/', "-")))?;
     let result = (|| {
         let mut session = CompilerSession::new(SessionConfig {
             input: InputSpec::Path(path.clone()),
@@ -362,14 +363,7 @@ fn compile(
     fixture: &str,
     root: &Path,
 ) -> Result<(String, (usize, usize, usize)), String> {
-    let safe_name = fixture.replace('/', "-");
-    let input_dir = workspace_root().join("target/wright-bench-inputs");
-    std::fs::create_dir_all(&input_dir).map_err(|e| e.to_string())?;
-    let path = input_dir.join(format!(
-        "wright-bench-{}-{safe_name}.ws",
-        std::process::id()
-    ));
-    std::fs::write(&path, source).map_err(|e| e.to_string())?;
+    let path = write_input(source, &fixture.replace('/', "-"))?;
     let mut session = CompilerSession::new(SessionConfig {
         input: wright_driver::config::InputSpec::Path(path.clone()),
         kind: SourceKind::Workshop,

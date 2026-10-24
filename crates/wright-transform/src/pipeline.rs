@@ -89,8 +89,6 @@ pub fn run_validated(
     }])
 }
 
-pub use self::run as run_canonical;
-
 fn literal_only(value: &workshop_rs::Value) -> bool {
     use workshop_rs::Value;
     match value {
@@ -330,7 +328,7 @@ mod tests {
                 }),
         );
 
-        run_canonical(&mut program, Profile::Compat).expect("pipeline runs");
+        run(&mut program, Profile::Compat).expect("pipeline runs");
         for action in &program.rules[0].actions {
             let Action::SetGlobalVariable { value, .. } = action else {
                 panic!("set-global action")
@@ -357,7 +355,7 @@ mod tests {
                         args: Vec::new(),
                     }),
             );
-            run_canonical(&mut program, Profile::Compat).expect("pipeline runs");
+            run(&mut program, Profile::Compat).expect("pipeline runs");
             program.rules[0].conditions[0].value.clone()
         };
         let global_g = || Value::GlobalVariable("g".to_string());
@@ -427,7 +425,7 @@ mod tests {
                 }),
         );
 
-        let results = run_canonical(&mut program, Profile::Compat).expect("canonical pipeline");
+        let results = run(&mut program, Profile::Compat).expect("canonical pipeline");
         assert!(results[0].stats.changed > 0);
         assert!(matches!(
             program.rules[0].conditions[0].value,

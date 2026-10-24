@@ -1,4 +1,3 @@
-use serde::Serialize;
 use serde_json::{Value as JsonValue, json};
 use workshop_rs::catalog::{Catalog, Kind, Locale};
 use workshop_rs::source::Span;
@@ -7,22 +6,14 @@ use wright_analyzer::canonical::{Finding, LintFix};
 use crate::edit::{EditRange, EditTransaction, SourceEdit};
 use crate::session::{Loaded, Provenance};
 
-/// A finding's materialized fix as it appears in the structured result:
-/// a stable `kind`, a one-line `summary`, and the validated-edit
-/// `transaction` a consumer previews through `validateEditTransaction` and
-/// applies through the same validated source-edit path.
-#[derive(Debug, Clone, Serialize)]
-pub struct LintFixProposal {
-    pub kind: &'static str,
-    pub summary: &'static str,
-    pub transaction: EditTransaction,
-}
-
-/// Attach each finding's materialized fix to its serialized form. The
-/// `findings` list and `json` array are the same findings in the same order
-/// (`SemanticService` serializes `findings()` in order); a finding whose
-/// fix cannot be materialized — no plan, or no authored source — simply
-/// carries no `fix` member.
+/// Attach each finding's materialized fix to its serialized form: a stable
+/// `kind`, a one-line `summary`, and the validated-edit `transaction` a
+/// consumer previews through `validateEditTransaction` and applies through
+/// the same validated source-edit path. The `findings` list and `json`
+/// array are the same findings in the same order (`SemanticService`
+/// serializes `findings()` in order); a finding whose fix cannot be
+/// materialized — no plan, or no authored source — simply carries no `fix`
+/// member.
 pub fn attach_fixes(
     json: &mut [JsonValue],
     findings: &[Finding],
@@ -38,14 +29,7 @@ pub fn attach_fixes(
             continue;
         };
         if let Some(object) = json.as_object_mut() {
-            object.insert(
-                "fix".to_string(),
-                json!({
-                    "kind": proposal.kind,
-                    "summary": proposal.summary,
-                    "transaction": proposal.transaction,
-                }),
-            );
+            object.insert("fix".to_string(), proposal);
         }
     }
 }
@@ -55,7 +39,7 @@ fn materialize(
     loaded: &Loaded,
     catalog: &Catalog,
     locale: &Locale,
-) -> Option<LintFixProposal> {
+) -> Option<JsonValue> {
     let fix = finding.fix.as_ref()?;
     let edits = match fix {
         LintFix::RemoveDeadBranch { span } => vec![edit(loaded, *span, String::new())?],
@@ -90,11 +74,11 @@ fn materialize(
             "mark each duplicated occurrence with Evaluate Once, the idiom for an intentional repeated evaluation"
         }
     };
-    Some(LintFixProposal {
-        kind,
-        summary,
-        transaction: EditTransaction::new(edits).ok()?,
-    })
+    Some(json!({
+        "kind": kind,
+        "summary": summary,
+        "transaction": EditTransaction::new(edits).ok()?,
+    }))
 }
 
 fn edit(loaded: &Loaded, span: Span, new_text: String) -> Option<SourceEdit> {

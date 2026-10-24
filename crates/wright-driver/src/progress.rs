@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 /// A real orchestration phase exposed to interested consumers.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProgressPhase {
@@ -63,6 +61,3 @@ impl ProgressEvent {
 pub trait ProgressObserver: Send + Sync {
     fn on_progress(&self, event: ProgressEvent);
 }
-
-/// Convenience alias for observers shared with a running session.
-pub type SharedProgressObserver = Arc<dyn ProgressObserver>;

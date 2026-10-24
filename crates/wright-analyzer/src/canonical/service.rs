@@ -54,49 +54,25 @@ pub struct SemanticService<'a> {
 
 impl<'a> SemanticService<'a> {
     pub fn new(program: &'a Program) -> Self {
-        Self::with_origin(
+        Self::with_origin_and_config(
             program,
             Origin {
                 kind: "unknown".to_string(),
                 locale: None,
             },
+            LintConfig::default(),
         )
-    }
-    pub fn from_workshop(program: &'a Program, locale: &str) -> Self {
-        Self::with_origin(
-            program,
-            Origin {
-                kind: "workshop".to_string(),
-                locale: Some(workshop_rs::catalog::Locale::new(locale).to_string()),
-            },
-        )
-    }
-    pub fn with_origin(program: &'a Program, origin: Origin) -> Self {
-        Self::with_origin_and_config(program, origin, LintConfig::default())
     }
     pub fn with_origin_and_config(
         program: &'a Program,
         origin: Origin,
         config: LintConfig,
     ) -> Self {
-        Self::with_origin_and_config_and_registry(
-            program,
-            origin,
-            config,
-            Arc::new(crate::registry::LintRegistry::default()),
-        )
-    }
-    pub fn with_origin_and_config_and_registry(
-        program: &'a Program,
-        origin: Origin,
-        config: LintConfig,
-        registry: Arc<crate::registry::LintRegistry>,
-    ) -> Self {
         Self::with_program_and_origin_and_config_and_registry(
             ProgramSource::Borrowed(program),
             origin,
             config,
-            registry,
+            Arc::new(crate::registry::LintRegistry::default()),
         )
     }
 
@@ -404,7 +380,7 @@ fn reference_json(index: &SemanticIndex, program: &Program, reference: &Referenc
 fn event_name(event: &Event) -> String {
     match event {
         Event::Subroutine(name) => format!("subroutine:{name}"),
-        _ => crate::declarative::public_event_id(event).to_string(),
+        _ => event.catalog_id().to_string(),
     }
 }
 

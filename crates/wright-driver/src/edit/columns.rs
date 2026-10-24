@@ -6,10 +6,6 @@ pub(super) fn position_byte(lines: &[&str], line: u32, col: u32) -> usize {
         + char_col(lines[line as usize - 1], col)
 }
 
-pub(super) fn char_count(line: &str) -> usize {
-    line.chars().count()
-}
-
 /// Convert a UTF-16 column to a Rust character offset, rounding up within a surrogate pair.
 pub fn utf16_offset_to_char(line: &str, utf16_offset: usize) -> usize {
     let mut chars = 0usize;

@@ -1,6 +1,4 @@
 use std::collections::BTreeSet;
-use std::path::Path;
-use std::time::Duration;
 
 use serde_json::Value;
 use wright_driver::result::{
@@ -9,13 +7,15 @@ use wright_driver::result::{
 };
 
 use super::{
-    Presentation, RenderContext, ResultPresentation, array_len, cfg_edge_count, count,
-    diagnostics_on_stdout, dim, display_location_path, edge_caller, finding_location,
-    finding_location_span, finding_severity_label, finding_severity_rank, inline_location,
-    is_real_source_path, location_suffix, notable_callers, persistent_object_summary, query_items,
-    render_diff_lines, render_node, renderable_group_spans, rule_address, rule_name, severity_rank,
-    source_context, span_position, summary_status, symbol_kind_heading, tree_rule,
-    unmapped_positions, unmapped_positions_note,
+    DETAIL_COMMANDS, Presentation, RenderContext, ResultPresentation, array_len, block_flags,
+    call_fan_counts, cfg_block_stats, cfg_edge_count, count, diagnostic_counts, diagnostic_files,
+    diagnostics_on_stdout, dim, display_location_path, edge_caller, finding_files,
+    finding_location_span, finding_severity_label, finding_severity_rank, findings_severity_counts,
+    fix_status_counts, fix_status_parts, group_runs, is_real_source_path, location_suffix,
+    lookup_hint_args, normalize_finding_spans, notable_callers, persistent_object_summary,
+    query_items, render_diff_lines, render_finding_location, render_node, renderable_group_spans,
+    rule_address, rule_name, severity_rank, shown_of, source_context, span_suffix, summary_status,
+    symbol_kind_heading, tree_rule, unmapped_positions, unmapped_positions_note,
 };
 
 fn tag_word<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) -> String {
@@ -30,14 +30,10 @@ fn tag_word<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) ->
         }
         .to_string();
     }
-    if is_query(&envelope.command) {
+    if crate::cli::is_query_command(&envelope.command) {
         return envelope.command.to_uppercase();
     }
     summary_status(envelope).to_string()
-}
-
-fn is_query(command: &str) -> bool {
-    crate::cli::is_query_command(command)
 }
 
 pub(crate) fn tag(word: &str, color: bool) -> String {
@@ -72,12 +68,6 @@ pub(crate) fn report_error(pres: Presentation, word: &str, subject: &str, messag
         eprintln!("  {message}");
     } else {
         eprintln!("wright: {message}");
-    }
-}
-
-pub(crate) fn report_close(pres: Presentation, subject: &str, word: &str) {
-    if pres.is_terminal() {
-        println!("{} {subject}", tag(word, pres.color));
     }
 }
 
@@ -156,39 +146,30 @@ pub(crate) trait TerminalReport {
 
 pub(crate) fn render<T: serde::Serialize + ResultPresentation + TerminalReport>(
     envelope: &Envelope<T>,
-    pres: Presentation,
-    elapsed: Duration,
-    source_base: Option<&Path>,
-    subject: Option<&str>,
+    ctx: &RenderContext<'_>,
 ) {
-    let ctx = RenderContext {
-        presentation: pres,
-        elapsed,
-        source_base,
-        subject,
-    };
     if let Some(artifact) = envelope.result.artifact() {
         if !envelope.ok || !envelope.diagnostics.is_empty() {
-            eprintln!("{}", verdict_line(envelope, pres.color));
-            diagnostics(&ctx, envelope, false);
+            eprintln!("{}", verdict_line(envelope, ctx.presentation.color));
+            diagnostics(ctx, envelope, false);
         }
         print!("{artifact}");
         return;
     }
-    println!("{}", verdict_line(envelope, pres.color));
+    println!("{}", verdict_line(envelope, ctx.presentation.color));
     if let Some(text) = headline(envelope) {
-        println!("{}{}", pad(&ctx, 1), dim(&text, pres.color));
+        println!("{}{}", pad(ctx, 1), dim(&text, ctx.presentation.color));
     }
     let to_stdout = diagnostics_on_stdout(envelope);
-    diagnostics(&ctx, envelope, to_stdout);
+    diagnostics(ctx, envelope, to_stdout);
     if envelope.ok || envelope.gated {
-        envelope.result.body(&ctx);
-        comparison(&ctx, envelope.comparison.as_ref());
+        envelope.result.body(ctx);
+        comparison(ctx, envelope.comparison.as_ref());
     } else if envelope.diagnostics.is_empty() {
         dprint(&format!("{}: failed", envelope.command), to_stdout);
     }
     if envelope.command == "check" {
-        check_footer(&ctx, envelope);
+        check_footer(ctx, envelope);
     }
 }
 
@@ -213,11 +194,7 @@ fn diagnostic_summary<T: serde::Serialize + ResultPresentation>(envelope: &Envel
     if let Some(selection) = &envelope.selection {
         return plural(selection.total, "diagnostic", "diagnostics");
     }
-    let mut counts = [0usize; 3];
-    for diagnostic in &envelope.diagnostics {
-        counts[severity_rank(diagnostic.severity) as usize] += 1;
-    }
-    severity_counts(counts, "diagnostic")
+    severity_counts(diagnostic_counts(&envelope.diagnostics), "diagnostic")
 }
 
 fn severity_counts(counts: [usize; 3], noun: &str) -> String {
@@ -242,13 +219,7 @@ fn check_footer<T: serde::Serialize + ResultPresentation>(
     ctx: &RenderContext<'_>,
     envelope: &Envelope<T>,
 ) {
-    let files: BTreeSet<String> = envelope
-        .diagnostics
-        .iter()
-        .filter_map(|diagnostic| diagnostic.span.as_ref())
-        .filter(|span| is_real_source_path(&span.path))
-        .map(|span| display_location_path(&span.path))
-        .collect();
+    let files = diagnostic_files(&envelope.diagnostics);
     let mut parts = Vec::new();
     if !files.is_empty() {
         parts.push(plural(files.len(), "file affected", "files affected"));
@@ -262,13 +233,7 @@ fn check_footer<T: serde::Serialize + ResultPresentation>(
 }
 
 fn lint_footer(ctx: &RenderContext<'_>, findings: &[Value], skipped: usize) {
-    let files: BTreeSet<&str> = findings
-        .iter()
-        .filter_map(|finding| finding.get("span"))
-        .filter_map(|span| span.get("path"))
-        .filter_map(serde_json::Value::as_str)
-        .filter(|path| is_real_source_path(path))
-        .collect();
+    let files = finding_files(findings);
     let mut parts = Vec::new();
     if !files.is_empty() {
         parts.push(plural(files.len(), "file affected", "files affected"));
@@ -308,25 +273,16 @@ fn diagnostics<T: serde::Serialize + ResultPresentation>(
         }
         diagnostic_item(ctx, diagnostic, to_stdout);
         if matches!(envelope.command.as_str(), "check" | "compile")
-            && diagnostic
-                .code
-                .split('.')
-                .any(|segment| segment.starts_with("unknown-") && segment != "unknown-language")
+            && let Some(args) = lookup_hint_args(diagnostic)
         {
-            let source = diagnostic.source.as_ref();
-            let hint = if source.is_some_and(|source| source.kind == "opy") {
-                "hint: run 'wright lookup --language opy' with the rejected name to find its spelling and signature".to_string()
-            } else if let Some(locale) = source
-                .and_then(|source| source.locale.as_deref())
-                .filter(|locale| !locale.eq_ignore_ascii_case("en-US"))
-            {
-                format!(
-                    "hint: run 'wright lookup --locale {locale}' with the rejected name to find its spelling and signature"
-                )
-            } else {
-                "hint: run 'wright lookup' with the rejected name to find its spelling and signature".to_string()
-            };
-            dnote(ctx, 1, &hint, to_stdout);
+            dnote(
+                ctx,
+                1,
+                &format!(
+                    "hint: run 'wright lookup{args}' with the rejected name to find its spelling and signature"
+                ),
+                to_stdout,
+            );
         }
     }
     if bounded && !ctx.presentation.all && total > 20 {
@@ -425,20 +381,7 @@ fn finding_head(ctx: &RenderContext<'_>, finding: &Value, occurrences: usize) ->
 }
 
 fn finding_location_line(ctx: &RenderContext<'_>, span: &Value, depth: usize, frame: bool) {
-    let Some((display, readable)) = finding_location(span, ctx.source_base) else {
-        return;
-    };
-    let line_no = span_position(span, "start", "line").unwrap_or(0);
-    let col = span_position(span, "start", "col").unwrap_or(0);
-    line(ctx, depth, &format!("--> {display}:{line_no}:{col}"));
-    if !frame {
-        return;
-    }
-    if let Some(context) = readable
-        .and_then(|path| source_context(&path, line_no as u32, col as u32, &pad(ctx, depth)))
-    {
-        println!("{context}");
-    }
+    render_finding_location(span, ctx, &pad(ctx, depth), frame);
 }
 
 fn uniform_evidence(findings: &[Value]) -> Option<String> {
@@ -459,7 +402,8 @@ fn finding_section(
     findings: &[Value],
     withheld: Option<u64>,
 ) {
-    let title = match uniform_evidence(findings) {
+    let evidence = uniform_evidence(findings);
+    let title = match &evidence {
         Some(evidence) => format!("{title} (evidence: {evidence})"),
         None => title.to_string(),
     };
@@ -468,18 +412,9 @@ fn finding_section(
         line(ctx, 1, "none");
         return;
     }
-    let mixed = uniform_evidence(findings).is_none();
-    let mut index = 0;
-    while index < findings.len() {
-        let first = &findings[index];
-        let mut end = index + 1;
-        while end < findings.len()
-            && findings[end]["code"] == first["code"]
-            && findings[end]["message"] == first["message"]
-        {
-            end += 1;
-        }
-        let group = &findings[index..end];
+    let mixed = evidence.is_none();
+    for group in group_runs(findings) {
+        let first = &group[0];
         line(ctx, 1, &finding_head(ctx, first, group.len()));
         if group.len() == 1 {
             if let Some(span) = first.get("span").filter(|span| span.is_object()) {
@@ -511,7 +446,6 @@ fn finding_section(
         if !notes.is_empty() {
             note(ctx, 2, &format!("= {}", notes.join(" · ")));
         }
-        index = end;
     }
     if let Some(withheld) = withheld.filter(|withheld| *withheld > 0) {
         line(
@@ -685,34 +619,14 @@ impl TerminalReport for LintResult {
         let mut metadata = if let Some(selection) = &self.selection {
             plural(selection.total, "finding", "findings")
         } else {
-            let mut counts = [0usize; 3];
-            for finding in self.findings.as_array().map_or(&[][..], Vec::as_slice) {
-                counts[finding_severity_rank(finding) as usize] += 1;
-            }
-            severity_counts(counts, "finding")
+            severity_counts(
+                findings_severity_counts(self.findings.as_array().map_or(&[][..], Vec::as_slice)),
+                "finding",
+            )
         };
         metadata.push_str(&format!(" across {}", plural(rules, "rule", "rules")));
         if let Some(fixes) = &self.fixes {
-            let mut applied = 0usize;
-            let mut previewed = 0usize;
-            let mut refused = 0usize;
-            for fix in fixes {
-                match fix.status {
-                    wright_driver::result::LintFixStatus::Applied => applied += 1,
-                    wright_driver::result::LintFixStatus::Preview => previewed += 1,
-                    wright_driver::result::LintFixStatus::Refused => refused += 1,
-                }
-            }
-            let mut parts = Vec::new();
-            if applied > 0 {
-                parts.push(format!("{applied} applied"));
-            }
-            if previewed > 0 {
-                parts.push(format!("{previewed} previewed"));
-            }
-            if refused > 0 {
-                parts.push(format!("{refused} refused"));
-            }
+            let parts = fix_status_parts(fix_status_counts(fixes));
             metadata.push_str(&format!("; {}", plural(fixes.len(), "fix", "fixes")));
             if !parts.is_empty() {
                 metadata.push_str(&format!(" ({})", parts.join(", ")));
@@ -834,23 +748,13 @@ impl TerminalReport for EssentialResult {
             }
             if value["next"].as_array().is_none_or(Vec::is_empty) {
                 heading(ctx, "Detail commands");
-                for command in [
-                    "wright inspect symbols",
-                    "wright inspect refs <NAME>",
-                    "wright inspect cfg <RULE>",
-                    "wright inspect callgraph",
-                    "wright inspect cost",
-                ] {
+                for command in DETAIL_COMMANDS {
                     line(ctx, 1, command);
                 }
             }
         } else {
             let mut findings = value["findings"].clone();
-            for finding in findings.as_array_mut().into_iter().flatten() {
-                if let Some(span) = finding_location_span(finding) {
-                    finding["span"] = span;
-                }
-            }
+            normalize_finding_spans(&mut findings);
             let findings = sorted_findings(&findings);
             finding_section(
                 ctx,
@@ -993,7 +897,8 @@ fn analyze_body(ctx: &RenderContext<'_>, value: &Value) {
     }
 
     let risks = value["risks"].as_array().map_or(&[][..], Vec::as_slice);
-    let title = match uniform_evidence(risks) {
+    let evidence = uniform_evidence(risks);
+    let title = match &evidence {
         Some(evidence) => format!("Performance and stability risks (evidence: {evidence})"),
         None => "Performance and stability risks".to_string(),
     };
@@ -1003,7 +908,7 @@ fn analyze_body(ctx: &RenderContext<'_>, value: &Value) {
         1,
         "heuristic/static indicators — not measured runtime cost or behavior",
     );
-    let mixed = uniform_evidence(risks).is_none();
+    let mixed = evidence.is_none();
     for risk in risks {
         line(ctx, 2, &finding_head(ctx, risk, 1));
         if let Some(span) = finding_location_span(risk) {
@@ -1078,10 +983,11 @@ impl TerminalReport for RulesResult {
         for rule in rules {
             let name = rule_name(rule);
             let event = rule["event"].as_str().unwrap_or("?");
-            match rule.get("span").and_then(inline_location) {
-                Some(location) => line(ctx, 1, &format!("{name} [{event}] --> {location}")),
-                None => line(ctx, 1, &format!("{name} [{event}]")),
-            }
+            line(
+                ctx,
+                1,
+                &format!("{name} [{event}]{}", span_suffix(rule, " --> ")),
+            );
             let content = &rule["content"];
             for condition in content["conditions"].as_array().into_iter().flatten() {
                 line(ctx, 2, &format!("if {}", render_node(&condition["value"])));
@@ -1129,10 +1035,7 @@ impl TerminalReport for SymbolsResult {
                     .as_str()
                     .filter(|name| !name.is_empty())
                     .unwrap_or("<unnamed>");
-                match symbol.get("span").and_then(inline_location) {
-                    Some(location) => line(ctx, 2, &format!("{name} --> {location}")),
-                    None => line(ctx, 2, name),
-                }
+                line(ctx, 2, &format!("{name}{}", span_suffix(symbol, " --> ")));
             }
         }
         truncation_notes(ctx, &self.0);
@@ -1177,11 +1080,7 @@ impl TerminalReport for RefsResult {
                     _ => String::new(),
                 },
             };
-            let location = reference
-                .get("span")
-                .and_then(inline_location)
-                .map(|location| format!(" --> {location}"))
-                .unwrap_or_default();
+            let location = span_suffix(reference, " --> ");
             line(
                 ctx,
                 1,
@@ -1217,15 +1116,7 @@ impl TerminalReport for CfgResult {
             line(ctx, 1, "none");
             return;
         }
-        let loops = blocks
-            .iter()
-            .filter(|block| matches!(block["kind"].as_str(), Some("while" | "for")))
-            .count();
-        let waits = blocks
-            .iter()
-            .filter(|block| block["waits"].as_bool().unwrap_or(false))
-            .count();
-        let calls: usize = blocks.iter().map(|block| array_len(&block["calls"])).sum();
+        let (loops, waits, calls) = cfg_block_stats(blocks);
         line(
             ctx,
             1,
@@ -1248,16 +1139,7 @@ impl TerminalReport for CfgResult {
             ),
         );
         for block in blocks {
-            let mut flags = Vec::new();
-            if block["waits"].as_bool().unwrap_or(false) {
-                flags.push("waits");
-            }
-            if block["calls"]
-                .as_array()
-                .is_some_and(|calls| !calls.is_empty())
-            {
-                flags.push("calls");
-            }
+            let flags = block_flags(block);
             let flags = if flags.is_empty() {
                 String::new()
             } else {
@@ -1308,15 +1190,7 @@ impl TerminalReport for CallGraphResult {
             line(ctx, 1, "none");
             return;
         }
-        let mut fan_in: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
-        let mut fan_out: std::collections::BTreeMap<&str, usize> =
-            std::collections::BTreeMap::new();
-        for edge in edges {
-            *fan_in
-                .entry(edge["callee"].as_str().unwrap_or("<unnamed>"))
-                .or_default() += 1;
-            *fan_out.entry(edge_caller(edge)).or_default() += 1;
-        }
+        let (fan_in, fan_out) = call_fan_counts(edges);
         line(
             ctx,
             1,
@@ -1426,22 +1300,16 @@ impl TerminalReport for CostResult {
                 ),
             );
             for rule in elements_value["rules"].as_array().into_iter().flatten() {
-                match rule.get("span").and_then(inline_location) {
-                    Some(location) => line(
-                        ctx,
-                        2,
-                        &format!(
-                            "{}  {}  {location}",
-                            elements(count(rule, "count")),
-                            rule_name(rule)
-                        ),
+                line(
+                    ctx,
+                    2,
+                    &format!(
+                        "{}  {}{}",
+                        elements(count(rule, "count")),
+                        rule_name(rule),
+                        span_suffix(rule, "  ")
                     ),
-                    None => line(
-                        ctx,
-                        2,
-                        &format!("{}  {}", elements(count(rule, "count")), rule_name(rule)),
-                    ),
-                }
+                );
             }
             if let Some(note) = elements_value["truncation"]["rules"].as_object() {
                 line(
@@ -1483,61 +1351,37 @@ impl TerminalReport for CostResult {
 fn cost_rule_body(result: &Value, ctx: &RenderContext<'_>) {
     let rule = &result["rule"];
     heading(ctx, "Element cost");
-    match rule.get("span").and_then(inline_location) {
-        Some(location) => line(
-            ctx,
-            1,
-            &format!(
-                "{} · {} · {location}",
-                rule_name(rule),
-                elements(count(rule, "count"))
-            ),
+    line(
+        ctx,
+        1,
+        &format!(
+            "{} · {}{}",
+            rule_name(rule),
+            elements(count(rule, "count")),
+            span_suffix(rule, " · ")
         ),
-        None => line(
-            ctx,
-            1,
-            &format!("{} · {}", rule_name(rule), elements(count(rule, "count"))),
-        ),
-    }
+    );
     let statements = result["statements"]
         .as_array()
         .map_or(&[][..], Vec::as_slice);
     let by_node = result["byNode"].as_array().map_or(&[][..], Vec::as_slice);
-    let shown = |key: &str| {
-        result["truncation"][key].as_object().map(|note| {
-            (
-                note["shown"].as_u64().unwrap_or(0),
-                note["total"].as_u64().unwrap_or(0),
-            )
-        })
-    };
     heading(ctx, "Costliest statements");
     if statements.is_empty() {
         line(ctx, 1, "none");
     }
     for statement in statements {
-        match statement.get("span").and_then(inline_location) {
-            Some(location) => line(
-                ctx,
-                1,
-                &format!(
-                    "{}  {}  {location}",
-                    elements(count(statement, "count")),
-                    statement["name"].as_str().unwrap_or("?"),
-                ),
+        line(
+            ctx,
+            1,
+            &format!(
+                "{}  {}{}",
+                elements(count(statement, "count")),
+                statement["name"].as_str().unwrap_or("?"),
+                span_suffix(statement, "  ")
             ),
-            None => line(
-                ctx,
-                1,
-                &format!(
-                    "{}  {}",
-                    elements(count(statement, "count")),
-                    statement["name"].as_str().unwrap_or("?"),
-                ),
-            ),
-        }
+        );
     }
-    if let Some((shown, total)) = shown("statements") {
+    if let Some((shown, total)) = shown_of(result, "statements") {
         line(
             ctx,
             1,
@@ -1566,7 +1410,7 @@ fn cost_rule_body(result: &Value, ctx: &RenderContext<'_>) {
             ),
         );
     }
-    if let Some((shown, total)) = shown("byNode") {
+    if let Some((shown, total)) = shown_of(result, "byNode") {
         line(
             ctx,
             1,

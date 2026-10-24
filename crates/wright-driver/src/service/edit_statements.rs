@@ -1,12 +1,45 @@
 use wright_analyzer::canonical::SemanticIndex;
 
 use super::{Address, StatementEditRequest, ToolErrorInfo, ToolResponse, ToolService};
-use crate::CompilerSession;
 use crate::diag::{Diagnostic, Stage};
-use crate::edit::{EditTransaction, EditValidation};
-use crate::result::exit_code_from;
+use crate::edit::{EditTransaction, EditValidation, SourcePreview};
+use crate::{CompilerSession, Loaded};
 
 impl<'a> ToolService<'a> {
+    /// The snapshot a `sources`-carrying request addresses: when
+    /// `sources` supplies text for the loaded input, that text reparses
+    /// into a derived `Loaded` and the source's own `sources` key
+    /// answers; without `sources` the held snapshot serves and the
+    /// input's display name answers.
+    pub(crate) fn derived_loaded(
+        &mut self,
+        loaded: Loaded,
+        sources: &Option<std::collections::BTreeMap<String, String>>,
+    ) -> Result<(Loaded, String), Vec<Diagnostic>> {
+        let Some(sources) = sources else {
+            let display = loaded.input.display.clone();
+            return Ok((loaded, display));
+        };
+        let Some((key, text)) = crate::statement_edit::supplied_source(sources, &loaded.input)
+        else {
+            return Err(vec![Diagnostic::error(
+                "edit-unknown-source",
+                Stage::Discovery,
+                format!(
+                    "the request's 'sources' carries no text for the loaded input '{}'",
+                    loaded.input.display
+                ),
+            )]);
+        };
+        let mut resolved = loaded.input.clone();
+        resolved.text = text.to_string();
+        resolved.identity = crate::input_identity(text);
+        self.session
+            .load_workshop_text(&resolved)
+            .map(|derived| (derived, key.to_string()))
+            .map_err(|diagnostic| vec![diagnostic])
+    }
+
     pub(crate) fn edit_statements_kind_gate(&mut self) -> Option<ToolResponse> {
         let refuse = |diagnostic: Diagnostic| {
             self.ok(
@@ -27,44 +60,14 @@ impl<'a> ToolService<'a> {
         sources: &Option<std::collections::BTreeMap<String, String>>,
         edits: &[StatementEditRequest],
     ) -> ToolResponse {
-        match self.statement_edits(input_identity, sources, edits) {
-            Ok(result) => self.ok(serde_json::to_value(result).expect("serializes")),
-            Err(response) => response,
-        }
-    }
-
-    fn statement_edits(
-        &mut self,
-        input_identity: &str,
-        sources: &Option<std::collections::BTreeMap<String, String>>,
-        edits: &[StatementEditRequest],
-    ) -> Result<crate::statement_edit::EditStatementsResult, ToolResponse> {
         use crate::statement_edit as se;
-        let refuse = |diagnostics: Vec<Diagnostic>| Ok(se::refusal(diagnostics));
+        let refuse = |diagnostics: Vec<Diagnostic>| ToolResponse::Ok {
+            result: serde_json::to_value(se::refusal(diagnostics)).expect("serializes"),
+        };
         let loaded = self.snapshot().loaded.clone();
-        let derived;
-        let (effective, source) = match sources {
-            Some(sources) => {
-                let Some((key, text)) = se::supplied_source(sources, &loaded.input) else {
-                    return refuse(vec![Diagnostic::error(
-                        "edit-unknown-source",
-                        Stage::Discovery,
-                        format!(
-                            "the request's 'sources' carries no text for the loaded input '{}'",
-                            loaded.input.display
-                        ),
-                    )]);
-                };
-                let mut resolved = loaded.input.clone();
-                resolved.text = text.to_string();
-                resolved.identity = crate::input_identity(text);
-                derived = match self.session.load_workshop_text(&resolved) {
-                    Ok(derived) => derived,
-                    Err(diagnostic) => return refuse(vec![diagnostic]),
-                };
-                (&derived, key.to_string())
-            }
-            None => (&loaded, loaded.input.display.clone()),
+        let (effective, source) = match self.derived_loaded(loaded, sources) {
+            Ok(derived) => derived,
+            Err(diagnostics) => return refuse(diagnostics),
         };
         if input_identity != effective.input.identity {
             return refuse(vec![Diagnostic::error(
@@ -82,12 +85,12 @@ impl<'a> ToolService<'a> {
             let rule = match &edit.rule {
                 Address::Id(id) if (*id as usize) < effective.program.rules.len() => *id as usize,
                 Address::Id(id) => {
-                    return Err(ToolResponse::Error {
+                    return ToolResponse::Error {
                         error: ToolErrorInfo::new(
                             "invalid-selection",
                             format!("unknown rule {id}"),
                         ),
-                    });
+                    };
                 }
                 Address::Name(name) => {
                     let resolved = match &derived_index {
@@ -100,9 +103,9 @@ impl<'a> ToolService<'a> {
                             crate::service::resolve_candidates(
                                 &mut error.message,
                                 &mut error.fields,
-                                Some(effective),
+                                Some(&effective),
                             );
-                            return Err(ToolResponse::Error { error });
+                            return ToolResponse::Error { error };
                         }
                     }
                 }
@@ -120,7 +123,7 @@ impl<'a> ToolService<'a> {
             }
             resolved_edits.push((rule, edit));
         }
-        let locale = CompilerSession::locale_for(effective);
+        let locale = CompilerSession::locale_for(&effective);
         let source_identity = crate::input_identity(&effective.input.text);
         let mut source_edits = Vec::with_capacity(resolved_edits.len());
         for (rule, edit) in &resolved_edits {
@@ -184,13 +187,16 @@ impl<'a> ToolService<'a> {
         let validation = self
             .session
             .validate_edit_transaction(sources.as_ref(), &transaction);
-        Ok(crate::statement_edit::EditStatementsResult {
-            ok: validation.ok,
-            exit: validation.exit,
-            diagnostics: validation.diagnostics,
-            transaction: Some(transaction),
-            preview: validation.preview,
-        })
+        self.ok(
+            serde_json::to_value(crate::statement_edit::EditStatementsResult {
+                ok: validation.ok,
+                exit: validation.exit,
+                diagnostics: validation.diagnostics,
+                transaction: Some(transaction),
+                preview: validation.preview,
+            })
+            .expect("serializes"),
+        )
     }
 
     /// The `wright ui` host write path (ADR-0032 decision 5 — host
@@ -202,37 +208,19 @@ impl<'a> ToolService<'a> {
     /// next read sees the edited program. The caller never supplies
     /// `sources` here: the host always edits the disk-loaded input.
     pub fn apply_edit_transaction(&mut self, transaction: &EditTransaction) -> EditValidation {
-        let refuse = |diagnostics: Vec<Diagnostic>| EditValidation {
-            ok: false,
-            exit: exit_code_from(&diagnostics),
-            diagnostics,
-            preview: None,
-        };
         let validation = self.session.validate_edit_transaction(None, transaction);
         if !validation.ok {
             return validation;
         }
         let previews = validation.preview.clone().unwrap_or_default();
-        if previews.iter().any(|preview| {
-            !transaction
-                .edits
-                .iter()
-                .any(|edit| edit.source == preview.source)
-        }) {
-            return refuse(vec![Diagnostic::error(
-                "edit-unknown-source",
-                Stage::Discovery,
-                "the transaction's edits do not cover every source its preview writes",
-            )]);
+        if let Some(refusal) = Self::uncovered_preview_refusal(&previews, transaction) {
+            return refusal;
         }
         if let Err(diagnostic) = crate::edit::write_previews(&previews, transaction) {
-            return refuse(vec![diagnostic]);
+            return EditValidation::refused(vec![diagnostic]);
         }
-        if let Err(error) = self.refresh() {
-            let mut diagnostic =
-                Diagnostic::carried_error(error.code, Stage::Discovery, error.message);
-            diagnostic.fields = error.fields;
-            return refuse(vec![diagnostic]);
+        if let Some(refusal) = self.refresh_refusal() {
+            return refusal;
         }
         validation
     }
@@ -255,12 +243,6 @@ impl<'a> ToolService<'a> {
         transaction: &EditTransaction,
         sources: &mut std::collections::BTreeMap<String, String>,
     ) -> EditValidation {
-        let refuse = |diagnostics: Vec<Diagnostic>| EditValidation {
-            ok: false,
-            exit: exit_code_from(&diagnostics),
-            diagnostics,
-            preview: None,
-        };
         let validation = self
             .session
             .validate_edit_transaction(Some(&*sources), transaction);
@@ -268,17 +250,8 @@ impl<'a> ToolService<'a> {
             return validation;
         }
         let previews = validation.preview.clone().unwrap_or_default();
-        if previews.iter().any(|preview| {
-            !transaction
-                .edits
-                .iter()
-                .any(|edit| edit.source == preview.source)
-        }) {
-            return refuse(vec![Diagnostic::error(
-                "edit-unknown-source",
-                Stage::Discovery,
-                "the transaction's edits do not cover every source its preview writes",
-            )]);
+        if let Some(refusal) = Self::uncovered_preview_refusal(&previews, transaction) {
+            return refusal;
         }
         // Every edit targets the loaded input (`validate_transaction`
         // enforces `same_source`), so exactly one preview rewrites it;
@@ -286,13 +259,13 @@ impl<'a> ToolService<'a> {
         // snapshot — a never-loaded session still applies its own writes.
         let resolved = match crate::edit::resolve_edit_input(&self.session.config) {
             Ok(resolved) => resolved,
-            Err(diagnostic) => return refuse(vec![diagnostic]),
+            Err(diagnostic) => return EditValidation::refused(vec![diagnostic]),
         };
         let Some(preview) = previews
             .iter()
             .find(|preview| crate::edit::same_source(preview.source.as_str(), &resolved))
         else {
-            return refuse(vec![Diagnostic::error(
+            return EditValidation::refused(vec![Diagnostic::error(
                 "edit-unknown-source",
                 Stage::Discovery,
                 "the transaction writes no source the loaded input owns",
@@ -301,13 +274,44 @@ impl<'a> ToolService<'a> {
         let (key, text) = (preview.source.clone(), preview.new_text.clone());
         self.session.set_text_input(text.clone());
         self.invalidate();
+        if let Some(refusal) = self.refresh_refusal() {
+            return refusal;
+        }
+        sources.insert(key, text);
+        validation
+    }
+
+    /// Every preview a validation produced must name a source the
+    /// transaction edits — a preview beyond that set would write a file
+    /// the caller never approved.
+    fn uncovered_preview_refusal(
+        previews: &[SourcePreview],
+        transaction: &EditTransaction,
+    ) -> Option<EditValidation> {
+        if previews.iter().any(|preview| {
+            !transaction
+                .edits
+                .iter()
+                .any(|edit| edit.source == preview.source)
+        }) {
+            return Some(EditValidation::refused(vec![Diagnostic::error(
+                "edit-unknown-source",
+                Stage::Discovery,
+                "the transaction's edits do not cover every source its preview writes",
+            )]));
+        }
+        None
+    }
+
+    /// A failed refresh after the write carries the loader's structured
+    /// error as a refused validation.
+    fn refresh_refusal(&mut self) -> Option<EditValidation> {
         if let Err(error) = self.refresh() {
             let mut diagnostic =
                 Diagnostic::carried_error(error.code, Stage::Discovery, error.message);
             diagnostic.fields = error.fields;
-            return refuse(vec![diagnostic]);
+            return Some(EditValidation::refused(vec![diagnostic]));
         }
-        sources.insert(key, text);
-        validation
+        None
     }
 }

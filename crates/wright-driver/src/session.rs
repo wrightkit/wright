@@ -94,6 +94,15 @@ fn loaded_origin(loaded: &Loaded) -> Origin {
     }
 }
 
+/// The client identity Wright presents on LPP provider handshakes.
+#[cfg(not(target_arch = "wasm32"))]
+fn lpp_client_info() -> wright_lpp::ClientInfo {
+    wright_lpp::ClientInfo {
+        name: wright_lpp::LPP_CLIENT_NAME.to_string(),
+        version: crate::result::DRIVER_VERSION.to_string(),
+    }
+}
+
 /// One reusable compiler session.
 pub struct CompilerSession {
     /// The session configuration (input, frontend, overrides, format).
@@ -243,8 +252,9 @@ impl CompilerSession {
     ) -> Result<Loaded, Diagnostic> {
         self.verify_fixed_config()?;
         if let Some(loaded) = &self.loaded {
-            let is_provider = self.config.source_backend != SourceBackend::Native
-                && loaded.input.kind == SourceKind::Opy;
+            // Only the provider backend produces an Opy `Loaded`; a
+            // native load refuses Opy input before this point.
+            let is_provider = loaded.input.kind == SourceKind::Opy;
             if !is_provider
                 || self.loaded_operation == Some(provider_operation)
                 || (self.loaded_operation == Some(ProviderOperation::Compile)
@@ -381,10 +391,7 @@ impl CompilerSession {
                     })
             };
             let mut provider = spawn(self)?;
-            let client_info = wright_lpp::ClientInfo {
-                name: wright_lpp::LPP_CLIENT_NAME.to_string(),
-                version: crate::result::DRIVER_VERSION.to_string(),
-            };
+            let client_info = lpp_client_info();
             let mut initialize = provider.initialize_artifact_negotiation(Some(&client_info));
             if initialize
                 .as_ref()
@@ -705,14 +712,6 @@ impl CompilerSession {
         mutation
     }
 
-    /// The locale a Workshop input resolved to, if the last load was
-    /// Workshop-origin.
-    pub fn resolved_locale(&self) -> Option<String> {
-        self.loaded
-            .as_ref()
-            .and_then(|loaded| loaded.origin.locale.clone())
-    }
-
     /// The include root the last load resolved against, if any. Reported
     /// `span.path` spellings on finding surfaces are root-relative to it.
     pub fn input_root(&self) -> Option<PathBuf> {
@@ -1018,15 +1017,10 @@ impl CompilerSession {
             .map_err(|e| {
                 self.diagnostics.push(provider_error_diagnostic(e, "start"));
             })?;
-        provider
-            .initialize(Some(&wright_lpp::ClientInfo {
-                name: wright_lpp::LPP_CLIENT_NAME.to_string(),
-                version: crate::result::DRIVER_VERSION.to_string(),
-            }))
-            .map_err(|e| {
-                self.diagnostics
-                    .push(provider_error_diagnostic(e, "initialize"));
-            })?;
+        provider.initialize(Some(&lpp_client_info())).map_err(|e| {
+            self.diagnostics
+                .push(provider_error_diagnostic(e, "initialize"));
+        })?;
         let result = provider
             .reconstruct(&wright_lpp::WorkshopArtifact {
                 format: "workshop-rs/text-v1".to_string(),

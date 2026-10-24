@@ -6,12 +6,15 @@ use std::path::{Path, PathBuf};
 mod download;
 use download::{extract_provider, fetch, fetch_text, provider_client, verify_checksum};
 
-#[cfg(test)]
-use sha2::{Digest, Sha256};
-
 const DEFAULT_BASE_URL: &str = "https://releases.wrightkit.dev/opy-rs";
 const MAX_DOWNLOAD_BYTES: u64 = 128 * 1024 * 1024;
 const PROVIDER_ARCHIVE_EXTENSION: &str = "tar.gz";
+const SUPPORTED_TARGETS: [&str; 4] = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+];
 
 pub const OPY_LANGUAGE_ID: &str = "opy";
 
@@ -29,24 +32,24 @@ impl OpyProviderConfig {
         }
     }
 
-    pub fn resolve(&self) -> Result<ResolvedOpyProvider, OpyProviderError> {
+    fn resolver(&self) -> OpyProviderResolver {
         OpyProviderResolver::new(self.store_dir.clone().unwrap_or_else(default_store_dir))
-            .resolve(self.executable.as_deref())
+    }
+
+    pub fn resolve(&self) -> Result<ResolvedOpyProvider, OpyProviderError> {
+        self.resolver().resolve(self.executable.as_deref())
     }
 
     pub fn update(&self, version: Option<&str>) -> Result<ResolvedOpyProvider, OpyProviderError> {
-        OpyProviderResolver::new(self.store_dir.clone().unwrap_or_else(default_store_dir))
-            .update(version)
+        self.resolver().update(version)
     }
 
     pub fn installed(&self) -> Result<Option<ResolvedOpyProvider>, OpyProviderError> {
-        OpyProviderResolver::new(self.store_dir.clone().unwrap_or_else(default_store_dir))
-            .installed()
+        self.resolver().installed()
     }
 
     pub fn latest_version(&self) -> Result<String, OpyProviderError> {
-        OpyProviderResolver::new(self.store_dir.clone().unwrap_or_else(default_store_dir))
-            .latest_version()
+        self.resolver().latest_version()
     }
 }
 
@@ -136,13 +139,7 @@ impl OpyProviderResolver {
             Some(t) => Ok(t.clone()),
             None => current_target(),
         }?;
-        if matches!(
-            target.as_str(),
-            "x86_64-unknown-linux-gnu"
-                | "x86_64-apple-darwin"
-                | "aarch64-apple-darwin"
-                | "x86_64-pc-windows-msvc"
-        ) {
+        if SUPPORTED_TARGETS.contains(&target.as_str()) {
             Ok(target)
         } else {
             Err(OpyProviderError::unsupported(format!(
@@ -279,50 +276,29 @@ impl OpyProviderResolver {
     ) -> Result<(), OpyProviderError> {
         let final_dir = self.store_dir.join(version).join(target);
         let final_executable = final_dir.join(provider_binary(target));
-        std::fs::create_dir_all(final_dir.parent().expect("parent exists")).map_err(|e| {
-            OpyProviderError::install(format!(
-                "cannot create OPY provider version directory '{}': {}",
-                final_dir.display(),
-                e
-            ))
-        })?;
-        match std::fs::rename(staging, &final_dir) {
-            Ok(()) => self.activate(version, target),
-            Err(_) if is_executable(&final_executable) => self.activate(version, target),
-            Err(e) => Err(OpyProviderError::install(format!(
-                "cannot activate staged OPY provider '{}': {}",
-                final_dir.display(),
-                e
-            ))),
-        }
+        crate::store::promote_dir(staging, &final_dir, || is_executable(&final_executable))
+            .map_err(|error| {
+                OpyProviderError::install(match error {
+                    crate::store::PromoteError::CreateParent(error) => format!(
+                        "cannot create OPY provider version directory '{}': {error}",
+                        final_dir.display()
+                    ),
+                    crate::store::PromoteError::Rename(error) => format!(
+                        "cannot activate staged OPY provider '{}': {error}",
+                        final_dir.display()
+                    ),
+                })
+            })?;
+        self.activate(version, target)
     }
 
     fn staging_dir(&self, version: &str) -> Result<PathBuf, OpyProviderError> {
-        for attempt in 0..1024 {
-            let staging = self.store_dir.join(format!(
-                ".opy-provider-{version}-{}-{}-{attempt}",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_nanos())
-                    .unwrap_or_default()
-            ));
-            match std::fs::create_dir(&staging) {
-                Ok(()) => return Ok(staging),
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(e) => {
-                    return Err(OpyProviderError::install(format!(
-                        "cannot create OPY provider staging directory '{}': {}",
-                        staging.display(),
-                        e
-                    )));
-                }
-            }
-        }
-        Err(OpyProviderError::install(format!(
-            "cannot reserve an OPY provider staging directory in '{}'",
-            self.store_dir.display()
-        )))
+        crate::store::reserve_staging_dir(
+            &self.store_dir,
+            &format!(".opy-provider-{version}"),
+            "an OPY provider",
+        )
+        .map_err(OpyProviderError::install)
     }
 
     fn activate(&self, version: &str, target: &str) -> Result<(), OpyProviderError> {
@@ -391,11 +367,12 @@ fn current_target() -> Result<String, OpyProviderError> {
 }
 
 fn target_for(os: &str, arch: &str) -> Result<String, OpyProviderError> {
+    let [linux_gnu, darwin_x86_64, darwin_aarch64, windows_msvc] = SUPPORTED_TARGETS;
     match (os, arch) {
-        ("linux", "x86_64") => Ok("x86_64-unknown-linux-gnu".to_string()),
-        ("macos", "x86_64") => Ok("x86_64-apple-darwin".to_string()),
-        ("macos", "aarch64") => Ok("aarch64-apple-darwin".to_string()),
-        ("windows", "x86_64") => Ok("x86_64-pc-windows-msvc".to_string()),
+        ("linux", "x86_64") => Ok(linux_gnu.to_string()),
+        ("macos", "x86_64") => Ok(darwin_x86_64.to_string()),
+        ("macos", "aarch64") => Ok(darwin_aarch64.to_string()),
+        ("windows", "x86_64") => Ok(windows_msvc.to_string()),
         _ => Err(OpyProviderError::unsupported(format!(
             "unsupported OPY provider target {}/{}; supported targets are linux/x86_64, darwin x86_64/aarch64, and windows x86_64",
             os, arch
@@ -407,17 +384,7 @@ fn default_store_dir() -> PathBuf {
     if let Some(path) = std::env::var_os("WRIGHT_PROVIDER_DATA_DIR") {
         return PathBuf::from(path).join("providers").join("opy");
     }
-    let base = match std::env::consts::OS {
-        "macos" => std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .map(|path| path.join("Library").join("Application Support")),
-        "windows" => std::env::var_os("APPDATA").map(PathBuf::from),
-        _ => std::env::var_os("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|path| PathBuf::from(path).join(".local"))),
-    };
-    base.unwrap_or_else(|| PathBuf::from("."))
-        .join("wright")
+    crate::store::wright_data_base()
         .join("providers")
         .join("opy")
 }
@@ -568,6 +535,7 @@ impl From<OpyProviderError> for wright_lpp::ProviderError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::input::sha256_hex;
     use std::io::Read;
     use std::net::{TcpListener, TcpStream};
     use std::sync::{
@@ -617,7 +585,7 @@ mod tests {
         let target = "x86_64-unknown-linux-gnu";
         let resolver = OpyProviderResolver::new(&root).with_target(target);
         let first = archive("1.2.3", target, b"first");
-        let first_sum = format!("{}  archive\n", hex(&first));
+        let first_sum = format!("{}  archive\n", sha256_hex(&first));
         verify_checksum(&first, &first_sum, "archive").unwrap();
         resolver.install_archive("1.2.3", target, &first).unwrap();
         assert_eq!(
@@ -654,7 +622,10 @@ mod tests {
         let target = "x86_64-unknown-linux-gnu";
         let version = "3.1.4";
         let bytes = archive(version, target, b"bootstrapped");
-        let checksum = format!("{}  opy-provider-{version}-{target}.tar.gz\n", hex(&bytes));
+        let checksum = format!(
+            "{}  opy-provider-{version}-{target}.tar.gz\n",
+            sha256_hex(&bytes)
+        );
         let (base_url, requests, server) =
             test_server(version.as_bytes().to_vec(), bytes, checksum.into_bytes());
         let resolver = OpyProviderResolver::new(&root)
@@ -797,7 +768,10 @@ mod tests {
         let root = test_root("windows");
         let version = "1.0.0";
         let bytes = archive(version, &target, b"windows-provider");
-        let checksum = format!("{}  opy-provider-{version}-{target}.tar.gz\n", hex(&bytes));
+        let checksum = format!(
+            "{}  opy-provider-{version}-{target}.tar.gz\n",
+            sha256_hex(&bytes)
+        );
         let (base_url, requests, server) =
             test_server(version.as_bytes().to_vec(), bytes, checksum.into_bytes());
         let resolver = OpyProviderResolver::new(&root)
@@ -817,16 +791,6 @@ mod tests {
             .unwrap();
         assert_eq!(resolved, updated);
         let _ = std::fs::remove_dir_all(root);
-    }
-
-    fn hex(bytes: &[u8]) -> String {
-        Sha256::digest(bytes)
-            .iter()
-            .fold(String::new(), |mut value, byte| {
-                use std::fmt::Write as _;
-                let _ = write!(value, "{byte:02x}");
-                value
-            })
     }
 
     fn test_server(

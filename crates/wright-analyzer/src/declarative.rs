@@ -317,7 +317,7 @@ impl DeclarativeRule {
             || self
                 .event
                 .as_deref()
-                .is_some_and(|event| event != public_event_id(&rule_data.event))
+                .is_some_and(|event| event != rule_data.event.catalog_id())
         {
             return Vec::new();
         }
@@ -565,30 +565,6 @@ fn public_value_matches(value: &PublicValue, pattern: &CanonicalValuePattern) ->
             }
         }
         _ => false,
-    }
-}
-
-pub(crate) fn public_event_id(event: &workshop_rs::Event) -> &str {
-    match event {
-        workshop_rs::Event::Global => "global",
-        workshop_rs::Event::EachPlayer | workshop_rs::Event::EachPlayerWithFilters { .. } => {
-            "eachPlayer"
-        }
-        workshop_rs::Event::Player { kind, .. } => match kind {
-            workshop_rs::PlayerEventKind::DealtDamage => "playerDealtDamage",
-            workshop_rs::PlayerEventKind::DealtFinalBlow => "playerDealtFinalBlow",
-            workshop_rs::PlayerEventKind::DealtHealing => "playerDealtHealing",
-            workshop_rs::PlayerEventKind::DealtKnockback => "playerDealtKnockback",
-            workshop_rs::PlayerEventKind::Died => "playerDied",
-            workshop_rs::PlayerEventKind::EarnedElimination => "playerEarnedElimination",
-            workshop_rs::PlayerEventKind::Joined => "playerJoined",
-            workshop_rs::PlayerEventKind::Left => "playerLeft",
-            workshop_rs::PlayerEventKind::ReceivedHealing => "playerReceivedHealing",
-            workshop_rs::PlayerEventKind::ReceivedKnockback => "playerReceivedKnockback",
-            workshop_rs::PlayerEventKind::TookDamage => "playerTookDamage",
-            _ => "unknown",
-        },
-        workshop_rs::Event::Subroutine(_) => "subroutine",
     }
 }
 

@@ -14,8 +14,6 @@ struct Record {
     version: u32,
     kind: String,
     key: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    baseline: Option<String>,
     payload: serde_json::Value,
 }
 
@@ -32,8 +30,21 @@ struct CostPayload {
     rules: Vec<RuleCost>,
 }
 
-fn cache_dir(input_root: Option<&Path>, cwd: &Path) -> PathBuf {
-    input_root.unwrap_or(cwd).join(".wright")
+fn cache_dir(root: &Path) -> PathBuf {
+    root.join(".wright")
+}
+
+/// The run's `.wright/` directory and record key.
+fn run_dir_key(run: &CostRun) -> (PathBuf, String) {
+    (
+        cache_dir(&run.root),
+        key_id(
+            run.input_path.as_deref(),
+            &run.kind,
+            &run.locale,
+            &run.profile,
+        ),
+    )
 }
 
 fn key_id(input_path: Option<&Path>, kind: &str, locale: &str, profile: &str) -> String {
@@ -273,13 +284,7 @@ pub(crate) fn compare_and_record_in(
     if environment.ci && run.baseline.is_none() && run.save_baseline.is_none() {
         return None;
     }
-    let dir = cache_dir(Some(&run.root), &run.root);
-    let key = key_id(
-        run.input_path.as_deref(),
-        &run.kind,
-        &run.locale,
-        &run.profile,
-    );
+    let (dir, key) = run_dir_key(run);
     let file = format!("{key}.json");
 
     let comparison = if let Some(baseline) = &run.baseline {
@@ -314,16 +319,13 @@ pub(crate) fn compare_and_record_in(
         version: RECORD_VERSION,
         kind: KIND_COST.to_string(),
         key: key.clone(),
-        baseline: None,
         payload: serde_json::to_value(snapshot.payload()).unwrap_or_default(),
     };
     if !environment.ci {
         write_record(&dir, &file, &record);
     }
     if let Some(name) = &run.save_baseline {
-        let mut baseline_record = record;
-        baseline_record.baseline = Some(name.clone());
-        write_record(&dir, &format!("baseline-{name}.json"), &baseline_record);
+        write_record(&dir, &format!("baseline-{name}.json"), &record);
     }
 
     comparison
@@ -345,13 +347,7 @@ pub(crate) fn baseline_exists_in(run: &CostRun, environment: CacheEnvironment) -
     let Some(name) = &run.baseline else {
         return false;
     };
-    let dir = cache_dir(Some(&run.root), &run.root);
-    let key = key_id(
-        run.input_path.as_deref(),
-        &run.kind,
-        &run.locale,
-        &run.profile,
-    );
+    let (dir, key) = run_dir_key(run);
     read_baseline(&dir, name, &key).is_some()
 }
 
@@ -467,13 +463,9 @@ mod tests {
     fn a_missing_or_corrupt_record_yields_no_comparison() {
         let dir = std::env::temp_dir().join(format!("wright-cache4-{}", std::process::id()));
         let run = cost_run(&dir);
-        fs::create_dir_all(cache_dir(Some(&dir), &dir)).unwrap();
+        fs::create_dir_all(cache_dir(&dir)).unwrap();
         let key = key_id(run.input_path.as_deref(), "workshop", "en-US", "off");
-        fs::write(
-            cache_dir(Some(&dir), &dir).join(format!("{key}.json")),
-            "not json",
-        )
-        .unwrap();
+        fs::write(cache_dir(&dir).join(format!("{key}.json")), "not json").unwrap();
         assert!(compare_and_record_in(&run, &snap(100, &[("a", 100)]), LOCAL_CACHE).is_none());
         let _ = fs::remove_dir_all(&dir);
     }

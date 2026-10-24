@@ -132,11 +132,6 @@ pub enum SourceProviderError {
 
 const PROVIDER_REFUSAL_CODE_PREFIX: &str = "provider-refusal-";
 
-#[cfg(not(target_arch = "wasm32"))]
-fn wright_refusal_code(code: &str) -> bool {
-    code == "session-config-changed"
-}
-
 fn failed_stage(code: &str) -> Stage {
     match code {
         "session-config-changed" => Stage::Discovery,
@@ -338,7 +333,7 @@ fn request_context(operation: &str, target: &SourceTarget) -> String {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn provider_failure_code(error: &wright_lpp::ProviderError) -> String {
     match error.refusal_code() {
-        Some(code) if wright_refusal_code(code) => code.to_string(),
+        Some(code) if code == "session-config-changed" => code.to_string(),
         Some(code) => format!("{PROVIDER_REFUSAL_CODE_PREFIX}{code}"),
         None if error.code() == "refusal" => "provider-refusal".to_string(),
         None => error.code().to_string(),

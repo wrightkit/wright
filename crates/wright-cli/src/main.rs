@@ -127,8 +127,8 @@ fn main() -> ExitCode {
             );
             match update::run(&args, pres) {
                 Ok(code) => {
-                    if code == exit::SUCCESS {
-                        present::terminal::report_close(pres, "update", "PASS");
+                    if code == exit::SUCCESS && pres.is_terminal() {
+                        println!("{} update", present::terminal::tag("PASS", pres.color));
                     }
                     ExitCode::from(code)
                 }
@@ -469,7 +469,10 @@ fn run_compile(args: &cli::CompileArgs) -> ExitCode {
                 .output
                 .as_ref()
                 .filter(|_| copy && envelope.ok)
-                .map(|output| copy_to_clipboard(&output.text));
+                .map(|output| {
+                    arboard::Clipboard::new()
+                        .and_then(|mut clipboard| clipboard.set_text(&output.text))
+                });
             if let Some(Err(error)) = copied {
                 envelope
                     .diagnostics
@@ -498,10 +501,6 @@ fn confirm_overwrite(
     let mut answer = String::new();
     input.read_line(&mut answer).is_ok()
         && matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
-}
-
-fn copy_to_clipboard(text: &str) -> Result<(), arboard::Error> {
-    arboard::Clipboard::new()?.set_text(text)
 }
 
 fn run_lookup(args: &cli::LookupArgs) -> ExitCode {

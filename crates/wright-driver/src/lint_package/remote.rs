@@ -1,7 +1,5 @@
 use std::collections::HashMap;
-use std::io::Read;
 use std::sync::Mutex;
-use std::time::Duration;
 
 use super::{LintPackageError, LintPackageSource};
 
@@ -89,15 +87,11 @@ pub(super) fn search_page(body: &[u8]) -> Result<SearchPage, LintPackageError> {
 }
 
 pub(super) fn package_client() -> Result<reqwest::blocking::Client, LintPackageError> {
-    reqwest::blocking::Client::builder()
-        .user_agent(concat!("wright-lint-packages/", env!("CARGO_PKG_VERSION")))
-        .timeout(Duration::from_secs(60))
-        .build()
-        .map_err(|e| {
-            LintPackageError::offline(format!(
-                "cannot initialize HTTPS client for lint package fetch: {e}"
-            ))
-        })
+    crate::store::client(concat!("wright-lint-packages/", env!("CARGO_PKG_VERSION"))).map_err(|e| {
+        LintPackageError::offline(format!(
+            "cannot initialize HTTPS client for lint package fetch: {e}"
+        ))
+    })
 }
 
 pub(super) fn api_get(
@@ -223,19 +217,14 @@ fn read_body(
     response: reqwest::blocking::Response,
     url: &str,
 ) -> Result<Vec<u8>, LintPackageError> {
-    let mut body = Vec::new();
-    response
-        .take(MAX_DOWNLOAD_BYTES + 1)
-        .read_to_end(&mut body)
-        .map_err(|error| {
+    crate::store::read_limited(response, MAX_DOWNLOAD_BYTES).map_err(|error| match error {
+        crate::store::ReadError::Io(error) => {
             LintPackageError::remote(format!("cannot read the response from {url}: {error}"))
-        })?;
-    if body.len() as u64 > MAX_DOWNLOAD_BYTES {
-        return Err(LintPackageError::remote(format!(
-            "response from {url} exceeds the 128 MiB limit"
-        )));
-    }
-    Ok(body)
+        }
+        crate::store::ReadError::OverLimit => {
+            LintPackageError::remote(format!("response from {url} exceeds the 128 MiB limit"))
+        }
+    })
 }
 
 fn rate_limited(

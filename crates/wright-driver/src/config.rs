@@ -183,52 +183,31 @@ impl SessionConfig {
     }
 
     pub(crate) fn changed_fields(&self, other: &SessionConfig) -> Vec<&'static str> {
+        macro_rules! changed_fields {
+            ($changed:ident; $($field:ident),+ $(,)?) => {
+                $(if self.$field != other.$field {
+                    $changed.push(stringify!($field));
+                })+
+            };
+        }
         let mut changed = Vec::new();
-        if self.input != other.input {
-            changed.push("input");
-        }
-        if self.kind != other.kind {
-            changed.push("kind");
-        }
-        if self.source_backend != other.source_backend {
-            changed.push("source_backend");
-        }
-        if self.locale != other.locale {
-            changed.push("locale");
-        }
-        if self.root != other.root {
-            changed.push("root");
-        }
-        if self.format != other.format {
-            changed.push("format");
-        }
-        if self.profile != other.profile {
-            changed.push("profile");
-        }
-        if self.lint != other.lint {
-            changed.push("lint");
-        }
-        if self.lint_package != other.lint_package {
-            changed.push("lint_package");
-        }
-        if self.lint_rule_paths != other.lint_rule_paths {
-            changed.push("lint_rule_paths");
-        }
-        if self.selection != other.selection {
-            changed.push("selection");
-        }
-        if self.run != other.run {
-            changed.push("run");
-        }
+        changed_fields!(
+            changed;
+            input,
+            kind,
+            source_backend,
+            locale,
+            root,
+            format,
+            profile,
+            lint,
+            lint_package,
+            lint_rule_paths,
+            selection,
+            run
+        );
         #[cfg(not(target_arch = "wasm32"))]
-        {
-            if self.providers != other.providers {
-                changed.push("providers");
-            }
-            if self.opy_provider != other.opy_provider {
-                changed.push("opy_provider");
-            }
-        }
+        changed_fields!(changed; providers, opy_provider);
         changed
     }
 }

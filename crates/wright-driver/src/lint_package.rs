@@ -231,10 +231,7 @@ impl LintPackageStore {
         source: &LintPackageSource,
         reference: Option<&str>,
     ) -> Result<InstalledPackage, LintPackageError> {
-        let sha = match normalize_ref(reference).filter(|r| is_full_sha(r)) {
-            Some(sha) => sha.to_lowercase(),
-            _ => self.resolve(source, reference)?,
-        };
+        let sha = self.resolve(source, reference)?;
         let dir = self.package_dir(source, &sha);
         if dir.exists() {
             let rules = rules::validate_stored(&dir, source.is_first_party())?;
@@ -461,49 +458,29 @@ impl LintPackageStore {
                 self.root.display()
             ))
         })?;
-        for attempt in 0..1024 {
-            let staging = self.root.join(format!(
-                ".lint-package-{sha}-{}-{}-{attempt}",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_nanos())
-                    .unwrap_or_default()
-            ));
-            match std::fs::create_dir(&staging) {
-                Ok(()) => return Ok(staging),
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(e) => {
-                    return Err(LintPackageError::install(format!(
-                        "cannot create lint package staging directory '{}': {e}",
-                        staging.display()
-                    )));
-                }
-            }
-        }
-        Err(LintPackageError::install(format!(
-            "cannot reserve a lint package staging directory in '{}'",
-            self.root.display()
-        )))
+        crate::store::reserve_staging_dir(
+            &self.root,
+            &format!(".lint-package-{sha}"),
+            "a lint package",
+        )
+        .map_err(LintPackageError::install)
     }
 
     fn promote(&self, staging: &Path, final_dir: &Path) -> Result<(), LintPackageError> {
-        std::fs::create_dir_all(final_dir.parent().expect("sha dir has a parent")).map_err(
-            |e| {
-                LintPackageError::install(format!(
-                    "cannot create lint package directory '{}': {e}",
-                    final_dir.display()
-                ))
+        crate::store::promote_dir(staging, final_dir, || rules::intact_package(final_dir)).map_err(
+            |error| {
+                LintPackageError::install(match error {
+                    crate::store::PromoteError::CreateParent(error) => format!(
+                        "cannot create lint package directory '{}': {error}",
+                        final_dir.display()
+                    ),
+                    crate::store::PromoteError::Rename(error) => format!(
+                        "cannot promote lint package directory '{}': {error}",
+                        final_dir.display()
+                    ),
+                })
             },
-        )?;
-        match std::fs::rename(staging, final_dir) {
-            Ok(()) => Ok(()),
-            Err(_) if rules::intact_package(final_dir) => Ok(()),
-            Err(e) => Err(LintPackageError::install(format!(
-                "cannot promote lint package directory '{}': {e}",
-                final_dir.display()
-            ))),
-        }
+        )
     }
 }
 
@@ -582,18 +559,7 @@ fn default_store_dir() -> PathBuf {
     if let Some(path) = std::env::var_os(STORE_DIR_ENV) {
         return PathBuf::from(path);
     }
-    let base = match std::env::consts::OS {
-        "macos" => std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .map(|path| path.join("Library").join("Application Support")),
-        "windows" => std::env::var_os("APPDATA").map(PathBuf::from),
-        _ => std::env::var_os("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|path| PathBuf::from(path).join(".local"))),
-    };
-    base.unwrap_or_else(|| PathBuf::from("."))
-        .join("wright")
-        .join("lint-packages")
+    crate::store::wright_data_base().join("lint-packages")
 }
 
 /// Every failure mode of a lint package fetch, store, or remote check.

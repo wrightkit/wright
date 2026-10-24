@@ -307,13 +307,6 @@ impl Default for LintRegistry {
 }
 
 impl LintRegistry {
-    pub fn rules(&self) -> impl Iterator<Item = &RuleMeta> {
-        self.entries.iter().filter_map(|entry| match entry {
-            RegistryEntry::Native(meta) => Some(meta),
-            RegistryEntry::Declarative(_) => None,
-        })
-    }
-
     /// Load one external declarative rule against the canonical Workshop catalog.
     pub fn load_yaml_str(&mut self, input: &str) -> Result<(), RuleRegistryError> {
         self.load_yaml_str_as(input, RuleIdentity::External)

@@ -72,19 +72,12 @@ impl<'a> ToolService<'a> {
 }
 
 fn merge_selected_references_with_usage(
-    mut references: serde_json::Value,
+    references: serde_json::Value,
     mut usage: serde_json::Value,
     generation: u64,
 ) -> serde_json::Value {
     usage["snapshot"] = json!(generation);
-    if let Some(selected) = references.as_object_mut() {
-        usage["references"] = selected.remove("references").unwrap_or_default();
-        if let Some(selection) = selected.remove("selection") {
-            usage["selection"] = selection;
-        }
-    } else {
-        usage["references"] = references;
-    }
+    crate::session::merge_references(&mut usage, references);
     usage
 }
 

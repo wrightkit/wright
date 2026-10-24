@@ -291,68 +291,24 @@ pub fn query(result: &Value, all: bool) -> Value {
     output
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(untagged)]
-enum CostPayload {
-    Rule {
-        rule: serde_json::Map<String, Value>,
-        statements: Vec<Value>,
-        #[serde(rename = "byNode")]
-        by_node: Vec<Value>,
-        #[serde(flatten)]
-        rest: serde_json::Map<String, Value>,
-    },
-    Program {
-        #[serde(rename = "elementCount")]
-        element_count: ElementCountPayload,
-        #[serde(flatten)]
-        rest: serde_json::Map<String, Value>,
-    },
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(untagged)]
-enum ElementCountPayload {
-    Counted {
-        total: u64,
-        budget: u64,
-        rules: Vec<Value>,
-        #[serde(flatten)]
-        rest: serde_json::Map<String, Value>,
-    },
-    BudgetOnly {
-        budget: u64,
-        #[serde(flatten)]
-        rest: serde_json::Map<String, Value>,
-    },
-}
-
+/// The payload shape selects which arrays `cap` truncates, probed in the
+/// same order the untagged variants matched: a rule-shaped cost first
+/// (`rule` object + `statements`/`byNode` arrays), then a program's
+/// `elementCount` (an object always carrying a `budget`).
 pub fn cost(result: &Value, all: bool) -> Value {
-    let Ok(payload) = serde_json::from_value::<CostPayload>(result.clone()) else {
-        return result.clone();
-    };
-    let mut output = serde_json::to_value(&payload).expect("cost payload serializes");
-    match payload {
-        CostPayload::Rule { .. } => {
-            cap(&mut output, "statements", 5, all);
-            cap(&mut output, "byNode", 5, all);
-            return output;
-        }
-        CostPayload::Program {
-            element_count: ElementCountPayload::Counted { .. },
-            ..
-        } => {
-            cap(
-                output.get_mut("elementCount").expect("counted payload"),
-                "rules",
-                5,
-                all,
-            );
-        }
-        CostPayload::Program {
-            element_count: ElementCountPayload::BudgetOnly { .. },
-            ..
-        } => {}
+    let mut output = result.clone();
+    if result["rule"].is_object() && result["statements"].is_array() && result["byNode"].is_array()
+    {
+        cap(&mut output, "statements", 5, all);
+        cap(&mut output, "byNode", 5, all);
+        return output;
+    }
+    let element_count = &result["elementCount"];
+    if !element_count.is_object() || element_count["budget"].as_u64().is_none() {
+        return output;
+    }
+    if element_count["total"].as_u64().is_some() && element_count["rules"].is_array() {
+        cap(&mut output["elementCount"], "rules", 5, all);
     }
     let mut output = query(&output, all);
     if !all && let Some(findings) = output.get("findings").and_then(Value::as_array) {

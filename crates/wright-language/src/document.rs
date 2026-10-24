@@ -2,18 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub use wright_driver::edit::{char_offset_to_utf16, utf16_offset_to_char};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct Position {
-    pub line: u32,
-    pub character: u32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct Range {
-    pub start: Position,
-    pub end: Position,
-}
+pub use wright_lpp::{Position, Range};
 
 #[derive(Debug, Clone)]
 pub struct Document {
@@ -107,12 +96,6 @@ impl DocumentStore {
         self.documents.keys().map(String::as_str)
     }
 
-    pub fn text_for_path(&self, path: &PathBuf) -> Option<String> {
-        self.document_for_path(path)
-            .map(|document| document.text.clone())
-            .or_else(|| std::fs::read_to_string(path).ok())
-    }
-
     pub fn uri_for_path(&self, path: &PathBuf) -> Option<String> {
         self.document_for_path(path)
             .map(|document| document.uri.clone())
@@ -122,23 +105,6 @@ impl DocumentStore {
         self.documents.values().find(|document| {
             uri_to_path(&document.uri).is_some_and(|document_path| document_path == *path)
         })
-    }
-
-    pub fn overlay(&self, root: &PathBuf) -> BTreeMap<String, String> {
-        let mut overlay = BTreeMap::new();
-        for doc in self.documents.values() {
-            let Some(path) = uri_to_path(&doc.uri) else {
-                continue;
-            };
-            overlay.insert(path.to_string_lossy().into_owned(), doc.text.clone());
-            if let Ok(rel) = path.strip_prefix(root) {
-                overlay.insert(rel.to_string_lossy().into_owned(), doc.text.clone());
-            }
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                overlay.insert(name.to_string(), doc.text.clone());
-            }
-        }
-        overlay
     }
 }
 
@@ -163,10 +129,6 @@ pub fn source_to_uri(source: &str) -> Option<String> {
     path_to_uri(Path::new(source))
 }
 
-pub fn utf16_len(s: &str) -> usize {
-    s.chars().map(|c| c.len_utf16()).sum()
-}
-
 /// A 1-based line and 1-based character column as a UTF-16 `Position`; a line or column past the end clamps.
 pub fn line_col_position(source: &str, line: u32, col: u32) -> Position {
     let index = line.saturating_sub(1) as usize;
@@ -189,6 +151,10 @@ pub fn span_to_range(span: &workshop_rs::source::Span, source: &str) -> Range {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn utf16_len(s: &str) -> usize {
+        s.chars().map(|c| c.len_utf16()).sum()
+    }
 
     #[test]
     fn client_versions_are_preserved_on_open_and_change() {

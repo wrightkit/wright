@@ -248,8 +248,8 @@ impl<'a> ToolService<'a> {
                 ToolResponse::Ok { result }
             }
             ToolRequest::Analyze { selection, all: _ } => {
-                if let Some(error) = self.selection_error(selection) {
-                    return error;
+                if let Err(error) = self.selection_check(selection) {
+                    return ToolResponse::Error { error };
                 }
                 let (loaded, semantic) = self.snapshot_and_semantic();
                 let result =
@@ -354,12 +354,15 @@ impl<'a> ToolService<'a> {
                     project_root: project_root.clone(),
                     documents,
                 };
-                self.ok(
-                    serde_json::to_value(self.run_provider_flow(language_id, |p| {
-                        crate::provider_edit::validate_transaction(p, &req)
-                    }))
-                    .expect("serializes"),
-                )
+                self.ok(serde_json::to_value(self.session.run_provider_flow(
+                    language_id,
+                    &wright_lpp::ClientInfo {
+                        name: SERVICE_NAME.to_string(),
+                        version: SERVICE_VERSION.to_string(),
+                    },
+                    |provider| crate::provider_edit::validate_transaction(provider, &req),
+                ))
+                .expect("serializes"))
             }
             ToolRequest::EditStatements {
                 input_identity,
@@ -478,43 +481,22 @@ impl<'a> ToolService<'a> {
         self.session.language_provider(language_id)
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    fn run_provider_flow(
-        &self,
-        language_id: &str,
-        flow: impl FnOnce(
-            &mut dyn wright_lpp::LanguageProvider,
-        ) -> crate::provider_edit::ProviderMutation,
-    ) -> crate::provider_edit::ProviderMutation {
-        self.session.run_provider_flow(
-            language_id,
-            &wright_lpp::ClientInfo {
-                name: SERVICE_NAME.to_string(),
-                version: SERVICE_VERSION.to_string(),
-            },
-            flow,
-        )
-    }
-
     fn ok(&self, result: serde_json::Value) -> ToolResponse {
         ToolResponse::Ok { result }
     }
 
     fn findings(&self, selection: &crate::select::FindingSelection) -> ToolResponse {
-        if let Some(error) = self.selection_error(selection) {
-            return error;
+        if let Err(error) = self.selection_check(selection) {
+            return ToolResponse::Error { error };
         }
         match self.semantic_query(Request::GetFindings) {
             ToolResponse::Ok { result } => {
-                let findings = crate::session::prepare_findings(
-                    result,
+                let (findings, outcome) = crate::session::select_findings(
                     self.semantic(),
                     &self.snapshot().loaded,
                     self.session.catalog(),
-                );
-                let (findings, outcome) = selection.apply_findings(
-                    findings,
-                    &crate::select::file_bases(&self.snapshot().loaded.input),
+                    selection,
+                    result,
                 );
                 match outcome {
                     Some(outcome) => self.ok(json!({ "findings": findings, "selection": outcome })),
@@ -566,12 +548,6 @@ impl<'a> ToolService<'a> {
             .lint_semantic
             .as_ref()
             .unwrap_or(&snapshot.semantic)
-    }
-
-    fn selection_error(&self, selection: &crate::select::FindingSelection) -> Option<ToolResponse> {
-        self.selection_check(selection)
-            .err()
-            .map(|error| ToolResponse::Error { error })
     }
 
     fn selection_check(
@@ -807,32 +783,27 @@ impl<'a> ToolService<'a> {
     }
 
     fn lint(&self, selection: &crate::select::FindingSelection) -> ToolResponse {
-        if let Some(error) = self.selection_error(selection) {
-            return error;
+        if let Err(error) = self.selection_check(selection) {
+            return ToolResponse::Error { error };
         }
         let service = self.configured_semantic();
-        let lint_rules = match service.handle(&Request::LintRules) {
-            Response::Ok { result } => result,
-            Response::Error { .. } => serde_json::json!({}),
-        };
+        let (rules, config, skipped) = lint_rules_split(service);
         let findings = match service.handle(&Request::GetFindings) {
             Response::Ok { result } => result,
             Response::Error { .. } => serde_json::json!([]),
         };
-        let findings = crate::session::prepare_findings(
-            findings,
+        let ok = !findings.as_array().is_some_and(|findings| {
+            findings
+                .iter()
+                .any(|finding| finding["severity"] == "error")
+        });
+        let (findings, outcome) = crate::session::select_findings(
             service,
             &self.snapshot().loaded,
             self.session.catalog(),
-        );
-        let ok = !findings
-            .iter()
-            .any(|finding| finding["severity"] == "error");
-        let (findings, outcome) = selection.apply_findings(
+            selection,
             findings,
-            &crate::select::file_bases(&self.snapshot().loaded.input),
         );
-        let (rules, config, skipped) = crate::result::split_lint_rules(&lint_rules);
         let mut result = json!({
             "inputIdentity": self.snapshot().loaded.input.identity,
             "ok": ok,
@@ -880,6 +851,18 @@ impl<'a> ToolService<'a> {
             })).collect::<Vec<_>>(),
         })
     }
+}
+
+/// The `lintRules` payload split into its findings-surface members; a
+/// failed fetch splits the empty object.
+fn lint_rules_split(
+    service: &SemanticService<'_>,
+) -> (serde_json::Value, serde_json::Value, serde_json::Value) {
+    let lint_rules = match service.handle(&Request::LintRules) {
+        Response::Ok { result } => result,
+        Response::Error { .. } => serde_json::json!({}),
+    };
+    crate::result::split_lint_rules(&lint_rules)
 }
 
 pub(crate) fn json_span_path(item: &serde_json::Value) -> Option<&str> {
