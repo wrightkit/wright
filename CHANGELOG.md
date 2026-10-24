@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.38.1](https://github.com/wrightkit/wright/compare/v0.38.0...v0.38.1) (2026-10-24)
+
+
+### Bug Fixes
+
+* **test:** record TestServer requests before writing the response ([#979](https://github.com/wrightkit/wright/issues/979)) ([672e05b](https://github.com/wrightkit/wright/commit/672e05b7d9f68807ea41ef136338186d535cfe6a)), closes [#978](https://github.com/wrightkit/wright/issues/978)
+
+
+### Code Refactoring
+
+* deduplicate repeated logic and drop dead code ([#981](https://github.com/wrightkit/wright/issues/981)) ([c848e86](https://github.com/wrightkit/wright/commit/c848e867d957061c2264ec15775eb30c77cb1757))
+
 ## [0.38.0](https://github.com/wrightkit/wright/compare/v0.37.0...v0.38.0) (2026-10-23)
 
 
