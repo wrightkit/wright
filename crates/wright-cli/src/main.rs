@@ -56,14 +56,14 @@ fn main() -> ExitCode {
                 eprintln!(
                     "{} {}",
                     present::terminal::tag("USAGE", pres.color),
-                    usage_hint::subject(&args)
+                    usage_hint::subject(&args, &error)
                 );
             }
             let _ = error.print();
             if matches!(
                 error.kind(),
                 ErrorKind::UnknownArgument | ErrorKind::TooManyValues
-            ) && let Some(hint) = usage_hint::narrowing(&args)
+            ) && let Some(hint) = usage_hint::narrowing(&error)
             {
                 eprintln!("hint: {hint}");
             }
