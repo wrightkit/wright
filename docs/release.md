@@ -68,7 +68,12 @@ Wright has two release channels and one shared native build workflow:
    patch; a breaking change bumps minor while the major version is 0;
    `chore`, `docs`, `style`, `test`, `build`, and `ci` alone do not release). Merging the Release PR makes
    `release-please` create the tag and a draft GitHub Release, and the tag
-   push starts `.github/workflows/release.yml`. The workflow verifies that
+   push starts `.github/workflows/release.yml`. The workflow refuses to
+   publish unless the `CI result` check-run succeeded on the tagged commit
+   and the tag is not older than the published `wright/latest/version`
+   pointer; stable runs serialize through the `wright-stable` concurrency
+   group so concurrent releases cannot interleave or regress `latest`. The
+   workflow verifies that
    the tag matches the workspace version, builds and smoke-tests the native
    matrix from the tagged commit, then publishes and verifies the immutable
    `wright/releases/<version>/` R2 objects and installer scripts. Only after
@@ -320,9 +325,10 @@ const project = core.request({ op: 'project' })
 
 ### Repository configuration
 
-Create a protected `release` environment if publication approval is required;
-the stable `publish-release` and `publish-npm` jobs are the only jobs that
-use it.
+Create a protected `release` environment if publication approval is required.
+Every secret-bearing publication job uses it: `publish-r2` (which also
+publishes the nightly channel), `publish-release`, `advance-latest`,
+`publish-tap`, and `publish-npm`.
 
 Configure these optional/required environment secrets:
 

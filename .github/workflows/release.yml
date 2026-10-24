@@ -41,7 +41,7 @@ jobs:
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == github.event.repository.default_branch)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 100
     permissions:
       contents: read
       checks: read
@@ -121,13 +121,14 @@ jobs:
       # the tagged revision passed the required checks.
       - name: Require CI success on the release revision
         if: steps.resolve.outputs.channel == 'stable'
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_COMMIT: ${{ steps.resolve.outputs.commit }}
           REQUIRED_CHECKS: CI result
         run: |
           set -euo pipefail
-          deadline=$(( SECONDS + 2400 ))
+          deadline=$(( SECONDS + 5400 ))
           pending_file="$(mktemp)"
           trap 'rm -f "$pending_file"' EXIT
           if [ "$REQUIRED_CHECKS" != "${REQUIRED_CHECKS//$'\n'/,}" ]; then
@@ -157,7 +158,7 @@ jobs:
             keep=""
             while IFS= read -r name; do
               [ -z "$name" ] && continue
-              if ! out="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_COMMIT/check-runs" \
+              if ! out="$(gh api --method GET "repos/$GITHUB_REPOSITORY/commits/$RELEASE_COMMIT/check-runs" \
                 -f "check_name=$name" \
                 --jq '(.check_runs | sort_by(.id) | last) // {status: "missing", conclusion: "", html_url: ""} | "\(.status) \(.conclusion // "-") \(.html_url // "-")"' 2>&1)"; then
                 echo "check-runs API call failed for '$name': $out" >&2
@@ -188,6 +189,7 @@ jobs:
       # a newer release cannot regress `latest`.
       - name: Guard latest promotion order
         if: steps.resolve.outputs.channel == 'stable'
+        shell: bash
         env:
           RELEASE_TAG: ${{ steps.resolve.outputs.tag }}
         run: |
