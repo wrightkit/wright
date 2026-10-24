@@ -2613,7 +2613,7 @@ dependencies = [
 
 [[package]]
 name = "wright-analyzer"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "hotpath",
  "serde",
@@ -2625,7 +2625,7 @@ dependencies = [
 
 [[package]]
 name = "wright-bench"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "hotpath",
  "nix",
@@ -2637,7 +2637,7 @@ dependencies = [
 
 [[package]]
 name = "wright-cli"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "arboard",
  "clap",
@@ -2661,7 +2661,7 @@ dependencies = [
 
 [[package]]
 name = "wright-consumer"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "serde_json",
  "wright-driver",
@@ -2669,7 +2669,7 @@ dependencies = [
 
 [[package]]
 name = "wright-driver"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "athena-sim",
  "flate2",
@@ -2689,7 +2689,7 @@ dependencies = [
 
 [[package]]
 name = "wright-language"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2702,7 +2702,7 @@ dependencies = [
 
 [[package]]
 name = "wright-lpp"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "os_pipe",
  "serde",
@@ -2711,7 +2711,7 @@ dependencies = [
 
 [[package]]
 name = "wright-lsp"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "lsp-types",
  "serde",
@@ -2721,7 +2721,7 @@ dependencies = [
 
 [[package]]
 name = "wright-transform"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "hotpath",
  "serde",
@@ -2730,7 +2730,7 @@ dependencies = [
 
 [[package]]
 name = "wright-wasm"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "serde",
  "serde_json",
