@@ -7,7 +7,7 @@
 //! session; the host write path (`wright_apply`) re-validates the
 //! `EditTransaction` an `editStatements` result produced, rewrites the
 //! held text, and reloads — the host write path of ADR-0037 decision 3,
-//! the in-memory counterpart of the on-disk `apply_edit_transaction`.
+//! the editor's counterpart of the retired `wright ui` on-disk host.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
