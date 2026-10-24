@@ -173,7 +173,7 @@ fn list(store: &LintPackageStore) -> Built {
                 source: entry.source.slug(),
                 status: "damaged".to_string(),
                 sha: Some(entry.sha.clone()),
-                dir: Some(dir_string(&entry.dir)),
+                dir: Some(entry.dir.display().to_string()),
                 code: Some(damage.code().to_string()),
                 message: Some(damage.to_string()),
                 ..LintPackageRow::default()
@@ -247,14 +247,14 @@ fn remove(store: &LintPackageStore, args: &cli::PackageRemoveArgs) -> Built {
                 }
                 .to_string(),
                 sha: Some(entry.sha.clone()),
-                dir: Some(dir_string(&entry.dir)),
+                dir: Some(entry.dir.display().to_string()),
                 ..LintPackageRow::default()
             },
             Err(error) => LintPackageRow {
                 source: entry.source.slug(),
                 status: "error".to_string(),
                 sha: Some(entry.sha.clone()),
-                dir: Some(dir_string(&entry.dir)),
+                dir: Some(entry.dir.display().to_string()),
                 code: Some(error.code().to_string()),
                 message: Some(error.to_string()),
                 ..LintPackageRow::default()
@@ -288,7 +288,7 @@ fn installed_row(
         source: source.slug(),
         status: status.to_string(),
         sha: Some(sha),
-        dir: Some(dir_string(dir)),
+        dir: Some(dir.display().to_string()),
         rules,
         downloaded: Some(downloaded),
         ..LintPackageRow::default()
@@ -299,7 +299,7 @@ fn check_row(store: &LintPackageStore, entry: &StoreEntry) -> LintPackageRow {
     let mut row = LintPackageRow {
         source: entry.source.slug(),
         sha: Some(entry.sha.clone()),
-        dir: Some(dir_string(&entry.dir)),
+        dir: Some(entry.dir.display().to_string()),
         ..LintPackageRow::default()
     };
     if let Some(damage) = &entry.damage {
@@ -340,7 +340,7 @@ fn update_row(store: &LintPackageStore, entry: &StoreEntry) -> LintPackageRow {
     match store.install(&entry.source, Some(&remote)) {
         Ok(package) => LintPackageRow {
             status: "updated".to_string(),
-            dir: Some(dir_string(&package.dir)),
+            dir: Some(package.dir.display().to_string()),
             rules: package.rules,
             downloaded: Some(package.downloaded),
             ..row
@@ -437,8 +437,4 @@ fn split_at_ref(input: &str) -> (&str, Option<&str>) {
         return (input, None);
     }
     (base, Some(reference))
-}
-
-fn dir_string(dir: &Path) -> String {
-    dir.display().to_string()
 }

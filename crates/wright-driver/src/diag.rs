@@ -132,21 +132,12 @@ impl Diagnostic {
     /// (`wright_analyzer::service::valid_code`); a violation is a bug, so it
     /// fails a debug assertion.
     pub fn error(code: impl Into<String>, stage: Stage, message: impl Into<String>) -> Diagnostic {
-        let code = code.into();
-        debug_assert!(
-            wright_analyzer::service::valid_code(&code),
-            "diagnostic code {code:?} violates the code grammar"
-        );
-        Diagnostic {
-            code,
-            stage,
-            severity: Severity::Error,
-            message: message.into(),
-            status: None,
-            span: None,
-            source: None,
-            fields: Default::default(),
-        }
+        Self::coded(code, stage, message, |code| {
+            debug_assert!(
+                wright_analyzer::service::valid_code(code),
+                "diagnostic code {code:?} violates the code grammar"
+            );
+        })
     }
 
     pub(crate) fn carried_error(
@@ -154,11 +145,22 @@ impl Diagnostic {
         stage: Stage,
         message: impl Into<String>,
     ) -> Diagnostic {
+        Self::coded(code, stage, message, |code| {
+            debug_assert!(
+                wright_analyzer::service::carried_code_ok(code),
+                "carried diagnostic code {code:?} is empty or contains whitespace"
+            );
+        })
+    }
+
+    fn coded(
+        code: impl Into<String>,
+        stage: Stage,
+        message: impl Into<String>,
+        check: impl Fn(&str),
+    ) -> Diagnostic {
         let code = code.into();
-        debug_assert!(
-            wright_analyzer::service::carried_code_ok(&code),
-            "carried diagnostic code {code:?} is empty or contains whitespace"
-        );
+        check(&code);
         Diagnostic {
             code,
             stage,

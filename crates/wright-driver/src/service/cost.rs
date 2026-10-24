@@ -37,34 +37,20 @@ impl<'a> ToolService<'a> {
         }
         let locale = CompilerSession::locale_for(loaded);
         let emitted = workshop_rs::emitter::emit(&loaded.program, self.session.catalog(), &locale);
-        let live = loaded
-            .program
-            .rules
-            .iter()
-            .filter(|rule| !rule.disabled)
-            .flat_map(|rule| wright_analyzer::canonical::live_actions(&rule.actions));
-        let mut program_actions = 0;
-        let mut waits = 0;
-        for (_, action) in live {
-            program_actions += 1;
-            if matches!(action, workshop_rs::Action::Call { name, .. } if name == "wait") {
-                waits += 1;
-            }
-        }
+        let (program_actions, waits) = crate::session::live_action_counts(&loaded.program);
         let service = self.configured_semantic();
         let findings = match service.handle(&Request::GetFindings) {
             Response::Ok { result } => result,
             Response::Error { .. } => serde_json::json!([]),
         };
-        let findings =
-            crate::session::prepare_findings(findings, service, loaded, self.session.catalog());
-        let lint_rules = match service.handle(&Request::LintRules) {
-            Response::Ok { result } => result,
-            Response::Error { .. } => serde_json::json!({}),
-        };
-        let (_, _, skipped) = crate::result::split_lint_rules(&lint_rules);
-        let (findings, outcome) =
-            selection.apply_findings(findings, &crate::select::file_bases(&loaded.input));
+        let (findings, outcome) = crate::session::select_findings(
+            service,
+            loaded,
+            self.session.catalog(),
+            selection,
+            findings,
+        );
+        let (_, _, skipped) = super::lint_rules_split(service);
         let mut exact = json!({
             "programActions": program_actions,
             "programRules": loaded.program.rules.len(),

@@ -161,7 +161,7 @@ impl LanguageService {
         }
         vec![SourceDiagnostic {
             source: document.uri.clone(),
-            range: empty_range(),
+            range: EMPTY_RANGE,
             severity: "error".to_string(),
             code: "source-provider-unavailable".to_string(),
             message:
@@ -201,7 +201,7 @@ impl LanguageService {
         let boundary = |code: &str, message: String| {
             vec![SourceDiagnostic {
                 source: uri.to_string(),
-                range: empty_range(),
+                range: EMPTY_RANGE,
                 severity: "error".to_string(),
                 code: code.to_string(),
                 message,
@@ -234,7 +234,7 @@ impl LanguageService {
                         .iter()
                         .map(move |diagnostic| SourceDiagnostic {
                             source: document.uri.clone(),
-                            range: lpp_range(diagnostic.range),
+                            range: diagnostic.range,
                             severity: lpp_severity(diagnostic.severity).to_string(),
                             code: diagnostic.code.clone().unwrap_or_default(),
                             message: diagnostic.message.clone(),
@@ -300,7 +300,7 @@ impl LanguageService {
                 return None;
             }
             return provider
-                .definition(&document, lpp_position(position))
+                .definition(&document, position)
                 .ok()
                 .map(|result| result.locations.iter().map(source_location).collect());
         }
@@ -333,7 +333,7 @@ impl LanguageService {
                 return None;
             }
             return provider
-                .references(&document, lpp_position(position), include_declaration)
+                .references(&document, position, include_declaration)
                 .ok()
                 .map(|result| result.locations.iter().map(source_location).collect());
         }
@@ -410,10 +410,7 @@ impl LanguageService {
         let request = wright_driver::provider_edit::ProviderRenameRequest {
             documents,
             position_document_uri: uri.to_string(),
-            position: wright_lpp::Position {
-                line: position.line,
-                character: position.character,
-            },
+            position,
             new_name: new_name.to_string(),
             project_root: self.project_root_uri(),
             sources,
@@ -483,7 +480,7 @@ impl LanguageService {
 
     fn workshop_document(&self, uri: &str) -> Option<&Document> {
         let document = self.store.document(uri)?;
-        if is_source_document(uri) || !is_workshop_document(document) {
+        if source_language_id(uri).is_some() || !is_workshop_document(document) {
             return None;
         }
         Some(document)
@@ -633,26 +630,6 @@ fn provider_failure_code(error: &ProviderError) -> &str {
     error.refusal_code().unwrap_or_else(|| error.code())
 }
 
-fn lpp_position(position: Position) -> wright_lpp::Position {
-    wright_lpp::Position {
-        line: position.line,
-        character: position.character,
-    }
-}
-
-fn lpp_range(range: wright_lpp::Range) -> Range {
-    Range {
-        start: Position {
-            line: range.start.line,
-            character: range.start.character,
-        },
-        end: Position {
-            line: range.end.line,
-            character: range.end.character,
-        },
-    }
-}
-
 fn lpp_severity(severity: wright_lpp::DiagnosticSeverity) -> &'static str {
     match severity {
         wright_lpp::DiagnosticSeverity::Error => "error",
@@ -665,7 +642,7 @@ fn lpp_severity(severity: wright_lpp::DiagnosticSeverity) -> &'static str {
 fn source_location(location: &wright_lpp::Location) -> SourceLocation {
     SourceLocation {
         uri: location.uri.clone(),
-        range: lpp_range(location.range),
+        range: location.range,
     }
 }
 
@@ -673,8 +650,8 @@ fn source_symbol(symbol: &wright_lpp::Symbol) -> SourceSymbol {
     SourceSymbol {
         name: symbol.name.clone(),
         kind: symbol.kind.clone(),
-        range: lpp_range(symbol.range),
-        selection_range: symbol.selection_range.map(lpp_range),
+        range: symbol.range,
+        selection_range: symbol.selection_range,
     }
 }
 
@@ -690,10 +667,6 @@ fn source_language_id(uri: &str) -> Option<String> {
         id if PENDING_PROVIDER_LANGUAGES.contains(&id) => Some(id.to_string()),
         _ => None,
     }
-}
-
-fn is_source_document(uri: &str) -> bool {
-    source_language_id(uri).is_some()
 }
 
 fn is_workshop_document(document: &Document) -> bool {
@@ -731,13 +704,10 @@ fn source_diagnostic(
 ) -> SourceDiagnostic {
     SourceDiagnostic {
         source: document.uri.clone(),
-        range: diagnostic
-            .span
-            .as_ref()
-            .map_or_else(empty_range, |span| Range {
-                start: line_col_position(&document.text, span.start.line, span.start.col),
-                end: line_col_position(&document.text, span.end.line, span.end.col),
-            }),
+        range: diagnostic.span.as_ref().map_or(EMPTY_RANGE, |span| Range {
+            start: line_col_position(&document.text, span.start.line, span.start.col),
+            end: line_col_position(&document.text, span.end.line, span.end.col),
+        }),
         severity: diagnostic.severity.as_str().to_string(),
         code: diagnostic.code.clone(),
         message: diagnostic.message.clone(),
@@ -753,18 +723,16 @@ fn edit_range(text: &str, range: &wright_driver::edit::EditRange) -> Range {
     }
 }
 
-fn empty_range() -> Range {
-    Range {
-        start: Position {
-            line: 0,
-            character: 0,
-        },
-        end: Position {
-            line: 0,
-            character: 0,
-        },
-    }
-}
+const EMPTY_RANGE: Range = Range {
+    start: Position {
+        line: 0,
+        character: 0,
+    },
+    end: Position {
+        line: 0,
+        character: 0,
+    },
+};
 
 #[cfg(test)]
 mod tests {

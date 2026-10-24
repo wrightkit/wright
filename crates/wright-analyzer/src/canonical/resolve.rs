@@ -80,7 +80,7 @@ impl SemanticIndex {
     }
 
     fn ambiguous_rule(&self, address: &str, candidates: &[&Symbol]) -> ErrorInfo {
-        let mut fields = error_fields();
+        let mut fields = serde_json::Map::new();
         fields.insert("name".to_string(), address.into());
         fields.insert(
             "candidates".to_string(),
@@ -153,7 +153,7 @@ impl SemanticIndex {
                 "symbols",
             )),
             _ => {
-                let mut fields = error_fields();
+                let mut fields = serde_json::Map::new();
                 fields.insert("name".to_string(), address.into());
                 fields.insert(
                     "candidates".to_string(),
@@ -206,10 +206,6 @@ fn candidate(address: String, span: Option<Span>) -> serde_json::Value {
     entry.into()
 }
 
-fn error_fields() -> serde_json::Map<String, serde_json::Value> {
-    serde_json::Map::new()
-}
-
 const NAME_LIST_LIMIT: usize = 20;
 
 fn unknown<'a>(
@@ -221,7 +217,7 @@ fn unknown<'a>(
 ) -> ErrorInfo {
     let declared: Vec<&'a Symbol> = declared.collect();
     let candidates = nearest(name, declared.iter().map(|symbol| symbol.name.as_str()));
-    let mut fields = error_fields();
+    let mut fields = serde_json::Map::new();
     fields.insert("name".to_string(), name.into());
     let hint = if candidates.is_empty() {
         let mut seen = std::collections::HashSet::new();

@@ -1,22 +1,15 @@
-use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use flate2::read::GzDecoder;
 
 use super::{MAX_DOWNLOAD_BYTES, OpyProviderError, is_executable, provider_binary};
 
 pub(super) fn provider_client() -> Result<reqwest::blocking::Client, OpyProviderError> {
-    reqwest::blocking::Client::builder()
-        .user_agent(concat!("wright-opy-provider/", env!("CARGO_PKG_VERSION")))
-        .timeout(Duration::from_secs(60))
-        .build()
-        .map_err(|e| {
-            OpyProviderError::offline(format!(
-                "cannot initialize HTTPS client for OPY provider release source: {}",
-                e
-            ))
-        })
+    crate::store::client(concat!("wright-opy-provider/", env!("CARGO_PKG_VERSION"))).map_err(|e| {
+        OpyProviderError::offline(format!(
+            "cannot initialize HTTPS client for OPY provider release source: {e}"
+        ))
+    })
 }
 
 pub(super) fn fetch_text(
@@ -46,20 +39,14 @@ pub(super) fn fetch(
             response.status()
         )));
     }
-    let mut bytes = Vec::new();
-    response
-        .take(MAX_DOWNLOAD_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|e| {
-            OpyProviderError::download(format!("cannot read response from {}: {}", url, e))
-        })?;
-    if bytes.len() as u64 > MAX_DOWNLOAD_BYTES {
-        return Err(OpyProviderError::download(format!(
-            "response from {} exceeds the 128 MiB provider artifact limit",
-            url
-        )));
-    }
-    Ok(bytes)
+    crate::store::read_limited(response, MAX_DOWNLOAD_BYTES).map_err(|error| match error {
+        crate::store::ReadError::Io(error) => {
+            OpyProviderError::download(format!("cannot read response from {url}: {error}"))
+        }
+        crate::store::ReadError::OverLimit => OpyProviderError::download(format!(
+            "response from {url} exceeds the 128 MiB provider artifact limit"
+        )),
+    })
 }
 
 pub(super) fn verify_checksum(

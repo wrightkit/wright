@@ -4,20 +4,13 @@ use std::path::Path;
 use std::time::Duration;
 
 use clap::{Args, Subcommand, ValueEnum};
+use wright_driver::result::exit;
 use wright_driver::{OpyProviderConfig, OpyProviderError, ResolvedOpyProvider, sha256_hex};
 
 const DEFAULT_BASE_URL: &str = "https://releases.wrightkit.dev/wright";
 const USER_AGENT: &str = concat!("wright-update/", env!("CARGO_PKG_VERSION"));
 
 mod install;
-
-mod exit {
-    pub(super) const SUCCESS: u8 = 0;
-    pub(super) const USER_ERROR: u8 = 1;
-    pub(super) const USAGE: u8 = 2;
-    pub(super) const UNSUPPORTED: u8 = 3;
-    pub(super) const INTERNAL: u8 = 4;
-}
 
 #[derive(Debug)]
 pub(crate) enum UpdateError {
@@ -41,7 +34,7 @@ impl UpdateError {
     pub(crate) fn exit_code(&self) -> u8 {
         match self {
             Self::Usage(_) => exit::USAGE,
-            Self::Rejected(_) => exit::USER_ERROR,
+            Self::Rejected(_) => exit::SOURCE_ERROR,
             Self::Unsupported(_) => exit::UNSUPPORTED,
             Self::Failed(_) => exit::INTERNAL,
         }

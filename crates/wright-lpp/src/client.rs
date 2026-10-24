@@ -84,10 +84,6 @@ impl JsonRpcClient {
         self.phase
     }
 
-    pub fn timeout(&self) -> Duration {
-        self.timeout
-    }
-
     fn require_ready(&self, method: &str) -> Result<(), ProviderError> {
         match self.phase {
             ClientPhase::Fresh => Err(ProviderError::NotInitialized {

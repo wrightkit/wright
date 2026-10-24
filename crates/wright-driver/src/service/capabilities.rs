@@ -54,17 +54,23 @@ pub struct Capabilities {
 impl<'a> ToolService<'a> {
     /// The capability/version contract.
     pub fn capabilities(&self) -> Capabilities {
-        let operations: Vec<String> = OPERATIONS.iter().map(|op| op.to_string()).collect();
-        let result_schemas = operations
+        let (operations, result_schemas): (
+            Vec<String>,
+            std::collections::BTreeMap<String, String>,
+        ) = OPERATIONS
             .iter()
             .map(|op| {
-                let mut pascal = op.clone();
+                let operation = op.to_string();
+                let mut pascal = operation.clone();
                 if let Some(first) = pascal.get_mut(0..1) {
                     first.make_ascii_uppercase();
                 }
-                (op.clone(), format!("#/$defs/{pascal}Result"))
+                (
+                    operation.clone(),
+                    (operation, format!("#/$defs/{pascal}Result")),
+                )
             })
-            .collect();
+            .unzip();
         Capabilities {
             name: SERVICE_NAME.to_string(),
             version: SERVICE_VERSION.to_string(),

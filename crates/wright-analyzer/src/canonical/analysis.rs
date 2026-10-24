@@ -561,19 +561,21 @@ fn dead_branch_fix(
         return dead_branch_span(&scan, range.start, range.end)
             .map(|span| LintFix::RemoveDeadBranch { span });
     }
-    let condition_end = expr_extent_end(
+    let condition_end = expr_extent_bytes(
         condition,
         &mut |path| program.action_argument_value_span(rule_id, action_id, 0, path),
         &scan,
-    )?;
+    )?
+    .end;
     let start = chain_marker_start(&scan, condition_end, "If")?;
     let end = match &rule.actions[boundary] {
         Action::ElseIf { condition } => {
-            let end = expr_extent_end(
+            let end = expr_extent_bytes(
                 condition,
                 &mut |path| program.action_argument_value_span(rule_id, boundary, 0, path),
                 &scan,
-            )?;
+            )?
+            .end;
             chain_marker_start(&scan, end, "If")?
         }
         Action::Else => {
@@ -845,14 +847,6 @@ fn expr_extent_bytes(
     (start < end).then_some(start..end)
 }
 
-fn expr_extent_end(
-    value: &Value,
-    span_of: &mut dyn FnMut(&[usize]) -> Option<Span>,
-    scan: &SourceScan,
-) -> Option<usize> {
-    Some(expr_extent_bytes(value, span_of, scan)?.end)
-}
-
 fn expr_start_anchor(scan: &SourceScan, mut pos: usize) -> Option<usize> {
     let text = scan.document.text();
     loop {
@@ -959,6 +953,7 @@ enum OccurrenceOrigin {
     BodyAction(usize),
 }
 
+#[derive(Default)]
 struct Collected<'a> {
     values: Vec<&'a Value>,
     parents: Vec<Option<usize>>,
@@ -966,19 +961,6 @@ struct Collected<'a> {
     paths: Vec<Vec<usize>>,
     arguments: Vec<usize>,
     origins: Vec<OccurrenceOrigin>,
-}
-
-impl Collected<'_> {
-    fn new() -> Self {
-        Collected {
-            values: Vec::new(),
-            parents: Vec::new(),
-            spans: Vec::new(),
-            paths: Vec::new(),
-            arguments: Vec::new(),
-            origins: Vec::new(),
-        }
-    }
 }
 
 fn repeated_value_findings(
@@ -993,7 +975,7 @@ fn repeated_value_findings(
     let body_start = body_range.start;
     let body = &rule.actions[body_range.clone()];
     let body_dead = &dead[body_range];
-    let mut collected = Collected::new();
+    let mut collected = Collected::default();
     if let Action::While { condition } = &rule.actions[loop_action] {
         collect_value_tree(
             condition,

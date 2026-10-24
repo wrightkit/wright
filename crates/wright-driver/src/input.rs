@@ -105,13 +105,7 @@ fn digest_files(files: Vec<PathBuf>) -> DiskFingerprint {
         }
         hasher.update([0]);
     }
-    DiskFingerprint::Digest(
-        hasher
-            .finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect(),
-    )
+    DiskFingerprint::Digest(sha256_hex(&hasher.finalize()))
 }
 
 pub fn resolve(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
@@ -176,15 +170,11 @@ fn resolve_file(
         SourceKind::Auto => kind_from_extension(path)?,
         other => other,
     };
-    let root = config
-        .root
-        .as_deref()
-        .map(|root| absolute_from(&cwd, root))
-        .unwrap_or_else(|| {
-            path.parent()
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|| PathBuf::from("."))
-        });
+    let root = config_root(config, &cwd, || {
+        path.parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."))
+    });
     let display = display_path(path);
     let origin = origin_for(kind, config.locale.as_deref());
     Ok(ResolvedInput {
@@ -230,11 +220,7 @@ fn resolve_directory(
         }
         return resolve_file(&files[0], config, cwd);
     }
-    let root = config
-        .root
-        .as_ref()
-        .map(|r| absolute_from(&cwd, r))
-        .unwrap_or_else(|| path.to_path_buf());
+    let root = config_root(config, &cwd, || path.to_path_buf());
     let display = display_path(path);
     let origin = origin_for(kind, config.locale.as_deref());
     Ok(ResolvedInput {
@@ -256,6 +242,16 @@ fn absolute_from(cwd: &Path, path: &Path) -> PathBuf {
     } else {
         cwd.join(path)
     }
+}
+
+/// The resolved project root: the configured `root` resolved against `cwd`,
+/// or `fallback` when unset.
+fn config_root(config: &SessionConfig, cwd: &Path, fallback: impl FnOnce() -> PathBuf) -> PathBuf {
+    config
+        .root
+        .as_deref()
+        .map(|root| absolute_from(cwd, root))
+        .unwrap_or_else(fallback)
 }
 
 fn detect_directory_kind(path: &Path) -> Result<SourceKind, Diagnostic> {
@@ -403,28 +399,17 @@ fn resolve_text(
         },
         other => other,
     };
-    let root = config
-        .root
-        .as_deref()
-        .map(|root| absolute_from(&cwd, root))
-        .or_else(|| {
-            path.as_deref()
-                .and_then(|path| path.parent().map(Path::to_path_buf))
-        })
-        .unwrap_or_else(|| cwd.clone());
+    let root = config_root(config, &cwd, || {
+        path.as_deref()
+            .and_then(|path| path.parent().map(Path::to_path_buf))
+            .unwrap_or_else(|| cwd.clone())
+    });
     // Display paths strip the invocation cwd — resolved here, not via
     // `display_path`, because `std::env::current_dir` has no answer on
     // WebAssembly (#959).
     let display = path
         .as_deref()
-        .map(|path| {
-            path.strip_prefix(&cwd)
-                .ok()
-                .filter(|rel| !rel.as_os_str().is_empty())
-                .unwrap_or(path)
-                .display()
-                .to_string()
-        })
+        .map(|path| relative_display(path, &cwd))
         .unwrap_or_else(|| "<document>".to_string());
     let origin = origin_for(kind, config.locale.as_deref());
     Ok(ResolvedInput {
@@ -487,14 +472,22 @@ fn kind_from_stdin(text: &str) -> Result<SourceKind, Diagnostic> {
     }
 }
 
+/// `path` shown relative to `base` when it sits beneath it — the shared
+/// strip-prefix core of `display_path` and `resolve_text`'s display.
+fn relative_display(path: &Path, base: &Path) -> String {
+    path.strip_prefix(base)
+        .ok()
+        .filter(|rel| !rel.as_os_str().is_empty())
+        .unwrap_or(path)
+        .display()
+        .to_string()
+}
+
 pub fn display_path(path: &Path) -> String {
-    if let Ok(cwd) = std::env::current_dir()
-        && let Ok(rel) = path.strip_prefix(&cwd)
-        && !rel.as_os_str().is_empty()
-    {
-        return rel.display().to_string();
+    match std::env::current_dir() {
+        Ok(cwd) => relative_display(path, &cwd),
+        Err(_) => path.display().to_string(),
     }
-    path.display().to_string()
 }
 
 fn origin_for(kind: SourceKind, locale: Option<&str>) -> Origin {

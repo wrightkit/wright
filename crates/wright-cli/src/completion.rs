@@ -2,15 +2,10 @@ use std::path::{Path, PathBuf};
 
 use clap::CommandFactory;
 
+use wright_driver::result::exit;
+
 use crate::CLI_NAME;
 use crate::cli::{Cli, CompletionInstallArgs, ShellArg};
-
-mod exit {
-    pub(super) const SUCCESS: u8 = 0;
-    pub(super) const USER_ERROR: u8 = 1;
-    pub(super) const USAGE: u8 = 2;
-    pub(super) const INTERNAL: u8 = 4;
-}
 
 #[derive(Debug)]
 pub(crate) enum CompletionError {
@@ -33,7 +28,7 @@ impl CompletionError {
     pub(crate) fn exit_code(&self) -> u8 {
         match self {
             CompletionError::Usage(_) => exit::USAGE,
-            CompletionError::UndetectedShell(_) => exit::USER_ERROR,
+            CompletionError::UndetectedShell(_) => exit::SOURCE_ERROR,
             CompletionError::Failed(_) => exit::INTERNAL,
         }
     }

@@ -1,5 +1,5 @@
 use crate::diag::{Diagnostic, Severity};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct VersionInfo {
@@ -471,6 +471,37 @@ pub fn version_info() -> VersionInfo {
     VersionInfo {
         version: DRIVER_VERSION.to_string(),
         contract: RESULT_CONTRACT.to_string(),
+    }
+}
+
+/// The edited text of one source in a validated transaction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourcePreview {
+    pub source: String,
+    pub new_text: String,
+    pub source_identity: String,
+}
+
+/// The result of validating a proposed transaction.
+#[derive(Debug, Clone, Serialize)]
+pub struct EditValidation {
+    pub ok: bool,
+    pub exit: u8,
+    pub diagnostics: Vec<Diagnostic>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<Vec<SourcePreview>>,
+}
+
+impl EditValidation {
+    /// The refused validation: `ok: false`, no preview, and the exit
+    /// code `diagnostics` implies.
+    pub fn refused(diagnostics: Vec<Diagnostic>) -> EditValidation {
+        EditValidation {
+            ok: false,
+            exit: exit_code_from(&diagnostics),
+            diagnostics,
+            preview: None,
+        }
     }
 }
 

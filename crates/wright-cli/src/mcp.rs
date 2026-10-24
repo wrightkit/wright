@@ -3,7 +3,7 @@ use std::process::ExitCode;
 use serde_json::{Map, Value, json};
 use wright_driver::service::{ToolRequest, ToolResponse, ToolService};
 
-use crate::serve::serve_lines;
+use crate::serve::{jsonrpc_error, serve_lines};
 use crate::tooldefs::{TOOL_SPECS, ToolSpec, input_schema, tool_name};
 
 const PROTOCOL_VERSIONS: &[&str] = &["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"];
@@ -40,7 +40,7 @@ pub(crate) fn serve_mcp(service: &mut ToolService<'_>) -> ExitCode {
             match line {
                 Ok(line) => line,
                 Err(_) => {
-                    return Some(error_response(Value::Null, -32700, "Parse error").to_string());
+                    return Some(jsonrpc_error(Value::Null, -32700, "Parse error").to_string());
                 }
             },
         )
@@ -57,25 +57,25 @@ fn dispatch_message(
 ) -> Option<Value> {
     let value: Value = match serde_json::from_str(line) {
         Ok(value) => value,
-        Err(_) => return Some(error_response(Value::Null, -32700, "Parse error")),
+        Err(_) => return Some(jsonrpc_error(Value::Null, -32700, "Parse error")),
     };
     let Some(object) = value.as_object() else {
-        return Some(error_response(Value::Null, -32600, "Invalid Request"));
+        return Some(jsonrpc_error(Value::Null, -32600, "Invalid Request"));
     };
     if object.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
-        return Some(error_response(Value::Null, -32600, "Invalid Request"));
+        return Some(jsonrpc_error(Value::Null, -32600, "Invalid Request"));
     }
     let Some(method) = object.get("method").and_then(Value::as_str) else {
-        return Some(error_response(Value::Null, -32600, "Invalid Request"));
+        return Some(jsonrpc_error(Value::Null, -32600, "Invalid Request"));
     };
     let Some(id) = object.get("id").cloned() else {
         if method.starts_with("notifications/") {
             return None;
         }
-        return Some(error_response(Value::Null, -32600, "Invalid Request"));
+        return Some(jsonrpc_error(Value::Null, -32600, "Invalid Request"));
     };
     if !matches!(id, Value::Null | Value::String(_) | Value::Number(_)) {
-        return Some(error_response(Value::Null, -32600, "Invalid Request"));
+        return Some(jsonrpc_error(Value::Null, -32600, "Invalid Request"));
     }
     let params = object.get("params").cloned().unwrap_or(Value::Null);
     let result = match method {
@@ -97,7 +97,7 @@ fn dispatch_message(
     };
     Some(match result {
         Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
-        Err((code, message)) => error_response(id, code, message),
+        Err((code, message)) => jsonrpc_error(id, code, message),
     })
 }
 
@@ -148,10 +148,6 @@ fn tool_result(response: ToolResponse) -> Value {
         result["isError"] = Value::Bool(true);
     }
     result
-}
-
-fn error_response(id: Value, code: i64, message: impl Into<String>) -> Value {
-    json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message.into() } })
 }
 
 #[cfg(test)]

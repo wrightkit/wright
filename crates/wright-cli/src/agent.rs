@@ -1,18 +1,12 @@
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
+use wright_driver::result::exit;
 use wright_driver::sha256_hex;
 
 use crate::cli::{AgentArgs, AgentInstallArgs, AgentSubcommand};
 
 mod mcp;
-
-mod exit {
-    pub(super) const SUCCESS: u8 = 0;
-    pub(super) const USER_ERROR: u8 = 1;
-    pub(super) const USAGE: u8 = 2;
-    pub(super) const INTERNAL: u8 = 4;
-}
 
 const SKILL_NAME: &str = "wright";
 const INSTALLED_BY: &str = "wright agent install";
@@ -41,7 +35,7 @@ impl AgentError {
     pub(crate) fn exit_code(&self) -> u8 {
         match self {
             AgentError::Usage(_) => exit::USAGE,
-            AgentError::Rejected(_) => exit::USER_ERROR,
+            AgentError::Rejected(_) => exit::SOURCE_ERROR,
             AgentError::Failed(_) => exit::INTERNAL,
         }
     }
@@ -385,7 +379,7 @@ mod tests {
         std::fs::create_dir_all(&target).unwrap();
         assert_eq!(
             install(&args(Some(root.clone()), false, true)).map_err(|e| e.exit_code()),
-            Err(exit::USER_ERROR)
+            Err(exit::SOURCE_ERROR)
         );
         assert_eq!(
             run(&AgentArgs { subcommand: None }).map_err(|e| e.exit_code()),

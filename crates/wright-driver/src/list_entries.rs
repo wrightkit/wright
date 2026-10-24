@@ -4,7 +4,8 @@ use workshop_rs::catalog::{Catalog, Kind, Locale};
 use crate::CompilerSession;
 use crate::input::sha256_hex;
 use crate::lookup::{
-    OWNER_OPY, OWNER_WORKSHOP, UNKNOWN_WITHIN, workshop_entry, workshop_locale, workshop_within,
+    OWNER_OPY, OWNER_WORKSHOP, UNKNOWN_WITHIN, quoted_list, unavailable, workshop_entry,
+    workshop_locale, workshop_within,
 };
 use crate::service::{ToolResponse, carried_refusal, refusal};
 
@@ -32,18 +33,16 @@ pub(crate) fn list_entries(
     match language {
         "workshop" => {}
         "opy" => {
-            return ToolResponse::Ok {
-                result: json!({
-                    "language": "opy",
-                    "owner": OWNER_OPY,
-                    "entries": [],
-                    "total": 0,
-                    "unavailable": {
-                        "capability": LIST_ENTRIES_CAPABILITY,
-                        "message": "listing OverPy vocabulary needs a negotiated LPP capability that opy-rs does not provide",
-                    },
-                }),
-            };
+            let mut response = unavailable(
+                "opy",
+                OWNER_OPY,
+                LIST_ENTRIES_CAPABILITY,
+                "listing OverPy vocabulary needs a negotiated LPP capability that opy-rs does not provide",
+            );
+            if let ToolResponse::Ok { result } = &mut response {
+                result["total"] = json!(0);
+            }
+            return response;
         }
         other => {
             return refusal(
@@ -64,11 +63,7 @@ pub(crate) fn list_entries(
                 "invalid-kind",
                 format!(
                     "kind must be one of {}; got '{kind}'",
-                    LISTABLE_KINDS
-                        .iter()
-                        .map(|kind| format!("'{kind}'"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
+                    quoted_list(&LISTABLE_KINDS)
                 ),
             );
         }

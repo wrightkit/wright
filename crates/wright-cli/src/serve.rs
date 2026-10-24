@@ -276,7 +276,7 @@ fn operation_result(service: &mut ToolService<'_>, request: ToolRequest) -> Valu
     }
 }
 
-fn jsonrpc_error(id: Value, code: i64, message: impl Into<String>) -> Value {
+pub(crate) fn jsonrpc_error(id: Value, code: i64, message: impl Into<String>) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message.into() } })
 }
 

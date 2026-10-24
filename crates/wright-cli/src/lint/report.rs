@@ -1,6 +1,6 @@
 use wright_driver::result::{Envelope, LintPackageResult, LintPackageRow};
 
-use crate::plain::{Line, PlainReport, Stream, expand_all, field, truncated_record};
+use crate::plain::{PlainReport, expand_all, field, truncated_record};
 use crate::present::terminal::{TerminalReport, heading, line, next, note, plural};
 use crate::present::{RenderContext, ResultPresentation};
 
@@ -95,7 +95,7 @@ impl PlainReport for LintPackageResult {
         &self,
         envelope: &Envelope<Self>,
         ctx: &RenderContext<'_>,
-        out: &mut Vec<Line>,
+        out: &mut Vec<String>,
     ) {
         let mut fields = vec![format!("packages={}", self.packages.len())];
         if let Some(total) = self.total.filter(|t| *t as usize != self.packages.len()) {
@@ -107,18 +107,15 @@ impl PlainReport for LintPackageResult {
                 .map(|(status, n)| format!("{status}={n}")),
         );
         fields.push(field("store", &self.store));
-        out.push((Stream::Out, format!("summary: {}", fields.join(" "))));
+        out.push(format!("summary: {}", fields.join(" ")));
         let limit = if ctx.presentation.all { usize::MAX } else { 20 };
         for row in self.packages.iter().take(limit) {
-            out.push((Stream::Out, package_record(row)));
+            out.push(package_record(row));
         }
         if self.packages.len() > limit {
-            out.push((
-                Stream::Out,
-                truncated_record(
-                    &[("packages", limit, self.packages.len())],
-                    &expand_all(envelope),
-                ),
+            out.push(truncated_record(
+                &[("packages", limit, self.packages.len())],
+                &expand_all(envelope),
             ));
         }
     }

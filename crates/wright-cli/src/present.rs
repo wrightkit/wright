@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::io::{IsTerminal, Write};
 use std::path::Path;
 #[cfg(test)]
@@ -21,9 +20,16 @@ use wright_driver::result::{
 use crate::cli::{ColorArg, CommonArgs, OutputFormatArg, RendererArg};
 
 pub(crate) mod addresses;
+mod common;
 pub(crate) mod terminal;
 
 pub(crate) use addresses::{edge_caller, rule_address, rule_name, tree_rule};
+pub(crate) use common::{
+    DETAIL_COMMANDS, block_flags, call_fan_counts, cfg_block_stats, cfg_edge_count,
+    diagnostic_counts, diagnostic_files, finding_files, findings_severity_counts,
+    fix_status_counts, fix_status_parts, group_runs, lookup_hint_args, normalize_finding_spans,
+    notable_callers, shown_of, span_suffix,
+};
 
 use crate::plain;
 
@@ -233,16 +239,7 @@ impl Presentation {
         self
     }
     pub(crate) fn from_common(common: &CommonArgs) -> Self {
-        let format = match common.format {
-            OutputFormatArg::Text => OutputFormat::Text,
-            OutputFormatArg::Json => OutputFormat::Json,
-        };
-        Self::resolve(
-            format,
-            common.renderer,
-            common.color,
-            RuntimeEnvironment::process(),
-        )
+        Self::from_output(common.format, common.renderer, common.color)
     }
 
     pub(crate) fn from_output(
@@ -358,7 +355,7 @@ pub(crate) fn render<
     match pres.renderer {
         Renderer::GithubActions => render_github(envelope, &ctx),
         Renderer::Plain => plain::render(envelope, &ctx),
-        Renderer::Terminal => terminal::render(envelope, pres, elapsed, source_base, subject),
+        Renderer::Terminal => terminal::render(envelope, &ctx),
     }
 }
 
@@ -394,20 +391,10 @@ struct Marks {
     pad: String,
 }
 
-impl Presentation {
-    fn section_marks(&self) -> Marks {
-        self.connector("  ")
-    }
-
-    fn connector(&self, base: &str) -> Marks {
-        Marks {
-            head: base.to_string(),
-            pad: format!("{base}  "),
-        }
-    }
-
-    fn footer_head(&self) -> &'static str {
-        "  "
+fn marks() -> Marks {
+    Marks {
+        head: "  ".to_string(),
+        pad: "    ".to_string(),
     }
 }
 
@@ -753,10 +740,8 @@ impl ResultPresentation for LintResult {
                 selection.total, rules
             ));
         }
-        let mut counts = [0usize; 3];
-        for finding in self.findings.as_array().map_or(&[][..], Vec::as_slice) {
-            counts[finding_severity_rank(finding) as usize] += 1;
-        }
+        let counts =
+            findings_severity_counts(self.findings.as_array().map_or(&[][..], Vec::as_slice));
         let mut parts = Vec::new();
         if counts[0] > 0 {
             parts.push(format!("{} error(s)", counts[0]));
@@ -774,26 +759,7 @@ impl ResultPresentation for LintResult {
         };
         metadata.push_str(&format!(" across {rules} rule(s)"));
         if let Some(fixes) = &self.fixes {
-            let mut applied = 0usize;
-            let mut previewed = 0usize;
-            let mut refused = 0usize;
-            for fix in fixes {
-                match fix.status {
-                    wright_driver::result::LintFixStatus::Applied => applied += 1,
-                    wright_driver::result::LintFixStatus::Preview => previewed += 1,
-                    wright_driver::result::LintFixStatus::Refused => refused += 1,
-                }
-            }
-            let mut fixes_part = Vec::new();
-            if applied > 0 {
-                fixes_part.push(format!("{applied} applied"));
-            }
-            if previewed > 0 {
-                fixes_part.push(format!("{previewed} previewed"));
-            }
-            if refused > 0 {
-                fixes_part.push(format!("{refused} refused"));
-            }
+            let fixes_part = fix_status_parts(fix_status_counts(fixes));
             metadata.push_str(&format!("; {} fix(es)", fixes.len()));
             if !fixes_part.is_empty() {
                 metadata.push_str(&format!(" ({})", fixes_part.join(", ")));
@@ -940,7 +906,7 @@ impl ResultPresentation for RulesResult {
     fn metadata(&self) -> Option<String> {
         Some(format!("{} rule(s)", query_items(&self.0, "rules").len()))
     }
-    fn render_body(&self, ctx: &RenderContext<'_>) {
+    fn render_body(&self, _ctx: &RenderContext<'_>) {
         let rules = query_items(&self.0, "rules");
         println!("\nRules");
         if rules.is_empty() {
@@ -948,13 +914,14 @@ impl ResultPresentation for RulesResult {
             return;
         }
         for rule in rules {
-            let marks = ctx.presentation.section_marks();
+            let marks = marks();
             let name = rule_name(rule);
             let event = rule["event"].as_str().unwrap_or("?");
-            match rule.get("span").and_then(inline_location) {
-                Some(location) => println!("{}{name} [{event}] --> {location}", marks.head),
-                None => println!("{}{name} [{event}]", marks.head),
-            }
+            println!(
+                "{}{name} [{event}]{}",
+                marks.head,
+                span_suffix(rule, " --> ")
+            );
             let content = &rule["content"];
             for condition in content["conditions"].as_array().into_iter().flatten() {
                 println!("{}if {}", marks.pad, render_node(&condition["value"]));
@@ -1015,10 +982,7 @@ impl ResultPresentation for SymbolsResult {
                     .as_str()
                     .filter(|name| !name.is_empty())
                     .unwrap_or("<unnamed>");
-                match symbol.get("span").and_then(inline_location) {
-                    Some(location) => println!("    {name} --> {location}"),
-                    None => println!("    {name}"),
-                }
+                println!("    {name}{}", span_suffix(symbol, " --> "));
             }
         }
         print_query_withheld(&self.0, "symbol(s)");
@@ -1059,11 +1023,7 @@ impl ResultPresentation for RefsResult {
                 (Some(rule), None) => format!(" (rule {rule})"),
                 _ => String::new(),
             };
-            let location = reference
-                .get("span")
-                .and_then(inline_location)
-                .map(|location| format!(" --> {location}"))
-                .unwrap_or_default();
+            let location = span_suffix(reference, " --> ");
             println!(
                 "  {}{}{}",
                 reference["kind"].as_str().unwrap_or("reference"),
@@ -1073,22 +1033,6 @@ impl ResultPresentation for RefsResult {
         }
         print_query_withheld(&self.0, "reference(s)");
     }
-}
-
-fn notable_callers<'a>(
-    counts: &std::collections::BTreeMap<&'a str, usize>,
-) -> Vec<(&'a str, usize)> {
-    let mut ranked: Vec<(&'a str, usize)> = counts.iter().map(|(name, n)| (*name, *n)).collect();
-    ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
-    ranked.retain(|(_, n)| *n > 1);
-    ranked
-}
-
-fn cfg_edge_count(blocks: &[serde_json::Value]) -> usize {
-    blocks
-        .iter()
-        .map(|block| array_len(&block["successors"]))
-        .sum()
 }
 
 impl ResultPresentation for CfgResult {
@@ -1110,15 +1054,7 @@ impl ResultPresentation for CfgResult {
             println!("  none");
             return;
         }
-        let loops = blocks
-            .iter()
-            .filter(|block| matches!(block["kind"].as_str(), Some("while" | "for")))
-            .count();
-        let waits = blocks
-            .iter()
-            .filter(|block| block["waits"].as_bool().unwrap_or(false))
-            .count();
-        let calls: usize = blocks.iter().map(|block| array_len(&block["calls"])).sum();
+        let (loops, waits, calls) = cfg_block_stats(blocks);
         println!(
             "  {} block(s), {} edge(s): {} loop header(s), {} wait block(s), {} call site(s)",
             blocks.len(),
@@ -1133,17 +1069,8 @@ impl ResultPresentation for CfgResult {
             self.0["exit"].as_u64().unwrap_or(0)
         );
         for block in blocks {
-            let marks = ctx.presentation.section_marks();
-            let mut flags = Vec::new();
-            if block["waits"].as_bool().unwrap_or(false) {
-                flags.push("waits");
-            }
-            if block["calls"]
-                .as_array()
-                .is_some_and(|calls| !calls.is_empty())
-            {
-                flags.push("calls");
-            }
+            let marks = marks();
+            let flags = block_flags(block);
             let flags = if flags.is_empty() {
                 String::new()
             } else {
@@ -1190,14 +1117,7 @@ impl ResultPresentation for CallGraphResult {
             println!("  none");
             return;
         }
-        let mut fan_in = std::collections::BTreeMap::<&str, usize>::new();
-        let mut fan_out = std::collections::BTreeMap::<&str, usize>::new();
-        for edge in edges {
-            *fan_in
-                .entry(edge["callee"].as_str().unwrap_or("<unnamed>"))
-                .or_default() += 1;
-            *fan_out.entry(edge_caller(edge)).or_default() += 1;
-        }
+        let (fan_in, fan_out) = call_fan_counts(edges);
         println!(
             "  {} edge(s): {} calling rule(s), {} subroutine(s) called",
             edges.len(),
@@ -1251,9 +1171,9 @@ impl ResultPresentation for CostResult {
             count(exact, "waitActions"),
         ))
     }
-    fn render_body(&self, ctx: &RenderContext<'_>) {
+    fn render_body(&self, _ctx: &RenderContext<'_>) {
         if self.result.get("rule").is_some_and(|rule| rule.is_object()) {
-            render_cost_rule_body(&self.result, ctx);
+            render_cost_rule_body(&self.result);
             return;
         }
         let exact = &self.result["exact"];
@@ -1278,18 +1198,12 @@ impl ResultPresentation for CostResult {
                 count(elements, "budget"),
             );
             for rule in elements["rules"].as_array().into_iter().flatten() {
-                match rule.get("span").and_then(inline_location) {
-                    Some(location) => println!(
-                        "    {} element(s)  {}  {location}",
-                        count(rule, "count"),
-                        rule_name(rule),
-                    ),
-                    None => println!(
-                        "    {} element(s)  {}",
-                        count(rule, "count"),
-                        rule_name(rule),
-                    ),
-                }
+                println!(
+                    "    {} element(s)  {}{}",
+                    count(rule, "count"),
+                    rule_name(rule),
+                    span_suffix(rule, "  "),
+                );
             }
             if let Some(note) = elements["truncation"]["rules"].as_object() {
                 println!(
@@ -1322,17 +1236,8 @@ impl ResultPresentation for CostResult {
         if findings.is_empty() {
             println!("  none");
         }
-        let mut index = 0;
-        while index < findings.len() {
-            let first = &findings[index];
-            let mut end = index + 1;
-            while end < findings.len()
-                && findings[end]["code"] == first["code"]
-                && findings[end]["message"] == first["message"]
-            {
-                end += 1;
-            }
-            let group = &findings[index..end];
+        for group in group_runs(&findings) {
+            let first = &group[0];
             let severity = first["severity"].as_str().unwrap_or("info");
             let code = first["code"].as_str().unwrap_or("finding");
             let message = first["message"].as_str().unwrap_or_default();
@@ -1340,12 +1245,11 @@ impl ResultPresentation for CostResult {
                 1 => println!("  {severity}[{code}]: {message}"),
                 count => println!("  {severity}[{code}] ({count} occurrences): {message}"),
             }
-            for finding in group {
+            for finding in group.iter() {
                 if let Some(location) = finding.get("span").and_then(inline_location) {
                     println!("    --> {location}");
                 }
             }
-            index = end;
         }
         print_truncation(&self.result);
         if let Some(withheld) = self.result["selection"]["withheld"]
@@ -1370,57 +1274,35 @@ impl ResultPresentation for CostResult {
     }
 }
 
-fn render_cost_rule_body(result: &serde_json::Value, ctx: &RenderContext<'_>) {
+fn render_cost_rule_body(result: &serde_json::Value) {
     let rule = &result["rule"];
-    let marks = ctx.presentation.section_marks();
+    let marks = marks();
     println!("\nElement cost");
-    match rule.get("span").and_then(inline_location) {
-        Some(location) => println!(
-            "{}{} · {} element(s) · {location}",
-            marks.head,
-            rule_name(rule),
-            count(rule, "count"),
-        ),
-        None => println!(
-            "{}{} · {} element(s)",
-            marks.head,
-            rule_name(rule),
-            count(rule, "count"),
-        ),
-    }
+    println!(
+        "{}{} · {} element(s){}",
+        marks.head,
+        rule_name(rule),
+        count(rule, "count"),
+        span_suffix(rule, " · "),
+    );
     let statements = result["statements"]
         .as_array()
         .map_or(&[][..], Vec::as_slice);
     let by_node = result["byNode"].as_array().map_or(&[][..], Vec::as_slice);
-    let shown = |key: &str| {
-        result["truncation"][key].as_object().map(|note| {
-            (
-                note["shown"].as_u64().unwrap_or(0),
-                note["total"].as_u64().unwrap_or(0),
-            )
-        })
-    };
     println!("\nCostliest statements");
     if statements.is_empty() {
         println!("  none");
     }
     for statement in statements {
-        match statement.get("span").and_then(inline_location) {
-            Some(location) => println!(
-                "{}{} element(s)  {}  {location}",
-                marks.head,
-                count(statement, "count"),
-                statement["name"].as_str().unwrap_or("?"),
-            ),
-            None => println!(
-                "{}{} element(s)  {}",
-                marks.head,
-                count(statement, "count"),
-                statement["name"].as_str().unwrap_or("?"),
-            ),
-        }
+        println!(
+            "{}{} element(s)  {}{}",
+            marks.head,
+            count(statement, "count"),
+            statement["name"].as_str().unwrap_or("?"),
+            span_suffix(statement, "  "),
+        );
     }
-    if let Some((shown, total)) = shown("statements") {
+    if let Some((shown, total)) = shown_of(result, "statements") {
         println!("  showing {shown} of {total}; --all to see every item");
     }
     println!("\nBy node name");
@@ -1442,7 +1324,7 @@ fn render_cost_rule_body(result: &serde_json::Value, ctx: &RenderContext<'_>) {
             times,
         );
     }
-    if let Some((shown, total)) = shown("byNode") {
+    if let Some((shown, total)) = shown_of(result, "byNode") {
         println!("  showing {shown} of {total}; --all to see every item");
     }
 }
@@ -1806,7 +1688,7 @@ fn render_lint_fixes(result: &LintResult, ctx: &RenderContext<'_>) {
         return;
     }
     for fix in fixes {
-        let marks = ctx.presentation.section_marks();
+        let marks = marks();
         let status = match fix.status {
             wright_driver::result::LintFixStatus::Preview => "fix",
             wright_driver::result::LintFixStatus::Applied => "applied",
@@ -1840,39 +1722,19 @@ fn render_lint(result: &LintResult, ctx: &RenderContext<'_>) {
     if findings.is_empty() {
         println!("  none");
     }
-    let mut index = 0;
-    while index < findings.len() {
-        let first = &findings[index];
-        let mut end = index + 1;
-        while end < findings.len()
-            && findings[end]["code"] == first["code"]
-            && findings[end]["message"] == first["message"]
-        {
-            end += 1;
-        }
-        let marks = ctx.presentation.section_marks();
-        render_finding_group(&findings[index..end], ctx, &marks);
-        index = end;
+    for group in group_runs(&findings) {
+        let marks = marks();
+        render_finding_group(group, ctx, &marks);
     }
     if let Some(selection) = &result.selection
         && selection.withheld > 0
     {
         println!("  ... {} finding(s) withheld (--max)", selection.withheld);
     }
-    let files: BTreeSet<&str> = findings
-        .iter()
-        .filter_map(|finding| finding.get("span"))
-        .filter_map(|span| span.get("path"))
-        .filter_map(serde_json::Value::as_str)
-        .filter(|path| is_real_source_path(path))
-        .collect();
+    let files = finding_files(&findings);
     let parts = lint_footer_parts(files.len(), array_len(&result.skipped), ctx);
     if !parts.is_empty() {
-        println!(
-            "{}{}",
-            ctx.presentation.footer_head(),
-            dim(&parts.join(" · "), ctx.presentation.color)
-        );
+        println!("  {}", dim(&parts.join(" · "), ctx.presentation.color));
     }
 }
 
@@ -1899,11 +1761,7 @@ fn render_essential(result: &EssentialResult, ctx: &RenderContext<'_>) {
         }
     } else {
         let mut findings = value["findings"].clone();
-        for finding in findings.as_array_mut().into_iter().flatten() {
-            if let Some(span) = finding_location_span(finding) {
-                finding["span"] = span;
-            }
-        }
+        normalize_finding_spans(&mut findings);
         render_lint(
             &LintResult {
                 findings,
@@ -1914,9 +1772,7 @@ fn render_essential(result: &EssentialResult, ctx: &RenderContext<'_>) {
         );
     }
     if value.get("program").is_some() && value.get("hotspots").is_none() {
-        println!(
-            "\nDetail commands\n  wright inspect symbols\n  wright inspect refs <NAME>\n  wright inspect cfg <RULE>\n  wright inspect callgraph\n  wright inspect cost"
-        );
+        println!("\nDetail commands\n  {}", DETAIL_COMMANDS.join("\n  "));
     }
     print_truncation(value);
     if let Some(expand) = value["expand"].as_str() {
@@ -1947,7 +1803,7 @@ fn print_truncation(value: &serde_json::Value) {
     }
 }
 
-fn render_essential_analyze(value: &serde_json::Value, ctx: &RenderContext<'_>) {
+fn render_essential_analyze(value: &serde_json::Value, _ctx: &RenderContext<'_>) {
     let p = &value["program"];
     println!(
         "\nProgram overview\n  {} file(s), {} rule(s), {} global variable(s), {} player variable(s), {} subroutine(s), {} persistent object(s)",
@@ -2038,7 +1894,7 @@ fn render_essential_analyze(value: &serde_json::Value, ctx: &RenderContext<'_>) 
     );
     let risks = value["risks"].as_array().map_or(&[][..], Vec::as_slice);
     for risk in risks {
-        let marks = ctx.presentation.section_marks();
+        let marks = marks();
         println!(
             "{}{}[{}] (evidence: {}): {}",
             marks.head,
@@ -2048,7 +1904,13 @@ fn render_essential_analyze(value: &serde_json::Value, ctx: &RenderContext<'_>) 
             risk["message"].as_str().unwrap_or_default()
         );
         if let Some(span) = finding_location_span(risk) {
-            print_location(&span, &format!("{}  ", marks.pad));
+            let path = span
+                .get("path")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("<span>");
+            let line = span_position(&span, "start", "line").unwrap_or(0);
+            let col = span_position(&span, "start", "col").unwrap_or(0);
+            println!("{}  --> {path}:{line}:{col}", marks.pad);
         }
     }
     if count(&value["persistentObjects"], "total") > 0 {
@@ -2238,16 +2100,6 @@ fn finding_severity_label(finding: &serde_json::Value, color: bool) -> String {
 
 pub(crate) fn display_location_path(path: &str) -> String {
     wright_driver::input::display_path(Path::new(path))
-}
-
-fn print_location(span: &serde_json::Value, indent: &str) {
-    let path = span
-        .get("path")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("<span>");
-    let line = span_position(span, "start", "line").unwrap_or(0);
-    let col = span_position(span, "start", "col").unwrap_or(0);
-    println!("{indent}--> {path}:{line}:{col}");
 }
 
 fn source_context(path: &str, line: u32, col: u32, indent: &str) -> Option<String> {

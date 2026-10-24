@@ -39,13 +39,7 @@ impl CompilerSession {
         transaction: &EditTransaction,
     ) -> EditValidation {
         if let Err(diagnostic) = self.verify_fixed_config() {
-            let diagnostics = vec![diagnostic];
-            return EditValidation {
-                ok: false,
-                exit: crate::result::exit_code_from(&diagnostics),
-                diagnostics,
-                preview: None,
-            };
+            return EditValidation::refused(vec![diagnostic]);
         }
         crate::edit::validate_transaction(&self.config, self.catalog, sources, transaction)
     }
@@ -241,10 +235,7 @@ impl CompilerSession {
         };
         let mutation = self.run_provider_flow(
             crate::opy_provider::OPY_LANGUAGE_ID,
-            &wright_lpp::ClientInfo {
-                name: wright_lpp::LPP_CLIENT_NAME.to_string(),
-                version: crate::result::DRIVER_VERSION.to_string(),
-            },
+            &super::lpp_client_info(),
             |provider| crate::provider_edit::validate_transaction(provider, &request),
         );
         if mutation.ok {

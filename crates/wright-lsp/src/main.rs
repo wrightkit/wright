@@ -710,13 +710,8 @@ fn other_roots_own(ownership: &PublicationOwnership, source: &str) -> bool {
 /// URI for anything else that resolves to one. Sources with no file URI
 /// yield `None` rather than a fabricated `file:///unknown`.
 fn publication_uri(service: &LanguageService, source: &str) -> Option<String> {
-    if let Some(document) = service.store.document(source) {
+    if let Some(document) = document_for_source(service, source) {
         return Some(document.uri.clone());
-    }
-    let path =
-        wright_language::document::uri_to_path(source).unwrap_or_else(|| PathBuf::from(source));
-    if let Some(uri) = service.store.uri_for_path(&path) {
-        return Some(uri);
     }
     wright_language::document::source_to_uri(source)
 }
@@ -760,8 +755,12 @@ fn publish_to(
 }
 
 fn source_version(service: &LanguageService, source: &str) -> Option<i32> {
+    document_for_source(service, source).map(|document| document.version)
+}
+
+fn document_for_source<'s>(service: &'s LanguageService, source: &str) -> Option<&'s Document> {
     if let Some(document) = service.store.document(source) {
-        return Some(document.version);
+        return Some(document);
     }
     let path =
         wright_language::document::uri_to_path(source).unwrap_or_else(|| PathBuf::from(source));
@@ -769,7 +768,6 @@ fn source_version(service: &LanguageService, source: &str) -> Option<i32> {
         .store
         .uri_for_path(&path)
         .and_then(|uri| service.store.document(&uri))
-        .map(|d| d.version)
 }
 
 #[allow(deprecated)]

@@ -135,8 +135,6 @@ fn cost_facts(
         workshop_rs::actions::ElementCountError,
     >,
 ) -> serde_json::Value {
-    let mut actions = 0usize;
-    let mut waits = 0usize;
     let mut conditions = 0usize;
     for rule in program.rules.iter().filter(|rule| !rule.disabled) {
         conditions += rule
@@ -144,13 +142,8 @@ fn cost_facts(
             .iter()
             .filter(|condition| !condition.disabled)
             .count();
-        for (_, action) in wright_analyzer::canonical::live_actions(&rule.actions) {
-            actions += 1;
-            if matches!(action, workshop_rs::Action::Call { name, .. } if name == "wait") {
-                waits += 1;
-            }
-        }
     }
+    let (actions, waits) = live_action_counts(program);
     let counts = serde_json::json!({
         "rules": program.rules.len(),
         "conditions": conditions,
@@ -326,6 +319,56 @@ pub(crate) fn prepare_findings(
     findings
 }
 
+/// The shared findings tail after a `GetFindings` fetch:
+/// [`prepare_findings`] prepares the payloads, then the surface's
+/// finding selection applies.
+pub(crate) fn select_findings(
+    service: &SemanticService<'_>,
+    loaded: &Loaded,
+    catalog: &Catalog,
+    selection: &crate::select::FindingSelection,
+    findings: serde_json::Value,
+) -> (
+    Vec<serde_json::Value>,
+    Option<crate::select::SelectionOutcome>,
+) {
+    let findings = prepare_findings(findings, service, loaded, catalog);
+    selection.apply_findings(findings, &crate::select::file_bases(&loaded.input))
+}
+
+/// Move a `references` operation's selected payload into a `usage`
+/// value (#429): a selected object's `references` and `selection` keys
+/// move over; any other shape replaces `usage.references` wholesale.
+pub(crate) fn merge_references(usage: &mut serde_json::Value, mut references: serde_json::Value) {
+    if let Some(selected) = references.as_object_mut() {
+        usage["references"] = selected.remove("references").unwrap_or_default();
+        if let Some(selection) = selected.remove("selection") {
+            usage["selection"] = selection;
+        }
+    } else {
+        usage["references"] = references;
+    }
+}
+
+/// The program's live action counts: actions in non-disabled rules, and
+/// how many of them are `wait` calls.
+pub(crate) fn live_action_counts(program: &workshop_rs::Program) -> (usize, usize) {
+    let mut actions = 0usize;
+    let mut waits = 0usize;
+    for (_, action) in program
+        .rules
+        .iter()
+        .filter(|rule| !rule.disabled)
+        .flat_map(|rule| wright_analyzer::canonical::live_actions(&rule.actions))
+    {
+        actions += 1;
+        if matches!(action, workshop_rs::Action::Call { name, .. } if name == "wait") {
+            waits += 1;
+        }
+    }
+    (actions, waits)
+}
+
 pub(crate) fn span_path(file: Option<u64>, loaded: &Loaded) -> String {
     match loaded.provenance {
         Provenance::Unmapped => "<provider-artifact>".to_string(),
@@ -489,22 +532,10 @@ impl CompilerSession {
                 symbol,
                 snapshot: None,
             }))?;
-            let mut result = usage.as_object().cloned().unwrap_or_default();
-            match references {
-                serde_json::Value::Object(mut selected) => {
-                    result.insert(
-                        "references".to_string(),
-                        selected.remove("references").unwrap_or_default(),
-                    );
-                    if let Some(selection) = selected.remove("selection") {
-                        result.insert("selection".to_string(), selection);
-                    }
-                }
-                other => {
-                    result.insert("references".to_string(), other);
-                }
-            }
-            Ok(RefsResult(serde_json::Value::Object(result)))
+            let mut result =
+                serde_json::Value::Object(usage.as_object().cloned().unwrap_or_default());
+            merge_references(&mut result, references);
+            Ok(RefsResult(result))
         })
     }
 
@@ -556,26 +587,16 @@ impl CompilerSession {
     /// before the envelope's verdict (ADR-0027, #723).
     pub fn cost(&mut self, rule: Option<String>) -> Envelope<CostResult> {
         let selection = self.config.selection.clone();
-        let mut envelope = self.service_query("cost", move |service| {
-            let (mut result, outcome) =
-                service.cost_estimate_result(&selection, rule.as_deref())?;
-            let comparison = service.apply_cost_run(&result)?;
-            if let Some(comparison) = comparison {
-                result["__comparison"] = comparison.to_json();
-            }
+        let mut comparison = None;
+        let mut envelope = self.service_query("cost", |service| {
+            let (result, outcome) = service.cost_estimate_result(&selection, rule.as_deref())?;
+            comparison = service.apply_cost_run(&result)?;
             Ok(CostResult {
                 result,
                 selection: outcome,
             })
         });
-        if let Some(comparison) = envelope
-            .result
-            .result
-            .as_object_mut()
-            .and_then(|result| result.remove("__comparison"))
-        {
-            envelope.comparison = Some(comparison);
-        }
+        envelope.comparison = comparison.map(|comparison| comparison.to_json());
         envelope
     }
 
@@ -669,16 +690,13 @@ impl CompilerSession {
                     lint_rule_count,
                     ProgressUnit::Rules,
                 ));
-                let findings = prepare_findings(
-                    service_response(service, &Request::GetFindings),
+                let (findings, selection) = select_findings(
                     service,
                     &loaded,
                     session.catalog(),
+                    &session.config.selection,
+                    service_response(service, &Request::GetFindings),
                 );
-                let (findings, selection) = session
-                    .config
-                    .selection
-                    .apply_findings(findings, &crate::select::file_bases(&loaded.input));
                 let (rules, config, skipped) = crate::result::split_lint_rules(&lint_rules);
                 LintResult {
                     input_identity: loaded.input.identity.clone(),

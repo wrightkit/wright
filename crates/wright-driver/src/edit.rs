@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 mod columns;
-use columns::{char_count, position_byte};
+use columns::position_byte;
 pub use columns::{char_offset_to_utf16, utf16_offset_to_char};
 
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use crate::config::{SessionConfig, SourceKind};
 use crate::diag::workshop_diag;
 use crate::diag::{Diagnostic, Stage, source_provider_unavailable};
 use crate::input::{self, ResolvedInput};
-use crate::result::exit_code_from;
+pub use crate::result::{EditValidation, SourcePreview};
 use crate::source_provider::provider_uri_path;
 
 /// One proposed source edit.
@@ -152,24 +152,6 @@ fn is_zero_width(edit: &SourceEdit) -> bool {
     (edit.range.start_line, edit.range.start_col) == (edit.range.end_line, edit.range.end_col)
 }
 
-/// The edited text of one source in a validated transaction.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SourcePreview {
-    pub source: String,
-    pub new_text: String,
-    pub source_identity: String,
-}
-
-/// The result of validating a proposed transaction.
-#[derive(Debug, Clone, Serialize)]
-pub struct EditValidation {
-    pub ok: bool,
-    pub exit: u8,
-    pub diagnostics: Vec<Diagnostic>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub preview: Option<Vec<SourcePreview>>,
-}
-
 /// `validateEditTransaction` (#434): every edit must name a supplied,
 /// current source; the transaction applies atomically to the caller's
 /// sources; and on raw Workshop input the edited project is reparsed and
@@ -185,12 +167,7 @@ pub fn validate_transaction(
     sources: Option<&BTreeMap<String, String>>,
     transaction: &EditTransaction,
 ) -> EditValidation {
-    let refuse = |diagnostics: Vec<Diagnostic>| EditValidation {
-        ok: false,
-        exit: exit_code_from(&diagnostics),
-        diagnostics,
-        preview: None,
-    };
+    let refuse = EditValidation::refused;
     let resolved = match resolve_edit_input(config) {
         Ok(resolved) => resolved,
         Err(diagnostic) => return refuse(vec![diagnostic]),
@@ -270,17 +247,13 @@ pub fn validate_transaction(
 
 pub(crate) fn resolve_edit_input(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
     if config.input.path().is_none() {
-        return Err(edit_stdin_refusal());
+        return Err(Diagnostic::error(
+            "edit-input-stdin",
+            Stage::Discovery,
+            "edit operations require a path-based input; the input has no source identity",
+        ));
     }
     input::resolve(config)
-}
-
-fn edit_stdin_refusal() -> Diagnostic {
-    Diagnostic::error(
-        "edit-input-stdin",
-        Stage::Discovery,
-        "edit operations require a path-based input; the input has no source identity",
-    )
 }
 
 pub(crate) fn edit_kind_gate(kind: SourceKind, provider_operation: &str) -> Option<Diagnostic> {
@@ -495,8 +468,8 @@ fn apply_edit(source: &str, edit: &SourceEdit) -> Result<String, Diagnostic> {
             ),
         ));
     }
-    let start_char_count = char_count(lines[sl as usize - 1]) as u32;
-    let end_char_count = char_count(lines[el as usize - 1]) as u32;
+    let start_char_count = lines[sl as usize - 1].chars().count() as u32;
+    let end_char_count = lines[el as usize - 1].chars().count() as u32;
     if sc < 1 || sc > start_char_count + 1 || ec < 1 || ec > end_char_count + 1 {
         return Err(Diagnostic::error(
             "edit-invalid-range",

@@ -9,26 +9,24 @@ use wright_driver::result::{
 use wright_driver::{Diagnostic, SelectionOutcome, Status};
 
 use crate::present::{
-    RenderContext, ResultPresentation, count, diagnostics_on_stdout, display_location_path,
-    edge_caller, finding_severity_rank, inline_location, is_real_source_path, query_items,
-    render_node, rule_address, rule_name, severity_rank, summary_status, tree_rule,
+    DETAIL_COMMANDS, RenderContext, ResultPresentation, block_flags, call_fan_counts,
+    cfg_block_stats, cfg_edge_count, count, diagnostic_counts, diagnostic_files,
+    diagnostics_on_stdout, display_location_path, edge_caller, finding_files,
+    finding_severity_rank, findings_severity_counts, fix_status_counts, inline_location,
+    is_real_source_path, lookup_hint_args, notable_callers, query_items, render_node, rule_address,
+    rule_name, severity_rank, summary_status, tree_rule,
 };
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum Stream {
-    Out,
-    Err,
-}
-
-pub(crate) type Line = (Stream, String);
 
 pub(crate) fn render<T: serde::Serialize + ResultPresentation + PlainReport>(
     envelope: &Envelope<T>,
     ctx: &RenderContext<'_>,
 ) {
     if envelope.result.is_artifact_stream() {
-        let mut err: Vec<Line> = Vec::new();
+        let mut err = Vec::new();
         diagnostic_records(envelope, ctx, &mut err);
-        emit(&mut err);
+        for line in err {
+            eprintln!("{line}");
+        }
         envelope.result.render_body(ctx);
         return;
     }
@@ -45,36 +43,24 @@ pub(crate) fn render_lines<T: serde::Serialize + ResultPresentation + PlainRepor
     envelope: &Envelope<T>,
     ctx: &RenderContext<'_>,
 ) -> (Vec<String>, Vec<String>) {
-    let mut out: Vec<Line> = Vec::new();
-    let mut err: Vec<Line> = Vec::new();
-    out.push((Stream::Out, verdict_line(envelope, ctx)));
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    out.push(verdict_line(envelope, ctx));
     let failed_to_stdout = diagnostics_on_stdout(envelope);
     if !envelope.ok && !envelope.gated {
         if envelope.diagnostics.is_empty() {
-            (if failed_to_stdout { &mut out } else { &mut err }).push((
-                Stream::Err,
-                format!(
-                    "error: {}",
-                    field("message", &format!("{} failed", envelope.command))
-                ),
+            (if failed_to_stdout { &mut out } else { &mut err }).push(format!(
+                "error: {}",
+                field("message", &format!("{} failed", envelope.command))
             ));
         } else {
-            let mut counts = [0usize; 3];
-            for diagnostic in &envelope.diagnostics {
-                counts[severity_rank(diagnostic.severity) as usize] += 1;
-            }
+            let counts = diagnostic_counts(&envelope.diagnostics);
             let mut fields = severity_fields(counts[0], counts[1], counts[2]);
-            let affected: BTreeSet<String> = envelope
-                .diagnostics
-                .iter()
-                .filter_map(|diagnostic| diagnostic.span.as_ref())
-                .filter(|span| is_real_source_path(&span.path))
-                .map(|span| display_location_path(&span.path))
-                .collect();
+            let affected = diagnostic_files(&envelope.diagnostics);
             if !affected.is_empty() {
                 fields.push(format!("affected={}", affected.len()));
             }
-            out.push((Stream::Out, format!("summary: {}", fields.join(" "))));
+            out.push(format!("summary: {}", fields.join(" ")));
         }
     } else {
         envelope.result.plain_report(envelope, ctx, &mut out);
@@ -86,12 +72,9 @@ pub(crate) fn render_lines<T: serde::Serialize + ResultPresentation + PlainRepor
         if failed_to_stdout { &mut out } else { &mut err },
     );
     for next in next_commands(envelope) {
-        out.push((Stream::Out, format!("next: {next}")));
+        out.push(format!("next: {next}"));
     }
-    (
-        out.into_iter().map(|(_, line)| line).collect(),
-        err.into_iter().map(|(_, line)| line).collect(),
-    )
+    (out, err)
 }
 
 fn verdict_word<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) -> String {
@@ -141,7 +124,7 @@ pub(crate) fn display_root(root: &Path) -> String {
 fn diagnostic_records<T: serde::Serialize>(
     envelope: &Envelope<T>,
     ctx: &RenderContext<'_>,
-    err: &mut Vec<Line>,
+    err: &mut Vec<String>,
 ) {
     let mut ordered: Vec<&Diagnostic> = envelope.diagnostics.iter().collect();
     ordered.sort_by_key(|diagnostic| severity_rank(diagnostic.severity));
@@ -153,12 +136,12 @@ fn diagnostic_records<T: serde::Serialize>(
         20
     };
     for diagnostic in ordered.iter().take(limit) {
-        err.push((Stream::Err, diagnostic_record(diagnostic)));
+        err.push(diagnostic_record(diagnostic));
     }
     if bounded && !ctx.presentation.all && total > 20 {
-        err.push((
-            Stream::Err,
-            truncated_record(&[("diagnostics", 20, total)], &expand_all(envelope)),
+        err.push(truncated_record(
+            &[("diagnostics", 20, total)],
+            &expand_all(envelope),
         ));
     }
     if let Some(selection) = envelope
@@ -177,7 +160,7 @@ fn diagnostic_records<T: serde::Serialize>(
                 &format!("wright {} --max {}", envelope.command, selection.total),
             ));
         }
-        err.push((Stream::Err, format!("selected: {}", fields.join(" "))));
+        err.push(format!("selected: {}", fields.join(" ")));
     }
 }
 
@@ -230,37 +213,17 @@ fn next_commands<T: serde::Serialize>(envelope: &Envelope<T>) -> Vec<String> {
     }
     match envelope.command.as_str() {
         "inspect" | "analyze" if commands.is_empty() => {
-            for cmd in [
-                "wright inspect symbols",
-                "wright inspect refs <NAME>",
-                "wright inspect cfg <RULE>",
-                "wright inspect callgraph",
-                "wright inspect cost",
-            ] {
+            for cmd in DETAIL_COMMANDS {
                 commands.push(cmd.to_string());
             }
         }
         "check" | "compile" => {
             let mut seen = BTreeSet::new();
             for diagnostic in &envelope.diagnostics {
-                let rejected_name = diagnostic
-                    .code
-                    .split('.')
-                    .any(|s| s.starts_with("unknown-") && s != "unknown-language");
-                if !rejected_name {
+                let Some(args) = lookup_hint_args(diagnostic) else {
                     continue;
-                }
-                let source = diagnostic.source.as_ref();
-                let hint = if source.is_some_and(|s| s.kind == "opy") {
-                    "wright lookup --language opy".to_string()
-                } else if let Some(locale) = source
-                    .and_then(|s| s.locale.as_deref())
-                    .filter(|locale| !locale.eq_ignore_ascii_case("en-US"))
-                {
-                    format!("wright lookup --locale {locale}")
-                } else {
-                    "wright lookup".to_string()
                 };
+                let hint = format!("wright lookup{args}");
                 if seen.insert(hint.clone()) {
                     commands.push(hint);
                 }
@@ -271,20 +234,17 @@ fn next_commands<T: serde::Serialize>(envelope: &Envelope<T>) -> Vec<String> {
     commands
 }
 
-fn comparison_records(comparison: Option<&Value>, out: &mut Vec<Line>) {
+fn comparison_records(comparison: Option<&Value>, out: &mut Vec<String>) {
     let Some(comparison) = comparison.filter(|c| c.is_object()) else {
         return;
     };
     let delta = comparison["totalDelta"].as_i64().unwrap_or(0);
     let sign = if delta > 0 { "+" } else { "" };
     let reference = comparison["reference"].as_str().unwrap_or("previous");
-    out.push((
-        Stream::Out,
-        format!(
-            "comparison: {} delta={sign}{delta} previousTotal={}",
-            field("reference", reference),
-            comparison["previousTotal"].as_u64().unwrap_or(0)
-        ),
+    out.push(format!(
+        "comparison: {} delta={sign}{delta} previousTotal={}",
+        field("reference", reference),
+        comparison["previousTotal"].as_u64().unwrap_or(0)
     ));
     let mut changes = Vec::new();
     for change in comparison["changed"].as_array().into_iter().flatten() {
@@ -309,19 +269,10 @@ fn comparison_records(comparison: Option<&Value>, out: &mut Vec<Line>) {
     }
     let total = changes.len();
     for change in changes.iter().take(5) {
-        out.push((Stream::Out, change.clone()));
+        out.push(change.clone());
     }
     if total > 5 {
-        out.push((Stream::Out, format!("truncated: changed=5/{total}")));
-    }
-}
-
-fn emit(lines: &mut Vec<Line>) {
-    for (stream, text) in lines.drain(..) {
-        match stream {
-            Stream::Out => println!("{text}"),
-            Stream::Err => eprintln!("{text}"),
-        }
+        out.push(format!("truncated: changed=5/{total}"));
     }
 }
 
@@ -366,17 +317,14 @@ pub(crate) fn truncated_record(lists: &[(&str, usize, usize)], expand: &str) -> 
 }
 
 pub(crate) fn expand_all<T: serde::Serialize>(envelope: &Envelope<T>) -> String {
-    format!("wright {} --all", cli_command(envelope))
-}
-
-fn cli_command<T: serde::Serialize>(envelope: &Envelope<T>) -> String {
-    match envelope.command.as_str() {
+    let command = match envelope.command.as_str() {
         name @ ("rules" | "symbols" | "refs" | "cfg" | "callgraph" | "cost") => {
             format!("inspect {name}")
         }
         name if name.starts_with("package-") => format!("lint {}", name.replacen('-', " ", 1)),
         name => name.to_string(),
-    }
+    };
+    format!("wright {command} --all")
 }
 
 fn at_field(span: &Value) -> Option<String> {
@@ -447,7 +395,12 @@ fn by_code_field(counts: &std::collections::BTreeMap<String, usize>) -> Option<S
     Some(format!("byCode={joined}"))
 }
 
-fn selected_record(noun: &str, shown: usize, selection: &SelectionOutcome, command: &str) -> Line {
+fn selected_record(
+    noun: &str,
+    shown: usize,
+    selection: &SelectionOutcome,
+    command: &str,
+) -> String {
     let mut fields = vec![format!("{noun}={shown}/{}", selection.total)];
     if let Some(by_code) = by_code_field(&selection.by_code) {
         fields.push(by_code);
@@ -459,12 +412,12 @@ fn selected_record(noun: &str, shown: usize, selection: &SelectionOutcome, comma
             &format!("wright {command} --max {}", selection.total),
         ));
     }
-    (Stream::Out, format!("selected: {}", fields.join(" ")))
+    format!("selected: {}", fields.join(" "))
 }
 
-fn truncation_records(value: &Value, command: &str, out: &mut Vec<Line>) {
+fn truncation_records(value: &Value, command: &str, out: &mut Vec<String>) {
     for key in truncation_keys(value) {
-        out.push((Stream::Out, truncation_line(value, key, command)));
+        out.push(truncation_line(value, key, command));
     }
 }
 
@@ -482,20 +435,14 @@ fn truncation_line(value: &Value, key: &str, command: &str) -> String {
         note["shown"].as_u64().unwrap_or(0),
         note["total"].as_u64().unwrap_or(0)
     )];
-    if let Some(by_code) = note.get("byCode").and_then(Value::as_object) {
-        let counts = by_code
-            .iter()
-            .filter_map(|(code, n)| n.as_u64().map(|n| (code.clone(), n as usize)))
-            .collect();
-        if let Some(field) = by_code_field(&counts) {
-            parts.push(field);
-        }
+    if let Some(field) = by_code_counts(note).as_ref().and_then(by_code_field) {
+        parts.push(field);
     }
     parts.push(field("expand", &format!("wright {command} --all")));
     format!("truncated: {}", parts.join(" "))
 }
 
-fn program_record(program: &Value, persistent_objects: Option<u64>) -> Option<Line> {
+fn program_record(program: &Value, persistent_objects: Option<u64>) -> Option<String> {
     if !program.is_object() {
         return None;
     }
@@ -509,10 +456,10 @@ fn program_record(program: &Value, persistent_objects: Option<u64>) -> Option<Li
     if let Some(objects) = persistent_objects {
         fields.push(format!("persistentObjects={objects}"));
     }
-    Some((Stream::Out, format!("program: {}", fields.join(" "))))
+    Some(format!("program: {}", fields.join(" ")))
 }
 
-fn cost_record(elements: Option<u64>, reason: Option<(&str, &str)>, extra: Vec<String>) -> Line {
+fn cost_record(elements: Option<u64>, reason: Option<(&str, &str)>, extra: Vec<String>) -> String {
     let mut fields = vec![match elements {
         Some(elements) => format!("elements={elements}"),
         None => "elements=unavailable".to_string(),
@@ -525,15 +472,19 @@ fn cost_record(elements: Option<u64>, reason: Option<(&str, &str)>, extra: Vec<S
     if let Some((key, reason)) = reason {
         fields.push(field(key, reason));
     }
-    (Stream::Out, format!("cost: {}", fields.join(" ")))
+    format!("cost: {}", fields.join(" "))
 }
 
 pub(crate) trait PlainReport {
     fn origin_fields(&self) -> Vec<(&'static str, String)> {
         Vec::new()
     }
-    fn plain_report(&self, envelope: &Envelope<Self>, ctx: &RenderContext<'_>, out: &mut Vec<Line>)
-    where
+    fn plain_report(
+        &self,
+        envelope: &Envelope<Self>,
+        ctx: &RenderContext<'_>,
+        out: &mut Vec<String>,
+    ) where
         Self: serde::Serialize + Sized;
 }
 
@@ -560,29 +511,20 @@ impl PlainReport for CheckResult {
         &self,
         envelope: &Envelope<Self>,
         _ctx: &RenderContext<'_>,
-        out: &mut Vec<Line>,
+        out: &mut Vec<String>,
     ) {
         let mut fields = match &envelope.selection {
             Some(selection) => vec![format!("diagnostics={}", selection.total)],
             None => {
-                let mut counts = [0usize; 3];
-                for diagnostic in &envelope.diagnostics {
-                    counts[severity_rank(diagnostic.severity) as usize] += 1;
-                }
+                let counts = diagnostic_counts(&envelope.diagnostics);
                 severity_fields(counts[0], counts[1], counts[2])
             }
         };
-        let affected: BTreeSet<String> = envelope
-            .diagnostics
-            .iter()
-            .filter_map(|diagnostic| diagnostic.span.as_ref())
-            .filter(|span| is_real_source_path(&span.path))
-            .map(|span| display_location_path(&span.path))
-            .collect();
+        let affected = diagnostic_files(&envelope.diagnostics);
         if !affected.is_empty() {
             fields.push(format!("affected={}", affected.len()));
         }
-        out.push((Stream::Out, format!("summary: {}", fields.join(" "))));
+        out.push(format!("summary: {}", fields.join(" ")));
         if let Some(program) = self
             .program
             .as_ref()
@@ -607,18 +549,12 @@ impl PlainReport for CompileResult {
         &self,
         envelope: &Envelope<Self>,
         _ctx: &RenderContext<'_>,
-        out: &mut Vec<Line>,
+        out: &mut Vec<String>,
     ) {
-        let mut counts = [0usize; 3];
-        for diagnostic in &envelope.diagnostics {
-            counts[severity_rank(diagnostic.severity) as usize] += 1;
-        }
-        out.push((
-            Stream::Out,
-            format!(
-                "summary: {}",
-                severity_fields(counts[0], counts[1], counts[2]).join(" ")
-            ),
+        let counts = diagnostic_counts(&envelope.diagnostics);
+        out.push(format!(
+            "summary: {}",
+            severity_fields(counts[0], counts[1], counts[2]).join(" ")
         ));
         if let Some(output) = self.output.as_ref().filter(|o| o.written_to != "stdout") {
             let mut fields = vec![
@@ -628,7 +564,7 @@ impl PlainReport for CompileResult {
             if !output.locale.is_empty() {
                 fields.push(field("locale", &output.locale));
             }
-            out.push((Stream::Out, format!("output: {}", fields.join(" "))));
+            out.push(format!("output: {}", fields.join(" ")));
         }
     }
 }
@@ -638,17 +574,9 @@ impl PlainReport for ConvertResult {
         &self,
         _envelope: &Envelope<Self>,
         _ctx: &RenderContext<'_>,
-        _out: &mut Vec<Line>,
+        _out: &mut Vec<String>,
     ) {
     }
-}
-
-fn findings_severity_counts(findings: &[Value]) -> [usize; 3] {
-    let mut counts = [0usize; 3];
-    for finding in findings {
-        counts[finding_severity_rank(finding) as usize] += 1;
-    }
-    counts
 }
 
 impl PlainReport for LintResult {
@@ -659,7 +587,7 @@ impl PlainReport for LintResult {
         &self,
         _envelope: &Envelope<Self>,
         _ctx: &RenderContext<'_>,
-        out: &mut Vec<Line>,
+        out: &mut Vec<String>,
     ) {
         let findings = self.findings.as_array().map_or(&[][..], Vec::as_slice);
         let counts = findings_severity_counts(findings);
@@ -680,37 +608,22 @@ impl PlainReport for LintResult {
             fields.push(format!("skipped={skipped}"));
         }
         if let Some(fixes) = &self.fixes {
-            let mut applied = 0usize;
-            let mut previewed = 0usize;
-            let mut refused = 0usize;
-            for fix in fixes {
-                match fix.status {
-                    wright_driver::result::LintFixStatus::Applied => applied += 1,
-                    wright_driver::result::LintFixStatus::Preview => previewed += 1,
-                    wright_driver::result::LintFixStatus::Refused => refused += 1,
-                }
-            }
+            let (applied, previewed, refused) = fix_status_counts(fixes);
             fields.push(format!("fixes={}", fixes.len()));
             fields.push(format!("applied={applied}"));
             fields.push(format!("previewed={previewed}"));
             fields.push(format!("refused={refused}"));
         }
-        let affected: BTreeSet<&str> = findings
-            .iter()
-            .filter_map(|finding| finding.get("span"))
-            .filter_map(|span| span.get("path"))
-            .filter_map(Value::as_str)
-            .filter(|path| is_real_source_path(path))
-            .collect();
+        let affected = finding_files(findings);
         if !affected.is_empty() {
             fields.push(format!("affected={}", affected.len()));
         }
-        out.push((Stream::Out, format!("summary: {}", fields.join(" "))));
+        out.push(format!("summary: {}", fields.join(" ")));
 
         let mut sorted = findings.to_vec();
         sorted.sort_by_key(finding_severity_rank);
         for finding in &sorted {
-            out.push((Stream::Out, finding_record(finding)));
+            out.push(finding_record(finding));
         }
         if let Some(selection) = &self.selection {
             out.push(selected_record(
@@ -736,24 +649,18 @@ impl PlainReport for LintResult {
                 items.push(at);
             }
             items.push(field("summary", &fix.summary));
-            out.push((Stream::Out, format!("fix: {}", items.join(" "))));
+            out.push(format!("fix: {}", items.join(" ")));
             for preview in fix.preview.iter().flatten() {
-                out.push((
-                    Stream::Out,
-                    format!("patch: {}", field("source", &preview.source)),
-                ));
+                out.push(format!("patch: {}", field("source", &preview.source)));
                 for line in crate::present::diff_rows(&preview.original, &preview.new_text) {
-                    out.push((Stream::Out, format!("patch: {line}")));
+                    out.push(format!("patch: {line}"));
                 }
             }
             for diagnostic in &fix.diagnostics {
-                out.push((
-                    Stream::Out,
-                    format!(
-                        "refusal: {} {}",
-                        diagnostic.code,
-                        field("message", &diagnostic.message)
-                    ),
+                out.push(format!(
+                    "refusal: {} {}",
+                    diagnostic.code,
+                    field("message", &diagnostic.message)
                 ));
             }
         }
@@ -766,9 +673,9 @@ impl PlainReport for EssentialResult {
     }
     fn plain_report(
         &self,
-        envelope: &Envelope<Self>,
+        _envelope: &Envelope<Self>,
         _ctx: &RenderContext<'_>,
-        out: &mut Vec<Line>,
+        out: &mut Vec<String>,
     ) {
         let value = &self.result;
         if value.get("hotspots").is_some() {
@@ -778,11 +685,10 @@ impl PlainReport for EssentialResult {
         } else {
             essential_lint(self, out);
         }
-        let _ = envelope;
     }
 }
 
-fn essential_lint(result: &EssentialResult, out: &mut Vec<Line>) {
+fn essential_lint(result: &EssentialResult, out: &mut Vec<String>) {
     let counts = &result.result["counts"]["findings"];
     let findings = result.result["findings"]
         .as_array()
@@ -827,9 +733,9 @@ fn essential_lint(result: &EssentialResult, out: &mut Vec<Line>) {
     if !affected.is_empty() {
         fields.push(format!("affected={}", affected.len()));
     }
-    out.push((Stream::Out, format!("summary: {}", fields.join(" "))));
+    out.push(format!("summary: {}", fields.join(" ")));
     for finding in findings {
-        out.push((Stream::Out, finding_record(finding)));
+        out.push(finding_record(finding));
     }
     truncation_records(&result.result, "lint", out);
     if let Some(selection) = &result.selection {
@@ -851,48 +757,39 @@ fn essential_lint(result: &EssentialResult, out: &mut Vec<Line>) {
         if let Some(summary) = fix["summary"].as_str() {
             items.push(field("summary", summary));
         }
-        out.push((Stream::Out, format!("fix: {}", items.join(" "))));
+        out.push(format!("fix: {}", items.join(" ")));
         for preview in fix["preview"].as_array().into_iter().flatten() {
-            out.push((
-                Stream::Out,
-                format!(
-                    "patch: {}",
-                    field("source", preview["source"].as_str().unwrap_or("?"))
-                ),
+            out.push(format!(
+                "patch: {}",
+                field("source", preview["source"].as_str().unwrap_or("?"))
             ));
             for line in crate::present::diff_rows(
                 preview["original"].as_str().unwrap_or_default(),
                 preview["newText"].as_str().unwrap_or_default(),
             ) {
-                out.push((Stream::Out, format!("patch: {line}")));
+                out.push(format!("patch: {line}"));
             }
         }
         for diagnostic in fix["diagnostics"].as_array().into_iter().flatten() {
-            out.push((
-                Stream::Out,
-                format!(
-                    "refusal: {} {}",
-                    diagnostic["code"].as_str().unwrap_or("refusal"),
-                    field(
-                        "message",
-                        diagnostic["message"].as_str().unwrap_or_default()
-                    )
-                ),
+            out.push(format!(
+                "refusal: {} {}",
+                diagnostic["code"].as_str().unwrap_or("refusal"),
+                field(
+                    "message",
+                    diagnostic["message"].as_str().unwrap_or_default()
+                )
             ));
         }
     }
 }
 
-fn essential_inspect(result: &EssentialResult, out: &mut Vec<Line>) {
+fn essential_inspect(result: &EssentialResult, out: &mut Vec<String>) {
     let counts = &result.result["counts"];
-    out.push((
-        Stream::Out,
-        format!(
-            "summary: rules={} symbols={} references={}",
-            counts["rules"].as_u64().unwrap_or(0),
-            counts["symbols"].as_u64().unwrap_or(0),
-            counts["references"].as_u64().unwrap_or(0)
-        ),
+    out.push(format!(
+        "summary: rules={} symbols={} references={}",
+        counts["rules"].as_u64().unwrap_or(0),
+        counts["symbols"].as_u64().unwrap_or(0),
+        counts["references"].as_u64().unwrap_or(0)
     ));
     if let Some(program) = program_record(&result.result["program"], None) {
         out.push(program);
@@ -902,12 +799,12 @@ fn essential_inspect(result: &EssentialResult, out: &mut Vec<Line>) {
         if let Some(id) = rule["id"].as_u64() {
             items.push(format!("id={id}"));
         }
-        out.push((Stream::Out, format!("rule: {}", items.join(" "))));
+        out.push(format!("rule: {}", items.join(" ")));
     }
     truncation_records(&result.result, "inspect", out);
 }
 
-fn essential_analyze(result: &EssentialResult, out: &mut Vec<Line>) {
+fn essential_analyze(result: &EssentialResult, out: &mut Vec<String>) {
     let value = &result.result;
     let risk_counts = &value["counts"]["risks"];
     let cost = &value["cost"];
@@ -934,7 +831,7 @@ fn essential_analyze(result: &EssentialResult, out: &mut Vec<Line>) {
         Some(elements) => format!("cost={elements}"),
         None => "cost=unavailable".to_string(),
     });
-    out.push((Stream::Out, format!("summary: {}", fields.join(" "))));
+    out.push(format!("summary: {}", fields.join(" ")));
 
     let cost_counts = &cost["counts"];
     out.push(cost_record(
@@ -950,10 +847,10 @@ fn essential_analyze(result: &EssentialResult, out: &mut Vec<Line>) {
     ));
 
     for risk in value["risks"].as_array().into_iter().flatten() {
-        out.push((Stream::Out, finding_record(risk)));
+        out.push(finding_record(risk));
     }
     if truncation_keys(value).contains(&"risks") {
-        out.push((Stream::Out, truncation_line(value, "risks", "analyze")));
+        out.push(truncation_line(value, "risks", "analyze"));
     }
     if let Some(selection) = &result.selection {
         out.push(selected_record(
@@ -986,10 +883,10 @@ fn essential_analyze(result: &EssentialResult, out: &mut Vec<Line>) {
         if let Some(at) = rule.get("span").and_then(at_field) {
             items.push(at);
         }
-        out.push((Stream::Out, format!("hotspot: {}", items.join(" "))));
+        out.push(format!("hotspot: {}", items.join(" ")));
     }
     if truncation_keys(value).contains(&"hotspots") {
-        out.push((Stream::Out, truncation_line(value, "hotspots", "analyze")));
+        out.push(truncation_line(value, "hotspots", "analyze"));
     }
     for tree in value["conditionTrees"].as_array().into_iter().flatten() {
         let mut items = vec![
@@ -1000,41 +897,32 @@ fn essential_analyze(result: &EssentialResult, out: &mut Vec<Line>) {
         if let Some(at) = tree.get("span").and_then(at_field) {
             items.push(at);
         }
-        out.push((Stream::Out, format!("tree: {}", items.join(" "))));
+        out.push(format!("tree: {}", items.join(" ")));
     }
     if truncation_keys(value).contains(&"conditionTrees") {
-        out.push((
-            Stream::Out,
-            truncation_line(value, "conditionTrees", "analyze"),
-        ));
+        out.push(truncation_line(value, "conditionTrees", "analyze"));
     }
     let complexity = &value["complexity"];
-    out.push((
-        Stream::Out,
-        format!(
-            "complexity: blocks={} edges={} loopBlocks={} waitBlocks={}",
-            count(complexity, "blocks"),
-            count(complexity, "edges"),
-            count(complexity, "loopBlocks"),
-            count(complexity, "waitBlocks")
-        ),
+    out.push(format!(
+        "complexity: blocks={} edges={} loopBlocks={} waitBlocks={}",
+        count(complexity, "blocks"),
+        count(complexity, "edges"),
+        count(complexity, "loopBlocks"),
+        count(complexity, "waitBlocks")
     ));
     for variable in value["variables"].as_array().into_iter().flatten() {
         let usage = &variable["usage"];
-        out.push((
-            Stream::Out,
-            format!(
-                "variable: {} {} rules={} reads={} writes={}",
-                field("kind", variable["kind"].as_str().unwrap_or("variable")),
-                field("name", variable["name"].as_str().unwrap_or("<unnamed>")),
-                count(usage, "rules"),
-                count(usage, "reads"),
-                count(usage, "writes")
-            ),
+        out.push(format!(
+            "variable: {} {} rules={} reads={} writes={}",
+            field("kind", variable["kind"].as_str().unwrap_or("variable")),
+            field("name", variable["name"].as_str().unwrap_or("<unnamed>")),
+            count(usage, "rules"),
+            count(usage, "reads"),
+            count(usage, "writes")
         ));
     }
     if truncation_keys(value).contains(&"variables") {
-        out.push((Stream::Out, truncation_line(value, "variables", "analyze")));
+        out.push(truncation_line(value, "variables", "analyze"));
     }
     let objects = &value["persistentObjects"];
     if count(objects, "total") > 0 {
@@ -1057,7 +945,7 @@ fn essential_analyze(result: &EssentialResult, out: &mut Vec<Line>) {
             "visibleToAllPlayers={}",
             count(objects, "visibleToAllPlayers")
         ));
-        out.push((Stream::Out, format!("objects: {}", fields.join(" "))));
+        out.push(format!("objects: {}", fields.join(" ")));
     }
 }
 
@@ -1066,10 +954,10 @@ impl PlainReport for RulesResult {
         &self,
         _envelope: &Envelope<Self>,
         _ctx: &RenderContext<'_>,
-        out: &mut Vec<Line>,
+        out: &mut Vec<String>,
     ) {
         let rules = query_items(&self.0, "rules");
-        out.push((Stream::Out, format!("summary: rules={}", rules.len())));
+        out.push(format!("summary: rules={}", rules.len()));
         for rule in rules {
             let mut items = vec![field("name", rule_name(rule))];
             if let Some(event) = rule["event"].as_str() {
@@ -1081,26 +969,20 @@ impl PlainReport for RulesResult {
             if let Some(at) = rule.get("span").and_then(at_field) {
                 items.push(at);
             }
-            out.push((Stream::Out, format!("rule: {}", items.join(" "))));
+            out.push(format!("rule: {}", items.join(" ")));
             let content = &rule["content"];
             for condition in content["conditions"].as_array().into_iter().flatten() {
-                out.push((
-                    Stream::Out,
-                    format!(
-                        "condition: {} {}",
-                        field("rule", rule_name(rule)),
-                        field("expr", &render_node(&condition["value"]))
-                    ),
+                out.push(format!(
+                    "condition: {} {}",
+                    field("rule", rule_name(rule)),
+                    field("expr", &render_node(&condition["value"]))
                 ));
             }
             for action in content["actions"].as_array().into_iter().flatten() {
-                out.push((
-                    Stream::Out,
-                    format!(
-                        "action: {} {}",
-                        field("rule", rule_name(rule)),
-                        field("expr", &render_node(action))
-                    ),
+                out.push(format!(
+                    "action: {} {}",
+                    field("rule", rule_name(rule)),
+                    field("expr", &render_node(action))
                 ));
             }
         }
@@ -1114,10 +996,10 @@ impl PlainReport for SymbolsResult {
         &self,
         _envelope: &Envelope<Self>,
         _ctx: &RenderContext<'_>,
-        out: &mut Vec<Line>,
+        out: &mut Vec<String>,
     ) {
         let symbols = query_items(&self.0, "symbols");
-        out.push((Stream::Out, format!("summary: symbols={}", symbols.len())));
+        out.push(format!("summary: symbols={}", symbols.len()));
         for symbol in symbols {
             let mut items = vec![
                 symbol["kind"].as_str().unwrap_or("symbol").to_string(),
@@ -1132,7 +1014,7 @@ impl PlainReport for SymbolsResult {
             if let Some(at) = symbol.get("span").and_then(at_field) {
                 items.push(at);
             }
-            out.push((Stream::Out, format!("symbol: {}", items.join(" "))));
+            out.push(format!("symbol: {}", items.join(" ")));
         }
         truncation_records(&self.0, "inspect symbols", out);
         selected_from_payload(&self.0, "symbols", symbols.len(), out);
@@ -1144,19 +1026,16 @@ impl PlainReport for RefsResult {
         &self,
         _envelope: &Envelope<Self>,
         _ctx: &RenderContext<'_>,
-        out: &mut Vec<Line>,
+        out: &mut Vec<String>,
     ) {
-        out.push((
-            Stream::Out,
-            format!(
-                "summary: {} {} reads={} writes={} calls={} rules={}",
-                field("symbol", self.0["symbol"].as_str().unwrap_or("<unknown>")),
-                field("kind", self.0["kind"].as_str().unwrap_or("symbol")),
-                count(&self.0, "reads"),
-                count(&self.0, "writes"),
-                count(&self.0, "calls"),
-                count(&self.0, "rules"),
-            ),
+        out.push(format!(
+            "summary: {} {} reads={} writes={} calls={} rules={}",
+            field("symbol", self.0["symbol"].as_str().unwrap_or("<unknown>")),
+            field("kind", self.0["kind"].as_str().unwrap_or("symbol")),
+            count(&self.0, "reads"),
+            count(&self.0, "writes"),
+            count(&self.0, "calls"),
+            count(&self.0, "rules"),
         ));
         let references = self.0["references"]
             .as_array()
@@ -1182,7 +1061,7 @@ impl PlainReport for RefsResult {
             if let Some(value) = reference.get("value").filter(|v| !v.is_null()) {
                 items.push(field("value", &value.to_string()));
             }
-            out.push((Stream::Out, format!("ref: {}", items.join(" "))));
+            out.push(format!("ref: {}", items.join(" ")));
         }
         truncation_records(&self.0, "inspect refs", out);
         selected_from_payload(&self.0, "references", references.len(), out);
@@ -1194,25 +1073,11 @@ impl PlainReport for CfgResult {
         &self,
         _envelope: &Envelope<Self>,
         ctx: &RenderContext<'_>,
-        out: &mut Vec<Line>,
+        out: &mut Vec<String>,
     ) {
         let blocks = self.0["blocks"].as_array().map_or(&[][..], Vec::as_slice);
-        let edges: usize = blocks
-            .iter()
-            .map(|block| block["successors"].as_array().map_or(0, Vec::len))
-            .sum();
-        let loops = blocks
-            .iter()
-            .filter(|block| matches!(block["kind"].as_str(), Some("while" | "for")))
-            .count();
-        let waits = blocks
-            .iter()
-            .filter(|block| block["waits"].as_bool().unwrap_or(false))
-            .count();
-        let calls: usize = blocks
-            .iter()
-            .map(|block| block["calls"].as_array().map_or(0, Vec::len))
-            .sum();
+        let edges = cfg_edge_count(blocks);
+        let (loops, waits, calls) = cfg_block_stats(blocks);
         let mut fields = Vec::new();
         if let Some(rule) = ctx.subject {
             fields.push(field("rule", rule));
@@ -1226,7 +1091,7 @@ impl PlainReport for CfgResult {
             format!("entry={}", self.0["entry"].as_u64().unwrap_or(0)),
             format!("exit={}", self.0["exit"].as_u64().unwrap_or(0)),
         ]);
-        out.push((Stream::Out, format!("summary: {}", fields.join(" "))));
+        out.push(format!("summary: {}", fields.join(" ")));
         for block in blocks {
             let mut items = vec![
                 format!("id={}", block["id"].as_u64().unwrap_or(0)),
@@ -1236,16 +1101,7 @@ impl PlainReport for CfgResult {
                     block["actions"].as_array().map_or(0, Vec::len)
                 ),
             ];
-            let mut flags = Vec::new();
-            if block["waits"].as_bool().unwrap_or(false) {
-                flags.push("waits");
-            }
-            if block["calls"]
-                .as_array()
-                .is_some_and(|calls| !calls.is_empty())
-            {
-                flags.push("calls");
-            }
+            let flags = block_flags(block);
             if !flags.is_empty() {
                 items.push(format!("flags={}", flags.join(",")));
             }
@@ -1266,7 +1122,7 @@ impl PlainReport for CfgResult {
                     .join(",");
                 items.push(format!("to={successors}"));
             }
-            out.push((Stream::Out, format!("block: {}", items.join(" "))));
+            out.push(format!("block: {}", items.join(" ")));
         }
         truncation_records(&self.0, "inspect cfg", out);
         selected_from_payload(&self.0, "blocks", blocks.len(), out);
@@ -1278,46 +1134,27 @@ impl PlainReport for CallGraphResult {
         &self,
         _envelope: &Envelope<Self>,
         _ctx: &RenderContext<'_>,
-        out: &mut Vec<Line>,
+        out: &mut Vec<String>,
     ) {
         let edges = query_items(&self.0, "edges");
-        let mut fan_in = std::collections::BTreeMap::<&str, usize>::new();
-        let mut fan_out = std::collections::BTreeMap::<&str, usize>::new();
-        for edge in edges {
-            *fan_in
-                .entry(edge["callee"].as_str().unwrap_or("<unnamed>"))
-                .or_default() += 1;
-            *fan_out.entry(edge_caller(edge)).or_default() += 1;
-        }
-        out.push((
-            Stream::Out,
-            format!(
-                "summary: edges={} callers={} callees={}",
-                edges.len(),
-                fan_out.len(),
-                fan_in.len()
-            ),
+        let (fan_in, fan_out) = call_fan_counts(edges);
+        out.push(format!(
+            "summary: edges={} callers={} callees={}",
+            edges.len(),
+            fan_out.len(),
+            fan_in.len()
         ));
-        for (name, n) in notable(&fan_in) {
-            out.push((
-                Stream::Out,
-                format!("fan-in: {} callers={n}", field("subroutine", name)),
-            ));
+        for (name, n) in notable_callers(&fan_in) {
+            out.push(format!("fan-in: {} callers={n}", field("subroutine", name)));
         }
-        for (name, n) in notable(&fan_out) {
-            out.push((
-                Stream::Out,
-                format!("fan-out: {} calls={n}", field("rule", name)),
-            ));
+        for (name, n) in notable_callers(&fan_out) {
+            out.push(format!("fan-out: {} calls={n}", field("rule", name)));
         }
         for edge in edges {
-            out.push((
-                Stream::Out,
-                format!(
-                    "edge: {} {}",
-                    field("caller", edge_caller(edge)),
-                    field("callee", edge["callee"].as_str().unwrap_or("<unnamed>"))
-                ),
+            out.push(format!(
+                "edge: {} {}",
+                field("caller", edge_caller(edge)),
+                field("callee", edge["callee"].as_str().unwrap_or("<unnamed>"))
             ));
         }
         truncation_records(&self.0, "inspect callgraph", out);
@@ -1325,32 +1162,31 @@ impl PlainReport for CallGraphResult {
     }
 }
 
-fn notable<'a>(counts: &std::collections::BTreeMap<&'a str, usize>) -> Vec<(&'a str, usize)> {
-    let mut ranked: Vec<(&'a str, usize)> = counts.iter().map(|(name, n)| (*name, *n)).collect();
-    ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
-    ranked.retain(|(_, n)| *n > 1);
-    ranked
+fn by_code_counts(value: &Value) -> Option<std::collections::BTreeMap<String, usize>> {
+    value
+        .get("byCode")
+        .and_then(Value::as_object)
+        .map(|by_code| {
+            by_code
+                .iter()
+                .filter_map(|(code, n)| n.as_u64().map(|n| (code.clone(), n as usize)))
+                .collect()
+        })
 }
 
-fn selected_from_payload(value: &Value, noun: &str, shown: usize, out: &mut Vec<Line>) {
+fn selected_from_payload(value: &Value, noun: &str, shown: usize, out: &mut Vec<String>) {
     let selection = &value["selection"];
     let total = selection["total"].as_u64();
     let withheld = selection["withheld"].as_u64().unwrap_or(0);
     let Some(total) = total else { return };
     let mut fields = vec![format!("{noun}={shown}/{total}")];
-    if let Some(by_code) = selection.get("byCode").and_then(Value::as_object) {
-        let counts = by_code
-            .iter()
-            .filter_map(|(code, n)| n.as_u64().map(|n| (code.clone(), n as usize)))
-            .collect();
-        if let Some(field) = by_code_field(&counts) {
-            fields.push(field);
-        }
+    if let Some(field) = by_code_counts(selection).as_ref().and_then(by_code_field) {
+        fields.push(field);
     }
     if withheld > 0 {
         fields.push(format!("withheld={withheld}"));
     }
-    out.push((Stream::Out, format!("selected: {}", fields.join(" "))));
+    out.push(format!("selected: {}", fields.join(" ")));
 }
 
 impl PlainReport for CostResult {
@@ -1358,7 +1194,7 @@ impl PlainReport for CostResult {
         &self,
         _envelope: &Envelope<Self>,
         _ctx: &RenderContext<'_>,
-        out: &mut Vec<Line>,
+        out: &mut Vec<String>,
     ) {
         let result = &self.result;
         if let Some(rule) = result.get("rule").filter(|rule| rule.is_object()) {
@@ -1369,7 +1205,7 @@ impl PlainReport for CostResult {
             if let Some(at) = rule.get("span").and_then(at_field) {
                 fields.push(at);
             }
-            out.push((Stream::Out, format!("summary: {}", fields.join(" "))));
+            out.push(format!("summary: {}", fields.join(" ")));
             for statement in result["statements"].as_array().into_iter().flatten() {
                 let mut items = vec![
                     field("name", statement["name"].as_str().unwrap_or("?")),
@@ -1378,7 +1214,7 @@ impl PlainReport for CostResult {
                 if let Some(at) = statement.get("span").and_then(at_field) {
                     items.push(at);
                 }
-                out.push((Stream::Out, format!("statement: {}", items.join(" "))));
+                out.push(format!("statement: {}", items.join(" ")));
             }
             for entry in result["byNode"].as_array().into_iter().flatten() {
                 let occurrences = entry["occurrences"].as_u64().unwrap_or(1);
@@ -1389,7 +1225,7 @@ impl PlainReport for CostResult {
                 if occurrences > 1 {
                     items.push(format!("occurrences={occurrences}"));
                 }
-                out.push((Stream::Out, format!("byNode: {}", items.join(" "))));
+                out.push(format!("byNode: {}", items.join(" ")));
             }
             truncation_records(result, "inspect cost", out);
             return;
@@ -1411,15 +1247,12 @@ impl PlainReport for CostResult {
         if skipped > 0 {
             fields.push(format!("skipped={skipped}"));
         }
-        out.push((Stream::Out, format!("summary: {}", fields.join(" "))));
+        out.push(format!("summary: {}", fields.join(" ")));
         let elements = &result["elementCount"];
         if let Some(total) = elements["total"].as_u64() {
-            out.push((
-                Stream::Out,
-                format!(
-                    "cost: elements={total} budget={}",
-                    count(elements, "budget")
-                ),
+            out.push(format!(
+                "cost: elements={total} budget={}",
+                count(elements, "budget")
             ));
             for rule in elements["rules"].as_array().into_iter().flatten() {
                 let mut items = vec![
@@ -1430,19 +1263,16 @@ impl PlainReport for CostResult {
                 if let Some(at) = rule.get("span").and_then(at_field) {
                     items.push(at);
                 }
-                out.push((Stream::Out, format!("share: {}", items.join(" "))));
+                out.push(format!("share: {}", items.join(" ")));
             }
             if let Some(note) = elements["truncation"]["rules"].as_object() {
-                out.push((
-                    Stream::Out,
-                    truncated_record(
-                        &[(
-                            "rules",
-                            note["shown"].as_u64().unwrap_or(0) as usize,
-                            note["total"].as_u64().unwrap_or(0) as usize,
-                        )],
-                        "wright inspect cost --all",
-                    ),
+                out.push(truncated_record(
+                    &[(
+                        "rules",
+                        note["shown"].as_u64().unwrap_or(0) as usize,
+                        note["total"].as_u64().unwrap_or(0) as usize,
+                    )],
+                    "wright inspect cost --all",
                 ));
             }
         } else {
@@ -1460,7 +1290,7 @@ impl PlainReport for CostResult {
         let mut findings = result["findings"].as_array().cloned().unwrap_or_default();
         findings.sort_by_key(finding_severity_rank);
         for finding in &findings {
-            out.push((Stream::Out, finding_record(finding)));
+            out.push(finding_record(finding));
         }
         truncation_records(result, "inspect cost", out);
         if let Some(selection) = &self.selection {

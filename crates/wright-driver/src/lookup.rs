@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 use workshop_rs::catalog::{Catalog, Kind, Locale};
-use workshop_rs::lookup::{LookupMatch, SignatureParam};
+use workshop_rs::lookup::{LookupEnumMember, LookupMatch, SignatureParam};
 use workshop_rs::settings::{SettingDefinition, SettingValueDomain};
 #[cfg(not(target_arch = "wasm32"))]
 use wright_lpp::{Capability, LookupParams, LookupWithin};
@@ -60,14 +60,7 @@ pub(crate) fn lookup(
     {
         return refusal(
             "invalid-kind",
-            format!(
-                "kind must be one of {}; got '{kind}'",
-                KINDS
-                    .iter()
-                    .map(|kind| format!("'{kind}'"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
+            format!("kind must be one of {}; got '{kind}'", quoted_list(&KINDS)),
         );
     }
     match language {
@@ -77,6 +70,37 @@ pub(crate) fn lookup(
             "invalid-language",
             format!("lookup serves 'workshop' and 'opy'; got '{other}'"),
         ),
+    }
+}
+
+/// `'a', 'b', 'c'` — the kind list an `invalid-kind` refusal recites.
+pub(crate) fn quoted_list(kinds: &[&str]) -> String {
+    kinds
+        .iter()
+        .map(|kind| format!("'{kind}'"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Each member's display name, falling back to its canonical id.
+fn member_names(members: &[LookupEnumMember]) -> Vec<String> {
+    members
+        .iter()
+        .map(|member| {
+            member
+                .display_name
+                .clone()
+                .unwrap_or_else(|| member.id.clone())
+        })
+        .collect()
+}
+
+/// A declared `"null"` default is JSON `null`; any other default is text.
+fn default_json(default: &str) -> Value {
+    if default == "null" {
+        Value::Null
+    } else {
+        json!(default)
     }
 }
 
@@ -90,14 +114,19 @@ fn result(language: &str, owner: &str, entries: Vec<Value>) -> ToolResponse {
     }
 }
 
-fn unavailable(language: &str, owner: &str, message: impl Into<String>) -> ToolResponse {
+pub(crate) fn unavailable(
+    language: &str,
+    owner: &str,
+    capability: &str,
+    message: impl Into<String>,
+) -> ToolResponse {
     ToolResponse::Ok {
         result: json!({
             "language": language,
             "owner": owner,
             "entries": [],
             "unavailable": {
-                "capability": LOOKUP_CAPABILITY,
+                "capability": capability,
                 "message": message.into(),
             },
         }),
@@ -233,15 +262,7 @@ pub(crate) fn workshop_entry(
                 "displayName": display,
                 "enum": {
                     "domain": domain,
-                    "members": members
-                        .iter()
-                        .map(|member| {
-                            member
-                                .display_name
-                                .clone()
-                                .unwrap_or_else(|| member.id.clone())
-                        })
-                        .collect::<Vec<_>>(),
+                    "members": member_names(&members),
                 },
             })
         }
@@ -269,25 +290,12 @@ pub(crate) fn workshop_entry(
                 "required": required,
             });
             if let Some(default) = &param.default {
-                parameter["default"] = if default == "null" {
-                    Value::Null
-                } else {
-                    json!(default)
-                };
+                parameter["default"] = default_json(default);
             }
             if let Some(domain) = domain {
                 parameter["enum"] = json!({
                     "domain": domain.domain,
-                    "members": domain
-                        .members
-                        .iter()
-                        .map(|member| {
-                            member
-                                .display_name
-                                .clone()
-                                .unwrap_or_else(|| member.id.clone())
-                        })
-                        .collect::<Vec<_>>(),
+                    "members": member_names(&domain.members),
                 });
             }
             param_facts(&param, &mut parameter);
@@ -321,11 +329,7 @@ fn callable_facts(signature: &workshop_rs::lookup::Signature) -> Value {
                 "required": index < signature.required_params,
             });
             if let Some(default) = &param.default {
-                wire["default"] = if default == "null" {
-                    Value::Null
-                } else {
-                    json!(default)
-                };
+                wire["default"] = default_json(default);
             }
             if let Some(domain) = &param.domain {
                 wire["enum"] = json!({
@@ -334,18 +338,7 @@ fn callable_facts(signature: &workshop_rs::lookup::Signature) -> Value {
                         .domains
                         .iter()
                         .find(|known| &known.domain == domain)
-                        .map(|known| {
-                            known
-                                .members
-                                .iter()
-                                .map(|member| {
-                                    member
-                                        .display_name
-                                        .clone()
-                                        .unwrap_or_else(|| member.id.clone())
-                                })
-                                .collect::<Vec<_>>()
-                        })
+                        .map(|known| member_names(&known.members))
                         .unwrap_or_default(),
                 });
             }
@@ -511,6 +504,7 @@ fn opy_lookup(
     unavailable(
         "opy",
         OWNER_OPY,
+        LOOKUP_CAPABILITY,
         "the WebAssembly build carries no LPP provider transport for 'opy' lookups",
     )
 }
@@ -527,7 +521,7 @@ fn opy_lookup(
     let mut provider = match session.language_provider(opy_provider::OPY_LANGUAGE_ID) {
         Ok(provider) => provider,
         Err(error) => {
-            return unavailable("opy", OWNER_OPY, error.to_string());
+            return unavailable("opy", OWNER_OPY, LOOKUP_CAPABILITY, error.to_string());
         }
     };
     let client = wright_lpp::ClientInfo {
@@ -540,7 +534,7 @@ fn opy_lookup(
             let _ = provider.shutdown();
             return match error.code() {
                 "protocol-version-mismatch" | "capability-unavailable" => {
-                    unavailable("opy", OWNER_OPY, error.to_string())
+                    unavailable("opy", OWNER_OPY, LOOKUP_CAPABILITY, error.to_string())
                 }
                 _ => carried_refusal(error.code(), error.to_string()),
             };
@@ -551,6 +545,7 @@ fn opy_lookup(
         return unavailable(
             "opy",
             OWNER_OPY,
+            LOOKUP_CAPABILITY,
             "opy-rs negotiated an LPP session without the 'lookup' capability",
         );
     }
