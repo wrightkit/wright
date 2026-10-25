@@ -18,7 +18,7 @@ def required_jobs(workflow, paths):
         if name == "ci-result" or job.get("continue-on-error") is True:
             continue
         condition = job.get("if")
-        if name == "paths" and condition is None:
+        if condition is None:
             required[name] = True
             continue
         if not isinstance(condition, str):

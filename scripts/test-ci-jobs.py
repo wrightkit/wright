@@ -21,6 +21,7 @@ class JobCouplingTests(unittest.TestCase):
         self.assertFalse(required["cli-behavior"])
         self.assertNotIn("benchmark", required)
         self.assertNotIn("metrics-latency", required)
+        self.assertTrue(required["workflow-lint"])
 
     def test_missing_dependency_fails(self):
         self.workflow["jobs"]["ci-result"]["needs"].remove("cli-behavior")
