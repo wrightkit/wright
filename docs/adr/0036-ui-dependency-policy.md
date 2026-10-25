@@ -1,6 +1,6 @@
 # ADR-0036: `wright ui` dependency policy
 
-- Status: Accepted
+- Status: Superseded by [ADR-0037](0037-web-editor-experiment.md) (decision 5 carries the dependency policy to the `editor` repository; the paths this record links are retired)
 - Date: 2026-10-22
 - Related: [ADR-0032](0032-structured-editor-form-factor.md), [UI design](../ui/README.md)
 

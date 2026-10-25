@@ -47,8 +47,11 @@ Issue contract.
   corpus and committed baseline.
 - [Language services & LSP](language-services.md): editor-neutral language
   services and LSP framing.
-- [`wright ui` design](ui/README.md): the look and interaction of the
-  structured editor UI.
+- Structured editor: the experimental web application at
+  [web.wrightkit.dev](https://web.wrightkit.dev), built in the
+  `wrightkit/editor` repository over the WebAssembly Wright core
+  ([ADR-0037](adr/0037-web-editor-experiment.md)); its design
+  documentation lives there.
 - [Integration verification](compatibility.md): owner boundaries and
   Wright-owned tests.
 - [Licensing/provenance boundary](licensing.md): third-party reference and

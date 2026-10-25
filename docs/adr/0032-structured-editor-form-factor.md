@@ -1,6 +1,6 @@
 # ADR-0032: The structured Workshop editor: form factor, ownership, and stack
 
-- Status: Accepted
+- Status: Partially Superseded by [ADR-0037](0037-web-editor-experiment.md) (decisions 1, 4, 5, 6, and 9)
 - Date: 2026-10-19
 - Related: [ADR-0020](0020-native-agent-tool-adapter.md), [ADR-0022](0022-shared-surface-for-semantic-queries.md), [ADR-0024](0024-structured-rule-content.md), [ADR-0029](0029-structured-statement-edits.md), [ADR-0031](0031-paginated-vocabulary-listing.md), [Agent contract](../agent-contract.md)
 

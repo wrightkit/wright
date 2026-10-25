@@ -8,7 +8,6 @@ mod plain;
 mod present;
 mod serve;
 mod tooldefs;
-mod ui;
 mod update;
 mod usage_hint;
 
@@ -86,7 +85,6 @@ fn main() -> ExitCode {
         Some(Command::SemanticCompare(args)) => run_semantic_compare(args),
         Some(Command::Lookup(args)) => run_lookup(&args),
         Some(Command::Serve(args)) => serve::run(args),
-        Some(Command::Ui(args)) => ui::run(args),
         Some(Command::Completion(args)) => match args.subcommand {
             Some(cli::CompletionSubcommand::Install(install_args)) => {
                 match completion::run_install(&install_args, args.shell) {
@@ -362,7 +360,6 @@ fn run_workflow(command: Command) -> ExitCode {
         | Command::Update(_)
         | Command::Agent(_)
         | Command::Serve(_)
-        | Command::Ui(_)
         | Command::Lookup(_)
         | Command::SemanticCompare(_) => {
             unreachable!("non-workflow command handled before run_workflow")
