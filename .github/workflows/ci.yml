@@ -16,9 +16,6 @@ jobs:
     timeout-minutes: 5
     outputs:
       rust_core: ${{ steps.filter.outputs.rust_core }}
-      opy: ${{ steps.filter.outputs.rust_core }}
-      lpp: ${{ steps.filter.outputs.rust_core }}
-      cli: ${{ steps.filter.outputs.rust_core }}
       dist: ${{ steps.filter.outputs.dist }}
       agent_guide: ${{ steps.filter.outputs.agent_guide }}
     steps:
@@ -104,7 +101,7 @@ jobs:
   wright-cli-build:
     name: Build CLI
     needs: [paths]
-    if: needs.paths.outputs.opy == 'true' || needs.paths.outputs.cli == 'true'
+    if: needs.paths.outputs.rust_core == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -236,7 +233,7 @@ jobs:
   opy-integration:
     name: Product integration
     needs: [paths, wright-cli-build]
-    if: needs.paths.outputs.opy == 'true'
+    if: needs.paths.outputs.rust_core == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -280,7 +277,7 @@ jobs:
   lpp-integration:
     name: LPP integration
     needs: [paths]
-    if: needs.paths.outputs.lpp == 'true'
+    if: needs.paths.outputs.rust_core == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -320,17 +317,12 @@ jobs:
   cli-behavior:
     name: CLI behavior
     needs: [paths, wright-cli-build]
-    if: needs.paths.outputs.cli == 'true'
+    if: needs.paths.outputs.rust_core == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-
-      - name: Set up Rust
-        uses: wrightkit/.github/.github/actions/setup-rust@main
-        with:
-          toolchain: 1.97.1
 
       - name: Download CLI artifact
         uses: actions/download-artifact@v8
@@ -348,7 +340,7 @@ jobs:
     name: Benchmarks
     continue-on-error: true
     needs: [paths]
-    if: needs.paths.outputs.opy == 'true'
+    if: needs.paths.outputs.rust_core == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -378,7 +370,7 @@ jobs:
   metrics-shard:
     name: Metrics shard (${{ matrix.project }})
     needs: [paths, wright-cli-build]
-    if: needs.paths.outputs.opy == 'true'
+    if: needs.paths.outputs.rust_core == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -424,7 +416,7 @@ jobs:
   metrics-drift:
     name: Metrics drift
     needs: [paths, metrics-shard]
-    if: needs.paths.outputs.opy == 'true'
+    if: needs.paths.outputs.rust_core == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -448,7 +440,7 @@ jobs:
   metrics-latency:
     name: Metrics latency (trend)
     needs: [paths, wright-cli-build]
-    if: github.event_name == 'push' && needs.paths.outputs.opy == 'true'
+    if: github.event_name == 'push' && needs.paths.outputs.rust_core == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     continue-on-error: true
@@ -611,7 +603,6 @@ jobs:
         uses: wrightkit/.github/.github/actions/setup-rust@main
         with:
           toolchain: 1.97.1
-          cache-shared-key: linux-wasm-stable-release
 
       - name: Set up Node
         uses: actions/setup-node@v7

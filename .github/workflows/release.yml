@@ -197,9 +197,6 @@ jobs:
         with:
           toolchain: 1.97.1
           targets: ${{ matrix.target }}
-          cache-shared-key: release-${{ matrix.target }}-stable-release
-          cache-targets: false
-          cache-save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build release binaries
         run: >-
@@ -262,9 +259,6 @@ jobs:
         with:
           toolchain: 1.97.1
           targets: wasm32-unknown-unknown
-          cache-shared-key: release-wasm-core
-          cache-targets: false
-          cache-save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install release tooling dependencies
         run: npm ci --prefix scripts
@@ -304,10 +298,15 @@ jobs:
       RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.release-identity.outputs.commit }}
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-identity.outputs.commit }}
+
       - name: Download target artifacts
         uses: actions/download-artifact@v8
         with:
-          pattern: wright-*
+          pattern: wright-*-*-*
           path: release
           merge-multiple: true
 
@@ -315,6 +314,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          expected_toolchain="$(awk -F'"' '/^channel/ {print $2}' rust-toolchain.toml)"
           mkdir verified
           for spec in \
             x86_64-unknown-linux-gnu:tar.gz \
@@ -335,10 +335,11 @@ jobs:
               --arg revision "$RELEASE_COMMIT" \
               --arg tag "$RELEASE_TAG" \
               --arg target "$target" \
+              --arg expected_toolchain "$expected_toolchain" \
               '.revision == $revision and
                .tag == $tag and
                .target == $target and
-               .toolchain == "stable" and
+               .toolchain == $expected_toolchain and
                .profile == "release" and
                .packages == ["wright-cli", "wright-lsp"] and
                .features == []' "$identity" >/dev/null
@@ -409,7 +410,9 @@ jobs:
         uses: wrightkit/.github/.github/actions/setup-rust@main
         with:
           toolchain: 1.97.1
-          cache-shared-key: release-metrics-stable
+      # Deliberate distinct identity: the metrics CLI needs plain wright-cli
+      # while `build` ships --features wright-cli/ui — a different binary, so
+      # this job keeps its own release build.
       - name: Build wright
         run: cargo build --locked --release -p wright-cli
       - name: Install OPY provider

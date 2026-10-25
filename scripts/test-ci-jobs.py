@@ -33,14 +33,14 @@ class JobCouplingTests(unittest.TestCase):
             ci_jobs.required_jobs(self.workflow, {})
 
     def test_required_when_uses_the_actual_job_condition(self):
-        self.workflow["jobs"]["cli-behavior"]["if"] = "needs.paths.outputs.cli == 'true'"
-        required = ci_jobs.required_jobs(self.workflow, {"cli": "true", "cli-behavior": "false"})
+        self.workflow["jobs"]["cli-behavior"]["if"] = "needs.paths.outputs.rust_core == 'true'"
+        required = ci_jobs.required_jobs(self.workflow, {"rust_core": "true", "cli-behavior": "false"})
         self.assertTrue(required["cli-behavior"])
 
-    def test_any_build_filter_selects_the_build(self):
-        for paths in ({"opy": "true"}, {"cli": "true"}):
-            with self.subTest(paths=paths):
-                self.assertTrue(ci_jobs.required_jobs(self.workflow, paths)["wright-cli-build"])
+    def test_rust_core_filter_selects_the_build(self):
+        self.assertTrue(
+            ci_jobs.required_jobs(self.workflow, {"rust_core": "true"})["wright-cli-build"]
+        )
 
     def test_new_gating_job_requires_a_dependency(self):
         self.workflow["jobs"]["new-job"] = copy.deepcopy(self.workflow["jobs"]["cli-behavior"])
