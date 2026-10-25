@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.39.0](https://github.com/wrightkit/wright/compare/v0.38.1...v0.39.0) (2026-10-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* retire wright ui ([#982](https://github.com/wrightkit/wright/issues/982))
+
+### Features
+
+* retire wright ui ([#982](https://github.com/wrightkit/wright/issues/982)) ([b04229b](https://github.com/wrightkit/wright/commit/b04229b1ee4cb71ec9cf59992fbf7aa0806168e8))
+
+
+### Bug Fixes
+
+* **cli:** resolve usage-hint subject via the clap error context ([#983](https://github.com/wrightkit/wright/issues/983)) ([6c6e7b2](https://github.com/wrightkit/wright/commit/6c6e7b2de3701774f678726e0b49e863de59269e)), closes [#905](https://github.com/wrightkit/wright/issues/905)
+
 ## [0.38.1](https://github.com/wrightkit/wright/compare/v0.38.0...v0.38.1) (2026-10-24)
 
 
