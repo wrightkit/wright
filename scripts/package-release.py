@@ -90,11 +90,15 @@ def main() -> int:
 
     checksum = archive.with_name(f"{archive.name}.sha256")
     checksum.write_text(f"{digest(archive)}  {archive.name}\n")
+    toolchain_toml = (ROOT / "rust-toolchain.toml").read_text()
+    channel = re.search(r'(?m)^channel\s*=\s*"([^"]+)"', toolchain_toml)
+    if channel is None:
+        raise SystemExit("rust-toolchain.toml has no channel pin to record")
     identity = {
         "revision": args.commit,
         "tag": args.tag or f"v{version}",
         "target": args.target,
-        "toolchain": "stable",
+        "toolchain": channel.group(1),
         "profile": "release",
         "packages": ["wright-cli", "wright-lsp"],
         "features": args.features.split(),

@@ -129,6 +129,13 @@ if (pack.status !== 0) process.exit(pack.status ?? 1)
 const tarball = join(outDir, `wrightkit-core-${version}.tgz`)
 const hash = createHash('sha256').update(readFileSync(tarball)).digest('hex')
 writeFileSync(`${tarball}.sha256`, `${hash}  ${basename(tarball)}\n`)
+const toolchain = readFileSync(join(repoRoot, 'rust-toolchain.toml'), 'utf8').match(
+  /^channel\s*=\s*"([^"]+)"/m,
+)?.[1]
+if (!toolchain) {
+  console.error('rust-toolchain.toml has no channel pin to record')
+  process.exit(2)
+}
 writeFileSync(
   `${tarball}.build.json`,
   `${JSON.stringify({
@@ -137,7 +144,7 @@ writeFileSync(
     version,
     agent_contract: contract,
     target: 'wasm32-unknown-unknown',
-    toolchain: 'stable',
+    toolchain,
     profile: 'release',
     packages: ['wright-wasm'],
   })}\n`,
