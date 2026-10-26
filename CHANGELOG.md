@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.1](https://github.com/wrightkit/wright/compare/v0.39.0...v0.39.1) (2026-10-26)
+
+
+### Dependencies
+
+* bump athena-sim to v0.5.0 and expose the trace timeline ([#994](https://github.com/wrightkit/wright/issues/994)) ([3d295be](https://github.com/wrightkit/wright/commit/3d295bedd9b96529290e2a389859b2f6049ecb65)), closes [#993](https://github.com/wrightkit/wright/issues/993)
+
 ## [0.39.0](https://github.com/wrightkit/wright/compare/v0.38.1...v0.39.0) (2026-10-25)
 
 
