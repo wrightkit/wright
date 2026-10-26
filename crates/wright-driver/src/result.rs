@@ -191,8 +191,8 @@ pub struct InspectResult {
 }
 
 /// The `simulate` result payload (ADR-0033): the `athena` trace, serialized
-/// unchanged — `outcome`, `logs`, `globals`, `players`, `hud`,
-/// `missingInputs`, and `expectations` are `athena`'s contract
+/// unchanged — `outcome`, `logs`, `globals`, `players`, `hud`, `effects`,
+/// `timeline`, `missingInputs`, and `expectations` are `athena`'s contract
 /// (`athena`'s `docs/simulator-interface.md`), versioned there, so Wright
 /// carries the typed value rather than re-describing its members.
 #[derive(Debug, Clone, Serialize)]
