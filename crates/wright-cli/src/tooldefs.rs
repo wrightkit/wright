@@ -203,7 +203,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         drop_fields: &["sources"],
         mcp: true,
         description: "Simulate the loaded project under `athena` (ADR-0033): send `seconds` for a scenario-free run or an `athena` `scenario` (which owns the simulated time) — never both. `inputIdentity` must be the current `project` identity; a stale one refuses `edit-stale-source`. The loaded program's canonical Workshop text runs — for a source-language project that is the provider-compiled Workshop output.",
-        result: "the wright-result/v1 simulate envelope carrying the unchanged `athena` trace — `outcome` (`complete`, `not_modeled` with `construct`/`tick`, or `missing_input`), `logs`, `globals`, `players`, `hud`, `missingInputs`, `expectations`",
+        result: "the wright-result/v1 simulate envelope carrying the unchanged `athena` trace — `outcome` (`complete`, `not_modeled` with `construct`/`tick`, or `missing_input`), `logs`, `globals`, `players`, `hud`, `effects`, `timeline`, `missingInputs`, `expectations`",
     },
 ];
 

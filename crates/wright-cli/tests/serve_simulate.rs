@@ -130,7 +130,7 @@ fn jsonrpc_serves_simulate_and_reports_the_athena_version() {
     assert_eq!(trace["globals"]["score"]["value"], json!(2.0));
 
     let caps = run_lines("stdio", &input, &[r#"{"op":"capabilities"}"#]);
-    assert_eq!(caps[0]["result"]["athena_version"], json!("0.2.0"));
+    assert_eq!(caps[0]["result"]["athena_version"], json!("0.5.0"));
 }
 
 #[test]

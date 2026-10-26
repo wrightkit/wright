@@ -46,11 +46,13 @@ the state tables:
 - `{"status": "missing_input"}` — the run stopped at a live input the
   scenario did not supply; `missingInputs` names it.
 
-`logs`, `globals`, `players`, and `hud` describe the state when the run
-ended; `missingInputs` and `expectations` report scenario facts. A result
-with unmodeled behavior or missing inputs is result content — the verdict
-wording belongs to the presentation contract and `simulate` never presents
-it as verified.
+`logs`, `globals`, `players`, `hud`, and `effects` describe the state when
+the run ended; `timeline` records the activity of every tick that had any —
+one `entries` element per tick, `{tick, time, rules, changes}`, with
+`truncated` set once `athena`'s bounds dropped records; `missingInputs` and
+`expectations` report scenario facts. A result with unmodeled behavior or
+missing inputs is result content — the verdict wording belongs to the
+presentation contract and `simulate` never presents it as verified.
 
 ## Refusals
 

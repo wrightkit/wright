@@ -1,0 +1,15 @@
+variables {
+	global:
+		0: score
+}
+
+rule ("two writes with a wait") {
+	event {
+		Ongoing - Global;
+	}
+	actions {
+		Set Global Variable(score, 1);
+		Wait(0.1, Ignore Condition);
+		Set Global Variable(score, 2);
+	}
+}

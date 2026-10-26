@@ -62,11 +62,54 @@ fn simulate_seconds_returns_the_athena_trace() {
         "globals",
         "players",
         "hud",
+        "effects",
+        "timeline",
         "missingInputs",
         "expectations",
     ] {
         assert!(trace.get(field).is_some(), "trace omits {field}: {trace}");
     }
+}
+
+#[test]
+fn simulate_returns_the_timeline_entries_unchanged() {
+    // `athena#48` / #993: two writes separated by a `Wait` land as timeline
+    // changes and cross the envelope unchanged (ADR-0033).
+    let path = fixture("athena/timeline-writes.ow");
+    let (mut session, identity) = service(&path);
+    let mut service = ToolService::new(&mut session).unwrap();
+    let ToolResponse::Ok { result } = service.handle(&request(&identity, json!({"seconds": 1.0})))
+    else {
+        panic!("simulate refused a scenario-free run")
+    };
+    let trace = trace_of(&result);
+    assert_eq!(trace["outcome"]["status"], json!("complete"));
+    let timeline = &trace["timeline"];
+    assert_eq!(timeline["truncated"], json!(false));
+    let entries = timeline["entries"].as_array().unwrap();
+    assert!(!entries.is_empty(), "the run had activity");
+    let writes: Vec<&Value> = entries
+        .iter()
+        .flat_map(|entry| entry["changes"].as_array().unwrap().iter())
+        .filter(|change| change["kind"] == "globalVariable" && change["name"] == "score")
+        .collect();
+    assert_eq!(
+        writes.len(),
+        2,
+        "both writes land in the timeline: {entries:?}"
+    );
+    assert_eq!(writes[0]["new"]["value"], json!(1.0));
+    assert_eq!(writes[1]["new"]["value"], json!(2.0));
+    let direct = athena_sim::run_text(
+        &std::fs::read_to_string(&path).unwrap(),
+        athena_sim::Options { seconds: 1.0 },
+    )
+    .expect("athena accepts the fixture text");
+    assert_eq!(
+        *trace,
+        serde_json::to_value(&direct).unwrap(),
+        "the trace crosses the boundary unchanged"
+    );
 }
 
 #[test]
@@ -522,16 +565,41 @@ fn probe_p3_same_tick_rule_order_driver_last_matches_recorded_captures() {
 }
 
 #[test]
-fn probe_p4_wait_until_is_reported_not_modeled() {
+fn probe_p4_wait_until_matches_recorded_capture() {
+    // `athena` ≥ v0.5.0 models `Wait Until` — the probe's `capture.json`
+    // pins the client's elapsed times: 0, 16, 32, 112 ms.
     let path = fixture("athena/probes/p4-wait-until-zero-tick/probe.workshop");
     let (mut session, identity) = service(&path);
     let mut service = ToolService::new(&mut session).unwrap();
     let ToolResponse::Ok { result } =
         service.handle(&request(&identity, json!({"seconds": RUN_SECONDS})))
     else {
-        panic!("not_modeled is trace content, not a refusal")
+        panic!("simulate refused")
     };
-    let outcome = &trace_of(&result)["outcome"];
-    assert_eq!(outcome["status"], json!("not_modeled"));
-    assert_eq!(outcome["construct"], json!("action waitUntil"));
+    let trace = trace_of(&result);
+    assert_eq!(trace["outcome"]["status"], json!("complete"));
+    let logs: Vec<&str> = trace["logs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(logs.len(), 4, "{logs:?}");
+    for (log, (case, expected_ms)) in logs.iter().zip(
+        ["P4a", "P4b", "P4c", "P4d"]
+            .into_iter()
+            .zip([0.0, 16.0, 32.0, 112.0]),
+    ) {
+        assert!(log.starts_with(case), "{log}");
+        let elapsed: f64 = log
+            .split("elapsed_ms=")
+            .nth(1)
+            .and_then(|rest| {
+                rest.split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+                    .next()
+            })
+            .and_then(|num| num.parse().ok())
+            .unwrap_or_else(|| panic!("no elapsed_ms in {log}"));
+        assert!((elapsed - expected_ms).abs() <= LOG_TOLERANCE, "{log}");
+    }
 }

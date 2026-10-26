@@ -119,8 +119,15 @@ await parity('capabilities', { op: 'capabilities' })
 
 // simulate — bare seconds and the practice-range scenario fixture
 const identity = project.result.inputIdentity
-await parity('simulate (seconds)', { op: 'simulate', inputIdentity: identity, seconds: 1 })
-await parity('simulate (scenario)', { op: 'simulate', inputIdentity: identity, scenario: SCENARIO })
+const simSeconds = await parity('simulate (seconds)', { op: 'simulate', inputIdentity: identity, seconds: 1 })
+const simScenario = await parity('simulate (scenario)', { op: 'simulate', inputIdentity: identity, scenario: SCENARIO })
+check('simulate carries the athena timeline in the wasm build (#993)', () => {
+  for (const body of [simSeconds, simScenario]) {
+    const timeline = body.result.result.trace.timeline
+    assert.ok(timeline && Array.isArray(timeline.entries), 'timeline.entries missing')
+  }
+  assert.ok(simScenario.result.result.trace.timeline.entries.length > 0, 'the scenario run had activity')
+})
 
 // ---------------------------------------------------------------- //
 // Section 2 — ADR-0037 host write path: editStatements → apply →     //

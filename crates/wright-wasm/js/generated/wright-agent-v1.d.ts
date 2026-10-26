@@ -1333,7 +1333,7 @@ export interface SimulatePayload {
   [k: string]: unknown
 }
 /**
- * The unchanged `athena` trace (ADR-0033). `athena` owns this contract — see `athena`'s simulator-interface document — and evolves it under its own versioning; Wright does not reinterpret or reorder it. `outcome` says how the run ended; `logs`, `globals`, `players`, and `hud` describe the state when the run ended and must be read only after checking `outcome.status`. `missingInputs` lists the live inputs a scenario did not supply; `expectations` reports one result per scenario expectation.
+ * The unchanged `athena` trace (ADR-0033). `athena` owns this contract — see `athena`'s simulator-interface document — and evolves it under its own versioning; Wright does not reinterpret or reorder it. `outcome` says how the run ended; `logs`, `globals`, `players`, `hud`, and `effects` describe the state when the run ended and must be read only after checking `outcome.status`. `timeline` records the activity of every tick that had any. `missingInputs` lists the live inputs a scenario did not supply; `expectations` reports one result per scenario expectation.
  *
  * This interface was referenced by `WrightAgentContractV1`'s JSON-Schema
  * via the `definition` "AthenaTrace".
@@ -1356,6 +1356,18 @@ export interface AthenaTrace {
     [k: string]: unknown
   }
   hud: unknown[]
+  /**
+   * The effect entities the run created or played, in creation order.
+   */
+  effects: unknown[]
+  /**
+   * The per-tick timeline: one `entries` element per tick that had activity — `{tick, time, rules, changes}` — in order; ticks without activity are omitted. `athena` bounds it (10 000 entries; 100 000 `rules` and 100 000 `changes` across all entries) and sets `truncated` once a bound dropped records.
+   */
+  timeline: {
+    entries: unknown[]
+    truncated: boolean
+    [k: string]: unknown
+  }
   missingInputs: unknown[]
   expectations: unknown[]
   [k: string]: unknown
