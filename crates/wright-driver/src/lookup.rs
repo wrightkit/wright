@@ -133,6 +133,43 @@ pub(crate) fn unavailable(
     }
 }
 
+/// The exit class the `lookup` surface gives a provider failure
+/// (#1003), classified from the typed error so the exits this surface
+/// published before classes were typed stay unchanged: the LPP
+/// `invalid-*` kinds stay usage (main mapped their `invalid-*` codes to
+/// USAGE), and an unrecognized LPP kind (`lpp-error`) plus the
+/// session-state failures (`provider-not-initialized`,
+/// `provider-already-initialized`, `provider-shutdown`) stay source
+/// errors (their codes took main's non-`invalid-` arm). Everything
+/// else — `provider-refusal-*`, `project-load-failed`,
+/// `capability-unavailable`, the transport failures — keeps the shared
+/// provider classification, which already agrees with those exits.
+#[cfg(not(target_arch = "wasm32"))]
+fn lookup_failure_class(error: &wright_lpp::ProviderError) -> crate::diag::ExitClass {
+    use crate::diag::ExitClass;
+    if let wright_lpp::ProviderError::Lpp(lpp) = error {
+        match &lpp.kind {
+            wright_lpp::LppErrorKind::InvalidRequest
+            | wright_lpp::LppErrorKind::InvalidLanguage
+            | wright_lpp::LppErrorKind::InvalidDocument
+            | wright_lpp::LppErrorKind::InvalidEntry
+            | wright_lpp::LppErrorKind::InvalidPosition
+            | wright_lpp::LppErrorKind::InvalidArtifact => return ExitClass::Usage,
+            wright_lpp::LppErrorKind::Unknown(_) => return ExitClass::SourceError,
+            _ => {}
+        }
+    }
+    if matches!(
+        error,
+        wright_lpp::ProviderError::NotInitialized { .. }
+            | wright_lpp::ProviderError::AlreadyInitialized
+            | wright_lpp::ProviderError::ShutDown { .. }
+    ) {
+        return ExitClass::SourceError;
+    }
+    crate::source_provider::provider_failure_class(error)
+}
+
 fn workshop_lookup(
     session: &CompilerSession,
     query: Option<&str>,
@@ -560,7 +597,7 @@ fn opy_lookup(
                     crate::source_provider::provider_failure_code(&error),
                     error.to_string(),
                 )
-                .with_class(crate::source_provider::provider_failure_class(&error)),
+                .with_class(lookup_failure_class(&error)),
             };
         }
     };
@@ -615,7 +652,7 @@ fn opy_lookup(
                     error.refusal_code().unwrap_or_else(|| error.code()),
                     error.to_string(),
                 )
-                .with_class(crate::source_provider::provider_failure_class(&error)),
+                .with_class(lookup_failure_class(&error)),
             };
         }
     };
@@ -746,3 +783,6 @@ fn lpp_default_text(value: &Value) -> String {
         other => other.to_string(),
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests;
