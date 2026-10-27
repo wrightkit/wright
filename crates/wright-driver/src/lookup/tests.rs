@@ -19,6 +19,19 @@ fn provider_failures_keep_their_lookup_exit_class() {
         (lpp(LppErrorKind::InvalidEntry), ExitClass::Usage, 2),
         (lpp(LppErrorKind::InvalidPosition), ExitClass::Usage, 2),
         (lpp(LppErrorKind::InvalidArtifact), ExitClass::Usage, 2),
+        // usage — a refusal whose carried `refusalCode` is `invalid-*`
+        // takes main's `invalid-` arm too (the selector is a
+        // user-supplied argument, so `invalid-selection` is USAGE on
+        // every path)
+        (
+            ProviderError::lpp(
+                LppErrorKind::Refusal,
+                serde_json::json!({"refusalCode": "invalid-selection"}),
+                "m",
+            ),
+            ExitClass::Usage,
+            2,
+        ),
         // source/user error — non-`invalid-` codes carried at exit 1;
         // every unknown LPP kind reports the `lpp-error` code
         (

@@ -135,10 +135,13 @@ pub(crate) fn unavailable(
 
 /// The exit class the `lookup` surface gives a provider failure
 /// (#1003), classified from the typed error so the exits this surface
-/// published before classes were typed stay unchanged: the LPP
-/// `invalid-*` kinds stay usage (main mapped their `invalid-*` codes to
-/// USAGE), and an unrecognized LPP kind (`lpp-error`) plus the
-/// session-state failures (`provider-not-initialized`,
+/// published before classes were typed stay unchanged: main mapped the
+/// *carried* code — `refusalCode` when the refusal carries one,
+/// otherwise the error's own code — so an `invalid-*` carried code
+/// stays usage whether it names an LPP `invalid-*` kind or a provider
+/// refusal code such as `invalid-selection` (the selector is a
+/// user-supplied argument). An unrecognized LPP kind (`lpp-error`) plus
+/// the session-state failures (`provider-not-initialized`,
 /// `provider-already-initialized`, `provider-shutdown`) stay source
 /// errors (their codes took main's non-`invalid-` arm). Everything
 /// else — `provider-refusal-*`, `project-load-failed`,
@@ -147,17 +150,17 @@ pub(crate) fn unavailable(
 #[cfg(not(target_arch = "wasm32"))]
 fn lookup_failure_class(error: &wright_lpp::ProviderError) -> crate::diag::ExitClass {
     use crate::diag::ExitClass;
-    if let wright_lpp::ProviderError::Lpp(lpp) = error {
-        match &lpp.kind {
-            wright_lpp::LppErrorKind::InvalidRequest
-            | wright_lpp::LppErrorKind::InvalidLanguage
-            | wright_lpp::LppErrorKind::InvalidDocument
-            | wright_lpp::LppErrorKind::InvalidEntry
-            | wright_lpp::LppErrorKind::InvalidPosition
-            | wright_lpp::LppErrorKind::InvalidArtifact => return ExitClass::Usage,
-            wright_lpp::LppErrorKind::Unknown(_) => return ExitClass::SourceError,
-            _ => {}
-        }
+    if error
+        .refusal_code()
+        .unwrap_or_else(|| error.code())
+        .starts_with("invalid-")
+    {
+        return ExitClass::Usage;
+    }
+    if let wright_lpp::ProviderError::Lpp(lpp) = error
+        && let wright_lpp::LppErrorKind::Unknown(_) = lpp.kind
+    {
+        return ExitClass::SourceError;
     }
     if matches!(
         error,
