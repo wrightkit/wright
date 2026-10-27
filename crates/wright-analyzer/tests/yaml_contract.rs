@@ -632,20 +632,25 @@ fn spans_by_code(
     native: &str,
     declarative: &str,
 ) -> (BTreeSet<String>, BTreeSet<String>) {
-    let key = |span: Option<workshop_rs::source::Span>| {
-        span.map(|span| format!("{:?}-{:?}", span.start, span.end))
-            .unwrap_or_else(|| "none".to_string())
+    // `action` is part of the machine-readable payload (`wright inspect
+    // cost`), so parity covers the addressed node as well as the span.
+    let key = |finding: &wright_analyzer::canonical::Finding| {
+        let span = finding
+            .span
+            .map(|span| format!("{:?}-{:?}", span.start, span.end))
+            .unwrap_or_else(|| "none".to_string());
+        format!("{span}@{:?}", finding.action)
     };
     (
         findings
             .iter()
             .filter(|finding| finding.code == native)
-            .map(|finding| key(finding.span))
+            .map(&key)
             .collect(),
         findings
             .iter()
             .filter(|finding| finding.code == declarative)
-            .map(|finding| key(finding.span))
+            .map(&key)
             .collect(),
     )
 }

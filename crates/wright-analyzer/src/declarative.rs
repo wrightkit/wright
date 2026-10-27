@@ -254,7 +254,12 @@ impl DeclarativeRule {
             match self.report {
                 ReportMode::EachMatch => {
                     for (span, value_id, owner_action) in matches {
-                        findings.push(self.finding(matched, span, rule, owner_action, value_id));
+                        // The native loop rules address the scope anchor
+                        // (the loop), not the statement owning the matched
+                        // value; a `rule` scope has no anchor, so it keeps
+                        // the owning statement (`nested-binder-lambda`).
+                        let action = anchor_action.or(owner_action);
+                        findings.push(self.finding(matched, span, rule, action, value_id));
                     }
                 }
                 ReportMode::Scope => {
