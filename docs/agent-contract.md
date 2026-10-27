@@ -54,7 +54,7 @@ error (exit 2), never a silently remapped default:
 A configured session example: `wright serve --lint-config policy.yaml
 --disable-rule repeated-value project.ws` serves `lint`/`lintRules`
 results under `policy.yaml` plus the disabled rule, reporting the same
-effective policy the equivalent `wright lint` invocation prints.
+effective policy `wright lint` prints.
 
 Stdio returns one `ToolResponse` per request. A successful response has a
 `result` member; an application-level refusal has an `error` member containing
@@ -248,16 +248,15 @@ in the next `symbols`, `references`, `check`, `lint`, or other
 program-reading request without restarting the session. An unchanged input
 is never reloaded.
 
-A load or reload that fails, whether from a missing or unreadable entry or
-a source that does not parse, refuses the request with the loader's structured
+A load or reload that fails — a missing or unreadable entry, or a source
+that does not parse — refuses the request with the loader's structured
 diagnostic code (`input-io`, `parse-error`, `input-kind-ambiguous`, a
 provider diagnostic). The service keeps refusing until the project loads
 again, retrying on every program-reading request; the previously loaded
-program is never served silently, and the service never substitutes an
-empty or placeholder program. The failed attempt invalidates the served
-snapshot: even restoring the input to byte-identical content loads a fresh
-program rather than resurrecting the dropped one. Repairing the input
-recovers the same running session, with no restart and no explicit reload
+program is never served silently and is never replaced by an empty or
+placeholder program. The failed attempt invalidates the served snapshot:
+even restoring byte-identical input loads a fresh program rather than
+resurrecting the dropped one; repair needs no restart or explicit reload
 request.
 
 `check` and `compile` are workflows rather than snapshot queries (#591):
@@ -295,15 +294,15 @@ generation they belong to in a `snapshot` member: `symbols`, `rules`,
 all carry it (on the `wright-result/v1` envelope for `inspect`/`analyze`,
 in the result object elsewhere). A request that addresses a symbol or rule
 numerically must echo that value: `references` and `usage` require
-`snapshot` when `symbol` is an integer, `cfg` and `rules` when `rule` is an
-integer, and `references` requires it when its `rule` filter is an integer
-too — every numeric address a request carries is checked (#592). A numeric
-address without `snapshot`, or with a generation other than the served
-one, is refused `stale-id`; the client re-issues the id from a current
-response's `snapshot` and id members, or addresses by declared name.
-Listing `symbols` or `rules` has no side effect on id validity — a
-`symbols {max: 0}` response still reports `snapshot`, and it is the value,
-not the act of listing, that scopes the ids it reports.
+`snapshot` when `symbol` is an integer, `cfg` and `rules` when `rule` is
+an integer, and `references` when its `rule` filter is an integer too —
+every numeric address is checked (#592). A numeric address without
+`snapshot`, or with another generation, is refused `stale-id`; the
+client re-issues the id from a current response's `snapshot` and id
+members, or addresses by declared name. Listing `symbols` or `rules`
+has no side effect on id validity — a `symbols {max: 0}` response still
+reports `snapshot`, and it is the value, not the act of listing, that
+scopes the ids it reports.
 
 `snapshot` is ignored when every address in the request is a declared
 name: name addressing resolves against the current program in both states
@@ -322,13 +321,11 @@ The responses that issue numeric ids or indexes into the loaded program are
 `references`, `findings`, `lint`, `persistentObjects`, `inspect`, `analyze`,
 `project`, `costEstimate`, and the `ambiguous-*` refusal candidates, plus
 `skipped[].rule` in `lint` and `lintRules`. `cfg` block ids are local to
-that one response and are not
-program addresses; `callGraph`, `targetMetadata`,
+that response, not program addresses; `callGraph`, `targetMetadata`,
 `capabilities`, the `compile`/`check` envelopes, and the edit/provider
-payloads issue no program ids. Positional fields such as `rule`, `action`,
-`value`, and `span.file` inside findings and references are coordinates into
-the current program rather than reusable addresses, but they are always
-computed from the program that was live at request time.
+payloads issue none. Positional fields such as `rule`, `action`, `value`,
+and `span.file` inside findings and references are coordinates into the
+current program, always computed from the program live at request time.
 
 ### Name and address grammar (#429, ADR-0035)
 
@@ -383,6 +380,13 @@ and `costEstimate` add a `selection` member to their existing result objects.
 capped result still reports every code's real count (#791). Requests without
 selection fields receive the previous shapes unchanged.
 
+### Error-severity lint policy (#1010)
+
+Any `error`-severity finding yields `ok: false` and `exit: 1`. Lint
+correctness is not guaranteed, so `error` is reserved for confirmed
+defects — only `runtime-validated` rules may emit it. The audit (none)
+and enforcement are in [cli/lint.md](cli/lint.md).
+
 ### Rule content (ADR-0024)
 
 `rules` with `"content": true` adds the owner's
@@ -433,10 +437,13 @@ that matches nothing in the loaded program, is a structured
   `ambiguous-rule`, never merged), `callee` (a declared subroutine
   name), `max`.
 
-The `file` field resolves like finding selection: any spelling that resolves
-to the same source file selects it. A capped list reports a `truncation` member with its total, shown and withheld counts, and an `expand` hint. Unselected arrays become `{items, truncation}` only when capped. Explicit selection wrappers retain their own totals. The CLI options
-`--only`, `--rule`, `--file`, `--caller`, `--callee`, and `--max` on `inspect`
-subcommands drive the same `wright-driver` selection.
+The `file` field resolves like finding selection: any spelling that
+resolves to the same source file selects it. A capped list reports a
+`truncation` member with its total, shown and withheld counts, and an
+`expand` hint. Unselected arrays become `{items, truncation}` only when
+capped. Explicit selection wrappers retain their own totals. The CLI
+options `--only`, `--rule`, `--file`, `--caller`, `--callee`, and `--max`
+on `inspect` subcommands drive the same `wright-driver` selection.
 
 ### Essential default results
 
@@ -465,12 +472,17 @@ owning rule's location without a second lookup.
 Full fact dumps are available only through the in-process `CompilerSession`
 API; external callers use the narrower semantic operations.
 
-General lists default to at most 20 items; lint also bounds its compact result to 5500 bytes before the envelope so long finding messages cannot consume the default token budget; the ranked analyze report keeps its top-five hotspots, risks, and variables and top-three condition trees. Capped lists report their total, truncation, and how to
-see the rest. `all: true` lifts the default cap (CLI `--all`); filters and an
-explicit `max` continue to apply. Verdicts and exit codes are computed on the
-complete set before truncation. Static catalogs are not capped. `brief` and
-`--brief` are removed. [ADR-0025](adr/0025-essential-default-output.md) records
-this breaking pre-1.0 shape change without a contract-id bump.
+General lists default to at most 20 items; lint also bounds its compact
+result to 5500 bytes before the envelope so long finding messages cannot
+consume the default token budget; the ranked analyze report keeps its
+top-five hotspots, risks, and variables and top-three condition trees.
+Capped lists report their total, truncation, and how to see the rest.
+`all: true` lifts the default cap (CLI `--all`); filters and an explicit
+`max` continue to apply. Verdicts and exit codes are computed on the
+complete set before truncation. Static catalogs are not capped. `brief`
+and `--brief` are removed.
+[ADR-0025](adr/0025-essential-default-output.md) records this breaking
+pre-1.0 shape change without a contract-id bump.
 
 Edit transactions use source identities and half-open, 1-based line/column
 ranges. Provider positions use 0-based line/character coordinates. Wright
@@ -589,8 +601,8 @@ diagnostics or mutation refusals, not guessed source locations or textual
 fallbacks.
 
 `capabilities` is the version negotiation step. Clients should check
-`agent_contract` and the advertised operation list before sending requests.
-Clients should ignore unknown response fields and must not assume an operation
+`agent_contract` and the advertised operation list before sending
+requests, ignore unknown response fields, and not assume an operation
 exists unless it is advertised.
 
 ## Versioning
@@ -605,7 +617,7 @@ evolution policy is defined in [`docs/cli/machine-contract.md`](cli/machine-cont
 
 [ADR-0025](adr/0025-essential-default-output.md) records the essential-default
 shape change across both contracts, including the removal of `brief` and full
-external fact dumps. The complete typed Rust API remains available.
+external fact dumps.
 
 One recorded exception applies to the same rule in both contracts, decided
 before the 1.0 contract freeze (#134): the `lint` result's `rules` member
@@ -620,6 +632,6 @@ provider operation (#548): `documents` and `sources` are optional on
 `providerValidateEdit`, defaulting to the
 session's loaded project and each document's text.
 
-The optional guide installed by `wright agent install` (and distributed by
-`wrightkit/skills`) teaches clients to discover and use these capabilities. It
-is not required to expose, execute, or validate any semantic operation.
+The optional guide installed by `wright agent install` (distributed by
+`wrightkit/skills`) teaches clients these capabilities; it is not required
+to expose, execute, or validate any semantic operation.

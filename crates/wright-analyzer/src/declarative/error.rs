@@ -34,6 +34,12 @@ pub enum RuleError {
     FirstPartyMetadataField {
         field: &'static str,
     },
+    /// A first-party rule may declare `severity: error` only when its
+    /// evidence class is `runtime-validated` — the audit contract (#1010,
+    /// `docs/agent-contract.md`) reserves `error` for findings confirmed by
+    /// runtime evaluation, because any error-severity finding yields
+    /// `ok: false` and `exit: 1`.
+    UnjustifiedErrorSeverity,
 }
 
 impl fmt::Display for RuleError {
@@ -92,6 +98,12 @@ impl fmt::Display for RuleError {
                 write!(
                     f,
                     "metadata field '{field}' is only allowed in first-party rule packages"
+                )
+            }
+            RuleError::UnjustifiedErrorSeverity => {
+                write!(
+                    f,
+                    "`severity: error` requires `evidence: runtime-validated`"
                 )
             }
         }

@@ -78,6 +78,18 @@ impl DeclarativeRule {
                 return Err(RuleError::FirstPartyMetadataField { field: "severity" });
             }
         }
+        // Error-severity audit (#1010): an error-severity finding yields
+        // `ok: false` and `exit: 1`, so `error` is reserved for findings
+        // confirmed by runtime evaluation. A first-party rule that declares
+        // `severity: error` without `evidence: runtime-validated` is rejected
+        // rather than silently downgraded — the load error is the structured
+        // `lint-rule-error` diagnostic, same as any invalid definition.
+        if identity == RuleIdentity::FirstParty
+            && metadata.severity == Some(Severity::Error)
+            && metadata.evidence != Some(EvidenceClass::RuntimeValidated)
+        {
+            return Err(RuleError::UnjustifiedErrorSeverity);
+        }
         let locale = Locale::new(&locale_name);
         if !catalog.supports(&locale) {
             return Err(RuleError::UnsupportedLocale(locale_name));

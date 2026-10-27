@@ -133,7 +133,11 @@ covers instead of colliding. The first-party package may also declare
 `evidence` and `severity` in rule metadata (#616 addendum, #970): the
 former sets the finding's evidence class, the latter the rule's default
 severity. Both fields are rejected with a `lint-rule-error` diagnostic in
-community packages and `--rule-file` rules.
+community packages and `--rule-file` rules. `severity: error` is further
+restricted to `evidence: runtime-validated` rules — the error-severity
+audit policy (#1010, `docs/agent-contract.md`) reserves `error` for
+findings confirmed by runtime evaluation, since any error-severity
+finding yields `ok: false` and `exit: 1`.
 
 `enabled` defaults to `true`; `severity` may be `off`, `warn`, or `error`; the
 only shared rule options are the bounded `min-matches` and `max-matches`
