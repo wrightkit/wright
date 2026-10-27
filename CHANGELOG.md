@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.2](https://github.com/wrightkit/wright/compare/v0.39.1...v0.39.2) (2026-10-27)
+
+
+### Dependencies
+
+* bump athena-sim to v0.11.0 for the Bastion progress ([6b1a1fc](https://github.com/wrightkit/wright/commit/6b1a1fcf54170a7036f6fc1beb064de8e431ff49)), closes [#996](https://github.com/wrightkit/wright/issues/996)
+
 ## [0.39.1](https://github.com/wrightkit/wright/compare/v0.39.0...v0.39.1) (2026-10-26)
 
 
