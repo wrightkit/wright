@@ -529,12 +529,36 @@ fn opy_lookup(
         Some(crate::ConnectFloor::Entry),
     ) {
         Ok(connected) => connected.provider,
-        // A connect failure — an unresolvable provider, a refused
-        // handshake, a version mismatch — is a capability gap on this
-        // surface, the same contract the spawn/initialize failures
-        // reported before the shared connect path (#1004).
+        // The failures `unavailable` covered before the shared connect
+        // path (#1004): resolution, spawn, process startup, and version
+        // negotiation — all capability gaps on this surface. A provider's
+        // `lpp/initialize` refusal instead keeps its structured code
+        // through the shared `provider-refusal-<code>` classification.
         Err(error) => {
-            return unavailable("opy", OWNER_OPY, LOOKUP_CAPABILITY, error.to_string());
+            let gap = matches!(
+                &error,
+                wright_lpp::ProviderError::NotConfigured { .. }
+                    | wright_lpp::ProviderError::Spawn { .. }
+                    | wright_lpp::ProviderError::Io { .. }
+                    | wright_lpp::ProviderError::Exited { .. }
+                    | wright_lpp::ProviderError::Local { .. }
+                    | wright_lpp::ProviderError::ProtocolVersionMismatch { .. }
+            ) || matches!(
+                &error,
+                wright_lpp::ProviderError::Lpp(error)
+                    if matches!(
+                        error.kind,
+                        wright_lpp::LppErrorKind::ProtocolVersionMismatch
+                            | wright_lpp::LppErrorKind::CapabilityUnavailable
+                    )
+            );
+            if gap {
+                return unavailable("opy", OWNER_OPY, LOOKUP_CAPABILITY, error.to_string());
+            }
+            return carried_refusal(
+                &crate::source_provider::provider_failure_code(&error),
+                error.to_string(),
+            );
         }
     };
     let negotiated = provider

@@ -471,3 +471,44 @@ for line in sys.stdin:
 
     std::fs::remove_dir_all(&dir).expect("remove test directory");
 }
+
+/// A `CompilerSession::new` failure is Wright's own diagnostic, not a
+/// provider refusal: an invalid lint selection in the service config
+/// publishes `invalid-selection` on `.opy` diagnostics and rename — never
+/// the fabricated `provider-refusal-invalid-selection` (#1004).
+#[test]
+fn a_session_construction_failure_keeps_its_own_code() {
+    let mut service = LanguageService::with_config(
+        PathBuf::from("."),
+        wright_language::SessionConfig {
+            selection: wright_driver::select::FindingSelection {
+                rule: Some("no-such-rule".to_string()),
+                ..wright_driver::select::FindingSelection::default()
+            },
+            ..wright_language::SessionConfig::default()
+        },
+    );
+    let uri = "file:///workspace/main.opy";
+    service.store.open(Document::new(
+        uri.to_string(),
+        "globalvar score = 0\n".to_string(),
+        PathBuf::from("."),
+    ));
+
+    let diagnostics = service.diagnostics(uri);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "invalid-selection");
+
+    let outcome = service.rename(
+        uri,
+        Position {
+            line: 0,
+            character: 0,
+        },
+        "renamed",
+    );
+    let wright_language::RenameOutcome::Refused { code, .. } = outcome else {
+        panic!("expected a refusal, got applied edits");
+    };
+    assert_eq!(code, "invalid-selection");
+}

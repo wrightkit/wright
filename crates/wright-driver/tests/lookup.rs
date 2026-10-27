@@ -590,6 +590,22 @@ for line in sys.stdin:
 "#;
 
 #[cfg(unix)]
+const INIT_REFUSAL_PROVIDER: &str = r#"#!/usr/bin/env python3
+import json, sys
+
+for line in sys.stdin:
+    request = json.loads(line)
+    id, method = request["id"], request["method"]
+    if method == "lpp/initialize":
+        print(json.dumps({"jsonrpc": "2.0", "id": id, "error": {
+            "code": -32000, "message": "refusal: busy",
+            "data": {"lpp": {"kind": "refusal",
+                     "details": {"refusalCode": "init.tooBusy"}}}}}), flush=True)
+    else:
+        print(json.dumps({"jsonrpc": "2.0", "id": id, "result": {}}), flush=True)
+"#;
+
+#[cfg(unix)]
 const NO_LOOKUP_PROVIDER: &str = r#"#!/usr/bin/env python3
 import json, sys
 
@@ -710,6 +726,22 @@ fn opy_lookup_reports_unavailable_when_the_provider_lacks_the_capability() {
     assert_eq!(result["owner"], "opy-rs");
     assert_eq!(result["entries"], serde_json::json!([]));
     assert_eq!(result["unavailable"]["capability"], "lookup");
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn opy_lookup_carries_an_initialize_refusal_with_its_code() {
+    let (dir, mut service) = service_with_provider(INIT_REFUSAL_PROVIDER);
+    let error = match service.handle(&lookup_request("opy", Some("hud"))) {
+        ToolResponse::Error { error } => error,
+        ToolResponse::Ok { result } => panic!("expected a refusal, got {result:?}"),
+    };
+    // The shared provider-failure classification (#1004): the same
+    // `provider-refusal-<refusalCode>` the driver surfaces report, not an
+    // Ok `unavailable` that reclassifies the refusal as a capability gap.
+    assert_eq!(error.code, "provider-refusal-init.tooBusy");
 
     let _ = std::fs::remove_dir_all(dir);
 }
