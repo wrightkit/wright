@@ -60,9 +60,11 @@ or changing an `.opy` document publishes the provider's `lpp/check` answer
 over the complete open-buffer overlay — the unsaved text under the client's
 own URI — with the provider's UTF-16 ranges carried through (#738). DEL/OSTW
 documents and OPY documents without a working provider publish an explicit
-`source-provider-unavailable` error, and a failed provider request publishes
-its structured error code on the document. A document that is neither
-publishes no diagnostics.
+`source-provider-unavailable` or provider-resolution error code, and a
+failed provider request publishes its structured error code on the
+document — a provider refusal carries the same `provider-refusal-<code>`
+classification the driver surfaces report (#1004). A document that is
+neither publishes no diagnostics.
 
 `textDocument/rename` on a source-language document routes through the
 provider-owned mutation path (#156): the
@@ -98,13 +100,14 @@ document answers `null` to hover, and `.del`/`.ostw` documents answer
 ## OPY provider-backed services (#738)
 
 `.opy` documents are served by the negotiated OPY provider, never by an
-in-process OPY implementation. The provider session is resolved locally at
-`initialize` — an explicit `--opy-provider <PATH>` executable or the
-already-installed provider store, never a download — and `lpp/initialize`
-runs inside the LSP handshake so the advertised surface is truthful. The
-session is retained and shared by every later request; an unresolvable or
-failed provider latches as unavailable and the LSP session continues without
-OPY backing.
+in-process OPY implementation. The provider session resolves at
+`initialize` through the same `resolve()` path the driver uses — an
+explicit `--opy-provider <PATH>` executable, the installed provider
+store, or a bootstrap download of the released provider — and
+`lpp/initialize` runs inside the LSP handshake so the advertised surface
+is truthful. The session is retained and shared by every later request; an
+unresolvable or failed provider latches as unavailable and the LSP session
+continues without OPY backing.
 
 Every provider request sends the open-document overlay: the text the editor
 holds, at the buffer's version, under the URI the client opened — including

@@ -1,12 +1,11 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
-use std::time::Duration;
 
 use serde::Serialize;
 use wright_analyzer::canonical::{PositionResolution, ReferenceKind, SemanticIndex, Symbol};
-use wright_driver::opy_provider::{OPY_LANGUAGE_ID, ResolvedOpyProvider};
+use wright_driver::opy_provider::OPY_LANGUAGE_ID;
 use wright_driver::{CompilerSession, InputSpec, SessionConfig, Severity, SourceKind};
-use wright_lpp::{Capability, DiagnosticSeverity, LanguageProvider, ProviderError};
+use wright_lpp::{Capability, DiagnosticSeverity, LanguageProvider};
 
 use crate::document::{Document, DocumentStore, Position, Range, line_col_position, uri_to_path};
 
@@ -93,7 +92,9 @@ pub struct HoverInfo {
 enum OpyProviderState {
     Pending,
     Ready(Box<dyn LanguageProvider>),
-    Unavailable(ProviderError),
+    // The `(code, message)` a connect failure reports — provider error
+    // classified, or a session-construction diagnostic verbatim (#1004).
+    Unavailable(String, String),
 }
 
 pub struct LanguageService {
@@ -214,7 +215,7 @@ impl LanguageService {
         };
         let provider = match self.opy_provider() {
             Ok(provider) => provider,
-            Err(error) => return boundary("source-provider-unavailable", error.to_string()),
+            Err((code, message)) => return boundary(&code, message),
         };
         if !provider_supports(provider, Capability::Check) {
             return boundary(
@@ -246,7 +247,13 @@ impl LanguageService {
                         })
                 })
                 .collect(),
-            Err(error) => boundary(provider_failure_code(&error), error.to_string()),
+            // The shared provider-failure classification (#1004): a
+            // refusal reports `provider-refusal-<refusalCode>` — the
+            // driver contract — never the raw refusal code.
+            Err(error) => boundary(
+                &wright_driver::source_provider::provider_failure_code(&error),
+                error.to_string(),
+            ),
         }
     }
 
@@ -419,15 +426,10 @@ impl LanguageService {
             sources,
         };
 
-        if self.session.is_none() {
-            self.session = match CompilerSession::new(self.config.clone()) {
-                Ok(session) => Some(session),
-                Err(diagnostic) => {
-                    return RenameOutcome::Refused {
-                        code: diagnostic.code,
-                        message: diagnostic.message,
-                    };
-                }
+        if let Err(diagnostic) = self.session() {
+            return RenameOutcome::Refused {
+                code: diagnostic.code,
+                message: diagnostic.message,
             };
         }
         let mutation = self
@@ -510,18 +512,58 @@ impl LanguageService {
         Some(SemanticIndex::build(&loaded.program))
     }
 
-    fn opy_provider(&mut self) -> Result<&mut dyn LanguageProvider, ProviderError> {
+    /// The connected OPY provider, or the classified `(code, message)`
+    /// its connect failure latched.
+    fn opy_provider(&mut self) -> Result<&mut dyn LanguageProvider, (String, String)> {
         if matches!(self.opy, OpyProviderState::Pending) {
-            self.opy = match connect_opy_provider(&self.config) {
+            self.opy = match self.connect_opy_provider() {
                 Ok(provider) => OpyProviderState::Ready(provider),
-                Err(error) => OpyProviderState::Unavailable(error),
+                Err(failure) => OpyProviderState::Unavailable(failure.0, failure.1),
             };
         }
         match &mut self.opy {
             OpyProviderState::Ready(provider) => Ok(provider.as_mut()),
-            OpyProviderState::Unavailable(error) => Err(error.clone()),
+            OpyProviderState::Unavailable(code, message) => Err((code.clone(), message.clone())),
             OpyProviderState::Pending => unreachable!("resolved above"),
         }
+    }
+
+    /// The shared session, built lazily on the first provider request so a
+    /// service that only serves Workshop documents never constructs one. A
+    /// construction failure is Wright's own diagnostic, not a provider
+    /// refusal: it surfaces with its own code (#1004).
+    fn session(&mut self) -> Result<&CompilerSession, wright_driver::Diagnostic> {
+        if self.session.is_none() {
+            self.session = Some(CompilerSession::new(self.config.clone())?);
+        }
+        Ok(self.session.as_ref().expect("session built above"))
+    }
+
+    /// The OPY provider session, connected through the driver's shared
+    /// connect path (#1004). The `(code, message)` failure the surface
+    /// reports is a provider error classified through
+    /// `provider_failure_code`, or a session-construction diagnostic
+    /// carried verbatim.
+    fn connect_opy_provider(&mut self) -> Result<Box<dyn LanguageProvider>, (String, String)> {
+        let client = wright_lpp::ClientInfo {
+            name: wright_lpp::LPP_CLIENT_NAME.to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        };
+        self.session()
+            .map_err(|d| (d.code.clone(), d.message.clone()))?
+            .connect_provider(
+                OPY_LANGUAGE_ID,
+                &client,
+                wright_lpp::LPP_PROTOCOL_VERSION,
+                None,
+            )
+            .map(|connected| connected.provider)
+            .map_err(|e| {
+                (
+                    wright_driver::source_provider::provider_failure_code(&e),
+                    e.to_string(),
+                )
+            })
     }
 
     fn opy_document(&self, uri: &str) -> Option<wright_lpp::Document> {
@@ -564,73 +606,11 @@ impl LanguageService {
     }
 }
 
-const PROVIDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-
-fn connect_opy_provider(
-    config: &SessionConfig,
-) -> Result<Box<dyn LanguageProvider>, ProviderError> {
-    let resolved = if config.opy_provider.executable.is_some() {
-        Some(config.opy_provider.resolve()?)
-    } else {
-        config.opy_provider.installed()?
-    };
-    let Some(resolved) = resolved else {
-        return Err(ProviderError::NotConfigured {
-            language_id: OPY_LANGUAGE_ID.to_string(),
-        });
-    };
-    let client = wright_lpp::ClientInfo {
-        name: wright_lpp::LPP_CLIENT_NAME.to_string(),
-        version: env!("CARGO_PKG_VERSION").to_string(),
-    };
-    let spawn = |resolved: &ResolvedOpyProvider| {
-        wright_lpp::StdioLanguageProvider::spawn(
-            &resolved.executable,
-            &[],
-            PROVIDER_REQUEST_TIMEOUT,
-        )
-    };
-    let mut provider = spawn(&resolved)?;
-    let mut initialize = provider.initialize(Some(&client));
-    if initialize
-        .as_ref()
-        .is_err_and(|error| error.code() == "protocol-version-mismatch")
-    {
-        let supported = initialize
-            .as_ref()
-            .err()
-            .map(|error| error.supported_protocol_versions())
-            .unwrap_or_default();
-        let _ = provider.shutdown();
-        provider = spawn(&resolved)?;
-        initialize = match mutual_protocol_version(&supported) {
-            Some(version) => provider.initialize_version(version, Some(&client)),
-            None => Err(ProviderError::ProtocolVersionMismatch {
-                supported,
-                message: "no mutually supported LPP protocol version".to_string(),
-            }),
-        };
-    }
-    initialize.map(|_| Box::new(provider) as Box<dyn LanguageProvider>)
-}
-
-fn mutual_protocol_version(supported: &[String]) -> Option<&'static str> {
-    wright_lpp::LPP_SUPPORTED_PROTOCOL_VERSIONS
-        .iter()
-        .rev()
-        .copied()
-        .find(|version| supported.iter().any(|s| s == version))
-}
-
 fn provider_supports(provider: &dyn LanguageProvider, capability: Capability) -> bool {
     provider
         .capabilities()
         .map(|capabilities| capabilities.supports(capability))
         .unwrap_or(false)
-}
-
-fn provider_failure_code(error: &ProviderError) -> &str {
-    error.refusal_code().unwrap_or_else(|| error.code())
 }
 
 fn source_location(location: &wright_lpp::Location) -> SourceLocation {

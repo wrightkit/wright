@@ -33,6 +33,7 @@ impl LspClient {
             SPAWN_COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&provider_dir).unwrap();
+        command.env("WRIGHT_OPY_PROVIDER_BASE_URL", "http://127.0.0.1:1"); // offline
         let mut child = command
             .env("WRIGHT_PROVIDER_DATA_DIR", &provider_dir)
             .stdin(Stdio::piped())
@@ -158,7 +159,6 @@ fn initialize(client: &mut LspClient) -> serde_json::Value {
         }),
     )
 }
-
 #[test]
 fn lsp_binary_reports_the_implementation_version_non_interactively() {
     let output = Command::new(env!("CARGO_BIN_EXE_wright-lsp"))
@@ -420,7 +420,6 @@ fn workshop_diagnostics_track_the_current_buffer() {
     assert!(shutdown["result"].is_null());
     client.notify("exit", serde_json::json!(null));
 }
-
 #[test]
 fn opy_lsp_workflow_reports_provider_boundary_without_static_fallback() {
     let root = workspace_root();
@@ -440,7 +439,7 @@ fn opy_lsp_workflow_reports_provider_boundary_without_static_fallback() {
     );
     let published = client.read_notification("textDocument/publishDiagnostics");
     let diagnostics = published["params"]["diagnostics"].as_array().unwrap();
-    assert_eq!(diagnostics[0]["code"], "source-provider-unavailable");
+    assert_eq!(diagnostics[0]["code"], "provider-offline");
 
     let completion = client.request(
         2,
@@ -579,9 +578,6 @@ fn rename_without_a_configured_provider_is_a_structured_request_error() {
 
 #[test]
 fn rename_is_only_negotiated_for_versioned_workspace_edits() {
-    // `WorkspaceEdit.changes` cannot carry the validated document version,
-    // so a client without `documentChanges` gets neither the advertisement
-    // nor the edit.
     let root = workspace_root();
     let mut client = LspClient::spawn(&root);
     let init = client.request(

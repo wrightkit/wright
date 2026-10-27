@@ -518,28 +518,53 @@ fn opy_lookup(
     locale: Option<&str>,
     limit: usize,
 ) -> ToolResponse {
-    let mut provider = match session.language_provider(opy_provider::OPY_LANGUAGE_ID) {
-        Ok(provider) => provider,
-        Err(error) => {
-            return unavailable("opy", OWNER_OPY, LOOKUP_CAPABILITY, error.to_string());
-        }
-    };
     let client = wright_lpp::ClientInfo {
         name: SERVICE_NAME.to_string(),
         version: SERVICE_VERSION.to_string(),
     };
-    let negotiated = match provider.initialize_lookup(Some(&client)) {
-        Ok(result) => result.capabilities,
+    let mut provider = match session.connect_provider(
+        opy_provider::OPY_LANGUAGE_ID,
+        &client,
+        wright_lpp::LPP_LOOKUP_PROTOCOL_VERSION,
+        Some(crate::ConnectFloor::Entry),
+    ) {
+        Ok(connected) => connected.provider,
+        // The failures `unavailable` covered before the shared connect
+        // path (#1004): resolution, spawn, process startup, and version
+        // negotiation — all capability gaps on this surface. A provider's
+        // `lpp/initialize` refusal instead keeps its structured code
+        // through the shared `provider-refusal-<code>` classification.
         Err(error) => {
-            let _ = provider.shutdown();
-            return match error.code() {
-                "protocol-version-mismatch" | "capability-unavailable" => {
-                    unavailable("opy", OWNER_OPY, LOOKUP_CAPABILITY, error.to_string())
-                }
-                _ => carried_refusal(error.code(), error.to_string()),
-            };
+            let gap = matches!(
+                &error,
+                wright_lpp::ProviderError::NotConfigured { .. }
+                    | wright_lpp::ProviderError::Spawn { .. }
+                    | wright_lpp::ProviderError::Io { .. }
+                    | wright_lpp::ProviderError::Exited { .. }
+                    | wright_lpp::ProviderError::Local { .. }
+                    | wright_lpp::ProviderError::ProtocolVersionMismatch { .. }
+            ) || matches!(
+                &error,
+                wright_lpp::ProviderError::Lpp(error)
+                    if matches!(
+                        error.kind,
+                        wright_lpp::LppErrorKind::ProtocolVersionMismatch
+                            | wright_lpp::LppErrorKind::CapabilityUnavailable
+                    )
+            );
+            if gap {
+                return unavailable("opy", OWNER_OPY, LOOKUP_CAPABILITY, error.to_string());
+            }
+            return carried_refusal(
+                &crate::source_provider::provider_failure_code(&error),
+                error.to_string(),
+            );
         }
     };
+    let negotiated = provider
+        .capabilities()
+        .expect("a connected provider negotiated")
+        .clone();
     if !negotiated.supports(Capability::Lookup) {
         let _ = provider.shutdown();
         return unavailable(
