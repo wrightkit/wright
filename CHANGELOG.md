@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.40.0](https://github.com/wrightkit/wright/compare/v0.39.3...v0.40.0) (2026-10-27)
+
+
+### Features
+
+* **analyzer:** extend declarative lint matcher vocabulary (scope lists, deep values search, each-match) ([#1013](https://github.com/wrightkit/wright/issues/1013)) ([ad0437c](https://github.com/wrightkit/wright/commit/ad0437ca5a0cd39fe62ad9358f9d32ff1e8ffd93)), closes [#970](https://github.com/wrightkit/wright/issues/970)
+
+
+### Performance Improvements
+
+* remove repeated full work in OPY check, LSP requests, and serve freshness ([#1019](https://github.com/wrightkit/wright/issues/1019)) ([b4ec42a](https://github.com/wrightkit/wright/commit/b4ec42a31fb986db0ad8e2c1ce71aa5a323abc47))
+
+
+### Code Refactoring
+
+* route every LPP provider client through one connect path ([#1014](https://github.com/wrightkit/wright/issues/1014)) ([39cbddb](https://github.com/wrightkit/wright/commit/39cbddbc61b0c4393846fc0ef7fb05e7532c0ca1)), closes [#1004](https://github.com/wrightkit/wright/issues/1004)
+* set the exit class where a diagnostic is created ([#1017](https://github.com/wrightkit/wright/issues/1017)) ([83d7179](https://github.com/wrightkit/wright/commit/83d7179bc788b131af0bbeeb71603e3ca0eb79a3)), closes [#1003](https://github.com/wrightkit/wright/issues/1003)
+
 ## [0.39.3](https://github.com/wrightkit/wright/compare/v0.39.2...v0.39.3) (2026-10-27)
 
 
