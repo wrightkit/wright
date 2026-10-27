@@ -325,6 +325,43 @@ fn workshop_semantic_queries_match_inspect_for_the_same_text() {
 }
 
 #[test]
+fn repeated_navigation_on_an_unchanged_document_reuses_one_session_and_index() {
+    let mut service = service();
+    let uri = open_workshop(&mut service, WORKSHOP_SOURCE);
+    let position = Position {
+        line: 24,
+        character: 25,
+    };
+
+    let hover = service.hover(&uri, position).expect("hover");
+    assert_eq!(hover.contents, "`subroutine shared`");
+    assert_eq!(service.workshop_build_count(), 1);
+
+    for _ in 0..3 {
+        assert!(service.hover(&uri, position).is_some());
+        assert!(service.definition(&uri, position).is_some());
+        assert!(service.references(&uri, position, true).is_some());
+        assert!(service.diagnostics(&uri).is_empty());
+    }
+    assert_eq!(
+        service.workshop_build_count(),
+        1,
+        "repeated navigation on an unchanged document reuses one build (#1005)"
+    );
+
+    service
+        .store
+        .change(&uri, &WORKSHOP_SOURCE.replace("shared", "renamed"), 2);
+    let hover = service.hover(&uri, position).expect("hover after change");
+    assert_eq!(hover.contents, "`subroutine renamed`");
+    assert_eq!(
+        service.workshop_build_count(),
+        2,
+        "a version bump rebuilds exactly once"
+    );
+}
+
+#[test]
 fn non_workshop_documents_keep_their_boundaries() {
     let mut service = service();
     for (name, language_id) in [("notes.txt", Some("plaintext")), ("notes.md", None)] {
