@@ -11,7 +11,7 @@ description = "Wright's reusable compiler/session driver shared by the CLI, tool
 workspace = true
 
 [dependencies]
-athena-sim = { git = "https://github.com/wrightkit/athena.git", tag = "v0.5.0" }
+athena-sim = { git = "https://github.com/wrightkit/athena.git", tag = "v0.11.0" }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 sha2.workspace = true
