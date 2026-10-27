@@ -35,17 +35,25 @@ impl<'a> ToolService<'a> {
         let ToolResponse::Ok { mut result } = response else {
             return response;
         };
+        let diagnostics =
+            serde_json::from_value::<Vec<crate::Diagnostic>>(result["diagnostics"].clone())
+                .unwrap_or_default();
         match request {
-            ToolRequest::Check { all } => crate::essential::envelope(&mut result, *all),
+            ToolRequest::Check { all } => {
+                crate::essential::envelope(&mut result, &diagnostics, *all)
+            }
             ToolRequest::Analyze { all, .. } => {
-                result["result"] = crate::essential::analyze(&result["result"], *all);
-                crate::essential::envelope(&mut result, *all);
+                result["result"] =
+                    crate::essential::analyze(&result["result"], &self.selected_meta, *all).0;
+                crate::essential::envelope(&mut result, &diagnostics, *all);
             }
             ToolRequest::Inspect { all } => {
                 result["result"] = crate::essential::inspect(&result["result"], *all);
-                crate::essential::envelope(&mut result, *all);
+                crate::essential::envelope(&mut result, &diagnostics, *all);
             }
-            ToolRequest::Lint { all, .. } => result = crate::essential::lint(&result, *all),
+            ToolRequest::Lint { all, .. } => {
+                result = crate::essential::lint(&result, &self.selected_meta, *all).0
+            }
             ToolRequest::References { symbol, all, .. } => {
                 let id = match self.symbol_address(symbol) {
                     Ok(id) => id,

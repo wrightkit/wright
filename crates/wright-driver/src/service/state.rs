@@ -49,6 +49,7 @@ impl<'a> ToolService<'a> {
             generation: state.generation,
             reloads: state.reloads,
             invalidated: state.invalidated,
+            selected_meta: Vec::new(),
         })
     }
 

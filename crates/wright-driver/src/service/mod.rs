@@ -1,9 +1,12 @@
 use serde_json::json;
 
-use crate::diag::Diagnostic;
-use crate::result::{AnalyzeResult, CheckResult, CompileResult, Envelope, InspectResult};
+use crate::diag::{Diagnostic, Severity};
+use crate::result::{
+    AnalyzeResult, CheckResult, CompileResult, Envelope, FindingMeta, InspectResult,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::session::Provenance;
+use crate::session::{findings_with_meta, select_findings};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::source_provider::document_sources;
 use crate::{CompilerSession, Loaded};
@@ -53,6 +56,7 @@ pub struct ToolService<'a> {
     generation: u64,
     reloads: usize,
     invalidated: bool,
+    selected_meta: Vec<FindingMeta>,
 }
 
 impl<'a> ToolService<'a> {
@@ -78,6 +82,7 @@ impl<'a> ToolService<'a> {
             generation: 0,
             reloads: 0,
             invalidated: false,
+            selected_meta: Vec::new(),
         };
         if let Ok(loaded) = service.session.load() {
             service.adopt(loaded);
@@ -250,9 +255,9 @@ impl<'a> ToolService<'a> {
                     return ToolResponse::Error { error };
                 }
                 let (loaded, semantic) = self.snapshot_and_semantic();
-                let result =
-                    serde_json::to_value(self.session.analyze_loaded(loaded, &semantic, selection))
-                        .expect("analyze result serializes");
+                let envelope = self.session.analyze_loaded(loaded, &semantic, selection);
+                self.selected_meta = envelope.result.risks_meta.clone();
+                let result = serde_json::to_value(envelope).expect("analyze result serializes");
                 ToolResponse::Ok { result }
             }
             ToolRequest::Inspect { all: _ } => {
@@ -304,7 +309,11 @@ impl<'a> ToolService<'a> {
             },
             ToolRequest::Findings { selection, .. } => self.findings(selection),
             ToolRequest::PersistentObjects { .. } => self.persistent_objects(),
-            ToolRequest::Lint { selection, all: _ } => self.lint(selection),
+            ToolRequest::Lint { selection, all: _ } => {
+                let (response, meta) = self.lint(selection);
+                self.selected_meta = meta;
+                response
+            }
             ToolRequest::LintRules => self.configured_semantic().handle(&Request::LintRules),
             ToolRequest::CallGraph {
                 caller,
@@ -487,21 +496,16 @@ impl<'a> ToolService<'a> {
         if let Err(error) = self.selection_check(selection) {
             return ToolResponse::Error { error };
         }
-        match self.semantic_query(Request::GetFindings) {
-            ToolResponse::Ok { result } => {
-                let (findings, outcome) = crate::session::select_findings(
-                    self.semantic(),
-                    &self.snapshot().loaded,
-                    self.session.catalog(),
-                    selection,
-                    result,
-                );
-                match outcome {
-                    Some(outcome) => self.ok(json!({ "findings": findings, "selection": outcome })),
-                    None => self.ok(serde_json::Value::Array(findings)),
-                }
-            }
-            other => other,
+        let (findings, _meta, outcome) = select_findings(
+            self.semantic(),
+            &self.snapshot().loaded,
+            self.session.catalog(),
+            selection,
+            findings_with_meta(self.semantic()),
+        );
+        match outcome {
+            Some(outcome) => self.ok(json!({ "findings": findings, "selection": outcome })),
+            None => self.ok(serde_json::Value::Array(findings)),
         }
     }
 
@@ -780,27 +784,23 @@ impl<'a> ToolService<'a> {
         }
     }
 
-    fn lint(&self, selection: &crate::select::FindingSelection) -> ToolResponse {
+    fn lint(
+        &self,
+        selection: &crate::select::FindingSelection,
+    ) -> (ToolResponse, Vec<FindingMeta>) {
         if let Err(error) = self.selection_check(selection) {
-            return ToolResponse::Error { error };
+            return (ToolResponse::Error { error }, Vec::new());
         }
         let service = self.configured_semantic();
         let (rules, config, skipped) = lint_rules_split(service);
-        let findings = match service.handle(&Request::GetFindings) {
-            Response::Ok { result } => result,
-            Response::Error { .. } => serde_json::json!([]),
-        };
-        let ok = !findings.as_array().is_some_and(|findings| {
-            findings
-                .iter()
-                .any(|finding| finding["severity"] == "error")
-        });
-        let (findings, outcome) = crate::session::select_findings(
+        let (findings, meta) = findings_with_meta(service);
+        let ok = !meta.iter().any(|meta| meta.severity == Severity::Error);
+        let (findings, meta, outcome) = select_findings(
             service,
             &self.snapshot().loaded,
             self.session.catalog(),
             selection,
-            findings,
+            (findings, meta),
         );
         let mut result = json!({
             "inputIdentity": self.snapshot().loaded.input.identity,
@@ -814,7 +814,7 @@ impl<'a> ToolService<'a> {
         if let Some(outcome) = outcome {
             result["selection"] = serde_json::to_value(outcome).expect("selection serializes");
         }
-        self.ok(result)
+        (self.ok(result), meta)
     }
 
     fn project(&self) -> serde_json::Value {
