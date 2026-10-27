@@ -1,7 +1,8 @@
 //! The provider-backed request-count and freshness contracts (#1005):
 //! `check` issues one provider compile per run, and a mapped snapshot's
-//! freshness is proportional to its source members rather than the whole
-//! input tree.
+//! freshness observes the whole input tree — including the compile-time
+//! `.js` inputs the mapped `files` table does not yet declare
+//! (opy-rs#654) — so a non-source edit still invalidates it.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -134,10 +135,14 @@ fn provider_backend_check_serves_compile_from_its_own_snapshot() {
 }
 
 #[test]
-fn an_unchanged_mapped_project_does_not_read_non_source_files() {
+fn a_mapped_project_still_observes_files_the_member_list_omits() {
     let (dir, entry) = temp_entry();
-    let non_source = dir.join("notes.bin");
-    std::fs::write(&non_source, "editor scratch — not a project member").expect("non-source");
+    // The mapped `files` table lists source members only; a `.js` hook
+    // consumed at compile time is an input the member list omits until
+    // opy-rs registers it (opy-rs#654), so the snapshot keeps the
+    // whole-tree fingerprint and a script edit still invalidates it.
+    let script = dir.join("hook.js");
+    std::fs::write(&script, "// postCompileHook input").expect("script input");
     let text = workshop_fixture("synthetic/control-flow");
     std::fs::write(dir.join("main.opy"), &text).expect("member source");
     let provenance = mapped_provenance(&text, &dir.join("main.opy"));
@@ -171,18 +176,14 @@ fn an_unchanged_mapped_project_does_not_read_non_source_files() {
     }
     assert_eq!(service.reload_count(), 0);
 
-    std::fs::write(&non_source, "an unrelated file changed").expect("edit non-source");
+    std::fs::write(&script, "// an edited compile-time input").expect("edit script");
     let ToolResponse::Ok { .. } = service.handle(&ToolRequest::Project) else {
-        panic!("project still serves the snapshot")
-    };
-    std::fs::remove_file(&non_source).expect("remove non-source");
-    let ToolResponse::Ok { .. } = service.handle(&ToolRequest::Project) else {
-        panic!("project still serves the snapshot")
+        panic!("a compile-time input edit reloads into a fresh snapshot")
     };
     assert_eq!(
         service.reload_count(),
-        0,
-        "non-source file changes must not invalidate the mapped snapshot (#1005)"
+        1,
+        "an undeclared input change invalidates the mapped snapshot once (#1005)"
     );
 
     std::fs::write(dir.join("main.opy"), "// an edited project member").expect("edit member");
@@ -191,7 +192,7 @@ fn an_unchanged_mapped_project_does_not_read_non_source_files() {
     };
     assert_eq!(
         service.reload_count(),
-        1,
+        2,
         "a member change invalidates the snapshot exactly once"
     );
     cleanup(dir);
