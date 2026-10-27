@@ -145,6 +145,10 @@ impl<'a> SemanticService<'a> {
         &self.findings
     }
 
+    pub fn symbol_count(&self) -> usize {
+        self.index.symbols().count()
+    }
+
     #[hotpath::measure]
     pub fn references_for_all_symbols(&self) -> JsonValue {
         JsonValue::Array(self.references_json().clone())

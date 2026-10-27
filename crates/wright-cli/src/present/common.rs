@@ -10,6 +10,28 @@ use super::{
     inline_location, is_real_source_path, severity_rank,
 };
 
+const DIAGNOSTIC_LIMIT: usize = 20;
+
+/// Diagnostics in severity order. Unless `all` is set or the command streams
+/// an artifact, at most [`DIAGNOSTIC_LIMIT`] are shown; the total is returned
+/// when some were withheld.
+pub(crate) fn shown_diagnostics<'a>(
+    command: &str,
+    diagnostics: &'a [wright_driver::Diagnostic],
+    all: bool,
+) -> (Vec<&'a wright_driver::Diagnostic>, Option<usize>) {
+    let mut ordered: Vec<_> = diagnostics.iter().collect();
+    ordered.sort_by_key(|diagnostic| severity_rank(diagnostic.severity));
+    let bounded = !all && !matches!(command, "compile" | "convert");
+    if bounded && ordered.len() > DIAGNOSTIC_LIMIT {
+        let total = ordered.len();
+        ordered.truncate(DIAGNOSTIC_LIMIT);
+        (ordered, Some(total))
+    } else {
+        (ordered, None)
+    }
+}
+
 pub(crate) const DETAIL_COMMANDS: &[&str] = &[
     "wright inspect symbols",
     "wright inspect refs <NAME>",

@@ -566,12 +566,7 @@ impl CompilerSession {
                     source_files = map.files().iter().map(|f| provider_uri_path(f)).collect();
                     let mut unreadable = Vec::new();
                     for (index, member) in source_files.iter().enumerate() {
-                        let member_path = Path::new(member);
-                        let member_path = if member_path.is_absolute() {
-                            member_path.to_path_buf()
-                        } else {
-                            resolved.root.join(member_path)
-                        };
+                        let member_path = resolved.root.join(member);
                         match std::fs::read_to_string(&member_path) {
                             Ok(text) => {
                                 program.set_file_source(

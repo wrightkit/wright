@@ -39,14 +39,7 @@ pub(crate) fn provider_member(
         })?;
         return Ok((url.to_string(), path));
     }
-    let path = {
-        let path = std::path::PathBuf::from(member);
-        if path.is_absolute() {
-            path
-        } else {
-            base.join(path)
-        }
-    };
+    let path = base.join(member);
     url::Url::from_file_path(&path)
         .map(|url| (url.to_string(), path))
         .map_err(|()| {

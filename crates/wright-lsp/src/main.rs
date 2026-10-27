@@ -109,31 +109,25 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
         if !matches!(method.as_str(), "initialize" | "shutdown" | "exit")
             && lifecycle != Lifecycle::Running
         {
-            if id.is_some() {
-                let (code, reason, refusal) = match lifecycle {
-                    Lifecycle::Waiting => {
-                        (-32002, "the server is not initialized", "not-initialized")
-                    }
-                    Lifecycle::Shutdown => (-32600, "the server is shut down", "invalid-request"),
-                    Lifecycle::Running => unreachable!("checked above"),
-                };
-                write_error(&mut writer, id, code, reason, refusal)?;
-            }
+            let (code, reason, refusal) = match lifecycle {
+                Lifecycle::Waiting => (-32002, "the server is not initialized", "not-initialized"),
+                Lifecycle::Shutdown => (-32600, "the server is shut down", "invalid-request"),
+                Lifecycle::Running => unreachable!("checked above"),
+            };
+            reply_error(&mut writer, id, code, reason, refusal)?;
             continue;
         }
 
         match method.as_str() {
             "initialize" => {
                 if lifecycle != Lifecycle::Waiting {
-                    if id.is_some() {
-                        write_error(
-                            &mut writer,
-                            id,
-                            -32600,
-                            "the server is already initialized",
-                            "already-initialized",
-                        )?;
-                    }
+                    reply_error(
+                        &mut writer,
+                        id,
+                        -32600,
+                        "the server is already initialized",
+                        "already-initialized",
+                    )?;
                     continue;
                 }
                 let Some(init) = read_params::<InitializeParams>(&mut writer, &id, params)? else {
@@ -153,43 +147,32 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
                 }
                 lifecycle = Lifecycle::Running;
                 let opy_support = service.opy_provider_support();
-                if id.is_some() {
-                    write_response(
-                        &mut writer,
-                        id,
-                        serde_json::to_value(initialize_result(
-                            versioned_workspace_edits,
-                            opy_support,
-                        ))
+                write_response(
+                    &mut writer,
+                    id,
+                    serde_json::to_value(initialize_result(versioned_workspace_edits, opy_support))
                         .unwrap(),
-                    )?;
-                }
+                )?;
             }
             "initialized" => {
-                if id.is_some() {
-                    write_response(&mut writer, id, Value::Null)?;
-                }
+                write_response(&mut writer, id, Value::Null)?;
             }
             "shutdown" => {
                 match lifecycle {
                     Lifecycle::Running => lifecycle = Lifecycle::Shutdown,
                     Lifecycle::Waiting => {
-                        if id.is_some() {
-                            write_error(
-                                &mut writer,
-                                id,
-                                -32002,
-                                "the server is not initialized",
-                                "not-initialized",
-                            )?;
-                        }
+                        reply_error(
+                            &mut writer,
+                            id,
+                            -32002,
+                            "the server is not initialized",
+                            "not-initialized",
+                        )?;
                         continue;
                     }
                     Lifecycle::Shutdown => {}
                 }
-                if id.is_some() {
-                    write_response(&mut writer, id, Value::Null)?;
-                }
+                write_response(&mut writer, id, Value::Null)?;
             }
             "exit" => return Ok(u8::from(lifecycle != Lifecycle::Shutdown)),
             "textDocument/didOpen" => {
@@ -208,9 +191,7 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
                 .with_language_id(params.text_document.language_id);
                 service.store.open(document);
                 publish_affected_diagnostics(&mut writer, &mut service, &mut ownership, &uri)?;
-                if id.is_some() {
-                    write_response(&mut writer, id, Value::Null)?;
-                }
+                write_response(&mut writer, id, Value::Null)?;
             }
             "textDocument/didChange" => {
                 let Some(params) =
@@ -232,9 +213,7 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
                 if applied {
                     publish_affected_diagnostics(&mut writer, &mut service, &mut ownership, &uri)?;
                 }
-                if id.is_some() {
-                    write_response(&mut writer, id, Value::Null)?;
-                }
+                write_response(&mut writer, id, Value::Null)?;
             }
             "textDocument/didClose" => {
                 let Some(params) =
@@ -256,14 +235,10 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
                     }
                 }
                 publish_affected_diagnostics(&mut writer, &mut service, &mut ownership, &uri)?;
-                if id.is_some() {
-                    write_response(&mut writer, id, Value::Null)?;
-                }
+                write_response(&mut writer, id, Value::Null)?;
             }
             "textDocument/didSave" => {
-                if id.is_some() {
-                    write_response(&mut writer, id, Value::Null)?;
-                }
+                write_response(&mut writer, id, Value::Null)?;
             }
             "textDocument/hover" => {
                 let Some(params) = read_params::<HoverParams>(&mut writer, &id, params)? else {
@@ -377,7 +352,7 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
                     // version the provider validated; serving it would let a
                     // client apply the edit to a buffer that moved while the
                     // rename was pending without ever detecting it.
-                    write_error(
+                    reply_error(
                         &mut writer,
                         id,
                         -32803,
@@ -401,7 +376,7 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
                         Ok(edit) => {
                             write_response(&mut writer, id, serde_json::to_value(edit).unwrap())?
                         }
-                        Err(uri) => write_error(
+                        Err(uri) => reply_error(
                             &mut writer,
                             id,
                             -32803,
@@ -412,14 +387,12 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
                         )?,
                     },
                     RenameOutcome::Refused { code, message } => {
-                        write_error(&mut writer, id, -32803, &message, &code)?;
+                        reply_error(&mut writer, id, -32803, &message, &code)?;
                     }
                 }
             }
             _ => {
-                if id.is_some() {
-                    write_response(&mut writer, id, Value::Null)?;
-                }
+                write_response(&mut writer, id, Value::Null)?;
             }
         }
     }
@@ -601,13 +574,32 @@ fn write_msg(writer: &mut impl Write, val: Value) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Answers a request; a notification (no `id`) gets no response.
 fn write_response(writer: &mut impl Write, id: Option<Value>, result: Value) -> Result<(), String> {
+    if id.is_none() {
+        return Ok(());
+    }
     write_msg(
         writer,
         serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result }),
     )
 }
 
+/// Refuses a request; a notification (no `id`) gets no response.
+fn reply_error(
+    writer: &mut impl Write,
+    id: Option<Value>,
+    code: i64,
+    message: &str,
+    refusal_code: &str,
+) -> Result<(), String> {
+    if id.is_none() {
+        return Ok(());
+    }
+    write_error(writer, id, code, message, refusal_code)
+}
+
+/// Writes an error even without an `id`, as a malformed frame requires.
 fn write_error(
     writer: &mut impl Write,
     id: Option<Value>,
@@ -638,9 +630,7 @@ fn read_params<T: serde::de::DeserializeOwned>(
     match parse_params(params) {
         Ok(parsed) => Ok(Some(parsed)),
         Err(message) => {
-            if id.is_some() {
-                write_error(writer, id.clone(), -32602, &message, "invalid-params")?;
-            }
+            reply_error(writer, id.clone(), -32602, &message, "invalid-params")?;
             Ok(None)
         }
     }

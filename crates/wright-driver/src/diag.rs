@@ -96,20 +96,6 @@ pub struct Diagnostic {
     pub fields: serde_json::Map<String, serde_json::Value>,
 }
 
-/// Build a source span from the IR source model, resolving the file path.
-pub fn span_from_ir(
-    span: Option<workshop_rs::source::Span>,
-    files: &[workshop_rs::source::SourceFile],
-) -> Option<SourceSpan> {
-    let span = span?;
-    let file = span.file.index();
-    let path = files
-        .get(file)
-        .map(|source_file| source_file.path.clone())
-        .unwrap_or_else(|| format!("<file {file}>"));
-    Some(source_span(span, path))
-}
-
 pub(crate) fn source_span(span: workshop_rs::source::Span, path: String) -> SourceSpan {
     SourceSpan {
         file: span.file.index(),

@@ -7,9 +7,7 @@ use crate::session::Provenance;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::source_provider::document_sources;
 use crate::{CompilerSession, Loaded};
-use wright_analyzer::canonical::{
-    BLOCK_KINDS, ReferenceKind, SemanticIndex, SemanticService, SymbolKind,
-};
+use wright_analyzer::canonical::{BLOCK_KINDS, ReferenceKind, SemanticService, SymbolKind};
 /// A structured tool error.
 pub use wright_analyzer::service::ErrorInfo as ToolErrorInfo;
 /// A tool response: a structured owned result or a structured error.
@@ -821,7 +819,6 @@ impl<'a> ToolService<'a> {
 
     fn project(&self) -> serde_json::Value {
         let loaded = &self.snapshot().loaded;
-        let index = SemanticIndex::build(&loaded.program);
         let findings = wright_analyzer::canonical::analyze(
             &loaded.program,
             &wright_analyzer::registry::LintConfig::default(),
@@ -831,7 +828,7 @@ impl<'a> ToolService<'a> {
             "inputIdentity": loaded.input.identity, "files": loaded.source_files.len().max(1),
             "sourceFiles": loaded.source_files.as_slice(), "globalVariables": loaded.program.global_variables.len(),
             "playerVariables": loaded.program.player_variables.len(), "subroutines": loaded.program.subroutines.len(),
-            "rules": loaded.program.rules.len(), "symbols": index.symbols().count(), "findings": findings.len(),
+            "rules": loaded.program.rules.len(), "symbols": self.semantic().symbol_count(), "findings": findings.len(),
             "settings": loaded.program.settings.as_ref().map(settings::settings_json),
         })
     }

@@ -58,7 +58,6 @@ impl ResultPresentation for LintPackageResult {
     fn metadata(&self) -> Option<String> {
         Some(metadata(self))
     }
-    fn render_body(&self, _ctx: &RenderContext<'_>) {}
 }
 
 fn package_record(row: &LintPackageRow) -> String {

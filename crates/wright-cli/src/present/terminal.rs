@@ -14,8 +14,8 @@ use super::{
     fix_status_counts, fix_status_parts, group_runs, is_real_source_path, location_suffix,
     lookup_hint_args, normalize_finding_spans, notable_callers, persistent_object_summary,
     query_items, render_diff_lines, render_finding_location, render_node, renderable_group_spans,
-    rule_address, rule_name, severity_rank, shown_of, source_context, span_suffix, summary_status,
-    symbol_kind_heading, tree_rule, unmapped_positions, unmapped_positions_note,
+    rule_address, rule_name, shown_diagnostics, shown_of, source_context, span_suffix,
+    summary_status, symbol_kind_heading, tree_rule, unmapped_positions, unmapped_positions_note,
 };
 
 fn tag_word<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) -> String {
@@ -135,9 +135,6 @@ fn dnote(ctx: &RenderContext<'_>, depth: usize, text: &str, to_stdout: bool) {
 }
 
 pub(crate) trait TerminalReport {
-    fn artifact(&self) -> Option<&str> {
-        None
-    }
     fn headline(&self) -> Option<String> {
         None
     }
@@ -258,16 +255,12 @@ fn diagnostics<T: serde::Serialize + ResultPresentation>(
     envelope: &Envelope<T>,
     to_stdout: bool,
 ) {
-    let mut ordered: Vec<&wright_driver::Diagnostic> = envelope.diagnostics.iter().collect();
-    ordered.sort_by_key(|diagnostic| severity_rank(diagnostic.severity));
-    let total = ordered.len();
-    let bounded = !matches!(envelope.command.as_str(), "compile" | "convert");
-    let limit = if ctx.presentation.all || !bounded {
-        usize::MAX
-    } else {
-        20
-    };
-    for (index, diagnostic) in ordered.into_iter().take(limit).enumerate() {
+    let (shown, withheld) = shown_diagnostics(
+        &envelope.command,
+        &envelope.diagnostics,
+        ctx.presentation.all,
+    );
+    for (index, diagnostic) in shown.into_iter().enumerate() {
         if index > 0 {
             dprint("", to_stdout);
         }
@@ -285,7 +278,7 @@ fn diagnostics<T: serde::Serialize + ResultPresentation>(
             );
         }
     }
-    if bounded && !ctx.presentation.all && total > 20 {
+    if let Some(total) = withheld {
         dline(
             ctx,
             1,
@@ -591,12 +584,6 @@ impl TerminalReport for CheckResult {
 }
 
 impl TerminalReport for CompileResult {
-    fn artifact(&self) -> Option<&str> {
-        self.output
-            .as_ref()
-            .filter(|output| output.written_to == "stdout")
-            .map(|output| output.text.as_str())
-    }
     fn headline(&self) -> Option<String> {
         self.output
             .as_ref()
@@ -607,9 +594,6 @@ impl TerminalReport for CompileResult {
 }
 
 impl TerminalReport for ConvertResult {
-    fn artifact(&self) -> Option<&str> {
-        Some(&self.text)
-    }
     fn body(&self, _ctx: &RenderContext<'_>) {}
 }
 

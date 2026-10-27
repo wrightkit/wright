@@ -1,4 +1,8 @@
+use std::cmp::Reverse;
+
 use serde_json::{Value, json};
+
+use crate::Severity;
 
 pub const DEFAULT_ITEMS: usize = 20;
 const DEFAULT_FINDING_BYTES: usize = 5500;
@@ -9,19 +13,17 @@ fn list<'a>(value: &'a Value, key: &str) -> &'a [Value] {
 fn number(value: &Value, key: &str) -> u64 {
     value[key].as_u64().unwrap_or(0)
 }
-fn severity(value: &Value) -> u8 {
-    match value["severity"].as_str() {
-        Some("error") => 0,
-        Some("info" | "notice") => 2,
-        _ => 1,
-    }
+fn severity(value: &Value) -> Severity {
+    Severity::from_label(value["severity"].as_str())
 }
 fn counts(items: &[Value]) -> Value {
-    let mut n = [0usize; 3];
-    for item in items {
-        n[severity(item) as usize] += 1;
-    }
-    let mut group = json!({"total":items.len(),"error":n[0],"warning":n[1],"info":n[2]});
+    let count = |wanted| items.iter().filter(|item| severity(item) == wanted).count();
+    let mut group = json!({
+        "total": items.len(),
+        "error": count(Severity::Error),
+        "warning": count(Severity::Warning),
+        "info": count(Severity::Info),
+    });
     if let Some(by_code) = by_code_counts(items) {
         group["byCode"] = by_code;
     }
@@ -73,7 +75,7 @@ fn findings(items: &[Value]) -> Vec<Value> {
             item
         })
         .collect::<Vec<_>>();
-    items.sort_by_key(severity);
+    items.sort_by_key(|item| Reverse(severity(item)));
     items
 }
 
@@ -321,7 +323,7 @@ pub fn cost(result: &Value, all: bool) -> Value {
 /// Preserve the complete-set verdict while bounding its displayed diagnostics.
 pub fn envelope(result: &mut Value, all: bool) {
     if let Some(diagnostics) = result["diagnostics"].as_array_mut() {
-        diagnostics.sort_by_key(severity);
+        diagnostics.sort_by_key(|item| Reverse(severity(item)));
     }
     cap(result, "diagnostics", DEFAULT_ITEMS, all);
 }

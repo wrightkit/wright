@@ -26,9 +26,6 @@ pub const LPP_ARTIFACT_NEGOTIATION_PROTOCOL_VERSION: &str = "1.4";
 /// The LPP 1.5 version that adds name and signature lookup on `lpp/lookup`.
 pub const LPP_LOOKUP_PROTOCOL_VERSION: &str = "1.5";
 
-/// The LPP 1.6 version that adds `lpp/resolveIds` canonical id resolution.
-pub const LPP_RESOLVE_IDS_PROTOCOL_VERSION: &str = "1.6";
-
 /// Every protocol version this client implements, in ascending order —
 /// the client's side of the highest-mutual-version computation LPP §19.2
 /// requires after a `protocolVersionMismatch` (#638). 1.6 is excluded:

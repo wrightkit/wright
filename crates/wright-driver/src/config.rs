@@ -175,13 +175,6 @@ impl LintPackageConfig {
 }
 
 impl SessionConfig {
-    pub fn from_path(path: impl Into<PathBuf>) -> SessionConfig {
-        SessionConfig {
-            input: InputSpec::Path(path.into()),
-            ..SessionConfig::default()
-        }
-    }
-
     pub(crate) fn changed_fields(&self, other: &SessionConfig) -> Vec<&'static str> {
         macro_rules! changed_fields {
             ($changed:ident; $($field:ident),+ $(,)?) => {

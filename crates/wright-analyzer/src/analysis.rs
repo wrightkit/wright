@@ -1,15 +1,25 @@
 use serde::{Deserialize, Serialize};
 
-/// The severity of a finding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// The severity of a finding, ordered from least to most severe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
-    Warning,
     Info,
+    Warning,
     Error,
 }
 
 impl Severity {
+    /// Reads a serialized severity label. `notice` is an alias of `info`; a
+    /// missing or unknown label is a warning.
+    pub fn from_label(label: Option<&str>) -> Self {
+        match label {
+            Some("error") => Self::Error,
+            Some("info" | "notice") => Self::Info,
+            _ => Self::Warning,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Error => "error",
