@@ -1250,11 +1250,7 @@ fn lint_rule_flags_control_findings() {
         "-f",
         "json",
     ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_eq!(output.status.code(), Some(1));
     let envelope = parse_json(&output.stdout);
     assert!(
         envelope["result"]["findings"]
@@ -1526,11 +1522,11 @@ fn fail_on_can_only_raise_a_verdict() {
         "--rule-severity",
         "min-wait-loop:error",
         "--fail-on",
-        "error",
+        "warning",
     ]);
     assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("FAIL lint"), "{stdout}");
+    assert!(stdout.contains("ERROR lint"), "{stdout}");
 
     let _ = std::fs::remove_dir_all(broken.parent().unwrap());
     let _ = std::fs::remove_dir_all(waitless.parent().unwrap());
@@ -1939,7 +1935,7 @@ fn lint_text_leads_with_the_verdict_and_orders_by_action_priority() {
         "--color",
         "never",
     ]);
-    assert!(output.status.success());
+    assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
     let verdict = stdout.find(" ERROR  lint").expect("verdict: {stdout}");
     let counts = stdout
@@ -2000,7 +1996,7 @@ fn lint_text_orders_all_severity_bands_by_action_priority() {
         "--color",
         "never",
     ]);
-    assert!(output.status.success());
+    assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("1 error, 1 warning, 1 info finding"),

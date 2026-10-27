@@ -1,5 +1,7 @@
 mod diagnostics;
 mod edit;
+mod lint;
+mod pipeline;
 mod provider;
 mod registry;
 mod semantic;
@@ -28,7 +30,6 @@ use crate::output::{CompileWrite, OutputDest, Overwrite};
 use crate::progress::{ProgressEvent, ProgressObserver, ProgressPhase};
 use crate::result::{
     CheckResult, CompileResult, CompiledOutput, ConvertResult, ConvertTarget, Envelope,
-    version_info,
 };
 use crate::source_provider::{SourceBackend, SourceProvider, SourceProviderError};
 
@@ -634,6 +635,9 @@ impl CompilerSession {
             ));
             envelope.ok = false;
             envelope.exit = crate::result::exit::SOURCE_ERROR;
+            // A real failure outranks the gate: `gated` must not claim
+            // it caused this exit.
+            envelope.gated = false;
         }
         envelope
     }
@@ -908,42 +912,6 @@ impl CompilerSession {
 
     pub(crate) fn lint_registry(&self) -> &LintRegistry {
         &self.lint_registry
-    }
-
-    fn finish<T: serde::Serialize>(&mut self, command: &str, result: T) -> Envelope<T> {
-        let diagnostics = std::mem::take(&mut self.diagnostics);
-        let (diagnostics, selection, exit) =
-            crate::select::envelope_diagnostics(&self.config, self.loaded.as_ref(), diagnostics);
-        Envelope {
-            wright: version_info(),
-            command: command.to_string(),
-            ok: exit == crate::result::exit::SUCCESS,
-            exit,
-            diagnostics,
-            selection,
-            gated: false,
-            result,
-            comparison: None,
-        }
-    }
-
-    fn with_loaded<T>(
-        &mut self,
-        command: &str,
-        load: impl FnOnce(&mut Self) -> Result<Loaded, Diagnostic>,
-        run: impl FnOnce(&mut Self, Loaded) -> T,
-    ) -> Envelope<T>
-    where
-        T: Default + serde::Serialize,
-    {
-        let result = match self.verify_fixed_config().and_then(|()| load(self)) {
-            Ok(loaded) => run(self, loaded),
-            Err(diagnostic) => {
-                self.diagnostics.push(diagnostic);
-                T::default()
-            }
-        };
-        self.finish(command, result)
     }
 }
 

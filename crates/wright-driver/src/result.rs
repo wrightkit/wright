@@ -30,10 +30,10 @@ pub struct Envelope<T: Serialize> {
     /// Present when a finding selection was applied to `diagnostics` (#430).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selection: Option<crate::select::SelectionOutcome>,
-    /// Set when the CLI's `--fail-on` gate raised this result's verdict
-    /// (ADR-0030 decision 13): the command succeeded but a diagnostic or
-    /// finding reached the threshold severity. In-process only — the wire
-    /// already carries the raised `ok`/`exit` pair.
+    /// Set when the `--fail-on` gate raised this result's verdict
+    /// (ADR-0030 decision 13, #1002): the command succeeded but a
+    /// diagnostic or finding reached the threshold severity. In-process
+    /// only — the wire already carries the raised `ok`/`exit` pair.
     #[serde(skip)]
     pub gated: bool,
     pub result: T,
@@ -46,6 +46,37 @@ pub struct Envelope<T: Serialize> {
 }
 
 impl<T: Serialize> Envelope<T> {
+    /// The `--fail-on` gate (ADR-0030 decision 13, #1002): when the
+    /// complete result's highest diagnostic or finding severity reaches
+    /// `threshold`, raise the verdict to `ok: false`, `exit: 1` and mark
+    /// the envelope `gated`. `finding_max` is the full finding set's
+    /// highest severity (the outcome's `max_severity` when a selection
+    /// applied). The gate only raises: a failing command keeps its own
+    /// verdict, and a result below the threshold is untouched.
+    pub fn apply_fail_on(&mut self, threshold: Severity, finding_max: Option<Severity>) {
+        if self.exit != exit::SUCCESS {
+            return;
+        }
+        let diagnostics = match &self.selection {
+            Some(selection) => selection.max_severity,
+            None => self
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.severity)
+                .max(),
+        };
+        let met = diagnostics
+            .into_iter()
+            .chain(finding_max)
+            .max()
+            .is_some_and(|severity| severity >= threshold);
+        if met {
+            self.ok = false;
+            self.exit = exit::SOURCE_ERROR;
+            self.gated = true;
+        }
+    }
+
     /// Rebuild this envelope around a transformed result: verdict, exit
     /// code, diagnostics, and any finding selection carry over unchanged
     /// when selecting the essential presentation.

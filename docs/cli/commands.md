@@ -216,7 +216,12 @@ reports a FAIL verdict on every renderer and in JSON (`ok: false`,
 `exit: 1`). The gate only raises a verdict: a result below the threshold is
 untouched (a `WARN` result still exits 0, so gating is off by default), and
 a command already failing keeps its own exit code and verdict rather than
-reporting FAIL. Deciding when a workflow enables the gate belongs to the
+reporting FAIL.
+
+The flag configures `SessionConfig.fail_on`, so the driver — not the CLI —
+decides the verdict (#1002): every surface over the same session
+configuration, including the `lint` agent operation, reports the same
+`ok`/`exit`. Deciding when a workflow enables the gate belongs to the
 `wright` action; the CLI carries no policy.
 
 `check`, `lint`, `analyze`, `inspect`, and the `inspect` subcommands report

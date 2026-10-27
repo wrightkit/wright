@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use crate::diag::{Diagnostic, Severity};
+use crate::diag::Diagnostic;
 use crate::result::{
     AnalyzeResult, CheckResult, CompileResult, Envelope, FindingMeta, InspectResult,
 };
@@ -782,36 +782,24 @@ impl<'a> ToolService<'a> {
         }
     }
 
+    /// Lint through the shared session pipeline (#1002): the session's
+    /// `lint` envelope — verdict, diagnostics, and findings over the
+    /// served snapshot — serialized as the response `result`, so the
+    /// `lint` operation and `wright lint` report the same `ok`/`exit`
+    /// for one input and configuration. `selection` is the request's
+    /// inline finding selection (the session's configured selection does
+    /// not apply to a `lint` request).
     fn lint(
-        &self,
+        &mut self,
         selection: &crate::select::FindingSelection,
     ) -> (ToolResponse, Vec<FindingMeta>) {
         if let Err(error) = self.selection_check(selection) {
             return (ToolResponse::Error { error }, Vec::new());
         }
-        let service = self.configured_semantic();
-        let (rules, config, skipped) = lint_rules_split(service);
-        let (findings, meta) = findings_with_meta(service);
-        let ok = !meta.iter().any(|meta| meta.severity == Severity::Error);
-        let (findings, meta, outcome) = select_findings(
-            service,
-            &self.snapshot().loaded,
-            self.session.catalog(),
-            selection,
-            (findings, meta),
-        );
-        let mut result = json!({
-            "inputIdentity": self.snapshot().loaded.input.identity,
-            "ok": ok,
-            "exit": if ok { 0 } else { crate::result::exit::SOURCE_ERROR },
-            "rules": rules,
-            "config": config,
-            "findings": findings,
-            "skipped": skipped,
-        });
-        if let Some(outcome) = outcome {
-            result["selection"] = serde_json::to_value(outcome).expect("selection serializes");
-        }
+        let (loaded, semantic) = self.snapshot_and_semantic();
+        let envelope = self.session.lint_loaded(loaded, &semantic, selection);
+        let meta = envelope.result.findings_meta.clone();
+        let result = serde_json::to_value(envelope).expect("lint result serializes");
         (self.ok(result), meta)
     }
 

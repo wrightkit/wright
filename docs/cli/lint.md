@@ -207,7 +207,10 @@ Non-`while-without-wait` findings carry `"boundedness": null`.
 ## Error severity (#1010)
 
 Any `error`-severity finding yields `ok: false` and `exit: 1` on every
-verdict surface. Lint correctness is not guaranteed — rules can produce
+verdict surface — `wright lint` and the `lint` agent operation share the
+driver's lint pipeline, so both report the identical verdict for one
+input and lint configuration (#1002). Lint correctness is not
+guaranteed — rules can produce
 false positives and the analyzer itself can have implementation errors —
 so `error` is reserved for findings whose defect is confirmed, not
 indicated: only a rule whose evidence class is `runtime-validated` may

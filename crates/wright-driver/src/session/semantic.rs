@@ -8,14 +8,17 @@ use wright_analyzer::canonical::SemanticService;
 use wright_analyzer::service::Request;
 
 use crate::diag::{Diagnostic, Stage};
-use crate::progress::{ProgressEvent, ProgressPhase, ProgressUnit};
+use crate::progress::{ProgressEvent, ProgressPhase};
 use crate::result::{
     AnalyzeResult, CallGraphResult, CfgResult, CostResult, Envelope, FindingMeta, InspectResult,
-    LintResult, RefsResult, RulesResult, SymbolsResult,
+    RefsResult, RulesResult, SymbolsResult,
 };
 use crate::service::{Address, ToolErrorInfo, ToolRequest, ToolResponse, ToolService};
 
-fn service_response(service: &SemanticService<'_>, request: &Request) -> serde_json::Value {
+pub(crate) fn service_response(
+    service: &SemanticService<'_>,
+    request: &Request,
+) -> serde_json::Value {
     match service.handle(request) {
         wright_analyzer::service::Response::Ok { result } => result,
         wright_analyzer::service::Response::Error { .. } => serde_json::Value::Null,
@@ -200,7 +203,7 @@ fn risk_facts(service: &SemanticService<'_>) -> (Vec<serde_json::Value>, Vec<Fin
         .unzip()
 }
 
-fn program_summary(service: &SemanticService<'_>, loaded: &Loaded) -> serde_json::Value {
+pub(crate) fn program_summary(service: &SemanticService<'_>, loaded: &Loaded) -> serde_json::Value {
     let mut program = service_response(service, &Request::Program);
     if let serde_json::Value::Object(object) = &mut program {
         object.insert(
@@ -416,7 +419,7 @@ fn source_span_path(file: Option<u64>, loaded: &Loaded) -> String {
 impl CompilerSession {
     #[hotpath::measure]
     pub fn analyze(&mut self) -> Envelope<AnalyzeResult> {
-        self.with_loaded(
+        let mut envelope = self.with_loaded(
             "analyze",
             |session| session.load_with_operation(ProviderOperation::Compile),
             |session, loaded| {
@@ -429,7 +432,11 @@ impl CompilerSession {
                     &session.config.selection,
                 )
             },
-        )
+        );
+        self.gate_findings(&mut envelope, |result| {
+            full_finding_max(&result.selection, &result.risks_meta)
+        });
+        envelope
     }
 
     pub(crate) fn analyze_loaded(
@@ -438,14 +445,18 @@ impl CompilerSession {
         service: &SemanticService<'_>,
         selection: &crate::select::FindingSelection,
     ) -> Envelope<AnalyzeResult> {
-        self.with_loaded(
+        let mut envelope = self.with_loaded(
             "analyze",
             |_| Ok(loaded),
             |session, loaded| {
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
                 analyze_result(service, &loaded, session.catalog(), selection)
             },
-        )
+        );
+        self.gate_findings(&mut envelope, |result| {
+            full_finding_max(&result.selection, &result.risks_meta)
+        });
+        envelope
     }
 
     /// `inspect`: load and produce the structural/semantic program model.
@@ -605,7 +616,24 @@ impl CompilerSession {
             })
         });
         envelope.comparison = comparison.map(|comparison| comparison.to_json());
+        self.gate_findings(&mut envelope, |result| {
+            full_finding_max(&result.selection, &result.findings_meta)
+        });
         envelope
+    }
+
+    /// Apply the configured `--fail-on` gate to an envelope whose result
+    /// carries a finding set (#1002): `finding_max` reports the complete
+    /// set's highest severity, so the gate judges the same full set the
+    /// verdict does on every surface.
+    fn gate_findings<T: serde::Serialize>(
+        &self,
+        envelope: &mut Envelope<T>,
+        finding_max: impl FnOnce(&T) -> Option<crate::Severity>,
+    ) {
+        if let Some(threshold) = self.config.fail_on {
+            envelope.apply_fail_on(threshold, finding_max(&envelope.result));
+        }
     }
 
     fn service_query<T>(
@@ -665,64 +693,17 @@ impl CompilerSession {
             },
         )
     }
+}
 
-    /// `lint`: load and produce the source identity, program summary, per-rule
-    /// id and effective severity, effective configuration, and findings (#98).
-    /// Full rule metadata is served by `lintRules` rather than inlined into
-    /// every `lint` result (#431).
-    ///
-    /// Lint rule findings are reported in `result.findings`; frontend and
-    /// Workshop semantic-completeness diagnostics remain in the envelope.
-    /// Rule enable/disable and severity come from `self.config.lint`, the same
-    /// configuration the CLI flags and programmatic consumers set.
-    #[hotpath::measure]
-    pub fn lint(&mut self) -> Envelope<LintResult> {
-        self.with_loaded(
-            "lint",
-            |session| session.load_with_operation(ProviderOperation::Compile),
-            |session, loaded| {
-                session.attach_workshop_completeness(&loaded);
-                let shared = session.shared_semantic(&loaded);
-                let configured;
-                let service = if session.config.lint.rules.is_empty() {
-                    &*shared
-                } else {
-                    configured = shared.with_lint_config(session.config.lint.clone());
-                    &configured
-                };
-                session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
-                let program = program_summary(service, &loaded);
-                let lint_rules = service_response(service, &Request::LintRules);
-                let lint_rule_count = lint_rules
-                    .pointer("/rules")
-                    .and_then(serde_json::Value::as_array)
-                    .map_or(0, Vec::len);
-                session.progress(ProgressEvent::with_count(
-                    ProgressPhase::Linting,
-                    lint_rule_count,
-                    ProgressUnit::Rules,
-                ));
-                let (findings, findings_meta, selection) = select_findings(
-                    service,
-                    &loaded,
-                    session.catalog(),
-                    &session.config.selection,
-                    findings_with_meta(service),
-                );
-                let (rules, config, skipped) = crate::result::split_lint_rules(&lint_rules);
-                LintResult {
-                    input_identity: loaded.input.identity.clone(),
-                    program,
-                    rules,
-                    config,
-                    findings: serde_json::Value::Array(findings),
-                    findings_meta,
-                    skipped,
-                    selection,
-                    fixes: None,
-                    next: crate::result::next::list(crate::result::next::LINT),
-                }
-            },
-        )
-    }
+/// The complete finding set's highest severity: the selection outcome's
+/// recorded full-set max when a selection applied, else the maximum over
+/// the (unselected) typed identities.
+pub(crate) fn full_finding_max(
+    selection: &Option<crate::select::SelectionOutcome>,
+    meta: &[FindingMeta],
+) -> Option<crate::Severity> {
+    selection
+        .as_ref()
+        .and_then(|outcome| outcome.max_severity)
+        .or_else(|| meta.iter().map(|meta| meta.severity).max())
 }

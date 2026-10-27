@@ -3790,7 +3790,7 @@ fn session_lint_keeps_the_effective_configuration_over_the_shared_index() {
         .expect("the fixture triggers min-wait-loop");
     assert_eq!(finding["severity"], "error");
 
-    assert!(session.lint().ok);
+    assert!(!session.lint().ok);
     assert!(session.analyze().ok);
     assert_eq!(session.semantic_build_count(), 1);
 }

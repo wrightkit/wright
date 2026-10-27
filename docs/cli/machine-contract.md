@@ -66,6 +66,11 @@ filters and `--max` still apply. The corresponding agent operations accept
 on external surfaces; query specific details through the `inspect` subcommands.
 The Rust `CompilerSession` API still returns complete typed results. Verdicts
 and exit codes are based on the complete input, before selection or capping.
+`lint` adds finding severities to the verdict set (#1002): an `error`-severity
+finding is `ok: false`, `exit: 1` — the same verdict the `lint` agent
+operation reports. `--fail-on <LEVEL>` configures `SessionConfig.fail_on`,
+the driver's verdict gate, so a configured session applies it on every
+surface.
 
 Stable contract fields: `wright.contract`, `command`, `ok`, `exit`,
 `diagnostics[].code/stage/severity/span/source`, and each command's
