@@ -7,7 +7,7 @@ use crate::lookup::{
     OWNER_OPY, OWNER_WORKSHOP, UNKNOWN_WITHIN, quoted_list, unavailable, workshop_entry,
     workshop_locale, workshop_within,
 };
-use crate::service::{ToolResponse, carried_refusal, refusal};
+use crate::service::{ToolResponse, carried_refusal, refusal, usage_refusal};
 
 const LIST_ENTRIES_CAPABILITY: &str = "listEntries";
 const DEFAULT_PAGE_SIZE: usize = 100;
@@ -45,7 +45,7 @@ pub(crate) fn list_entries(
             return response;
         }
         other => {
-            return refusal(
+            return usage_refusal(
                 "invalid-language",
                 format!("listEntries serves 'workshop' and 'opy'; got '{other}'"),
             );
@@ -59,7 +59,7 @@ pub(crate) fn list_entries(
         "structural" => Some(Kind::Structural),
         "enumMember" => None,
         _ => {
-            return refusal(
+            return usage_refusal(
                 "invalid-kind",
                 format!(
                     "kind must be one of {}; got '{kind}'",
@@ -153,7 +153,7 @@ pub(crate) fn list_entries(
         Some(cursor) => match parse_cursor(cursor, &binding) {
             Some(offset) if offset <= entries.len() => offset,
             _ => {
-                return refusal(
+                return usage_refusal(
                     "invalid-cursor",
                     "the cursor does not belong to this request and owner version; restart from the first page",
                 );

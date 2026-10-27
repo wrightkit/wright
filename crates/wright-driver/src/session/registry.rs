@@ -16,7 +16,7 @@ pub(super) fn compose(config: &SessionConfig) -> Result<LintRegistry, Diagnostic
         })?;
     }
     if let Err(message) = config.selection.validate(&registry) {
-        return Err(Diagnostic::error(
+        return Err(Diagnostic::usage_error(
             "invalid-selection",
             Stage::Discovery,
             message,
@@ -29,7 +29,7 @@ pub(super) fn compose(config: &SessionConfig) -> Result<LintRegistry, Diagnostic
         .filter(|id| !registry.contains(id))
         .min()
     {
-        return Err(Diagnostic::error(
+        return Err(Diagnostic::usage_error(
             "invalid-selection",
             Stage::Discovery,
             format!("unknown rule id '{rule_id}'"),

@@ -239,6 +239,7 @@ mod tests {
             error: wright_driver::service::ToolErrorInfo {
                 code: "edit-requires-provider".to_string(),
                 message: "raw edit operations cover Workshop input".to_string(),
+                class: Default::default(),
                 fields: Default::default(),
             },
         });

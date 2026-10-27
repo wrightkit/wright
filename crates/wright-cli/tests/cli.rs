@@ -1790,7 +1790,7 @@ fn inspect_cost_verdict_and_file_selection() {
         "-f",
         "json",
     ]);
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(2));
     let envelope = parse_json(&output.stdout);
     assert_eq!(envelope["diagnostics"][0]["code"], "invalid-selection");
     assert!(
@@ -3623,7 +3623,7 @@ fn cost_run_cache_compares_against_the_previous_run() {
     let unknown = run(&["inspect", "cost", path, "--baseline", "nope"]);
     assert_eq!(
         unknown.status.code(),
-        Some(1),
+        Some(2),
         "{}",
         command_result(&unknown)
     );
@@ -3756,12 +3756,12 @@ fn cost_baseline_degrades_silently_under_ci() {
     let outside = run(&["inspect", "cost", a, "--baseline", "nope"]);
     assert_eq!(
         outside.status.code(),
-        Some(1),
+        Some(2),
         "{}",
         command_result(&outside)
     );
     assert!(
-        String::from_utf8_lossy(&outside.stdout).contains("unknown baseline 'nope'"),
+        String::from_utf8_lossy(&outside.stderr).contains("unknown baseline 'nope'"),
         "{}",
         command_result(&outside)
     );
@@ -4121,7 +4121,7 @@ fn cost_rule_drilldown_reconciles_to_the_rule_total() {
         "-f",
         "json",
     ]);
-    assert_eq!(bad.status.code(), Some(1));
+    assert_eq!(bad.status.code(), Some(2));
     let bad = parse_json(&bad.stdout);
     assert_eq!(bad["diagnostics"][0]["code"], "invalid-selection");
 

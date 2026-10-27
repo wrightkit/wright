@@ -37,7 +37,8 @@ impl<'a> ToolService<'a> {
                 return Err(ToolErrorInfo::new(
                     "invalid-selection",
                     "the 'rule' selector reports one rule's element cost; finding selection fields do not apply",
-                ));
+                )
+                .with_class(crate::diag::ExitClass::Usage));
             }
             return self.cost_estimate_rule(loaded, rule).map(|mut result| {
                 result["snapshot"] = json!(self.generation);
@@ -148,7 +149,8 @@ impl<'a> ToolService<'a> {
                     "unknown baseline '{}': no record under .wright/ for this input kind/locale/profile",
                     run.baseline.as_deref().unwrap_or_default()
                 ),
-            ));
+            )
+            .with_class(crate::diag::ExitClass::Usage));
         }
         let Some(snapshot) = self.session.cost_snapshot(loaded) else {
             return Ok(None);
@@ -171,6 +173,7 @@ impl<'a> ToolService<'a> {
             .map_err(|error| ToolErrorInfo {
                 fields: error.fields,
                 ..ToolErrorInfo::new("invalid-selection", error.message)
+                    .with_class(crate::diag::ExitClass::Usage)
             })?;
         let report = loaded
             .program

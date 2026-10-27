@@ -70,27 +70,12 @@ pub fn exit_code_from(diagnostics: &[Diagnostic]) -> u8 {
         if d.severity != Severity::Error {
             continue;
         }
-        if matches!(
-            d.code.as_str(),
-            "output-exists"
-                | "output-is-input"
-                | "output-unnamed"
-                | "profile-workshop-only"
-                | "invalid-locale"
-        ) {
-            return exit::USAGE;
+        match d.class {
+            crate::diag::ExitClass::Usage => return exit::USAGE,
+            crate::diag::ExitClass::Internal => return exit::INTERNAL,
+            crate::diag::ExitClass::Unsupported => return exit::UNSUPPORTED,
+            crate::diag::ExitClass::SourceError => has_source_error = true,
         }
-        if d.stage == crate::diag::Stage::Internal {
-            return exit::INTERNAL;
-        }
-        if d.stage == crate::diag::Stage::Reconstruction
-            || d.code == "adapter-stdin-unsupported"
-            || d.code == "source-provider-unsupported"
-            || d.code == "capability-unavailable"
-        {
-            return exit::UNSUPPORTED;
-        }
-        has_source_error = true;
     }
     if has_source_error {
         exit::SOURCE_ERROR
@@ -505,6 +490,15 @@ pub struct LintPackageRow {
     /// The failure detail on `error`/`unavailable`/`damaged` rows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// The exit class the row's failure belongs to, classified from the
+    /// typed error that produced the row; `None` for non-failure rows.
+    /// In-process only — it never serializes.
+    #[serde(skip)]
+    pub class: Option<crate::diag::ExitClass>,
+    /// The stage the row's failure is reported under; `None` for non-failure
+    /// rows. In-process only — it never serializes.
+    #[serde(skip)]
+    pub stage: Option<crate::diag::Stage>,
 }
 
 pub fn version_info() -> VersionInfo {
@@ -548,7 +542,63 @@ impl EditValidation {
 #[cfg(test)]
 mod tests {
     use super::compact_lint_rules;
+    use crate::diag::{Diagnostic, ExitClass, Stage};
     use serde_json::json;
+
+    /// The exit code `exit_code_from` yields for a single error diagnostic of
+    /// the documented code and class (#1003). Every documented code keeps the
+    /// exit it had when the class was inferred from the code string, except
+    /// `invalid-selection`, which the owner decision makes USAGE on every
+    /// path (the selector is a user-supplied argument).
+    #[test]
+    fn documented_codes_keep_their_exit_class() {
+        // (code, class at creation, expected exit)
+        let cases: &[(&str, ExitClass, u8)] = &[
+            // usage
+            ("output-exists", ExitClass::Usage, 2),
+            ("output-is-input", ExitClass::Usage, 2),
+            ("output-unnamed", ExitClass::Usage, 2),
+            ("profile-workshop-only", ExitClass::Usage, 2),
+            ("invalid-locale", ExitClass::Usage, 2),
+            ("lint-package-source", ExitClass::Usage, 2),
+            // the decided change: SOURCE_ERROR -> USAGE
+            ("invalid-selection", ExitClass::Usage, 2),
+            // unsupported
+            ("adapter-stdin-unsupported", ExitClass::Unsupported, 3),
+            ("source-provider-unsupported", ExitClass::Unsupported, 3),
+            ("capability-unavailable", ExitClass::Unsupported, 3),
+            // internal
+            ("provider-spawn", ExitClass::Internal, 4),
+            ("provider-timeout", ExitClass::Internal, 4),
+            ("provider-exited", ExitClass::Internal, 4),
+            ("provider-malformed", ExitClass::Internal, 4),
+            ("jsonrpc-error", ExitClass::Internal, 4),
+            ("provider-missing", ExitClass::Internal, 4),
+            ("provider-offline", ExitClass::Internal, 4),
+            ("provider-download", ExitClass::Internal, 4),
+            ("provider-integrity", ExitClass::Internal, 4),
+            ("provider-install", ExitClass::Internal, 4),
+            ("provider-unsupported-platform", ExitClass::Internal, 4),
+            ("lint-package-offline", ExitClass::Internal, 4),
+            ("lint-package-not-found", ExitClass::Internal, 4),
+            ("lint-package-rate-limited", ExitClass::Internal, 4),
+            ("lint-package-remote", ExitClass::Internal, 4),
+            ("lint-package-install", ExitClass::Internal, 4),
+            // source/user error
+            ("parse-error", ExitClass::SourceError, 1),
+            ("project-load-failed", ExitClass::SourceError, 1),
+            ("provider-refusal", ExitClass::SourceError, 1),
+            ("lint-package-invalid", ExitClass::SourceError, 1),
+        ];
+        for (code, class, expected) in cases {
+            let diagnostic = Diagnostic::carried_classed_error(*code, Stage::Frontend, *class, "m");
+            assert_eq!(
+                super::exit_code_from(&[diagnostic]),
+                *expected,
+                "{code} ({class:?})"
+            );
+        }
+    }
 
     #[test]
     fn compact_lint_rules_keeps_only_id_and_effective_severity() {

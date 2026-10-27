@@ -14,6 +14,20 @@ fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
+fn failed(
+    code: &str,
+    stage: Stage,
+    class: wright_driver::ExitClass,
+    message: impl Into<String>,
+) -> SourceProviderError {
+    SourceProviderError::Failed {
+        code: code.to_string(),
+        stage,
+        class,
+        message: message.into(),
+    }
+}
+
 fn workshop_fixture(fixture: &str) -> String {
     std::fs::read_to_string(workspace_root().join(format!("tests/fixtures/workshop/{fixture}.ws")))
         .expect("Workshop fixture")
@@ -1357,10 +1371,12 @@ fn provider_backend_does_not_fall_back_when_the_provider_fails() {
         check_compilation: None,
         compilation: None,
         check_failure: None,
-        failure: Some(SourceProviderError::Failed {
-            code: "provider-exited".to_string(),
-            message: "provider exited before compiling the entry".to_string(),
-        }),
+        failure: Some(failed(
+            "provider-exited",
+            Stage::Internal,
+            wright_driver::ExitClass::Internal,
+            "provider exited before compiling the entry",
+        )),
     };
     let config = SessionConfig {
         input: InputSpec::Path(entry),
@@ -1405,11 +1421,12 @@ fn provider_refusal_is_a_frontend_failure_with_its_refusal_code() {
         check_compilation: None,
         compilation: None,
         check_failure: None,
-        failure: Some(SourceProviderError::Failed {
-            code: "provider-refusal-compile.tooLarge".to_string(),
-            message: "the compile request failed: the provider refused (compile.tooLarge)"
-                .to_string(),
-        }),
+        failure: Some(failed(
+            "provider-refusal-compile.tooLarge",
+            Stage::Frontend,
+            wright_driver::ExitClass::SourceError,
+            "the compile request failed: the provider refused (compile.tooLarge)",
+        )),
     };
     let config = SessionConfig {
         input: InputSpec::Path(entry),
@@ -1438,11 +1455,12 @@ fn provider_capability_unavailable_exits_as_unsupported() {
         check_compilation: None,
         compilation: None,
         check_failure: None,
-        failure: Some(SourceProviderError::Failed {
-            code: "capability-unavailable".to_string(),
-            message: "the check request failed: capability 'projectLoading' was not negotiated"
-                .to_string(),
-        }),
+        failure: Some(failed(
+            "capability-unavailable",
+            Stage::Frontend,
+            wright_driver::ExitClass::Unsupported,
+            "the check request failed: capability 'projectLoading' was not negotiated",
+        )),
     };
     let config = SessionConfig {
         input: InputSpec::Path(entry),
@@ -1468,11 +1486,12 @@ fn provider_project_load_failure_is_a_source_side_failure() {
         check_compilation: None,
         compilation: None,
         check_failure: None,
-        failure: Some(SourceProviderError::Failed {
-            code: "project-load-failed".to_string(),
-            message: "the check request failed: a required source file could not be loaded"
-                .to_string(),
-        }),
+        failure: Some(failed(
+            "project-load-failed",
+            Stage::Frontend,
+            wright_driver::ExitClass::SourceError,
+            "the check request failed: a required source file could not be loaded",
+        )),
     };
     let config = SessionConfig {
         input: InputSpec::Path(entry),
@@ -1498,10 +1517,12 @@ fn provider_transport_failures_stay_internal() {
             check_compilation: None,
             compilation: None,
             check_failure: None,
-            failure: Some(SourceProviderError::Failed {
-                code: code.to_string(),
-                message: format!("the compile request failed: {code}"),
-            }),
+            failure: Some(failed(
+                code,
+                Stage::Internal,
+                wright_driver::ExitClass::Internal,
+                format!("the compile request failed: {code}"),
+            )),
         };
         let config = SessionConfig {
             input: InputSpec::Path(entry),
@@ -1528,10 +1549,12 @@ fn wright_originated_refusal_keeps_its_verbatim_code() {
         check_compilation: None,
         compilation: None,
         check_failure: None,
-        failure: Some(SourceProviderError::Failed {
-            code: "session-config-changed".to_string(),
-            message: "the check request failed: session configuration is fixed".to_string(),
-        }),
+        failure: Some(failed(
+            "session-config-changed",
+            Stage::Discovery,
+            wright_driver::ExitClass::SourceError,
+            "the check request failed: session configuration is fixed",
+        )),
     };
     let config = SessionConfig {
         input: InputSpec::Path(entry),

@@ -155,7 +155,7 @@ rule ("gamma") {
         "-f",
         "json",
     ]);
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(2));
     let envelope = parse_json(&output.stdout);
     assert_eq!(envelope["diagnostics"][0]["code"], "invalid-selection");
     let message = envelope["diagnostics"][0]["message"].as_str().unwrap();
@@ -189,7 +189,7 @@ rule ("gamma") {
         "-f",
         "json",
     ]);
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(2));
     let message = parse_json(&output.stdout)["diagnostics"][0]["message"]
         .as_str()
         .unwrap()
@@ -274,7 +274,7 @@ fn ambiguous_rule_lists_candidates_with_locations() {
         "-f",
         "json",
     ]);
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(2));
     let message = parse_json(&output.stdout)["diagnostics"][0]["message"]
         .as_str()
         .unwrap()
@@ -304,7 +304,7 @@ fn unmatched_file_lists_project_sources() {
         "-f",
         "json",
     ]);
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(2));
     let envelope = parse_json(&output.stdout);
     assert_eq!(envelope["diagnostics"][0]["code"], "invalid-selection");
     let message = envelope["diagnostics"][0]["message"].as_str().unwrap();
@@ -336,7 +336,7 @@ fn file_selector_has_no_suffix_matching() {
     ]);
     assert_eq!(
         output.status.code(),
-        Some(1),
+        Some(2),
         "no suffix match: {}",
         command_result(&output)
     );
@@ -402,7 +402,7 @@ fn placeholder_spelling_file_argument_stays_literal() {
             "-f",
             "json",
         ]);
-        assert_eq!(output.status.code(), Some(1), "{}", command_result(&output));
+        assert_eq!(output.status.code(), Some(2), "{}", command_result(&output));
         let envelope = parse_json(&output.stdout);
         assert_eq!(envelope["diagnostics"][0]["code"], "invalid-selection");
         let message = envelope["diagnostics"][0]["message"].as_str().unwrap();
@@ -443,7 +443,7 @@ rule ("a{list:rules}b") {
         "-f",
         "json",
     ]);
-    assert_eq!(output.status.code(), Some(1), "{}", command_result(&output));
+    assert_eq!(output.status.code(), Some(2), "{}", command_result(&output));
     let message = parse_json(&output.stdout)["diagnostics"][0]["message"]
         .as_str()
         .unwrap()
@@ -549,7 +549,7 @@ fn brace_spelling_source_files_stay_literal() {
             "-f",
             "json",
         ]);
-        assert_eq!(output.status.code(), Some(1), "{}", command_result(&output));
+        assert_eq!(output.status.code(), Some(2), "{}", command_result(&output));
         let message = parse_json(&output.stdout)["diagnostics"][0]["message"]
             .as_str()
             .unwrap()

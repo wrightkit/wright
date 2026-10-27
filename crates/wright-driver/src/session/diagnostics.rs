@@ -46,9 +46,10 @@ pub(super) fn provider_error_diagnostic(
     error: wright_lpp::ProviderError,
     operation: &str,
 ) -> Diagnostic {
-    Diagnostic::carried_error(
+    Diagnostic::carried_classed_error(
         crate::source_provider::provider_failure_code(&error),
         crate::source_provider::provider_failure_stage(&error),
+        crate::source_provider::provider_failure_class(&error),
         format!(
             "the provider could not {} the artifact: {}",
             operation, error

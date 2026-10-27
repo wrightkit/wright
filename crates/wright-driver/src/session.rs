@@ -279,7 +279,7 @@ impl CompilerSession {
         if self.config.profile != wright_transform::Profile::Off
             && resolved.kind != SourceKind::Workshop
         {
-            return Err(Diagnostic::error(
+            return Err(Diagnostic::usage_error(
                 "profile-workshop-only",
                 Stage::Discovery,
                 format!(
@@ -478,12 +478,7 @@ impl CompilerSession {
                         }
                         compilation
                     }
-                    Err(error)
-                        if matches!(error, SourceProviderError::Unsupported { .. })
-                            || error.code() == "capability-unavailable" =>
-                    {
-                        check
-                    }
+                    Err(error) if error.class() == crate::diag::ExitClass::Unsupported => check,
                     Err(error) => {
                         self.diagnostics.extend(check.diagnostics);
                         return Err(error.diagnostic());
@@ -880,13 +875,13 @@ impl CompilerSession {
         let mut envelope = self.finish("compile", result);
         envelope.comparison = comparison.map(|c| c.to_json());
         if let Some(name) = missing_baseline {
-            envelope.diagnostics.push(Diagnostic::error(
+            envelope.diagnostics.push(Diagnostic::usage_error(
                 "invalid-selection",
                 Stage::Emission,
                 format!("unknown baseline '{}': no record under .wright/ for this input kind/locale/profile", name),
             ));
             envelope.ok = false;
-            envelope.exit = crate::result::exit::SOURCE_ERROR;
+            envelope.exit = crate::result::exit::USAGE;
         }
         envelope
     }
@@ -900,7 +895,7 @@ impl CompilerSession {
             Some(name) => {
                 let locale = workshop_rs::catalog::Locale::new(name);
                 if !self.catalog.supports(&locale) {
-                    return Err(Diagnostic::error(
+                    return Err(Diagnostic::usage_error(
                         "invalid-locale",
                         Stage::Discovery,
                         format!(
@@ -1088,6 +1083,7 @@ impl CompilerSession {
                     code: "element-count-unavailable".to_string(),
                     stage: Stage::Emission,
                     severity: Severity::Info,
+                    class: Default::default(),
                     message: format!(
                         "the canonical element count is unavailable ({}); the {WORKSHOP_CLIENT_ELEMENT_LIMIT}-element client import limit was not evaluated",
                         error
@@ -1108,6 +1104,7 @@ impl CompilerSession {
             code: "target-element-limit".to_string(),
             stage: Stage::Emission,
             severity: Severity::Warning,
+            class: Default::default(),
             message: format!(
                 "generated Workshop program uses {total} elements, over the {WORKSHOP_CLIENT_ELEMENT_LIMIT}-element client import limit; the artifact was still emitted but is expected to fail Overwatch client import"
             ),
@@ -1253,6 +1250,7 @@ fn map_issue(
         code: diagnostic_code(kind_code, &issue.name),
         stage: Stage::Analysis,
         severity,
+        class: Default::default(),
         message,
         status: Some(status),
         span: Some(issue_span(issue.span, path)),

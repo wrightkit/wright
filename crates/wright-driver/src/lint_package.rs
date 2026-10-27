@@ -624,10 +624,16 @@ impl LintPackageError {
     }
 
     pub fn exit_code(&self) -> u8 {
+        self.exit_class().exit_code()
+    }
+
+    /// The exit class of the failure, classified from the typed variant.
+    pub fn exit_class(&self) -> crate::diag::ExitClass {
+        use crate::diag::ExitClass;
         match self {
-            Self::Source(_) => crate::result::exit::USAGE,
-            Self::Invalid { .. } => crate::result::exit::SOURCE_ERROR,
-            _ => crate::result::exit::INTERNAL,
+            Self::Source(_) => ExitClass::Usage,
+            Self::Invalid { .. } => ExitClass::SourceError,
+            _ => ExitClass::Internal,
         }
     }
 }

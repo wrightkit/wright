@@ -120,23 +120,24 @@ impl SourceCompilation {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceProviderError {
-    NotConfigured { language: SourceLanguage },
-    Unsupported { message: String },
-    Failed { code: String, message: String },
+    NotConfigured {
+        language: SourceLanguage,
+    },
+    Unsupported {
+        message: String,
+    },
+    Failed {
+        code: String,
+        /// The pipeline stage and exit class, classified from the typed
+        /// provider error at creation; never re-derived from `code`.
+        stage: Stage,
+        class: crate::diag::ExitClass,
+        message: String,
+    },
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 const PROVIDER_REFUSAL_CODE_PREFIX: &str = "provider-refusal-";
-
-fn failed_stage(code: &str) -> Stage {
-    match code {
-        "session-config-changed" => Stage::Discovery,
-        "provider-refusal" | "refusal" | "capability-unavailable" | "project-load-failed" => {
-            Stage::Frontend
-        }
-        code if code.starts_with(PROVIDER_REFUSAL_CODE_PREFIX) => Stage::Frontend,
-        _ => Stage::Internal,
-    }
-}
 
 impl SourceProviderError {
     pub fn code(&self) -> &str {
@@ -147,13 +148,22 @@ impl SourceProviderError {
         }
     }
 
+    /// The exit class the error was classified with at creation.
+    pub fn class(&self) -> crate::diag::ExitClass {
+        match self {
+            Self::Unsupported { .. } => crate::diag::ExitClass::Unsupported,
+            Self::NotConfigured { .. } => crate::diag::ExitClass::Internal,
+            Self::Failed { class, .. } => *class,
+        }
+    }
+
     pub fn diagnostic(&self) -> Diagnostic {
         let stage = match self {
             Self::Unsupported { .. } => Stage::Frontend,
             Self::NotConfigured { .. } => Stage::Internal,
-            Self::Failed { code, .. } => failed_stage(code),
+            Self::Failed { stage, .. } => *stage,
         };
-        Diagnostic::carried_error(self.code(), stage, self.to_string())
+        Diagnostic::carried_classed_error(self.code(), stage, self.class(), self.to_string())
     }
 }
 
@@ -199,6 +209,8 @@ impl LppSourceProvider {
         let uri = url::Url::from_file_path(target.entry_path())
             .map_err(|()| SourceProviderError::Failed {
                 code: "provider-invalid-entry".to_string(),
+                stage: Stage::Internal,
+                class: crate::diag::ExitClass::Internal,
                 message: format!(
                     "cannot convert OPY entry '{}' to an absolute file URI",
                     target.entry_path().display()
@@ -288,6 +300,8 @@ impl SourceProvider for LppSourceProvider {
                 let mapped = MappedText::from_json(&a.content).map_err(|error| {
                     SourceProviderError::Failed {
                         code: "provider-artifact-format".to_string(),
+                        stage: Stage::Internal,
+                        class: crate::diag::ExitClass::Internal,
                         message: format!(
                             "the source provider returned an invalid '{MAPPED_TEXT_V1}' artifact: {}",
                             error
@@ -299,6 +313,8 @@ impl SourceProvider for LppSourceProvider {
             Some(a) => {
                 return Err(SourceProviderError::Failed {
                     code: "provider-artifact-format".to_string(),
+                    stage: Stage::Internal,
+                    class: crate::diag::ExitClass::Internal,
                     message: format!(
                         "the source provider returned unsupported artifact format '{}', expected '{TEXT_V1}'",
                         a.format
@@ -335,9 +351,46 @@ pub(crate) fn provider_failure_code(error: &wright_lpp::ProviderError) -> String
     }
 }
 
+/// The pipeline stage a provider failure reports at, classified from
+/// the typed error, not the code string: a `session-config-changed`
+/// refusal reports discovery; an LPP refusal, capability gap, or project
+/// load failure reports the frontend; transport/process failures are
+/// internal.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn provider_failure_stage(error: &wright_lpp::ProviderError) -> Stage {
-    failed_stage(&provider_failure_code(error))
+    let wright_lpp::ProviderError::Lpp(error) = error else {
+        return Stage::Internal;
+    };
+    match error.kind {
+        wright_lpp::LppErrorKind::Refusal
+            if error.refusal_code() == Some("session-config-changed") =>
+        {
+            Stage::Discovery
+        }
+        wright_lpp::LppErrorKind::Refusal
+        | wright_lpp::LppErrorKind::CapabilityUnavailable
+        | wright_lpp::LppErrorKind::ProjectLoadFailed => Stage::Frontend,
+        _ => Stage::Internal,
+    }
+}
+
+/// The exit class of a provider failure, classified from the typed error,
+/// not the code string: an LPP `CapabilityUnavailable` is unsupported,
+/// an LPP refusal or `ProjectLoadFailed` is a source error, and
+/// transport/process/session failures are internal.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn provider_failure_class(error: &wright_lpp::ProviderError) -> crate::diag::ExitClass {
+    use crate::diag::ExitClass;
+    match error {
+        wright_lpp::ProviderError::Lpp(error) => match error.kind {
+            wright_lpp::LppErrorKind::CapabilityUnavailable => ExitClass::Unsupported,
+            wright_lpp::LppErrorKind::Refusal | wright_lpp::LppErrorKind::ProjectLoadFailed => {
+                ExitClass::SourceError
+            }
+            _ => ExitClass::Internal,
+        },
+        _ => ExitClass::Internal,
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -347,6 +400,8 @@ pub(crate) fn provider_error(
 ) -> SourceProviderError {
     SourceProviderError::Failed {
         code: provider_failure_code(&error),
+        stage: provider_failure_stage(&error),
+        class: provider_failure_class(&error),
         message: format!("{context}: {}", error),
     }
 }
@@ -380,6 +435,7 @@ fn provider_diagnostics(
                     code: d.code.unwrap_or_else(|| "provider-diagnostic".to_string()),
                     stage: Stage::Frontend,
                     severity,
+                    class: crate::diag::class_for_stage(Stage::Frontend),
                     message: d.message.clone(),
                     status: None,
                     span: Some(SourceSpan {
@@ -536,6 +592,8 @@ mod tests {
     fn provider_failures_have_a_distinct_structured_code() {
         let diagnostic = SourceProviderError::Failed {
             code: "provider-exited".to_string(),
+            stage: Stage::Internal,
+            class: crate::diag::ExitClass::Internal,
             message: "provider exited".to_string(),
         }
         .diagnostic();

@@ -317,7 +317,7 @@ fn callgraph_caller_refuses_the_merge() {
         "-f",
         "json",
     ]);
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(2));
     let envelope = parse_json(&output.stdout);
     assert_eq!(envelope["diagnostics"][0]["code"], "invalid-selection");
     for candidate in ["tick#1", "tick#2"] {
@@ -440,7 +440,7 @@ fn unmatched_files_refuse_on_cli_and_serve() {
         vec!["inspect", "rules", clean, "--file", "elsewhere.ws"],
     ] {
         let output = run(&[&command[..], &["-f", "json"]].concat());
-        assert_eq!(output.status.code(), Some(1), "{command:?}");
+        assert_eq!(output.status.code(), Some(2), "{command:?}");
         let envelope = parse_json(&output.stdout);
         assert_eq!(envelope["diagnostics"][0]["code"], "invalid-selection");
         assert!(

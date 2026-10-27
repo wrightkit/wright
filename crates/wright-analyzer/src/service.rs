@@ -79,8 +79,44 @@ pub fn carried_code_ok(code: &str) -> bool {
 pub struct ErrorInfo {
     pub code: String,
     pub message: String,
+    /// The exit class the producer assigns the failure (#1003): surfaces
+    /// read it instead of re-classifying from the code. In-process only —
+    /// the wire refuses carry `code`/`message`; the exit verdict already
+    /// rides in the envelope.
+    #[serde(skip)]
+    pub class: ExitClass,
     #[serde(default, flatten)]
     pub fields: serde_json::Map<String, serde_json::Value>,
+}
+
+/// The exit class a diagnostic or tool error is created with (#1003).
+/// Producers — not renderers — decide whether a failure is a usage
+/// error, a source error, an unsupported capability, or an internal
+/// failure, so no downstream layer matches on the diagnostic code to
+/// pick an exit code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExitClass {
+    /// A source/user error (exit 1).
+    #[default]
+    SourceError,
+    /// A usage error (exit 2).
+    Usage,
+    /// A recognized but unsupported request (exit 3).
+    Unsupported,
+    /// An internal/environment failure (exit 4).
+    Internal,
+}
+
+impl ExitClass {
+    /// The `wright-result/v1` exit code for the class.
+    pub fn exit_code(self) -> u8 {
+        match self {
+            Self::SourceError => 1,
+            Self::Usage => 2,
+            Self::Unsupported => 3,
+            Self::Internal => 4,
+        }
+    }
 }
 
 impl ErrorInfo {
@@ -96,6 +132,7 @@ impl ErrorInfo {
         ErrorInfo {
             code,
             message: message.into(),
+            class: ExitClass::SourceError,
             fields: Default::default(),
         }
     }
@@ -114,8 +151,15 @@ impl ErrorInfo {
         ErrorInfo {
             code,
             message: message.into(),
+            class: ExitClass::SourceError,
             fields: Default::default(),
         }
+    }
+
+    /// This payload with a different exit class (#1003).
+    pub fn with_class(mut self, class: ExitClass) -> Self {
+        self.class = class;
+        self
     }
 }
 

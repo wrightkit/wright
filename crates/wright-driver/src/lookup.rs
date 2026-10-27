@@ -12,7 +12,7 @@ use crate::CompilerSession;
 use crate::opy_provider;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::service::{SERVICE_NAME, SERVICE_VERSION};
-use crate::service::{ToolResponse, carried_refusal, refusal};
+use crate::service::{ToolResponse, carried_refusal, refusal, usage_refusal};
 
 const DEFAULT_LIMIT: usize = 3;
 const MAX_LIMIT: usize = 10;
@@ -58,7 +58,7 @@ pub(crate) fn lookup(
     if let Some(kind) = kind
         && !KINDS.contains(&kind)
     {
-        return refusal(
+        return usage_refusal(
             "invalid-kind",
             format!("kind must be one of {}; got '{kind}'", quoted_list(&KINDS)),
         );
@@ -66,7 +66,7 @@ pub(crate) fn lookup(
     match language {
         "workshop" => workshop_lookup(session, query, kind, within, locale, limit),
         "opy" => opy_lookup(session, query, kind, within, locale, limit),
-        other => refusal(
+        other => usage_refusal(
             "invalid-language",
             format!("lookup serves 'workshop' and 'opy'; got '{other}'"),
         ),
