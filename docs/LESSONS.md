@@ -36,7 +36,13 @@ Short review queue of reusable failure classes from merged Wright work. Each ent
 - **Rule:** When input falls outside the declared contract or a computation cannot produce its result, reject or report `unavailable` — never clamp, coerce, or print a zero. A plausible-looking result is worse than an honest failure.
 - **Why:** `lookup` silently clamped `limit: 11` to 10 so the caller could not tell its request was changed, and `inspect cost` printed `0 element(s) of the 0-element budget` when the count had failed. The same class as the wire-boundary escalation in #728, now on request and result surfaces.
 - **Prevention home:** the `malformed-request` rejection and `unavailable` reporting landed in #811 and #816; org escalation [wright#728](https://github.com/wrightkit/wright/issues/728).
-- **Incidents:** [wright#811](https://github.com/wrightkit/wright/pull/811) (fixes [wright#783](https://github.com/wrightkit/wright/issues/783)), [wright#816](https://github.com/wrightkit/wright/pull/816) (fixes [wright#790](https://github.com/wrightkit/wright/issues/790)) — observed 2026-10-19
+- **Incidents:** [wright#811](https://github.com/wrightkit/wright/pull/811) (fixes [wright#783](https://github.com/wrightkit/wright/issues/783)), [wright#816](https://github.com/wrightkit/wright/pull/816) (fixes [wright#790](https://github.com/wrightkit/wright/issues/790)) — observed 2026-10-19; [wright#943](https://github.com/wrightkit/wright/pull/943) (a failed findings read showed rules as unmarked) — observed 2026-10-22
+
+### A failure keeps its code and class when it crosses a boundary
+- **Rule:** A wrapper that forwards a provider, session, or loader failure carries its typed code and exit class through unchanged. Do not reclassify it as a capability gap, a refusal, or a default class.
+- **Why:** A refusal became an `unavailable` capability gap, a session diagnostic became a fabricated provider refusal, and a reload failure lost its class, so callers and exit codes reported the wrong failure.
+- **Prevention home:** test — escalated in [wright#1022](https://github.com/wrightkit/wright/issues/1022).
+- **Incidents:** [wright#1014](https://github.com/wrightkit/wright/pull/1014), [wright#1017](https://github.com/wrightkit/wright/pull/1017) — observed 2026-10-27
 
 ### A multi-resource mutation stages every change before committing
 - **Rule:** A transaction over several files or resources stages every replacement before touching the first target; a mid-sequence failure leaves the set unchanged or names exactly what was written.
