@@ -94,7 +94,7 @@ fn digest_tree(root: &Path) -> DiskFingerprint {
     digest_files(files)
 }
 
-fn digest_files(files: Vec<PathBuf>) -> DiskFingerprint {
+pub(crate) fn digest_files(files: Vec<PathBuf>) -> DiskFingerprint {
     let mut hasher = Sha256::new();
     for path in &files {
         hasher.update(path.as_os_str().as_encoded_bytes());

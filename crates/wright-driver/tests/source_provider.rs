@@ -237,44 +237,8 @@ fn provider_backend_check_falls_back_to_the_check_operation_on_a_check_only_prov
     assert!(result.ok, "provider check: {:?}", result.diagnostics);
     assert_eq!(
         *operations.lock().expect("operation lock"),
-        vec!["check", "compile"]
-    );
-    cleanup(dir);
-}
-
-#[test]
-fn provider_backend_serves_compile_from_the_check_established_snapshot() {
-    let (dir, entry) = temp_entry();
-    let operations = Arc::new(Mutex::new(Vec::new()));
-    let provider = RecordingProvider {
-        target: Arc::new(Mutex::new(None)),
-        operations: Arc::clone(&operations),
-        check_compilation: Some(SourceCompilation {
-            workshop_text: None,
-            locale: None,
-            provenance: wright_driver::source_provider::SourceProvenance::Unmapped,
-            diagnostics: Vec::new(),
-            source_identity: None,
-        }),
-        compilation: Some(SourceCompilation::success(workshop_fixture(
-            "synthetic/basic-rule",
-        ))),
-        check_failure: None,
-        failure: None,
-    };
-    let config = SessionConfig {
-        input: InputSpec::Path(entry),
-        kind: SourceKind::Opy,
-        ..SessionConfig::default()
-    };
-    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
-        .expect("provider session");
-    assert!(session.check().ok);
-    assert!(session.compile().ok);
-    assert_eq!(
-        *operations.lock().expect("operation lock"),
-        vec!["check", "compile"],
-        "check compiles once for its canonical snapshot; compile reuses it"
+        vec!["compile", "check"],
+        "check compiles first and falls back to the check operation only on a capability decline"
     );
     cleanup(dir);
 }
@@ -1107,12 +1071,16 @@ fn service_check_and_compile_run_without_a_prewarmed_snapshot() {
     };
     assert_eq!(result["command"], "check");
     assert_eq!(result["ok"], true, "{result}");
-    assert_eq!(*operations.lock().expect("ops"), vec!["check", "compile"]);
+    assert_eq!(
+        *operations.lock().expect("ops"),
+        vec!["compile", "check"],
+        "check compiles first and falls back to the check operation on a capability decline (#1005)"
+    );
 
     assert!(service.check().ok);
     assert_eq!(
         *operations.lock().expect("ops"),
-        vec!["check", "compile", "check", "compile"]
+        vec!["compile", "check", "compile", "check"]
     );
 
     for request in [
@@ -1132,7 +1100,7 @@ fn service_check_and_compile_run_without_a_prewarmed_snapshot() {
     }
     assert_eq!(
         *operations.lock().expect("ops"),
-        vec!["check", "compile", "check", "compile"],
+        vec!["compile", "check", "compile", "check"],
         "snapshot queries refuse without asking the provider to compile"
     );
 
@@ -1150,7 +1118,7 @@ fn service_check_and_compile_run_without_a_prewarmed_snapshot() {
     );
     assert_eq!(
         *operations.lock().expect("ops"),
-        vec!["check", "compile", "check", "compile", "compile"]
+        vec!["compile", "check", "compile", "check", "compile"]
     );
     cleanup(dir);
 }
@@ -1197,8 +1165,8 @@ fn service_compile_establishes_the_snapshot_and_recovers_after_reload() {
     assert_eq!(result["ok"], true, "{result}");
     assert_eq!(
         *operations.lock().expect("ops"),
-        vec!["compile", "check", "compile"],
-        "an observed change re-checks instead of serving the stale program"
+        vec!["compile", "compile"],
+        "an observed change re-compiles instead of serving the stale program"
     );
     assert!(
         service.loaded().is_some(),
@@ -1216,10 +1184,7 @@ fn service_compile_establishes_the_snapshot_and_recovers_after_reload() {
         service.loaded().is_some(),
         "compile re-supplied the snapshot"
     );
-    assert_eq!(
-        *operations.lock().expect("ops"),
-        vec!["compile", "check", "compile"]
-    );
+    assert_eq!(*operations.lock().expect("ops"), vec!["compile", "compile"]);
     cleanup(dir);
 }
 
@@ -1252,7 +1217,7 @@ fn service_check_and_compile_match_the_direct_workflow_methods() {
         };
         assert_eq!(check["command"], "check");
         assert_eq!(check["ok"], true, "{check}");
-        assert_eq!(*operations.lock().expect("ops"), vec!["check", "compile"]);
+        assert_eq!(*operations.lock().expect("ops"), vec!["compile"]);
 
         let compile = if via_request {
             let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile {
@@ -1268,7 +1233,7 @@ fn service_check_and_compile_match_the_direct_workflow_methods() {
         };
         assert_eq!(compile["command"], "compile");
         assert_eq!(compile["ok"], true, "{compile}");
-        assert_eq!(*operations.lock().expect("ops"), vec!["check", "compile"]);
+        assert_eq!(*operations.lock().expect("ops"), vec!["compile"]);
         cleanup(dir);
     }
 }
@@ -1435,9 +1400,19 @@ fn provider_capability_unavailable_exits_as_unsupported() {
     let provider = RecordingProvider {
         target: Arc::new(Mutex::new(None)),
         operations: Arc::new(Mutex::new(Vec::new())),
-        check_compilation: None,
+        check_compilation: Some(SourceCompilation {
+            workshop_text: None,
+            locale: None,
+            provenance: wright_driver::SourceProvenance::Unmapped,
+            diagnostics: Vec::new(),
+            source_identity: None,
+        }),
         compilation: None,
-        check_failure: None,
+        check_failure: Some(SourceProviderError::Failed {
+            code: "capability-unavailable".to_string(),
+            message: "the check request failed: capability 'projectLoading' was not negotiated"
+                .to_string(),
+        }),
         failure: Some(SourceProviderError::Failed {
             code: "capability-unavailable".to_string(),
             message: "the check request failed: capability 'projectLoading' was not negotiated"
@@ -1934,13 +1909,7 @@ fn a_repeated_check_reports_the_same_provider_diagnostics() {
     let provider = RecordingProvider {
         target: Arc::new(Mutex::new(None)),
         operations: Arc::clone(&operations),
-        check_compilation: Some(SourceCompilation {
-            workshop_text: None,
-            locale: None,
-            provenance: wright_driver::SourceProvenance::Unmapped,
-            diagnostics: vec![provider_diagnostic("check-warning")],
-            source_identity: None,
-        }),
+        check_compilation: None,
         compilation: Some(SourceCompilation {
             workshop_text: Some(workshop_fixture("synthetic/basic-rule")),
             locale: None,
@@ -1976,12 +1945,12 @@ fn a_repeated_check_reports_the_same_provider_diagnostics() {
         second
             .diagnostics
             .iter()
-            .any(|d| d.code == "check-warning" || d.code == "compile-warning"),
+            .any(|d| d.code == "compile-warning"),
         "the repeated check keeps the provider diagnostics: {second:?}"
     );
     assert_eq!(
         *operations.lock().expect("operation lock"),
-        vec!["check", "compile"],
+        vec!["compile"],
         "the repeated check is served from the cached load"
     );
     cleanup(dir);

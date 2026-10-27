@@ -7,9 +7,29 @@ use std::sync::Arc;
 use wright_analyzer::canonical::SemanticService;
 
 use super::ToolService;
+use crate::config::SourceKind;
 use crate::diag::Diagnostic;
 use crate::input;
-use crate::{CompilerSession, Loaded};
+use crate::{CompilerSession, Loaded, Provenance};
+
+/// The snapshot's disk-observation set (#1005): a mapped provider artifact
+/// names its source members, so freshness hashes exactly those files
+/// instead of walking the whole input tree — a tool request on an
+/// unchanged project no longer reads non-source files. Unmapped artifacts
+/// and check-only loads declare no member list, so they keep the whole
+/// tree fingerprint the provider contract implies.
+fn loaded_fingerprint(config: &crate::SessionConfig, loaded: &Loaded) -> input::DiskFingerprint {
+    let resolved = &loaded.input;
+    if resolved.kind == SourceKind::Opy && loaded.provenance == Provenance::Mapped {
+        let members = loaded
+            .source_files
+            .iter()
+            .map(|member| resolved.root.join(member))
+            .collect();
+        return input::digest_files(members);
+    }
+    input::disk_fingerprint(config, resolved)
+}
 
 pub(super) struct Snapshot {
     pub(super) loaded: Loaded,
@@ -74,7 +94,7 @@ impl<'a> ToolService<'a> {
             }
             return Ok(());
         };
-        let fingerprint = input::disk_fingerprint(&self.session.config, &snapshot.loaded.input);
+        let fingerprint = loaded_fingerprint(&self.session.config, &snapshot.loaded);
         if snapshot.fingerprint == fingerprint {
             return Ok(());
         }
@@ -99,7 +119,7 @@ impl<'a> ToolService<'a> {
         let Some(snapshot) = &self.snapshot else {
             return;
         };
-        let fingerprint = input::disk_fingerprint(&self.session.config, &snapshot.loaded.input);
+        let fingerprint = loaded_fingerprint(&self.session.config, &snapshot.loaded);
         if snapshot.fingerprint == fingerprint {
             return;
         }
@@ -126,7 +146,7 @@ impl<'a> ToolService<'a> {
         let semantic = self.session.shared_semantic(&loaded);
         let lint_semantic = (!self.session.config.lint.rules.is_empty())
             .then(|| semantic.with_lint_config(self.session.config.lint.clone()));
-        let fingerprint = input::disk_fingerprint(&self.session.config, &loaded.input);
+        let fingerprint = loaded_fingerprint(&self.session.config, &loaded);
         self.generation += 1;
         self.snapshot = Some(Snapshot {
             loaded,
