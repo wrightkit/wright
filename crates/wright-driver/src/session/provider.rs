@@ -10,7 +10,9 @@ use std::sync::Arc;
 use workshop_rs::Program;
 
 use super::diagnostics::workshop_diag_for_provider_artifact;
-use super::{CompilerSession, Loaded, Provenance, ProviderOperation, lpp_client_info};
+#[cfg(not(target_arch = "wasm32"))]
+use super::lpp_client_info;
+use super::{CompilerSession, Loaded, Provenance, ProviderOperation};
 use crate::diag::{Diagnostic, Severity, Stage};
 use crate::input::{InputTarget, ResolvedInput};
 #[cfg(not(target_arch = "wasm32"))]
