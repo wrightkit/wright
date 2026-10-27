@@ -6,7 +6,7 @@ use std::process::ExitCode;
 use wright_driver::result::exit;
 
 use crate::present;
-use crate::{cli, essential_envelope, fail_on, run_configured, selection_from_args};
+use crate::{cli, fail_on, run_configured, selection_from_args};
 use crate::{config_from_common, present::terminal};
 
 pub(crate) fn run(args: cli::LintArgs) -> ExitCode {
@@ -36,12 +36,6 @@ pub(crate) fn run(args: cli::LintArgs) -> ExitCode {
         presentation.with_all(args.all),
         fail_on(&args.common),
         None,
-        |session| {
-            essential_envelope(
-                session.lint(),
-                |value| wright_driver::essential::lint(value, args.all),
-                |result| result.selection.clone(),
-            )
-        },
+        |session| crate::essential::lint(session.lint(), args.all),
     )
 }

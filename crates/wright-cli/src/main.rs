@@ -2,6 +2,7 @@ mod agent;
 mod agenttools;
 mod cli;
 mod completion;
+mod essential;
 mod lint;
 mod mcp;
 mod plain;
@@ -195,13 +196,7 @@ fn run_workflow(command: Command) -> ExitCode {
                 presentation.with_all(args.all),
                 fail_on(&args.common),
                 None,
-                |session| {
-                    essential_envelope(
-                        session.analyze(),
-                        |value| wright_driver::essential::analyze(value, args.all),
-                        |result| result.selection.clone(),
-                    )
-                },
+                |session| crate::essential::analyze(session.analyze(), args.all),
             )
         }
         Command::Lint(args) => lint::run(args),
@@ -212,13 +207,7 @@ fn run_workflow(command: Command) -> ExitCode {
                 present::Presentation::from_common(&args.common).with_all(args.all),
                 fail_on(&args.common),
                 None,
-                |session| {
-                    essential_envelope(
-                        session.inspect(),
-                        |value| wright_driver::essential::inspect(value, args.all),
-                        |_| None,
-                    )
-                },
+                |session| crate::essential::inspect(session.inspect(), args.all),
             ),
             Some(cli::InspectQuery::Rules(query)) => run_configured(
                 "rules",
@@ -365,17 +354,6 @@ fn run_workflow(command: Command) -> ExitCode {
             unreachable!("non-workflow command handled before run_workflow")
         }
     }
-}
-
-pub(crate) fn essential_envelope<T: serde::Serialize>(
-    envelope: wright_driver::Envelope<T>,
-    form: impl FnOnce(&serde_json::Value) -> serde_json::Value,
-    outcome: impl FnOnce(&T) -> Option<wright_driver::SelectionOutcome>,
-) -> wright_driver::Envelope<wright_driver::EssentialResult> {
-    envelope.map_result(|result| wright_driver::EssentialResult {
-        result: form(&serde_json::to_value(&result).expect("result serializes")),
-        selection: outcome(&result),
-    })
 }
 
 pub(crate) fn run_configured<

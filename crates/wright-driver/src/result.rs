@@ -174,6 +174,10 @@ pub struct AnalyzeResult {
     /// Present when a finding selection was applied to `facts.risks` (#430).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selection: Option<crate::select::SelectionOutcome>,
+    /// The typed identities of `facts.risks`, index-aligned (#1001):
+    /// in-process only — the wire rows already carry the fields.
+    #[serde(skip)]
+    pub risks_meta: Vec<FindingMeta>,
     /// The shared follow-up commands (#792).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub next: Vec<String>,
@@ -246,6 +250,9 @@ pub struct CostResult {
     /// The applied finding selection's outcome; never serialized — the wire
     /// member lives in `result.selection`.
     pub selection: Option<crate::select::SelectionOutcome>,
+    /// The typed identities of `result.findings`, index-aligned (#1001):
+    /// in-process only — the wire rows already carry the fields.
+    pub findings_meta: Vec<FindingMeta>,
 }
 
 impl Serialize for CostResult {
@@ -254,11 +261,40 @@ impl Serialize for CostResult {
     }
 }
 
+/// One finding's typed identity, parallel to its serialized row
+/// (#1001): severity and code stay typed through the driver boundary so
+/// no layer re-parses them out of the wire projection.
+pub use wright_analyzer::canonical::FindingMeta;
+
+/// Which command produced an `EssentialResult` (#1001): the projection
+/// declares its producer, so renderers select their report by the tag
+/// rather than by probing JSON keys. In-process only — it never
+/// serializes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EssentialCommand {
+    /// The `lint` essential projection.
+    #[default]
+    Lint,
+    /// The `inspect` essential projection.
+    Inspect,
+    /// The `analyze` essential projection.
+    Analyze,
+}
+
 /// The essential presentation payload and complete-set selection outcome.
 #[derive(Debug, Clone, Default)]
 pub struct EssentialResult {
     pub result: serde_json::Value,
     pub selection: Option<crate::select::SelectionOutcome>,
+    /// The command whose projection produced `result`.
+    pub command: EssentialCommand,
+    /// The typed identities of the emitted finding rows — `result.findings`
+    /// for `lint`, `result.risks` for `analyze` — index-aligned (#1001).
+    pub findings_meta: Vec<FindingMeta>,
+    /// The full finding set's highest severity before projection
+    /// truncation (#1001) — the verdict's severity, which the projected
+    /// `counts` used to answer.
+    pub max_severity: Option<Severity>,
 }
 impl Serialize for EssentialResult {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -272,9 +308,13 @@ pub struct LintResult {
     pub program: serde_json::Value,
     pub rules: serde_json::Value,
     pub config: serde_json::Value,
-    /// Lint findings after selection. The verdict reports the true total via
-    /// `selection`, not this array's length.
+    /// Lint findings after selection, as serialized rows. The verdict
+    /// reports the true total via `selection`, not this array's length.
     pub findings: serde_json::Value,
+    /// The typed identities of `findings`, index-aligned (#1001):
+    /// in-process only — the wire rows already carry the fields.
+    #[serde(skip)]
+    pub findings_meta: Vec<FindingMeta>,
     pub skipped: serde_json::Value,
     /// Present when a finding selection was applied to `findings` (#430).
     #[serde(skip_serializing_if = "Option::is_none")]

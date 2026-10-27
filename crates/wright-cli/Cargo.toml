@@ -14,6 +14,10 @@ workspace = true
 name = "wright"
 path = "src/main.rs"
 
+[[test]]
+name = "update_provider"
+path = "tests/update/provider.rs"
+
 [dependencies]
 arboard = { version = "3.6", default-features = false }
 clap = { version = "4.5", features = ["derive"] }

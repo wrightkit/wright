@@ -4,11 +4,49 @@
 
 use std::collections::BTreeSet;
 
+use serde_json::Value;
+use wright_driver::{FindingMeta, Severity};
+
 use super::addresses::edge_caller;
 use super::{
-    array_len, display_location_path, finding_location_span, finding_severity_rank,
-    inline_location, is_real_source_path, severity_rank,
+    array_len, display_location_path, finding_location_span, inline_location, is_real_source_path,
 };
+
+/// Rank a typed severity for ordering: errors first (#1001).
+pub(crate) fn severity_rank(severity: Severity) -> u8 {
+    match severity {
+        Severity::Error => 0,
+        Severity::Warning => 1,
+        Severity::Info => 2,
+    }
+}
+
+/// Severity counts over a typed finding-meta list — the renderers'
+/// severity input; nothing re-parses the serialized `severity` (#1001).
+pub(crate) fn meta_severity_counts(meta: &[FindingMeta]) -> [usize; 3] {
+    let mut counts = [0usize; 3];
+    for meta in meta {
+        counts[severity_rank(meta.severity) as usize] += 1;
+    }
+    counts
+}
+
+/// The severity label a finding displays — colored when the presentation
+/// is — from the typed severity (#1001); the serialized label is never
+/// re-parsed.
+pub(crate) fn severity_label(severity: Severity, color: bool) -> String {
+    let label = severity.as_str();
+    if color {
+        let code = match severity {
+            Severity::Error => "31",
+            Severity::Warning => "33",
+            Severity::Info => "36",
+        };
+        format!("\x1b[{code}m{label}\x1b[0m")
+    } else {
+        label.to_string()
+    }
+}
 
 const DIAGNOSTIC_LIMIT: usize = 20;
 
@@ -44,14 +82,6 @@ pub(crate) fn diagnostic_counts(diagnostics: &[wright_driver::Diagnostic]) -> [u
     let mut counts = [0usize; 3];
     for diagnostic in diagnostics {
         counts[severity_rank(diagnostic.severity) as usize] += 1;
-    }
-    counts
-}
-
-pub(crate) fn findings_severity_counts(findings: &[serde_json::Value]) -> [usize; 3] {
-    let mut counts = [0usize; 3];
-    for finding in findings {
-        counts[finding_severity_rank(finding) as usize] += 1;
     }
     counts
 }
@@ -211,16 +241,54 @@ pub(crate) fn normalize_finding_spans(findings: &mut serde_json::Value) {
     }
 }
 
-/// Groups consecutive findings sharing `code` and `message` into runs.
-pub(crate) fn group_runs(findings: &[serde_json::Value]) -> Vec<&[serde_json::Value]> {
+pub(crate) fn shown_of(value: &serde_json::Value, key: &str) -> Option<(u64, u64)> {
+    value["truncation"][key].as_object().map(|note| {
+        (
+            note["shown"].as_u64().unwrap_or(0),
+            note["total"].as_u64().unwrap_or(0),
+        )
+    })
+}
+
+/// A result's finding rows paired with their typed severities (#1001),
+/// sorted most severe first; `meta` supplies every severity, so no
+/// renderer re-parses the serialized row.
+pub(crate) fn sorted_findings<'f>(
+    findings: &'f Value,
+    meta: &'f [FindingMeta],
+) -> Vec<(&'f Value, Severity)> {
+    let mut pairs: Vec<(&Value, Severity)> = findings
+        .as_array()
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .map(|(index, row)| {
+            (
+                row,
+                meta.get(index)
+                    .map(|meta| meta.severity)
+                    .unwrap_or(Severity::Warning),
+            )
+        })
+        .collect();
+    debug_assert_eq!(pairs.len(), meta.len(), "finding meta parallels the rows");
+    pairs.sort_by_key(|(_, severity)| severity_rank(*severity));
+    pairs
+}
+
+/// Consecutive severity-paired finding rows sharing `code` and `message`
+/// group together, keeping each row's typed severity (#1001).
+pub(crate) fn grouped_findings<'f>(
+    findings: &'f [(&'f Value, Severity)],
+) -> Vec<&'f [(&'f Value, Severity)]> {
     let mut groups = Vec::new();
     let mut index = 0;
     while index < findings.len() {
-        let first = &findings[index];
+        let (first, _) = findings[index];
         let mut end = index + 1;
         while end < findings.len()
-            && findings[end]["code"] == first["code"]
-            && findings[end]["message"] == first["message"]
+            && findings[end].0["code"] == first["code"]
+            && findings[end].0["message"] == first["message"]
         {
             end += 1;
         }
@@ -230,11 +298,63 @@ pub(crate) fn group_runs(findings: &[serde_json::Value]) -> Vec<&[serde_json::Va
     groups
 }
 
-pub(crate) fn shown_of(value: &serde_json::Value, key: &str) -> Option<(u64, u64)> {
-    value["truncation"][key].as_object().map(|note| {
-        (
-            note["shown"].as_u64().unwrap_or(0),
-            note["total"].as_u64().unwrap_or(0),
-        )
-    })
+/// One plain-format `finding: …` record — the severity arrives typed
+/// (#1001); every other field reads the serialized row verbatim.
+pub(crate) fn finding_record(finding: &Value, severity: Severity) -> String {
+    let severity = severity.as_str();
+    let code = finding["code"].as_str().unwrap_or("finding");
+    let repeated = finding.get("repeated").filter(|r| r.is_object());
+    let mut items = vec![severity.to_string(), code.to_string()];
+    if let Some(count) = repeated.and_then(|r| r["count"].as_u64()) {
+        items.push(format!("count={count}"));
+    }
+    if let Some(span) = finding.get("span").filter(|span| span.is_object()) {
+        if let Some(at) =
+            crate::present::inline_location(span).map(|location| format!("at={location}"))
+        {
+            items.push(at);
+        }
+    } else if let Some(location) = finding["location"].as_str() {
+        items.push(format!("at={location}"));
+    }
+    if let Some(repeated) = repeated {
+        if let Some(span_kind) = repeated["spanKind"].as_str() {
+            items.push(crate::plain::field("spanKind", span_kind));
+        }
+        if let Some(expression) = repeated["expression"].as_str() {
+            items.push(crate::plain::field("expression", expression));
+        }
+    }
+    const CARRIED: &[&str] = &[
+        "code", "severity", "message", "span", "location", "fix", "repeated",
+    ];
+    if let Some(object) = finding.as_object() {
+        for (key, value) in object {
+            if CARRIED.contains(&key.as_str()) {
+                continue;
+            }
+            match value {
+                Value::String(text) => items.push(crate::plain::field(key, text)),
+                Value::Number(_) | Value::Bool(_) => items.push(format!("{key}={value}")),
+                _ => {}
+            }
+        }
+    }
+    if let Some(message) = finding["message"].as_str() {
+        items.push(crate::plain::field("message", message));
+    }
+    format!("finding: {}", items.join(" "))
+}
+
+/// The one evidence class every finding shares, when they all agree.
+pub(crate) fn uniform_evidence(findings: &[&Value]) -> Option<String> {
+    let mut classes = findings
+        .iter()
+        .map(|finding| finding["evidence"].as_str().unwrap_or("exact"))
+        .collect::<BTreeSet<_>>();
+    if classes.len() == 1 {
+        classes.pop_first().map(str::to_string)
+    } else {
+        None
+    }
 }

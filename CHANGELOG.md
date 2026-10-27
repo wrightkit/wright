@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.39.3](https://github.com/wrightkit/wright/compare/v0.39.2...v0.39.3) (2026-10-27)
+
+
+### Code Refactoring
+
+* keep findings typed through driver results ([#1015](https://github.com/wrightkit/wright/issues/1015)) ([6bea05a](https://github.com/wrightkit/wright/commit/6bea05afe7c4e56cb54385e22d046cd0569dd068)), closes [#1001](https://github.com/wrightkit/wright/issues/1001)
+* remove dead render paths and duplicated helpers ([#999](https://github.com/wrightkit/wright/issues/999)) ([bfb8a29](https://github.com/wrightkit/wright/commit/bfb8a29cbf8988f6dcb2fc54c2c53782cc0a0144))
+* reuse the store download and checksum helpers in wright update ([#1012](https://github.com/wrightkit/wright/issues/1012)) ([eb42f1f](https://github.com/wrightkit/wright/commit/eb42f1f34e68add6a43263d90fceaa3ae5cf3b87)), closes [#1007](https://github.com/wrightkit/wright/issues/1007)
+
 ## [0.39.2](https://github.com/wrightkit/wright/compare/v0.39.1...v0.39.2) (2026-10-27)
 
 

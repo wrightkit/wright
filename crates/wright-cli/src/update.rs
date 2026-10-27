@@ -1,14 +1,13 @@
 use std::cmp::Ordering;
-use std::io::Read;
 use std::path::Path;
-use std::time::Duration;
 
 use clap::{Args, Subcommand, ValueEnum};
 use wright_driver::result::exit;
-use wright_driver::{OpyProviderConfig, OpyProviderError, ResolvedOpyProvider, sha256_hex};
+use wright_driver::{OpyProviderConfig, OpyProviderError, ResolvedOpyProvider};
 
 const DEFAULT_BASE_URL: &str = "https://releases.wrightkit.dev/wright";
 const USER_AGENT: &str = concat!("wright-update/", env!("CARGO_PKG_VERSION"));
+const MAX_DOWNLOAD_BYTES: u64 = 128 * 1024 * 1024;
 
 mod install;
 
@@ -501,15 +500,11 @@ fn parse_latest_version(body: &str) -> Option<String> {
 }
 
 fn update_client() -> Result<reqwest::blocking::Client, UpdateError> {
-    reqwest::blocking::Client::builder()
-        .user_agent(USER_AGENT)
-        .timeout(Duration::from_secs(60))
-        .build()
-        .map_err(|e| {
-            UpdateError::failed(format!(
-                "could not initialize HTTPS client for release downloads: {e}"
-            ))
-        })
+    wright_driver::store::client(USER_AGENT).map_err(|e| {
+        UpdateError::failed(format!(
+            "could not initialize HTTPS client for release downloads: {e}"
+        ))
+    })
 }
 
 fn fetch_text(client: &reqwest::blocking::Client, url: &str) -> Result<String, UpdateError> {
@@ -526,12 +521,14 @@ fn fetch(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>, Updat
             response.status()
         )));
     }
-    let mut bytes = Vec::new();
-    response
-        .take(128 * 1024 * 1024)
-        .read_to_end(&mut bytes)
-        .map_err(|e| UpdateError::failed(format!("could not download {url}: {e}")))?;
-    Ok(bytes)
+    wright_driver::store::read_limited(response, MAX_DOWNLOAD_BYTES).map_err(|error| match error {
+        wright_driver::store::ReadError::Io(error) => {
+            UpdateError::failed(format!("could not download {url}: {error}"))
+        }
+        wright_driver::store::ReadError::OverLimit => UpdateError::failed(format!(
+            "download from {url} exceeds the 128 MiB size limit"
+        )),
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,5 +1,4 @@
 use serde_json::json;
-use wright_analyzer::service::{Request, Response};
 
 use super::{ToolErrorInfo, ToolResponse, ToolService};
 use crate::{CompilerSession, Loaded};
@@ -11,16 +10,26 @@ impl<'a> ToolService<'a> {
         rule: Option<&str>,
     ) -> ToolResponse {
         match self.cost_estimate_result(selection, rule) {
-            Ok((result, _)) => self.ok(result),
+            Ok((result, _, _)) => self.ok(result),
             Err(error) => ToolResponse::Error { error },
         }
     }
 
+    /// The `costEstimate` payload, its finding-selection outcome, and the
+    /// typed identities of the selected `result.findings` (#1001) — the
+    /// session keeps the meta so `CostResult` readers stay typed.
     pub(crate) fn cost_estimate_result(
         &self,
         selection: &crate::select::FindingSelection,
         rule: Option<&str>,
-    ) -> Result<(serde_json::Value, Option<crate::select::SelectionOutcome>), ToolErrorInfo> {
+    ) -> Result<
+        (
+            serde_json::Value,
+            Option<crate::select::SelectionOutcome>,
+            Vec<crate::result::FindingMeta>,
+        ),
+        ToolErrorInfo,
+    > {
         self.selection_check(selection)?;
         let loaded = &self.snapshot().loaded;
         if let Some(rule) = rule {
@@ -32,23 +41,19 @@ impl<'a> ToolService<'a> {
             }
             return self.cost_estimate_rule(loaded, rule).map(|mut result| {
                 result["snapshot"] = json!(self.generation);
-                (result, None)
+                (result, None, Vec::new())
             });
         }
         let locale = CompilerSession::locale_for(loaded);
         let emitted = workshop_rs::emitter::emit(&loaded.program, self.session.catalog(), &locale);
         let (program_actions, waits) = crate::session::live_action_counts(&loaded.program);
         let service = self.configured_semantic();
-        let findings = match service.handle(&Request::GetFindings) {
-            Response::Ok { result } => result,
-            Response::Error { .. } => serde_json::json!([]),
-        };
-        let (findings, outcome) = crate::session::select_findings(
+        let (findings, meta, outcome) = crate::session::select_findings(
             service,
             loaded,
             self.session.catalog(),
             selection,
-            findings,
+            crate::session::findings_with_meta(service),
         );
         let (_, _, skipped) = super::lint_rules_split(service);
         let mut exact = json!({
@@ -111,7 +116,7 @@ impl<'a> ToolService<'a> {
             result["selection"] = serde_json::to_value(outcome).expect("selection serializes");
         }
         result["snapshot"] = json!(self.generation);
-        Ok((result, outcome))
+        Ok((result, outcome, meta))
     }
 
     pub(crate) fn apply_cost_run(

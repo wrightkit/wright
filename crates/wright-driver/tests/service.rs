@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use wright_driver::edit::{EditRange, EditTransaction, SourceEdit};
+use wright_driver::essential;
 use wright_driver::service::{Address, ToolRequest, ToolResponse, ToolService};
 use wright_driver::{
     CompilerSession, FindingSelection, InputSpec, SessionConfig, Severity, SourceKind,
@@ -1975,24 +1976,23 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
 
-    let names = |result: serde_json::Value| {
-        result["symbols"]
+    let symbols = |service: &mut ToolService<'_>| {
+        result_of(
+            service,
+            &ToolRequest::Symbols {
+                kind: None,
+                file: None,
+                max: None,
+                all: true,
+            },
+        )["symbols"]
             .as_array()
             .unwrap()
             .iter()
             .map(|symbol| symbol["name"].as_str().unwrap().to_string())
             .collect::<Vec<_>>()
     };
-    let before = names(result_of(
-        &mut service,
-        &ToolRequest::Symbols {
-            kind: None,
-            file: None,
-            max: None,
-            all: true,
-        },
-    ));
-    assert_eq!(before, ["score", "setup"]);
+    assert_eq!(symbols(&mut service), ["score", "setup"]);
 
     for request in [
         ToolRequest::References {
@@ -2023,8 +2023,10 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
     }
     assert_eq!(
         {
-            let mut expected = serde_json::to_value(service.analyze()).unwrap();
-            expected["result"] = wright_driver::essential::analyze(&expected["result"], true);
+            let envelope = service.analyze();
+            let mut expected = serde_json::to_value(&envelope).unwrap();
+            let meta = &envelope.result.risks_meta;
+            expected["result"] = essential::analyze(&expected["result"].take(), meta, true).0;
             expected["snapshot"] = serde_json::json!(service.snapshot_generation().unwrap());
             expected
         },
@@ -2039,16 +2041,7 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
 
     std::fs::write(&input, FRESHNESS_V2).unwrap();
 
-    let after = names(result_of(
-        &mut service,
-        &ToolRequest::Symbols {
-            kind: None,
-            file: None,
-            max: None,
-            all: true,
-        },
-    ));
-    assert_eq!(after, ["points", "setup", "extra"]);
+    assert_eq!(symbols(&mut service), ["points", "setup", "extra"]);
     assert_eq!(service.reload_count(), 1);
 
     let project = result_of(&mut service, &ToolRequest::Project);

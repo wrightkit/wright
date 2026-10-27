@@ -142,7 +142,12 @@ fn workshop_diagnostics_match_check_for_the_same_text() {
     );
     for (diagnostic, expected) in diagnostics.iter().zip(expected.iter()) {
         assert_eq!(diagnostic.code, expected.code);
-        assert_eq!(diagnostic.severity, expected.severity.as_str());
+        let expected_severity = match expected.severity.as_str() {
+            "error" => wright_language::DiagnosticSeverity::Error,
+            "warning" => wright_language::DiagnosticSeverity::Warning,
+            _ => wright_language::DiagnosticSeverity::Info,
+        };
+        assert_eq!(diagnostic.severity, expected_severity);
         let span = expected.span.as_ref().expect("check span");
         assert_eq!(
             diagnostic.range,
@@ -167,7 +172,9 @@ fn workshop_diagnostics_follow_the_current_buffer() {
     service.store.change(&uri, "rule (\"x\" {\n", 1);
     let diagnostics = service.diagnostics(&uri);
     assert!(
-        diagnostics.iter().any(|d| d.severity == "error"),
+        diagnostics
+            .iter()
+            .any(|d| d.severity == wright_language::DiagnosticSeverity::Error),
         "the changed buffer republishes its own diagnostics: {diagnostics:?}"
     );
     assert_eq!(diagnostics[0].document_version, 1);

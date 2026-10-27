@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use serde::Serialize;
 use wright_analyzer::canonical::{PositionResolution, ReferenceKind, SemanticIndex, Symbol};
 use wright_driver::opy_provider::OPY_LANGUAGE_ID;
-use wright_driver::{CompilerSession, InputSpec, SessionConfig, SourceKind};
-use wright_lpp::{Capability, LanguageProvider};
+use wright_driver::{CompilerSession, InputSpec, SessionConfig, Severity, SourceKind};
+use wright_lpp::{Capability, DiagnosticSeverity, LanguageProvider};
 
 use crate::document::{Document, DocumentStore, Position, Range, line_col_position, uri_to_path};
 
@@ -13,7 +13,10 @@ use crate::document::{Document, DocumentStore, Position, Range, line_col_positio
 pub struct SourceDiagnostic {
     pub source: String,
     pub range: Range,
-    pub severity: String,
+    /// The provider vocabulary's severity — `error`/`warning`/`info`/
+    /// `hint`, carried typed so consumers never re-parse the label
+    /// (#1001); workshop-side diagnostics always report `Error`.
+    pub severity: DiagnosticSeverity,
     pub code: String,
     pub message: String,
     pub source_version: i32,
@@ -163,7 +166,7 @@ impl LanguageService {
         vec![SourceDiagnostic {
             source: document.uri.clone(),
             range: EMPTY_RANGE,
-            severity: "error".to_string(),
+            severity: DiagnosticSeverity::Error,
             code: "source-provider-unavailable".to_string(),
             message:
                 "source-language analysis is provider-owned; diagnostics are not yet negotiated"
@@ -203,7 +206,7 @@ impl LanguageService {
             vec![SourceDiagnostic {
                 source: uri.to_string(),
                 range: EMPTY_RANGE,
-                severity: "error".to_string(),
+                severity: DiagnosticSeverity::Error,
                 code: code.to_string(),
                 message,
                 source_version: version,
@@ -236,7 +239,7 @@ impl LanguageService {
                         .map(move |diagnostic| SourceDiagnostic {
                             source: document.uri.clone(),
                             range: diagnostic.range,
-                            severity: lpp_severity(diagnostic.severity).to_string(),
+                            severity: diagnostic.severity,
                             code: diagnostic.code.clone().unwrap_or_default(),
                             message: diagnostic.message.clone(),
                             source_version: version,
@@ -610,15 +613,6 @@ fn provider_supports(provider: &dyn LanguageProvider, capability: Capability) ->
         .unwrap_or(false)
 }
 
-fn lpp_severity(severity: wright_lpp::DiagnosticSeverity) -> &'static str {
-    match severity {
-        wright_lpp::DiagnosticSeverity::Error => "error",
-        wright_lpp::DiagnosticSeverity::Warning => "warning",
-        wright_lpp::DiagnosticSeverity::Info => "info",
-        wright_lpp::DiagnosticSeverity::Hint => "hint",
-    }
-}
-
 fn source_location(location: &wright_lpp::Location) -> SourceLocation {
     SourceLocation {
         uri: location.uri.clone(),
@@ -688,7 +682,11 @@ fn source_diagnostic(
             start: line_col_position(&document.text, span.start.line, span.start.col),
             end: line_col_position(&document.text, span.end.line, span.end.col),
         }),
-        severity: diagnostic.severity.as_str().to_string(),
+        severity: match diagnostic.severity {
+            Severity::Error => DiagnosticSeverity::Error,
+            Severity::Warning => DiagnosticSeverity::Warning,
+            Severity::Info => DiagnosticSeverity::Info,
+        },
         code: diagnostic.code.clone(),
         message: diagnostic.message.clone(),
         source_version: document.version,

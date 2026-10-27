@@ -10,8 +10,8 @@ use wright_analyzer::service::Request;
 use crate::diag::{Diagnostic, Stage};
 use crate::progress::{ProgressEvent, ProgressPhase, ProgressUnit};
 use crate::result::{
-    AnalyzeResult, CallGraphResult, CfgResult, CostResult, Envelope, InspectResult, LintResult,
-    RefsResult, RulesResult, SymbolsResult,
+    AnalyzeResult, CallGraphResult, CfgResult, CostResult, Envelope, FindingMeta, InspectResult,
+    LintResult, RefsResult, RulesResult, SymbolsResult,
 };
 use crate::service::{Address, ToolErrorInfo, ToolRequest, ToolResponse, ToolService};
 
@@ -27,7 +27,7 @@ fn semantic_facts(
     service: &SemanticService<'_>,
     loaded: &Loaded,
     catalog: &Catalog,
-) -> serde_json::Value {
+) -> (serde_json::Value, Vec<FindingMeta>) {
     let symbols = service_response(service, &Request::ListSymbols { kind: None })
         .as_array()
         .map(|symbols| {
@@ -117,15 +117,18 @@ fn semantic_facts(
         .unwrap_or_default();
 
     let cost = cost_facts(&loaded.program, &element_count);
-    let risks = risk_facts(service);
+    let (risks, risks_meta) = risk_facts(service);
 
-    serde_json::json!({
-        "symbols": symbols,
-        "rules": rules,
-        "cost": cost,
-        "risks": risks,
-        "persistentObjects": service_response(service, &Request::GetPersistentObjects),
-    })
+    (
+        serde_json::json!({
+            "symbols": symbols,
+            "rules": rules,
+            "cost": cost,
+            "risks": risks,
+            "persistentObjects": service_response(service, &Request::GetPersistentObjects),
+        }),
+        risks_meta,
+    )
 }
 
 fn cost_facts(
@@ -163,7 +166,16 @@ fn cost_facts(
     cost
 }
 
-fn risk_facts(service: &SemanticService<'_>) -> serde_json::Value {
+/// The service's serialized findings paired with their typed identities
+/// (#1001) — the `GetFindings` rows the wire carries, index-aligned with
+/// `findings_meta`, so no consumer re-parses `severity`/`code` out of JSON.
+pub(crate) fn findings_with_meta(
+    service: &SemanticService<'_>,
+) -> (Vec<serde_json::Value>, Vec<FindingMeta>) {
+    (service.findings_json().to_vec(), service.findings_meta())
+}
+
+fn risk_facts(service: &SemanticService<'_>) -> (Vec<serde_json::Value>, Vec<FindingMeta>) {
     let lint_rules = service_response(service, &Request::LintRules);
     let risk_rule_ids: BTreeSet<&str> = lint_rules
         .get("rules")
@@ -180,22 +192,12 @@ fn risk_facts(service: &SemanticService<'_>) -> serde_json::Value {
         })
         .filter_map(|rule| rule.get("id").and_then(serde_json::Value::as_str))
         .collect();
-    let risks = service_response(service, &Request::GetFindings)
-        .as_array()
-        .map(|findings| {
-            findings
-                .iter()
-                .filter(|finding| {
-                    finding
-                        .get("code")
-                        .and_then(serde_json::Value::as_str)
-                        .is_some_and(|code| risk_rule_ids.contains(code))
-                })
-                .cloned()
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    serde_json::Value::Array(risks)
+    let (findings, meta) = findings_with_meta(service);
+    findings
+        .into_iter()
+        .zip(meta)
+        .filter(|(_, meta)| risk_rule_ids.contains(meta.code.as_str()))
+        .unzip()
 }
 
 fn program_summary(service: &SemanticService<'_>, loaded: &Loaded) -> serde_json::Value {
@@ -248,7 +250,7 @@ fn analyze_result(
     if let serde_json::Value::Object(object) = &mut program {
         object.remove("findings");
     }
-    let mut facts = semantic_facts(service, loaded, catalog);
+    let (mut facts, risks_meta) = semantic_facts(service, loaded, catalog);
     hotpath::measure_block!("analyze::resolve_span_paths", {
         resolve_span_paths(&mut facts, loaded)
     });
@@ -256,14 +258,15 @@ fn analyze_result(
         serde_json::Value::Array(risks) => risks,
         _ => Vec::new(),
     };
-    let (risks, outcome) =
-        selection.apply_findings(risks, &crate::select::file_bases(&loaded.input));
+    let (risks, risks_meta, outcome) =
+        selection.apply_findings_meta(risks, risks_meta, &crate::select::file_bases(&loaded.input));
     facts["risks"] = serde_json::Value::Array(risks);
     AnalyzeResult {
         program,
         facts,
         selection: outcome,
         next: crate::result::next::list(crate::result::next::ANALYZE),
+        risks_meta,
     }
 }
 
@@ -320,20 +323,23 @@ pub(crate) fn prepare_findings(
 }
 
 /// The shared findings tail after a `GetFindings` fetch:
-/// [`prepare_findings`] prepares the payloads, then the surface's
-/// finding selection applies.
+/// [`prepare_findings`] prepares the payload rows, then the surface's
+/// finding selection applies to the rows paired with their typed meta
+/// (#1001) — severity and code come from `meta`, never re-parsed.
 pub(crate) fn select_findings(
     service: &SemanticService<'_>,
     loaded: &Loaded,
     catalog: &Catalog,
     selection: &crate::select::FindingSelection,
-    findings: serde_json::Value,
+    findings: (Vec<serde_json::Value>, Vec<FindingMeta>),
 ) -> (
     Vec<serde_json::Value>,
+    Vec<FindingMeta>,
     Option<crate::select::SelectionOutcome>,
 ) {
-    let findings = prepare_findings(findings, service, loaded, catalog);
-    selection.apply_findings(findings, &crate::select::file_bases(&loaded.input))
+    let (findings, meta) = findings;
+    let findings = prepare_findings(serde_json::Value::Array(findings), service, loaded, catalog);
+    selection.apply_findings_meta(findings, meta, &crate::select::file_bases(&loaded.input))
 }
 
 /// Move a `references` operation's selected payload into a `usage`
@@ -589,11 +595,13 @@ impl CompilerSession {
         let selection = self.config.selection.clone();
         let mut comparison = None;
         let mut envelope = self.service_query("cost", |service| {
-            let (result, outcome) = service.cost_estimate_result(&selection, rule.as_deref())?;
+            let (result, outcome, findings_meta) =
+                service.cost_estimate_result(&selection, rule.as_deref())?;
             comparison = service.apply_cost_run(&result)?;
             Ok(CostResult {
                 result,
                 selection: outcome,
+                findings_meta,
             })
         });
         envelope.comparison = comparison.map(|comparison| comparison.to_json());
@@ -690,12 +698,12 @@ impl CompilerSession {
                     lint_rule_count,
                     ProgressUnit::Rules,
                 ));
-                let (findings, selection) = select_findings(
+                let (findings, findings_meta, selection) = select_findings(
                     service,
                     &loaded,
                     session.catalog(),
                     &session.config.selection,
-                    service_response(service, &Request::GetFindings),
+                    findings_with_meta(service),
                 );
                 let (rules, config, skipped) = crate::result::split_lint_rules(&lint_rules);
                 LintResult {
@@ -704,6 +712,7 @@ impl CompilerSession {
                     rules,
                     config,
                     findings: serde_json::Value::Array(findings),
+                    findings_meta,
                     skipped,
                     selection,
                     fixes: None,

@@ -27,7 +27,7 @@ pub mod session;
 pub mod source_provider;
 pub(crate) mod statement_edit;
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) mod store;
+pub mod store;
 pub mod workshop_compat;
 
 pub use config::{
@@ -51,8 +51,8 @@ pub use output::{CompileWrite, OutputDest, Overwrite};
 pub use progress::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit};
 pub use result::{
     AnalyzeResult, CheckResult, CompileResult, CompiledOutput, ConvertResult, ConvertTarget,
-    Envelope, EssentialResult, InspectResult, LintPackageResult, LintPackageRow, LintResult,
-    RESULT_CONTRACT, SimulateResult,
+    Envelope, EssentialCommand, EssentialResult, FindingMeta, InspectResult, LintPackageResult,
+    LintPackageRow, LintResult, RESULT_CONTRACT, SimulateResult,
 };
 pub use select::{FindingSelection, SelectionOutcome};
 pub use session::{CompilerSession, Loaded, Provenance, WORKSHOP_CLIENT_ELEMENT_LIMIT};

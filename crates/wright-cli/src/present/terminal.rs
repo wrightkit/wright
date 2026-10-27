@@ -1,21 +1,21 @@
-use std::collections::BTreeSet;
-
 use serde_json::Value;
+use wright_driver::Severity;
 use wright_driver::result::{
     CallGraphResult, CfgResult, CheckResult, CompileResult, ConvertResult, CostResult, Envelope,
-    EssentialResult, LintResult, RefsResult, RulesResult, SymbolsResult,
+    EssentialCommand, EssentialResult, FindingMeta, LintResult, RefsResult, RulesResult,
+    SymbolsResult,
 };
 
 use super::{
     DETAIL_COMMANDS, Presentation, RenderContext, ResultPresentation, array_len, block_flags,
     call_fan_counts, cfg_block_stats, cfg_edge_count, count, diagnostic_counts, diagnostic_files,
-    diagnostics_on_stdout, dim, display_location_path, edge_caller, finding_files,
-    finding_location_span, finding_severity_label, finding_severity_rank, findings_severity_counts,
-    fix_status_counts, fix_status_parts, group_runs, is_real_source_path, location_suffix,
-    lookup_hint_args, normalize_finding_spans, notable_callers, persistent_object_summary,
-    query_items, render_diff_lines, render_finding_location, render_node, renderable_group_spans,
-    rule_address, rule_name, shown_diagnostics, shown_of, source_context, span_suffix,
-    summary_status, symbol_kind_heading, tree_rule, unmapped_positions, unmapped_positions_note,
+    diagnostics_on_stdout, dim, display_location_path, edge_caller, finding_head,
+    finding_location_line, finding_location_span, finding_section, fix_status_counts,
+    fix_status_parts, is_real_source_path, lint_footer, location_suffix, lookup_hint_args,
+    meta_severity_counts, normalize_finding_spans, notable_callers, persistent_object_summary,
+    query_items, render_diff_lines, render_node, rule_address, rule_name, shown_diagnostics,
+    shown_of, sorted_findings, source_context, span_suffix, summary_status, symbol_kind_heading,
+    tree_rule, uniform_evidence,
 };
 
 fn tag_word<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) -> String {
@@ -88,7 +88,7 @@ pub(crate) fn plural(n: usize, singular: &str, plural: &str) -> String {
     }
 }
 
-fn pad(ctx: &RenderContext<'_>, depth: usize) -> String {
+pub(crate) fn pad(ctx: &RenderContext<'_>, depth: usize) -> String {
     if depth == 0 {
         return String::new();
     }
@@ -229,27 +229,6 @@ fn check_footer<T: serde::Serialize + ResultPresentation>(
     }
 }
 
-fn lint_footer(ctx: &RenderContext<'_>, findings: &[Value], skipped: usize) {
-    let files = finding_files(findings);
-    let mut parts = Vec::new();
-    if !files.is_empty() {
-        parts.push(plural(files.len(), "file affected", "files affected"));
-    }
-    if skipped > 0 {
-        parts.push(plural(
-            skipped,
-            "rule evaluation skipped",
-            "rule evaluations skipped",
-        ));
-    }
-    if ctx.presentation.interactive {
-        parts.push(format!("{} ms", ctx.elapsed.as_millis()));
-    }
-    if !parts.is_empty() {
-        note(ctx, 1, &parts.join(" · "));
-    }
-}
-
 fn diagnostics<T: serde::Serialize + ResultPresentation>(
     ctx: &RenderContext<'_>,
     envelope: &Envelope<T>,
@@ -360,96 +339,6 @@ fn diagnostic_item(
 
 fn elements(n: usize) -> String {
     plural(n, "element", "elements")
-}
-
-fn finding_head(ctx: &RenderContext<'_>, finding: &Value, occurrences: usize) -> String {
-    let severity = finding_severity_label(finding, ctx.presentation.color);
-    let code = finding["code"].as_str().unwrap_or("finding");
-    let message = finding["message"].as_str().unwrap_or_default();
-    if occurrences > 1 {
-        format!("{severity}[{code}] ({occurrences} findings): {message}")
-    } else {
-        format!("{severity}[{code}]: {message}")
-    }
-}
-
-fn finding_location_line(ctx: &RenderContext<'_>, span: &Value, depth: usize, frame: bool) {
-    render_finding_location(span, ctx, &pad(ctx, depth), frame);
-}
-
-fn uniform_evidence(findings: &[Value]) -> Option<String> {
-    let mut classes = findings
-        .iter()
-        .map(|finding| finding["evidence"].as_str().unwrap_or("exact"))
-        .collect::<BTreeSet<_>>();
-    if classes.len() == 1 {
-        classes.pop_first().map(str::to_string)
-    } else {
-        None
-    }
-}
-
-fn finding_section(
-    ctx: &RenderContext<'_>,
-    title: &str,
-    findings: &[Value],
-    withheld: Option<u64>,
-) {
-    let evidence = uniform_evidence(findings);
-    let title = match &evidence {
-        Some(evidence) => format!("{title} (evidence: {evidence})"),
-        None => title.to_string(),
-    };
-    heading(ctx, &title);
-    if findings.is_empty() {
-        line(ctx, 1, "none");
-        return;
-    }
-    let mixed = evidence.is_none();
-    for group in group_runs(findings) {
-        let first = &group[0];
-        line(ctx, 1, &finding_head(ctx, first, group.len()));
-        if group.len() == 1 {
-            if let Some(span) = first.get("span").filter(|span| span.is_object()) {
-                finding_location_line(ctx, span, 2, true);
-            }
-        } else {
-            for span in renderable_group_spans(group) {
-                finding_location_line(ctx, span, 2, false);
-            }
-        }
-        let mut notes = Vec::new();
-        if mixed {
-            notes.push(format!(
-                "evidence: {}",
-                first["evidence"].as_str().unwrap_or("exact")
-            ));
-        }
-        if let Some(boundedness) = first.get("boundedness").and_then(Value::as_str) {
-            notes.push(format!("boundedness: {boundedness}"));
-        }
-        if let Some(repeated) = first.get("repeated").and_then(Value::as_u64)
-            && repeated > 1
-        {
-            notes.push(format!("occurs at {repeated} sites"));
-        }
-        if let Some(unmapped) = unmapped_positions_note(&unmapped_positions(group)) {
-            notes.push(unmapped);
-        }
-        if !notes.is_empty() {
-            note(ctx, 2, &format!("= {}", notes.join(" · ")));
-        }
-    }
-    if let Some(withheld) = withheld.filter(|withheld| *withheld > 0) {
-        line(
-            ctx,
-            1,
-            &format!(
-                "... {} withheld (--max)",
-                plural(withheld as usize, "finding", "findings")
-            ),
-        );
-    }
 }
 
 fn truncation_notes(ctx: &RenderContext<'_>, value: &Value) {
@@ -603,10 +492,7 @@ impl TerminalReport for LintResult {
         let mut metadata = if let Some(selection) = &self.selection {
             plural(selection.total, "finding", "findings")
         } else {
-            severity_counts(
-                findings_severity_counts(self.findings.as_array().map_or(&[][..], Vec::as_slice)),
-                "finding",
-            )
+            severity_counts(meta_severity_counts(&self.findings_meta), "finding")
         };
         metadata.push_str(&format!(" across {}", plural(rules, "rule", "rules")));
         if let Some(fixes) = &self.fixes {
@@ -619,25 +505,23 @@ impl TerminalReport for LintResult {
         Some(metadata)
     }
     fn body(&self, ctx: &RenderContext<'_>) {
-        let findings = sorted_findings(&self.findings);
+        let findings = sorted_findings(&self.findings, &self.findings_meta);
         finding_section(
             ctx,
             "Lint findings",
             &findings,
             withheld(self.selection.as_ref()),
         );
-        lint_footer(ctx, &findings, array_len(&self.skipped));
+        lint_footer(
+            ctx,
+            &findings.iter().map(|(row, _)| *row).collect::<Vec<_>>(),
+            array_len(&self.skipped),
+        );
         if let Some(fixes) = &self.fixes {
             lint_fixes(ctx, fixes);
         }
         next(ctx, &serde_json::to_value(self).unwrap_or_default());
     }
-}
-
-fn sorted_findings(findings: &Value) -> Vec<Value> {
-    let mut findings = findings.as_array().cloned().unwrap_or_default();
-    findings.sort_by_key(finding_severity_rank);
-    findings
 }
 
 fn withheld(selection: Option<&wright_driver::SelectionOutcome>) -> Option<u64> {
@@ -716,37 +600,45 @@ impl TerminalReport for EssentialResult {
     }
     fn body(&self, ctx: &RenderContext<'_>) {
         let value = &self.result;
-        if value.get("hotspots").is_some() {
-            analyze_body(ctx, value);
-        } else if let Some(program) = value.get("program").filter(|p| p.is_object()) {
-            program_overview(ctx, program, None);
-            if let Some(rules) = value["rules"].as_array() {
-                heading(ctx, "Rules");
-                for rule in rules {
-                    let name = match rule_address(rule) {
-                        Some(name) => name.to_string(),
-                        None => format!("rule {}", rule["id"]),
-                    };
-                    line(ctx, 1, &name);
+        match self.command {
+            EssentialCommand::Analyze => analyze_body(ctx, value, &self.findings_meta),
+            EssentialCommand::Inspect => {
+                if let Some(program) = value.get("program").filter(|p| p.is_object()) {
+                    program_overview(ctx, program, None);
+                }
+                if let Some(rules) = value["rules"].as_array() {
+                    heading(ctx, "Rules");
+                    for rule in rules {
+                        let name = match rule_address(rule) {
+                            Some(name) => name.to_string(),
+                            None => format!("rule {}", rule["id"]),
+                        };
+                        line(ctx, 1, &name);
+                    }
+                }
+                if value["next"].as_array().is_none_or(Vec::is_empty) {
+                    heading(ctx, "Detail commands");
+                    for command in DETAIL_COMMANDS {
+                        line(ctx, 1, command);
+                    }
                 }
             }
-            if value["next"].as_array().is_none_or(Vec::is_empty) {
-                heading(ctx, "Detail commands");
-                for command in DETAIL_COMMANDS {
-                    line(ctx, 1, command);
-                }
+            EssentialCommand::Lint => {
+                let mut findings = value["findings"].clone();
+                normalize_finding_spans(&mut findings);
+                let findings = sorted_findings(&findings, &self.findings_meta);
+                finding_section(
+                    ctx,
+                    "Lint findings",
+                    &findings,
+                    withheld(self.selection.as_ref()),
+                );
+                lint_footer(
+                    ctx,
+                    &findings.iter().map(|(row, _)| *row).collect::<Vec<_>>(),
+                    0,
+                );
             }
-        } else {
-            let mut findings = value["findings"].clone();
-            normalize_finding_spans(&mut findings);
-            let findings = sorted_findings(&findings);
-            finding_section(
-                ctx,
-                "Lint findings",
-                &findings,
-                withheld(self.selection.as_ref()),
-            );
-            lint_footer(ctx, &findings, 0);
         }
         truncation_notes(ctx, value);
         if let Some(expand) = value["expand"].as_str() {
@@ -756,7 +648,7 @@ impl TerminalReport for EssentialResult {
     }
 }
 
-fn analyze_body(ctx: &RenderContext<'_>, value: &Value) {
+fn analyze_body(ctx: &RenderContext<'_>, value: &Value, risks_meta: &[FindingMeta]) {
     program_overview(
         ctx,
         &value["program"],
@@ -880,8 +772,15 @@ fn analyze_body(ctx: &RenderContext<'_>, value: &Value) {
         );
     }
 
-    let risks = value["risks"].as_array().map_or(&[][..], Vec::as_slice);
-    let evidence = uniform_evidence(risks);
+    let risks: Vec<(&Value, Severity)> = value["risks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .zip(risks_meta)
+        .map(|(risk, meta)| (risk, meta.severity))
+        .collect();
+    let risk_rows: Vec<&Value> = risks.iter().map(|(row, _)| *row).collect();
+    let evidence = uniform_evidence(&risk_rows);
     let title = match &evidence {
         Some(evidence) => format!("Performance and stability risks (evidence: {evidence})"),
         None => "Performance and stability risks".to_string(),
@@ -893,8 +792,8 @@ fn analyze_body(ctx: &RenderContext<'_>, value: &Value) {
         "heuristic/static indicators — not measured runtime cost or behavior",
     );
     let mixed = evidence.is_none();
-    for risk in risks {
-        line(ctx, 2, &finding_head(ctx, risk, 1));
+    for (risk, severity) in &risks {
+        line(ctx, 2, &finding_head(ctx, risk, *severity, 1));
         if let Some(span) = finding_location_span(risk) {
             finding_location_line(ctx, &span, 3, false);
         }
@@ -1321,7 +1220,7 @@ impl TerminalReport for CostResult {
             }
         }
 
-        let findings = sorted_findings(&self.result["findings"]);
+        let findings = sorted_findings(&self.result["findings"], &self.findings_meta);
         finding_section(
             ctx,
             "Static findings",

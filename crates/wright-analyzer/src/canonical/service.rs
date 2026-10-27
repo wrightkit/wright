@@ -11,7 +11,7 @@ use super::analysis::Finding;
 use super::cfg::cfg_response;
 use super::facts::persistent_objects;
 use super::symbols::{Reference, RuleId, SemanticIndex, Symbol, SymbolId};
-use crate::analysis::Boundedness;
+use crate::analysis::{Boundedness, Severity};
 use crate::registry::{LintConfig, SkippedRule};
 use crate::service::{ErrorInfo, Origin, Request, Response};
 
@@ -48,8 +48,18 @@ pub struct SemanticService<'a> {
     registry: Arc<crate::registry::LintRegistry>,
     symbols_json: OnceLock<Vec<JsonValue>>,
     references_json: OnceLock<Vec<JsonValue>>,
-    findings_json: OnceLock<JsonValue>,
+    findings_json: OnceLock<Vec<JsonValue>>,
     lint_rules_json: OnceLock<JsonValue>,
+}
+
+/// One finding's typed identity, parallel to its serialized row: the
+/// severity and code consumers must not re-parse out of JSON (#1001).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FindingMeta {
+    pub severity: Severity,
+    pub code: String,
+    /// The finding's span file index — the key `span.file` serializes.
+    pub span_file: Option<usize>,
 }
 
 impl<'a> SemanticService<'a> {
@@ -145,6 +155,34 @@ impl<'a> SemanticService<'a> {
         &self.findings
     }
 
+    /// The typed finding identities in [`Request::GetFindings`] order
+    /// (#1001), parallel to [`findings_json`](Self::findings_json): index
+    /// `i` describes serialized finding `i`.
+    pub fn findings_meta(&self) -> Vec<FindingMeta> {
+        self.findings
+            .iter()
+            .map(|finding| FindingMeta {
+                severity: finding.severity,
+                code: finding.code.clone(),
+                span_file: finding.span.map(|span| span.file.index()),
+            })
+            .collect()
+    }
+
+    /// The serialized findings in [`Request::GetFindings`] order, one JSON
+    /// row per finding — the payload rows [`findings_meta`](Self::findings_meta)
+    /// annotates (#1001).
+    pub fn findings_json(&self) -> &[JsonValue] {
+        self.findings_json
+            .get_or_init(|| {
+                self.findings
+                    .iter()
+                    .map(|finding| finding_json(&self.index, finding))
+                    .collect()
+            })
+            .as_slice()
+    }
+
     pub fn symbol_count(&self) -> usize {
         self.index.symbols().count()
     }
@@ -228,7 +266,7 @@ impl<'a> SemanticService<'a> {
             Request::FindReferences { symbol } => { let id = SymbolId::from_index(*symbol as usize); if self.index.symbol(id).is_none() { self.error("invalid-id", format!("unknown symbol {symbol}")) } else { Response::Ok { result: self.references_json()[id.index()].clone() } } }
             Request::GetUsage { symbol } => { let id = SymbolId::from_index(*symbol as usize); self.index.symbol(id).map_or_else(|| self.error("invalid-id", format!("unknown symbol {symbol}")), |data| { let usage = self.index.usage(id); Response::Ok { result: json!({"id": id.index(), "kind": data.kind.as_str(), "symbol": data.name, "reads": usage.reads, "writes": usage.writes, "calls": usage.calls, "rules": usage.rules}) } }) }
             Request::GetCfg { rule } => cfg_response(self.program.as_ref(), *rule as usize),
-            Request::GetFindings => Response::Ok { result: self.findings_json.get_or_init(|| json!(self.findings.iter().map(|finding| finding_json(&self.index, finding)).collect::<Vec<_>>())).clone() },
+            Request::GetFindings => Response::Ok { result: JsonValue::Array(self.findings_json().to_vec()) },
             Request::GetPersistentObjects => Response::Ok { result: json!(persistent_objects(self.program.as_ref())) },
             Request::LintRules => Response::Ok {
                 result: self.lint_rules_json.get_or_init(|| lint_rules(&self.index, &self.registry, &self.config, &self.skipped)).clone(),
