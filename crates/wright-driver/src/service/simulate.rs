@@ -4,7 +4,7 @@ use super::{ToolErrorInfo, ToolResponse, ToolService};
 use crate::CompilerSession;
 use crate::result::{Envelope, SimulateResult, exit, exit_code_from, version_info};
 
-pub(crate) const ATHENA_VERSION: &str = "0.5.0";
+pub(crate) const ATHENA_VERSION: &str = "0.11.0";
 
 impl<'a> ToolService<'a> {
     pub(crate) fn simulate(

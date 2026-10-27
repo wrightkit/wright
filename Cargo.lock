@@ -121,8 +121,8 @@ checksum = "d92bec98840b8f03a5ff5413de5293bfcd8bf96467cf5452609f939ec6f5de16"
 
 [[package]]
 name = "athena-sim"
-version = "0.5.0"
-source = "git+https://github.com/wrightkit/athena.git?tag=v0.5.0#cf856d4855dc5c41e73d823a5a30d2243bcbd48f"
+version = "0.11.0"
+source = "git+https://github.com/wrightkit/athena.git?tag=v0.11.0#7d385439da558876f549c8e0a5d123de7d783995"
 dependencies = [
  "serde",
  "serde_json",
@@ -2599,9 +2599,9 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "workshop-rs"
-version = "1.25.2"
+version = "1.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d20453e56b51129beb1261978c5b5b9b097a62b7c0020b7428c40c1b7dfd8aff"
+checksum = "12570a81e7eaab6c7ae06ac9be89dbb84c4835d002c5f018e697fb3d0ff5f203"
 dependencies = [
  "aho-corasick",
  "serde",

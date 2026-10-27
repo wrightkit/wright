@@ -130,7 +130,7 @@ fn jsonrpc_serves_simulate_and_reports_the_athena_version() {
     assert_eq!(trace["globals"]["score"]["value"], json!(2.0));
 
     let caps = run_lines("stdio", &input, &[r#"{"op":"capabilities"}"#]);
-    assert_eq!(caps[0]["result"]["athena_version"], json!("0.5.0"));
+    assert_eq!(caps[0]["result"]["athena_version"], json!("0.11.0"));
 }
 
 #[test]
@@ -383,7 +383,10 @@ fn stdio_simulates_a_provider_loaded_opy_artifact() {
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
     std::fs::write(
         provider_dir.join("artifact.ws"),
-        std::fs::read_to_string(fixture("workshop/synthetic/basic-rule.ws")).unwrap(),
+        std::fs::read_to_string(fixture(
+            "athena/probes/p5-value-refresh-rate/probe.workshop",
+        ))
+        .unwrap(),
     )
     .unwrap();
     std::fs::write(dir.join("providers/opy/active"), "9.9.9").unwrap();
@@ -415,8 +418,9 @@ fn stdio_simulates_a_provider_loaded_opy_artifact() {
 
     let project = exchange(r#"{"op":"project"}"#);
     let identity = project["result"]["inputIdentity"].as_str().unwrap();
-    let simulate =
-        exchange(&json!({"op": "simulate", "inputIdentity": identity, "seconds": 1.0}).to_string());
+    let simulate = exchange(
+        &json!({"op": "simulate", "inputIdentity": identity, "seconds": RUN_SECONDS}).to_string(),
+    );
     let trace = &simulate["result"]["result"]["trace"];
     assert_eq!(trace["outcome"]["status"], "not_modeled", "{simulate}");
     assert!(
