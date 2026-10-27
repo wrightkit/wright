@@ -1,13 +1,16 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
+mod workshop;
+
 use serde::Serialize;
 use wright_analyzer::canonical::{PositionResolution, ReferenceKind, SemanticIndex, Symbol};
 use wright_driver::opy_provider::OPY_LANGUAGE_ID;
-use wright_driver::{CompilerSession, InputSpec, SessionConfig, Severity, SourceKind};
+use wright_driver::{CompilerSession, SessionConfig, Severity};
 use wright_lpp::{Capability, DiagnosticSeverity, LanguageProvider};
 
 use crate::document::{Document, DocumentStore, Position, Range, line_col_position, uri_to_path};
+use workshop::WorkshopAnalysis;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SourceDiagnostic {
@@ -103,6 +106,8 @@ pub struct LanguageService {
     config: SessionConfig,
     session: Option<CompilerSession>,
     opy: OpyProviderState,
+    workshop: Option<WorkshopAnalysis>,
+    workshop_builds: usize,
 }
 
 impl LanguageService {
@@ -121,6 +126,8 @@ impl LanguageService {
             config,
             session: None,
             opy: OpyProviderState::Pending,
+            workshop: None,
+            workshop_builds: 0,
         }
     }
 
@@ -144,6 +151,13 @@ impl LanguageService {
             definition: capabilities.supports(Capability::Definition),
             references: capabilities.supports(Capability::References),
         }
+    }
+
+    /// How many Workshop analyses this service has built (#1005): a
+    /// stable count across requests proves the `(uri, version)` cache
+    /// reuses one session and index; a `didChange` bump adds one.
+    pub fn workshop_build_count(&self) -> usize {
+        self.workshop_builds
     }
 
     /// Diagnostics for the open buffer at `uri`.
@@ -176,21 +190,23 @@ impl LanguageService {
         }]
     }
 
-    fn workshop_diagnostics(&self, uri: &str) -> Vec<SourceDiagnostic> {
+    fn workshop_diagnostics(&mut self, uri: &str) -> Vec<SourceDiagnostic> {
         let Some(document) = self.store.document(uri) else {
             return Vec::new();
         };
         if !is_workshop_document(document) {
             return Vec::new();
         }
-        match self.workshop_session(document) {
-            Ok(mut session) => session
+        let document = document.clone();
+        match self.workshop_analysis(uri) {
+            Ok(analysis) => analysis
+                .session
                 .check()
                 .diagnostics
                 .iter()
-                .map(|diagnostic| source_diagnostic(document, diagnostic))
+                .map(|diagnostic| source_diagnostic(&document, diagnostic))
                 .collect(),
-            Err(diagnostic) => vec![source_diagnostic(document, &diagnostic)],
+            Err(diagnostic) => vec![source_diagnostic(&document, &diagnostic)],
         }
     }
 
@@ -261,10 +277,10 @@ impl LanguageService {
     /// (#555): the resolved symbol's `kind name` — the identity `inspect`
     /// reports — over the occurrence that matched. Anything that is not an
     /// identifier occurrence, or a document that fails to load, is `None`.
-    pub fn hover(&self, uri: &str, position: Position) -> Option<HoverInfo> {
-        let document = self.workshop_document(uri)?;
-        let index = self.workshop_index(document)?;
-        let (symbol, occurrence) = symbol_at(&index, document, position)?;
+    pub fn hover(&mut self, uri: &str, position: Position) -> Option<HoverInfo> {
+        let document = self.workshop_document(uri)?.clone();
+        let analysis = self.workshop_analysis(&document.uri).ok()?;
+        let (symbol, occurrence) = symbol_at(&analysis.index, &document, position)?;
         Some(HoverInfo {
             contents: format!("`{} {}`", symbol.kind.as_str(), symbol.name),
             range: document.from_span(&occurrence),
@@ -314,9 +330,9 @@ impl LanguageService {
                 .ok()
                 .map(|result| result.locations.iter().map(source_location).collect());
         }
-        let document = self.workshop_document(uri)?;
-        let index = self.workshop_index(document)?;
-        let (symbol, _) = symbol_at(&index, document, position)?;
+        let document = self.workshop_document(uri)?.clone();
+        let analysis = self.workshop_analysis(&document.uri).ok()?;
+        let (symbol, _) = symbol_at(&analysis.index, &document, position)?;
         let span = symbol.span.or(symbol.occurrence)?;
         Some(vec![SourceLocation {
             uri: document.uri.clone(),
@@ -347,12 +363,13 @@ impl LanguageService {
                 .ok()
                 .map(|result| result.locations.iter().map(source_location).collect());
         }
-        let document = self.workshop_document(uri)?;
-        let index = self.workshop_index(document)?;
-        let (symbol, _) = symbol_at(&index, document, position)?;
+        let document = self.workshop_document(uri)?.clone();
+        let analysis = self.workshop_analysis(&document.uri).ok()?;
+        let (symbol, _) = symbol_at(&analysis.index, &document, position)?;
         let mut seen = BTreeSet::new();
         Some(
-            index
+            analysis
+                .index
                 .references(symbol.id)
                 .into_iter()
                 .filter(|reference| {
@@ -489,27 +506,6 @@ impl LanguageService {
             return None;
         }
         Some(document)
-    }
-
-    fn workshop_session(
-        &self,
-        document: &Document,
-    ) -> Result<CompilerSession, wright_driver::Diagnostic> {
-        CompilerSession::new(SessionConfig {
-            input: InputSpec::Text {
-                text: document.text.clone(),
-                path: uri_to_path(&document.uri),
-            },
-            kind: SourceKind::Workshop,
-            root: Some(document.root.clone()),
-            ..self.config.clone()
-        })
-    }
-
-    fn workshop_index(&self, document: &Document) -> Option<SemanticIndex> {
-        let mut session = self.workshop_session(document).ok()?;
-        let loaded = session.load().ok()?;
-        Some(SemanticIndex::build(&loaded.program))
     }
 
     /// The connected OPY provider, or the classified `(code, message)`

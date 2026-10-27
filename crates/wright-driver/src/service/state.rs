@@ -7,9 +7,45 @@ use std::sync::Arc;
 use wright_analyzer::canonical::SemanticService;
 
 use super::ToolService;
+use crate::config::InputSpec;
 use crate::diag::Diagnostic;
 use crate::input;
-use crate::{CompilerSession, Loaded};
+use crate::{CompilerSession, Loaded, Provenance};
+
+/// The snapshot's disk-observation set (#1005): where the load's declared
+/// member list covers every disk input the snapshot depends on, freshness
+/// hashes exactly those files instead of walking the whole input tree.
+///
+/// `Provenance::Source` names the single parsed file, so its member list
+/// is complete when the input spec targets that file — members are
+/// display paths resolved against `cwd`, the same base the provider
+/// document set uses for non-mapped members. A directory spec still
+/// observes membership changes (an added `.ws` file flips a Workshop
+/// directory load to `input-kind-ambiguous`), so it keeps the directory
+/// fingerprint even though the resolved member list has one entry.
+/// A mapped provider artifact's `files` table is not complete — opy-rs
+/// omits compile-time `.js` script inputs (`#!postCompileHook`,
+/// `__script__`) whose edits change the artifact (opy-rs#654) — so
+/// mapped loads keep the whole-tree fingerprint the provider contract
+/// implies until the member list covers them. Unmapped artifacts,
+/// check-only loads, and caller-held text inputs declare no member list
+/// and keep the previous fingerprint (or `Detached`).
+fn loaded_fingerprint(config: &crate::SessionConfig, loaded: &Loaded) -> input::DiskFingerprint {
+    let resolved = &loaded.input;
+    let file_input = match &config.input {
+        InputSpec::Path(path) => !resolved.cwd.join(path).is_dir(),
+        _ => false,
+    };
+    if loaded.provenance == Provenance::Source && file_input {
+        let members = loaded
+            .source_files
+            .iter()
+            .map(|member| resolved.cwd.join(member))
+            .collect();
+        return input::digest_files(members);
+    }
+    input::disk_fingerprint(config, resolved)
+}
 
 pub(super) struct Snapshot {
     pub(super) loaded: Loaded,
@@ -74,7 +110,7 @@ impl<'a> ToolService<'a> {
             }
             return Ok(());
         };
-        let fingerprint = input::disk_fingerprint(&self.session.config, &snapshot.loaded.input);
+        let fingerprint = loaded_fingerprint(&self.session.config, &snapshot.loaded);
         if snapshot.fingerprint == fingerprint {
             return Ok(());
         }
@@ -99,7 +135,7 @@ impl<'a> ToolService<'a> {
         let Some(snapshot) = &self.snapshot else {
             return;
         };
-        let fingerprint = input::disk_fingerprint(&self.session.config, &snapshot.loaded.input);
+        let fingerprint = loaded_fingerprint(&self.session.config, &snapshot.loaded);
         if snapshot.fingerprint == fingerprint {
             return;
         }
@@ -126,7 +162,7 @@ impl<'a> ToolService<'a> {
         let semantic = self.session.shared_semantic(&loaded);
         let lint_semantic = (!self.session.config.lint.rules.is_empty())
             .then(|| semantic.with_lint_config(self.session.config.lint.clone()));
-        let fingerprint = input::disk_fingerprint(&self.session.config, &loaded.input);
+        let fingerprint = loaded_fingerprint(&self.session.config, &loaded);
         self.generation += 1;
         self.snapshot = Some(Snapshot {
             loaded,
