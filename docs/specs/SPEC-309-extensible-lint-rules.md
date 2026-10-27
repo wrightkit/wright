@@ -62,19 +62,38 @@ matcher:
 
 The public matcher vocabulary is intentionally Workshop-shaped:
 
-- `scope` is `rule`, `while`, `for-global-variable`,
-  `for-player-variable`, or `if`. A loop/branch scope includes nested action
-  nodes in its body; nested loops are also independently matched.
+- `scope` is one of `rule`, `while`, `for-global-variable`,
+  `for-player-variable`, or `if`, or a list of those scopes (#970). A list
+  enumerates every listed scope under one rule ID, so the three loop kinds can
+  share a rule. A loop/branch scope includes nested action nodes in its body;
+  nested loops are also independently matched.
 - `actions` uses direct predicates: `kind`, localized or canonical `name`,
   positional `args`, catalog-backed named `parameters`, `count.min`,
   `count.max`, and `present: false` for an absence predicate. Named parameters
   use canonical catalog labels with locale-independent normalization. An
   omitted `kind` matches any action. A call name and argument shape only match
   call actions.
+- `values` lists value patterns searched at any depth inside every value tree
+  of the scope (#970): rule conditions and live action arguments for `rule`;
+  live body-action arguments for a loop scope — not the loop's own
+  condition, and a nested loop's body is searched once per enclosing loop;
+  the condition list for `if`. Disabled and dead statements are excluded, as
+  for `actions`.
+- `report` is `scope` (default) or `each-match` (#970). `scope` anchors one
+  finding per scope at the scope anchor; `each-match` anchors one finding per
+  matched value node at the node's own span and requires `values`.
+- A `values` value pattern may carry `within` (#970): a value pattern that
+  must match a strict ancestor of the matched node. `in-args: { from: N }`
+  limits the constraint to ancestor argument positions at index `>= N`, so a
+  binder's array-source argument at index 0 stays outside and
+  `Filtered Array(Sorted Array(x, r), c)` is not reported. `within` is only
+  valid inside `values`.
 - value patterns are one of `number`, `string`, `boolean`, `call`, `enum`, or a
   numeric `comparison` using `<`, `<=`, `>`, or `>=`.
-  A call and enum recursively use the same canonical name/domain/member
-  resolution. An empty value pattern means any value.
+  A call pattern accepts `name` (one spelling) or `names` (a set matched as
+  alternatives, #970); exactly one is required. A call and enum recursively
+  use the same canonical name/domain/member resolution. An empty value
+  pattern means any value.
 - counts and options are static matched-node counts. They are evidence about
   the authored WIR shape, not a runtime execution count.
 
@@ -110,12 +129,17 @@ including in CI; an unfetchable SHA fails with an explicit diagnostic and
 produces no lint findings. Rule ID collisions between packages are errors.
 The first-party package repository is the only source allowed bare rule
 IDs, and listing it with a SHA replaces the embedded default rules it
-covers instead of colliding.
+covers instead of colliding. The first-party package may also declare
+`evidence` and `severity` in rule metadata (#616 addendum, #970): the
+former sets the finding's evidence class, the latter the rule's default
+severity. Both fields are rejected with a `lint-rule-error` diagnostic in
+community packages and `--rule-file` rules.
 
 `enabled` defaults to `true`; `severity` may be `off`, `warn`, or `error`; the
 only shared rule options are the bounded `min-matches` and `max-matches`
 limits. Evidence classification and a declarative rule's default finding
-severity are assigned by Wright from the canonical matcher contract; external
+severity are assigned by Wright from the canonical matcher contract — or
+declared by the first-party package under the boundary above; external
 metadata cannot override them.
 Unknown configuration keys are rejected. CLI flags apply to the same
 configuration object: `wright lint --lint-config project.yaml --rule-file rules/

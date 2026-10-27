@@ -158,7 +158,7 @@ pub struct SemanticIndex {
     next_value_id: ValueId,
 }
 
-pub(super) fn value_identity_map(program: &Program) -> HashMap<usize, ValueId> {
+pub(crate) fn value_identity_map(program: &Program) -> HashMap<usize, ValueId> {
     let mut identities = HashMap::new();
     for rule in &program.rules {
         for condition in &rule.conditions {

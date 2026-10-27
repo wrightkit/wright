@@ -70,7 +70,7 @@ pub fn subroutine_callee(action: &Action) -> Option<&str> {
     }
 }
 
-pub(super) fn visit_action_roots<'a>(action: &'a Action, visit: &mut impl FnMut(usize, &'a Value)) {
+pub(crate) fn visit_action_roots<'a>(action: &'a Action, visit: &mut impl FnMut(usize, &'a Value)) {
     match action {
         Action::SetGlobalVariable { value, .. } | Action::ModifyGlobalVariable { value, .. } => {
             visit(0, value)
@@ -125,7 +125,7 @@ pub(super) fn visit_value_tree<'a>(
     visit_value_tree_at(value, parent, &mut path, visit);
 }
 
-pub(super) fn value_children(value: &Value) -> Vec<&Value> {
+pub(crate) fn value_children(value: &Value) -> Vec<&Value> {
     match value {
         Value::Array(values) | Value::Call { args: values, .. } => values.iter().collect(),
         Value::Vector { x, y, z } => vec![x, y, z],

@@ -11,5 +11,5 @@ pub use cfg::BLOCK_KINDS;
 pub(crate) use cfg::matching_end;
 pub use service::{SemanticService, span_json};
 pub use symbols::*;
-pub(crate) use traversal::{dead_actions, unwrapped};
+pub(crate) use traversal::{dead_actions, unwrapped, value_children, visit_action_roots};
 pub use traversal::{live_actions, subroutine_callee};
