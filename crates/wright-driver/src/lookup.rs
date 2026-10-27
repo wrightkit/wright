@@ -536,7 +536,10 @@ fn opy_lookup(
                 "protocol-version-mismatch" | "capability-unavailable" => {
                     unavailable("opy", OWNER_OPY, LOOKUP_CAPABILITY, error.to_string())
                 }
-                _ => carried_refusal(error.code(), error.to_string()),
+                _ => ToolResponse::Error {
+                    error: crate::service::ToolErrorInfo::carried(error.code(), error.to_string())
+                        .with_class(crate::source_provider::provider_failure_class(&error)),
+                },
             };
         }
     };
@@ -582,10 +585,13 @@ fn opy_lookup(
     let mut entries = match outcome {
         Ok(answer) => answer.entries,
         Err(error) => {
-            return carried_refusal(
-                error.refusal_code().unwrap_or_else(|| error.code()),
-                error.to_string(),
-            );
+            return ToolResponse::Error {
+                error: crate::service::ToolErrorInfo::carried(
+                    error.refusal_code().unwrap_or_else(|| error.code()),
+                    error.to_string(),
+                )
+                .with_class(crate::source_provider::provider_failure_class(&error)),
+            };
         }
     };
     for entry in &mut entries {
