@@ -51,22 +51,6 @@ pub struct SelectionOutcome {
     pub max_severity: Option<Severity>,
 }
 
-fn severity_rank(severity: Severity) -> u8 {
-    match severity {
-        Severity::Info => 0,
-        Severity::Warning => 1,
-        Severity::Error => 2,
-    }
-}
-
-fn parse_severity(value: Option<&str>) -> Severity {
-    match value {
-        Some("error") => Severity::Error,
-        Some("info") | Some("notice") => Severity::Info,
-        _ => Severity::Warning,
-    }
-}
-
 impl FindingSelection {
     /// Whether any selection dimension is set.
     pub fn is_active(&self) -> bool {
@@ -148,7 +132,7 @@ impl FindingSelection {
             findings,
             |finding| {
                 (
-                    parse_severity(finding.get("severity").and_then(|v| v.as_str())),
+                    Severity::from_label(finding.get("severity").and_then(|v| v.as_str())),
                     finding.get("code").and_then(|v| v.as_str()).unwrap_or(""),
                     crate::service::json_span_path(finding),
                 )
@@ -171,16 +155,12 @@ impl FindingSelection {
             .as_deref()
             .map(|file| FileMatch::new(file, file_bases));
         let total = items.len();
-        let max_severity = items
-            .iter()
-            .map(|item| key(item).0)
-            .max_by_key(|severity| severity_rank(*severity));
+        let max_severity = items.iter().map(|item| key(item).0).max();
         let mut kept: Vec<T> = items
             .into_iter()
             .filter(|item| {
                 let (severity, code, path) = key(item);
-                self.severity
-                    .is_none_or(|min| severity_rank(severity) >= severity_rank(min))
+                self.severity.is_none_or(|min| severity >= min)
                     && self.rule.as_ref().is_none_or(|rule| rule == code)
                     && file_matcher
                         .as_ref()
@@ -268,13 +248,7 @@ fn finish_bases(config: &SessionConfig, loaded: Option<&Loaded>) -> Vec<PathBuf>
         return file_bases(&loaded.input);
     }
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let absolute = |path: &Path| {
-        if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            cwd.join(path)
-        }
-    };
+    let absolute = |path: &Path| cwd.join(path);
     let mut bases = vec![cwd.clone()];
     if let Some(root) = &config.root {
         bases.push(absolute(root));
@@ -352,14 +326,7 @@ pub(crate) fn file_bases(input: &ResolvedInput) -> Vec<PathBuf> {
 fn canonical_forms(path: &Path, bases: &[PathBuf]) -> BTreeSet<PathBuf> {
     bases
         .iter()
-        .filter_map(|base| {
-            let full = if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                base.join(path)
-            };
-            full.canonicalize().ok()
-        })
+        .filter_map(|base| base.join(path).canonicalize().ok())
         .collect()
 }
 

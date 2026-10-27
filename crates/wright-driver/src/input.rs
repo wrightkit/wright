@@ -52,7 +52,7 @@ pub(crate) fn disk_fingerprint(
     let InputSpec::Path(path) = &config.input else {
         return DiskFingerprint::Detached;
     };
-    let path = absolute_from(&resolved.cwd, path);
+    let path = resolved.cwd.join(path);
     if resolved.kind == SourceKind::Opy {
         let root = if path.is_dir() {
             path
@@ -138,7 +138,7 @@ fn invocation_cwd() -> Result<PathBuf, Diagnostic> {
 
 fn resolve_path(path: &Path, config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
     let cwd = invocation_cwd()?;
-    let path = absolute_from(&cwd, path);
+    let path = cwd.join(path);
     let metadata = std::fs::metadata(&path).map_err(|e| {
         Diagnostic::error(
             "input-io",
@@ -236,21 +236,13 @@ fn resolve_directory(
     })
 }
 
-fn absolute_from(cwd: &Path, path: &Path) -> PathBuf {
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        cwd.join(path)
-    }
-}
-
 /// The resolved project root: the configured `root` resolved against `cwd`,
 /// or `fallback` when unset.
 fn config_root(config: &SessionConfig, cwd: &Path, fallback: impl FnOnce() -> PathBuf) -> PathBuf {
     config
         .root
         .as_deref()
-        .map(|root| absolute_from(cwd, root))
+        .map(|root| cwd.join(root))
         .unwrap_or_else(fallback)
 }
 
@@ -385,7 +377,7 @@ fn resolve_text(
 ) -> Result<ResolvedInput, Diagnostic> {
     let text = strip_bom(text);
     let cwd = invocation_cwd()?;
-    let path = path.map(|path| absolute_from(&cwd, path));
+    let path = path.map(|path| cwd.join(path));
     let kind = match config.kind {
         SourceKind::Auto => match &path {
             Some(path) => kind_from_extension(path)?,

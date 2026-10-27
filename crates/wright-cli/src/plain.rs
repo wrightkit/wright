@@ -14,20 +14,20 @@ use crate::present::{
     diagnostics_on_stdout, display_location_path, edge_caller, finding_files,
     finding_severity_rank, findings_severity_counts, fix_status_counts, inline_location,
     is_real_source_path, lookup_hint_args, notable_callers, query_items, render_node, rule_address,
-    rule_name, severity_rank, summary_status, tree_rule,
+    rule_name, shown_diagnostics, summary_status, tree_rule,
 };
 
 pub(crate) fn render<T: serde::Serialize + ResultPresentation + PlainReport>(
     envelope: &Envelope<T>,
     ctx: &RenderContext<'_>,
 ) {
-    if envelope.result.is_artifact_stream() {
+    if let Some(artifact) = envelope.result.artifact() {
         let mut err = Vec::new();
         diagnostic_records(envelope, ctx, &mut err);
         for line in err {
             eprintln!("{line}");
         }
-        envelope.result.render_body(ctx);
+        print!("{artifact}");
         return;
     }
     let (out, err) = render_lines(envelope, ctx);
@@ -126,19 +126,15 @@ fn diagnostic_records<T: serde::Serialize>(
     ctx: &RenderContext<'_>,
     err: &mut Vec<String>,
 ) {
-    let mut ordered: Vec<&Diagnostic> = envelope.diagnostics.iter().collect();
-    ordered.sort_by_key(|diagnostic| severity_rank(diagnostic.severity));
-    let total = ordered.len();
-    let bounded = !matches!(envelope.command.as_str(), "compile" | "convert");
-    let limit = if ctx.presentation.all || !bounded {
-        usize::MAX
-    } else {
-        20
-    };
-    for diagnostic in ordered.iter().take(limit) {
+    let (shown, withheld) = shown_diagnostics(
+        &envelope.command,
+        &envelope.diagnostics,
+        ctx.presentation.all,
+    );
+    for diagnostic in shown {
         err.push(diagnostic_record(diagnostic));
     }
-    if bounded && !ctx.presentation.all && total > 20 {
+    if let Some(total) = withheld {
         err.push(truncated_record(
             &[("diagnostics", 20, total)],
             &expand_all(envelope),
@@ -149,7 +145,11 @@ fn diagnostic_records<T: serde::Serialize>(
         .as_ref()
         .filter(|selection| selection.total > 0)
     {
-        let mut fields = vec![format!("diagnostics={total}/{}", selection.total)];
+        let mut fields = vec![format!(
+            "diagnostics={}/{}",
+            envelope.diagnostics.len(),
+            selection.total
+        )];
         if let Some(by_code) = by_code_field(&selection.by_code) {
             fields.push(by_code);
         }

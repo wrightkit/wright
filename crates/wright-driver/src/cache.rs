@@ -269,10 +269,6 @@ impl CostSnapshot {
 ///
 /// Every filesystem failure is swallowed: the comparison and the write are
 /// conveniences that never touch the verdict or exit code (decision 10).
-pub fn compare_and_record(run: &CostRun, snapshot: &CostSnapshot) -> Option<Comparison> {
-    compare_and_record_in(run, snapshot, CacheEnvironment::from_env())
-}
-
 pub(crate) fn compare_and_record_in(
     run: &CostRun,
     snapshot: &CostSnapshot,
@@ -289,15 +285,9 @@ pub(crate) fn compare_and_record_in(
 
     let comparison = if let Some(baseline) = &run.baseline {
         read_baseline(&dir, baseline, &key).map(|record| {
-            let payload: CostPayload =
-                serde_json::from_value(record.payload).unwrap_or(CostPayload {
-                    total: 0,
-                    budget: 0,
-                    rules: Vec::new(),
-                });
             compare(
                 &snapshot.payload(),
-                &payload,
+                &cost_payload(record),
                 format!("baseline:{baseline}"),
             )
         })
@@ -305,13 +295,11 @@ pub(crate) fn compare_and_record_in(
         None
     } else {
         read_record(&dir, &file).map(|record| {
-            let payload: CostPayload =
-                serde_json::from_value(record.payload).unwrap_or(CostPayload {
-                    total: 0,
-                    budget: 0,
-                    rules: Vec::new(),
-                });
-            compare(&snapshot.payload(), &payload, "previous".to_string())
+            compare(
+                &snapshot.payload(),
+                &cost_payload(record),
+                "previous".to_string(),
+            )
         })
     };
 
@@ -331,15 +319,20 @@ pub(crate) fn compare_and_record_in(
     comparison
 }
 
+/// An undecodable payload compares as an empty program.
+fn cost_payload(record: Record) -> CostPayload {
+    serde_json::from_value(record.payload).unwrap_or(CostPayload {
+        total: 0,
+        budget: 0,
+        rules: Vec::new(),
+    })
+}
+
 /// Whether the explicitly named `--baseline` has a usable record under
 /// `.wright/` for this run's key — present, readable, a known
 /// version/kind, and keyed to this input, kind, locale and profile. The
 /// caller decides what an unusable one means: a usage error outside CI,
 /// silence under it (ADR-0030 decision 14).
-pub fn baseline_exists(run: &CostRun) -> bool {
-    baseline_exists_in(run, CacheEnvironment::from_env())
-}
-
 pub(crate) fn baseline_exists_in(run: &CostRun, environment: CacheEnvironment) -> bool {
     if environment.disabled(run.no_cache) {
         return false;

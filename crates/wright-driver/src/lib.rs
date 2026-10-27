@@ -61,9 +61,6 @@ pub use workshop_compat::{
 };
 pub use wright_transform::Profile;
 
-/// The driver crate name reported in result metadata.
-pub const DRIVER_NAME: &str = "wright-driver";
-
 /// The stable embedding-API contract name (#56).
 pub const EMBEDDING_CONTRACT: &str = "wright-embedding/v1";
 

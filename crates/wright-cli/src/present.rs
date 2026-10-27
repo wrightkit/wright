@@ -28,7 +28,7 @@ pub(crate) use common::{
     DETAIL_COMMANDS, block_flags, call_fan_counts, cfg_block_stats, cfg_edge_count,
     diagnostic_counts, diagnostic_files, finding_files, findings_severity_counts,
     fix_status_counts, fix_status_parts, group_runs, lookup_hint_args, normalize_finding_spans,
-    notable_callers, shown_of, span_suffix,
+    notable_callers, shown_diagnostics, shown_of, span_suffix,
 };
 
 use crate::plain;
@@ -386,18 +386,6 @@ fn dim(value: &str, color: bool) -> String {
     }
 }
 
-struct Marks {
-    head: String,
-    pad: String,
-}
-
-fn marks() -> Marks {
-    Marks {
-        head: "  ".to_string(),
-        pad: "    ".to_string(),
-    }
-}
-
 struct GithubAnnotation {
     kind: &'static str,
     props: Vec<String>,
@@ -480,8 +468,8 @@ fn render_github<T: serde::Serialize + ResultPresentation + plain::PlainReport>(
         "::group::{}",
         escape_workflow_data(&format!("wright {} — {status}{headline}", envelope.command))
     );
-    if envelope.result.is_artifact_stream() {
-        envelope.result.render_body(&github_context(ctx.subject));
+    if let Some(artifact) = envelope.result.artifact() {
+        print!("{artifact}");
     } else {
         let (out, err) = plain::render_lines(envelope, ctx);
         for line in out.iter().chain(err.iter()) {
@@ -498,22 +486,6 @@ fn render_github<T: serde::Serialize + ResultPresentation + plain::PlainReport>(
         );
     }
     emit_summary(envelope, ctx, &annotations);
-}
-
-fn github_context(subject: Option<&str>) -> RenderContext<'_> {
-    RenderContext {
-        presentation: Presentation {
-            format: OutputFormat::Text,
-            renderer: Renderer::GithubActions,
-            color: false,
-            all: false,
-            interactive: false,
-            width: MAX_WIDTH,
-        },
-        elapsed: Duration::ZERO,
-        source_base: None,
-        subject,
-    }
 }
 
 fn diagnostic_annotation(diagnostic: &wright_driver::Diagnostic) -> Option<GithubAnnotation> {
@@ -648,20 +620,8 @@ impl From<Severity> for SummaryStatus {
     }
 }
 
-fn severity_level(severity: Severity) -> u8 {
-    match severity {
-        Severity::Info => 0,
-        Severity::Warning => 1,
-        Severity::Error => 2,
-    }
-}
-
 fn finding_severity(finding: &serde_json::Value) -> Severity {
-    match finding.get("severity").and_then(serde_json::Value::as_str) {
-        Some("error") => Severity::Error,
-        Some("info") | Some("notice") => Severity::Info,
-        _ => Severity::Warning,
-    }
+    Severity::from_label(finding.get("severity").and_then(serde_json::Value::as_str))
 }
 
 fn max_finding_severity(
@@ -675,7 +635,7 @@ fn max_finding_severity(
             .map_or(&[][..], Vec::as_slice)
             .iter()
             .map(finding_severity)
-            .max_by_key(|severity| severity_level(*severity)),
+            .max(),
     }
 }
 
@@ -683,9 +643,9 @@ pub(crate) trait ResultPresentation {
     fn metadata(&self) -> Option<String> {
         None
     }
-    fn render_body(&self, ctx: &RenderContext<'_>);
-    fn is_artifact_stream(&self) -> bool {
-        false
+    /// Text the command streams to stdout in place of a report.
+    fn artifact(&self) -> Option<&str> {
+        None
     }
     fn github_findings(&self) -> Vec<serde_json::Value> {
         Vec::new()
@@ -708,28 +668,21 @@ impl ResultPresentation for CompileResult {
             output.written_to, output.sha256
         ))
     }
-    fn is_artifact_stream(&self) -> bool {
+    fn artifact(&self) -> Option<&str> {
         self.output
             .as_ref()
-            .is_some_and(|o| o.written_to == "stdout")
-    }
-    fn render_body(&self, _ctx: &RenderContext<'_>) {
-        render_compile(self);
+            .filter(|output| output.written_to == "stdout")
+            .map(|output| output.text.as_str())
     }
 }
 
 impl ResultPresentation for ConvertResult {
-    fn is_artifact_stream(&self) -> bool {
-        true
-    }
-    fn render_body(&self, _ctx: &RenderContext<'_>) {
-        render_convert(self);
+    fn artifact(&self) -> Option<&str> {
+        Some(&self.text)
     }
 }
 
-impl ResultPresentation for CheckResult {
-    fn render_body(&self, _ctx: &RenderContext<'_>) {}
-}
+impl ResultPresentation for CheckResult {}
 
 impl ResultPresentation for LintResult {
     fn metadata(&self) -> Option<String> {
@@ -766,10 +719,6 @@ impl ResultPresentation for LintResult {
             }
         }
         Some(metadata)
-    }
-    fn render_body(&self, ctx: &RenderContext<'_>) {
-        render_lint(self, ctx);
-        render_lint_fixes(self, ctx);
     }
     fn github_findings(&self) -> Vec<serde_json::Value> {
         self.findings.as_array().cloned().unwrap_or_default()
@@ -840,9 +789,6 @@ impl ResultPresentation for EssentialResult {
             essential_metadata(&self.result)
         })
     }
-    fn render_body(&self, ctx: &RenderContext<'_>) {
-        render_essential(self, ctx);
-    }
     fn max_finding_severity(&self) -> Option<Severity> {
         if let Some(selection) = &self.selection {
             return selection.max_severity;
@@ -860,7 +806,7 @@ impl ResultPresentation for EssentialResult {
                 .find(|(label, _)| group[label].as_u64().unwrap_or(0) > 0)
                 .map(|(_, severity)| severity)
             })
-            .max_by_key(|severity| severity_level(*severity))
+            .max()
     }
 }
 
@@ -892,45 +838,9 @@ pub(crate) fn query_items<'a>(value: &'a serde_json::Value, key: &str) -> &'a [s
         .map_or(&[][..], Vec::as_slice)
 }
 
-fn print_query_withheld(value: &serde_json::Value, noun: &str) {
-    print_truncation(value);
-    if let Some(withheld) = value["selection"]["withheld"]
-        .as_u64()
-        .filter(|withheld| *withheld > 0)
-    {
-        println!("  ... {withheld} {noun} withheld (--max)");
-    }
-}
-
 impl ResultPresentation for RulesResult {
     fn metadata(&self) -> Option<String> {
         Some(format!("{} rule(s)", query_items(&self.0, "rules").len()))
-    }
-    fn render_body(&self, _ctx: &RenderContext<'_>) {
-        let rules = query_items(&self.0, "rules");
-        println!("\nRules");
-        if rules.is_empty() {
-            println!("  none");
-            return;
-        }
-        for rule in rules {
-            let marks = marks();
-            let name = rule_name(rule);
-            let event = rule["event"].as_str().unwrap_or("?");
-            println!(
-                "{}{name} [{event}]{}",
-                marks.head,
-                span_suffix(rule, " --> ")
-            );
-            let content = &rule["content"];
-            for condition in content["conditions"].as_array().into_iter().flatten() {
-                println!("{}if {}", marks.pad, render_node(&condition["value"]));
-            }
-            for action in content["actions"].as_array().into_iter().flatten() {
-                println!("{}{}", marks.pad, render_node(action));
-            }
-        }
-        print_query_withheld(&self.0, "rule(s)");
     }
 }
 
@@ -960,33 +870,6 @@ impl ResultPresentation for SymbolsResult {
             query_items(&self.0, "symbols").len()
         ))
     }
-    fn render_body(&self, _ctx: &RenderContext<'_>) {
-        let symbols = query_items(&self.0, "symbols");
-        println!("\nSymbols");
-        if symbols.is_empty() {
-            println!("  none");
-            return;
-        }
-        let mut groups: Vec<(&str, Vec<&serde_json::Value>)> = Vec::new();
-        for symbol in symbols {
-            let kind = symbol["kind"].as_str().unwrap_or("symbol");
-            match groups.iter_mut().find(|(k, _)| *k == kind) {
-                Some((_, members)) => members.push(symbol),
-                None => groups.push((kind, vec![symbol])),
-            }
-        }
-        for (kind, members) in groups {
-            println!("  {} ({})", symbol_kind_heading(kind), members.len());
-            for symbol in members.iter() {
-                let name = symbol["name"]
-                    .as_str()
-                    .filter(|name| !name.is_empty())
-                    .unwrap_or("<unnamed>");
-                println!("    {name}{}", span_suffix(symbol, " --> "));
-            }
-        }
-        print_query_withheld(&self.0, "symbol(s)");
-    }
 }
 
 impl ResultPresentation for RefsResult {
@@ -1001,38 +884,6 @@ impl ResultPresentation for RefsResult {
             count(&self.0, "rules"),
         ))
     }
-    fn render_body(&self, _ctx: &RenderContext<'_>) {
-        let references = self.0["references"]
-            .as_array()
-            .map_or(&[][..], Vec::as_slice);
-        println!(
-            "\nReferences to {} ({})",
-            self.0["symbol"].as_str().unwrap_or("<unknown>"),
-            self.0["kind"].as_str().unwrap_or("symbol"),
-        );
-        if references.is_empty() {
-            println!("  none");
-            return;
-        }
-        for reference in references.iter() {
-            let owner = rule_address(&reference["owningRule"])
-                .map(String::from)
-                .or_else(|| reference["rule"].as_u64().map(|rule| rule.to_string()));
-            let context = match (owner, reference["action"].as_u64()) {
-                (Some(rule), Some(action)) => format!(" (rule {rule}, action {action})"),
-                (Some(rule), None) => format!(" (rule {rule})"),
-                _ => String::new(),
-            };
-            let location = span_suffix(reference, " --> ");
-            println!(
-                "  {}{}{}",
-                reference["kind"].as_str().unwrap_or("reference"),
-                location,
-                context
-            );
-        }
-        print_query_withheld(&self.0, "reference(s)");
-    }
 }
 
 impl ResultPresentation for CfgResult {
@@ -1044,109 +895,11 @@ impl ResultPresentation for CfgResult {
             cfg_edge_count(blocks)
         ))
     }
-    fn render_body(&self, ctx: &RenderContext<'_>) {
-        let blocks = self.0["blocks"].as_array().map_or(&[][..], Vec::as_slice);
-        match ctx.subject {
-            Some(rule) => println!("\nControl-flow graph of rule \"{rule}\""),
-            None => println!("\nControl-flow graph"),
-        }
-        if blocks.is_empty() {
-            println!("  none");
-            return;
-        }
-        let (loops, waits, calls) = cfg_block_stats(blocks);
-        println!(
-            "  {} block(s), {} edge(s): {} loop header(s), {} wait block(s), {} call site(s)",
-            blocks.len(),
-            cfg_edge_count(blocks),
-            loops,
-            waits,
-            calls
-        );
-        println!(
-            "  entry: block {}, exit: block {}",
-            self.0["entry"].as_u64().unwrap_or(0),
-            self.0["exit"].as_u64().unwrap_or(0)
-        );
-        for block in blocks {
-            let marks = marks();
-            let flags = block_flags(block);
-            let flags = if flags.is_empty() {
-                String::new()
-            } else {
-                format!(" [{}]", flags.join(" "))
-            };
-            println!(
-                "{}block {} ({}): {} action(s){}",
-                marks.head,
-                block["id"].as_u64().unwrap_or(0),
-                block["kind"].as_str().unwrap_or("block"),
-                array_len(&block["actions"]),
-                flags
-            );
-            if let Some(successors) = block["successors"]
-                .as_array()
-                .filter(|successors| !successors.is_empty())
-            {
-                let successors = successors
-                    .iter()
-                    .map(|successor| {
-                        format!(
-                            "{} ({})",
-                            successor["to"].as_u64().unwrap_or(0),
-                            successor["kind"].as_str().unwrap_or("edge")
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                println!("{}-> {successors}", marks.pad);
-            }
-        }
-        print_query_withheld(&self.0, "block(s)");
-    }
 }
 
 impl ResultPresentation for CallGraphResult {
     fn metadata(&self) -> Option<String> {
         Some(format!("{} edge(s)", query_items(&self.0, "edges").len()))
-    }
-    fn render_body(&self, _ctx: &RenderContext<'_>) {
-        let edges = query_items(&self.0, "edges");
-        println!("\nCall graph");
-        if edges.is_empty() {
-            println!("  none");
-            return;
-        }
-        let (fan_in, fan_out) = call_fan_counts(edges);
-        println!(
-            "  {} edge(s): {} calling rule(s), {} subroutine(s) called",
-            edges.len(),
-            fan_out.len(),
-            fan_in.len()
-        );
-        let most_called = notable_callers(&fan_in);
-        if !most_called.is_empty() {
-            println!("\n  Most-called subroutines");
-            for (name, n) in most_called.iter() {
-                println!("    {name}: {n} caller(s)");
-            }
-        }
-        let busiest = notable_callers(&fan_out);
-        if !busiest.is_empty() {
-            println!("\n  Busiest callers");
-            for (name, n) in busiest.iter() {
-                println!("    {name}: calls {n} subroutine(s)");
-            }
-        }
-        println!("\n  Edges");
-        for edge in edges.iter() {
-            println!(
-                "    {} -> {}",
-                edge_caller(edge),
-                edge["callee"].as_str().unwrap_or("<unnamed>")
-            );
-        }
-        print_query_withheld(&self.0, "edge(s)");
     }
 }
 
@@ -1171,98 +924,6 @@ impl ResultPresentation for CostResult {
             count(exact, "waitActions"),
         ))
     }
-    fn render_body(&self, _ctx: &RenderContext<'_>) {
-        if self.result.get("rule").is_some_and(|rule| rule.is_object()) {
-            render_cost_rule_body(&self.result);
-            return;
-        }
-        let exact = &self.result["exact"];
-        println!("\nGenerated resources (exact)");
-        match exact["emittedBytes"].as_u64() {
-            Some(bytes) => println!("  emitted bytes: {bytes}"),
-            None => println!(
-                "  emitted bytes: unavailable — {}",
-                exact["emittedBytesUnavailable"]
-                    .as_str()
-                    .unwrap_or("the emitter does not model this program")
-            ),
-        }
-        println!("  actions: {}", count(exact, "programActions"));
-        println!("  rules: {}", count(exact, "programRules"));
-        println!("  waits: {}", count(exact, "waitActions"));
-
-        let elements = &self.result["elementCount"];
-        if let Some(total) = elements["total"].as_u64() {
-            println!(
-                "  {total} element(s) of the {}-element budget [exact] — canonical structure, not a statement of client importability",
-                count(elements, "budget"),
-            );
-            for rule in elements["rules"].as_array().into_iter().flatten() {
-                println!(
-                    "    {} element(s)  {}{}",
-                    count(rule, "count"),
-                    rule_name(rule),
-                    span_suffix(rule, "  "),
-                );
-            }
-            if let Some(note) = elements["truncation"]["rules"].as_object() {
-                println!(
-                    "    showing {} of {}; --all to see every item",
-                    note["shown"], note["total"]
-                );
-            }
-        } else {
-            let reason = self.result["elementCountUnavailable"]
-                .as_str()
-                .unwrap_or("counter does not model this program");
-            match elements["budget"].as_u64() {
-                Some(budget) => println!(
-                    "  element count unavailable: {reason} — the {budget}-element budget still applies"
-                ),
-                None => println!("  element count unavailable: {reason}"),
-            }
-        }
-
-        let mut findings = self.result["findings"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
-        findings.sort_by_key(|finding| match finding["severity"].as_str() {
-            Some("error") => 0u8,
-            Some("warning") => 1,
-            _ => 2,
-        });
-        println!("\nStatic findings (evidence: static)");
-        if findings.is_empty() {
-            println!("  none");
-        }
-        for group in group_runs(&findings) {
-            let first = &group[0];
-            let severity = first["severity"].as_str().unwrap_or("info");
-            let code = first["code"].as_str().unwrap_or("finding");
-            let message = first["message"].as_str().unwrap_or_default();
-            match group.len() {
-                1 => println!("  {severity}[{code}]: {message}"),
-                count => println!("  {severity}[{code}] ({count} occurrences): {message}"),
-            }
-            for finding in group.iter() {
-                if let Some(location) = finding.get("span").and_then(inline_location) {
-                    println!("    --> {location}");
-                }
-            }
-        }
-        print_truncation(&self.result);
-        if let Some(withheld) = self.result["selection"]["withheld"]
-            .as_u64()
-            .filter(|withheld| *withheld > 0)
-        {
-            println!("  ... {withheld} finding(s) withheld (--max)");
-        }
-        let skipped = array_len(&self.result["skipped"]);
-        if skipped > 0 {
-            println!("  {skipped} rule evaluation(s) skipped");
-        }
-    }
     fn github_findings(&self) -> Vec<serde_json::Value> {
         self.result["findings"]
             .as_array()
@@ -1274,61 +935,6 @@ impl ResultPresentation for CostResult {
     }
 }
 
-fn render_cost_rule_body(result: &serde_json::Value) {
-    let rule = &result["rule"];
-    let marks = marks();
-    println!("\nElement cost");
-    println!(
-        "{}{} · {} element(s){}",
-        marks.head,
-        rule_name(rule),
-        count(rule, "count"),
-        span_suffix(rule, " · "),
-    );
-    let statements = result["statements"]
-        .as_array()
-        .map_or(&[][..], Vec::as_slice);
-    let by_node = result["byNode"].as_array().map_or(&[][..], Vec::as_slice);
-    println!("\nCostliest statements");
-    if statements.is_empty() {
-        println!("  none");
-    }
-    for statement in statements {
-        println!(
-            "{}{} element(s)  {}{}",
-            marks.head,
-            count(statement, "count"),
-            statement["name"].as_str().unwrap_or("?"),
-            span_suffix(statement, "  "),
-        );
-    }
-    if let Some((shown, total)) = shown_of(result, "statements") {
-        println!("  showing {shown} of {total}; --all to see every item");
-    }
-    println!("\nBy node name");
-    if by_node.is_empty() {
-        println!("  none");
-    }
-    for entry in by_node {
-        let occurrences = entry["occurrences"].as_u64().unwrap_or(1);
-        let times = if occurrences > 1 {
-            format!(" ×{occurrences}")
-        } else {
-            String::new()
-        };
-        println!(
-            "{}{} element(s)  {}{}",
-            marks.head,
-            count(entry, "count"),
-            entry["name"].as_str().unwrap_or("?"),
-            times,
-        );
-    }
-    if let Some((shown, total)) = shown_of(result, "byNode") {
-        println!("  showing {shown} of {total}; --all to see every item");
-    }
-}
-
 pub(crate) fn gate<T: serde::Serialize + ResultPresentation>(
     envelope: &mut Envelope<T>,
     threshold: Severity,
@@ -1336,8 +942,7 @@ pub(crate) fn gate<T: serde::Serialize + ResultPresentation>(
     if envelope.exit != wright_driver::result::exit::SUCCESS {
         return;
     }
-    let met = max_envelope_severity(envelope)
-        .is_some_and(|severity| severity_level(severity) >= severity_level(threshold));
+    let met = max_envelope_severity(envelope).is_some_and(|severity| severity >= threshold);
     if met {
         envelope.ok = false;
         envelope.exit = wright_driver::result::exit::SOURCE_ERROR;
@@ -1354,12 +959,12 @@ fn max_envelope_severity<T: serde::Serialize + ResultPresentation>(
             .diagnostics
             .iter()
             .map(|diagnostic| diagnostic.severity)
-            .max_by_key(|severity| severity_level(*severity)),
+            .max(),
     };
     diagnostics
         .into_iter()
         .chain(envelope.result.max_finding_severity())
-        .max_by_key(|severity| severity_level(*severity))
+        .max()
 }
 
 pub(crate) fn summary_status<T: serde::Serialize + ResultPresentation>(
@@ -1444,7 +1049,7 @@ fn emit_summary<T: serde::Serialize + ResultPresentation + plain::PlainReport>(
     if !annotations.is_empty() {
         section.push('\n');
     }
-    if envelope.result.is_artifact_stream() {
+    if envelope.result.artifact().is_some() {
         section.push_str("The command's artifact streamed to stdout.\n");
     } else {
         let (out, err) = plain::render_lines(envelope, ctx);
@@ -1525,20 +1130,6 @@ fn span_position(span: &serde_json::Value, edge: &str, coord: &str) -> Option<u6
         .and_then(serde_json::Value::as_object)
         .and_then(|p| p.get(coord))
         .and_then(serde_json::Value::as_u64)
-}
-
-fn render_compile(result: &CompileResult) {
-    let Some(output) = result.output.as_ref() else {
-        return;
-    };
-    if output.written_to != "stdout" {
-        return;
-    }
-    print!("{}", output.text);
-}
-
-fn render_convert(result: &ConvertResult) {
-    print!("{}", result.text);
 }
 
 fn render_diff_lines(original: &str, new_text: &str, indent: &str) {
@@ -1656,131 +1247,8 @@ fn persistent_object_summary(objects: &serde_json::Value) -> String {
     format!("{} [static]", notes.join("; "))
 }
 
-fn lint_footer_parts(files: usize, skipped: usize, ctx: &RenderContext<'_>) -> Vec<String> {
-    let mut parts = Vec::new();
-    if files > 0 {
-        parts.push(format!("{files} file(s) affected"));
-    }
-    if skipped > 0 {
-        parts.push(format!("{skipped} rule evaluation(s) skipped"));
-    }
-    if ctx.presentation.interactive {
-        parts.push(format!("{} ms", ctx.elapsed.as_millis()));
-    }
-    parts
-}
-
 pub(crate) fn finding_severity_rank(finding: &serde_json::Value) -> u8 {
-    match finding.get("severity").and_then(serde_json::Value::as_str) {
-        Some("error") => 0,
-        Some("info") | Some("notice") => 2,
-        _ => 1,
-    }
-}
-
-fn render_lint_fixes(result: &LintResult, ctx: &RenderContext<'_>) {
-    let Some(fixes) = &result.fixes else {
-        return;
-    };
-    println!("\nLint fixes");
-    if fixes.is_empty() {
-        println!("  none offered");
-        return;
-    }
-    for fix in fixes {
-        let marks = marks();
-        let status = match fix.status {
-            wright_driver::result::LintFixStatus::Preview => "fix",
-            wright_driver::result::LintFixStatus::Applied => "applied",
-            wright_driver::result::LintFixStatus::Refused => "refused",
-        };
-        println!("{}{status}[{}]: {}", marks.head, fix.code, fix.summary);
-        if let Some(span) = fix.span.as_ref().filter(|span| span.is_object()) {
-            render_finding_location(span, ctx, &marks.pad, false);
-        }
-        for preview in fix.preview.iter().flatten() {
-            println!("{}{}", marks.pad, preview.source);
-            render_diff_lines(
-                &preview.original,
-                &preview.new_text,
-                &format!("{}  ", marks.pad),
-            );
-        }
-        for diagnostic in &fix.diagnostics {
-            println!(
-                "{}refused — {}: {}",
-                marks.pad, diagnostic.code, diagnostic.message
-            );
-        }
-    }
-}
-
-fn render_lint(result: &LintResult, ctx: &RenderContext<'_>) {
-    let mut findings = result.findings.as_array().cloned().unwrap_or_default();
-    findings.sort_by_key(finding_severity_rank);
-    println!("\nLint findings");
-    if findings.is_empty() {
-        println!("  none");
-    }
-    for group in group_runs(&findings) {
-        let marks = marks();
-        render_finding_group(group, ctx, &marks);
-    }
-    if let Some(selection) = &result.selection
-        && selection.withheld > 0
-    {
-        println!("  ... {} finding(s) withheld (--max)", selection.withheld);
-    }
-    let files = finding_files(&findings);
-    let parts = lint_footer_parts(files.len(), array_len(&result.skipped), ctx);
-    if !parts.is_empty() {
-        println!("  {}", dim(&parts.join(" · "), ctx.presentation.color));
-    }
-}
-
-fn render_essential(result: &EssentialResult, ctx: &RenderContext<'_>) {
-    let value = &result.result;
-    if value.get("hotspots").is_some() {
-        render_essential_analyze(value, ctx);
-    } else if value.get("program").is_some() {
-        let p = &value["program"];
-        println!(
-            "\nProgram overview\n  {} file(s), {} rule(s), {} global variable(s), {} player variable(s), {} subroutine(s)",
-            count(p, "files"),
-            count(p, "rules"),
-            count(p, "globalVariables"),
-            count(p, "playerVariables"),
-            count(p, "subroutines")
-        );
-        println!("\nRules");
-        for rule in value["rules"].as_array().into_iter().flatten() {
-            match rule_address(rule) {
-                Some(name) => println!("  {name}"),
-                None => println!("  rule {}", rule["id"]),
-            }
-        }
-    } else {
-        let mut findings = value["findings"].clone();
-        normalize_finding_spans(&mut findings);
-        render_lint(
-            &LintResult {
-                findings,
-                selection: result.selection.clone(),
-                ..Default::default()
-            },
-            ctx,
-        );
-    }
-    if value.get("program").is_some() && value.get("hotspots").is_none() {
-        println!("\nDetail commands\n  {}", DETAIL_COMMANDS.join("\n  "));
-    }
-    print_truncation(value);
-    if let Some(expand) = value["expand"].as_str() {
-        println!(
-            "  {}",
-            dim(&expand.replace(" / all: true", ""), ctx.presentation.color)
-        );
-    }
+    severity_rank(finding_severity(finding))
 }
 
 fn finding_location_span(finding: &serde_json::Value) -> Option<serde_json::Value> {
@@ -1792,193 +1260,6 @@ fn finding_location_span(finding: &serde_json::Value) -> Option<serde_json::Valu
     let line = parts.next()?.parse::<u64>().ok()?;
     let path = parts.next()?;
     Some(serde_json::json!({"path":path,"start":{"line":line,"col":col}}))
-}
-
-fn print_truncation(value: &serde_json::Value) {
-    for (key, note) in value["truncation"].as_object().into_iter().flatten() {
-        println!(
-            "  {key}: showing {} of {}; --all to see every item",
-            note["shown"], note["total"]
-        );
-    }
-}
-
-fn render_essential_analyze(value: &serde_json::Value, _ctx: &RenderContext<'_>) {
-    let p = &value["program"];
-    println!(
-        "\nProgram overview\n  {} file(s), {} rule(s), {} global variable(s), {} player variable(s), {} subroutine(s), {} persistent object(s)",
-        count(p, "files"),
-        count(p, "rules"),
-        count(p, "globalVariables"),
-        count(p, "playerVariables"),
-        count(p, "subroutines"),
-        count(&value["counts"], "persistentObjects")
-    );
-    println!("  evidence: [static] parsed program inventory");
-    let cost = &value["cost"];
-    println!("\nWorkshop cost");
-    if let Some(elements) = cost["elementCount"].as_u64() {
-        println!(
-            "  {elements} element(s) [exact] — canonical element count; structural size, not runtime cost"
-        );
-    } else {
-        println!(
-            "  element count unavailable: {}",
-            cost["unavailableReason"]
-                .as_str()
-                .unwrap_or("counter does not model this program")
-        );
-    }
-    println!(
-        "  {} action(s), {} condition(s), {} wait(s) [static]",
-        count(&cost["counts"], "actions"),
-        count(&cost["counts"], "conditions"),
-        count(&cost["counts"], "waits")
-    );
-    let element_total = cost["elementCount"].as_u64();
-    println!(
-        "\nHotspots\n  {}",
-        if element_total.is_some() {
-            "ranked by Workshop element count [exact counts; the ranking itself is a heuristic]"
-        } else {
-            "ranked by control-flow size [heuristic: blocks + edges]"
-        }
-    );
-    for rule in value["hotspots"].as_array().into_iter().flatten() {
-        let flow = &rule["controlFlow"];
-        let (blocks, edges) = (count(flow, "blocks"), count(flow, "edges"));
-        let risks = count(rule, "risks");
-        let location = location_suffix(rule.get("span"));
-        match rule["elements"].as_u64() {
-            Some(elements) => {
-                let share = element_total
-                    .filter(|total| *total > 0)
-                    .map(|total| format!(" ({:.1}%)", elements as f64 * 100.0 / total as f64))
-                    .unwrap_or_default();
-                println!(
-                    "    \"{}\": {elements} element(s){share}, {blocks} block(s), {edges} edge(s), {risks} risk(s){location}",
-                    rule_name(rule),
-                );
-            }
-            None => println!(
-                "    \"{}\": {blocks} block(s), {edges} edge(s), {risks} risk(s){location}",
-                rule_name(rule),
-            ),
-        }
-    }
-    let c = &value["complexity"];
-    println!(
-        "\nComplexity\n  {} block(s), {} edge(s), {} loop block(s), {} wait block(s) [static]",
-        count(c, "blocks"),
-        count(c, "edges"),
-        count(c, "loopBlocks"),
-        count(c, "waitBlocks")
-    );
-    if value["conditionTrees"]
-        .as_array()
-        .is_some_and(|trees| !trees.is_empty())
-    {
-        println!("  top condition tree(s) by element count [exact]");
-    }
-    for tree in value["conditionTrees"].as_array().into_iter().flatten() {
-        println!(
-            "    \"{}\" condition {}: {} element(s){}",
-            tree_rule(tree),
-            count(tree, "index") + 1,
-            count(tree, "elements"),
-            location_suffix(tree.get("span"))
-        );
-    }
-    println!(
-        "\nPerformance and stability risks\n  heuristic/static indicators — not measured runtime cost or behavior"
-    );
-    let risks = value["risks"].as_array().map_or(&[][..], Vec::as_slice);
-    for risk in risks {
-        let marks = marks();
-        println!(
-            "{}{}[{}] (evidence: {}): {}",
-            marks.head,
-            risk["severity"].as_str().unwrap_or("info"),
-            risk["code"].as_str().unwrap_or("finding"),
-            risk["evidence"].as_str().unwrap_or("static"),
-            risk["message"].as_str().unwrap_or_default()
-        );
-        if let Some(span) = finding_location_span(risk) {
-            let path = span
-                .get("path")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("<span>");
-            let line = span_position(&span, "start", "line").unwrap_or(0);
-            let col = span_position(&span, "start", "col").unwrap_or(0);
-            println!("{}  --> {path}:{line}:{col}", marks.pad);
-        }
-    }
-    if count(&value["persistentObjects"], "total") > 0 {
-        println!(
-            "  {}",
-            persistent_object_summary(&value["persistentObjects"])
-        );
-    }
-    if value["risks"].as_array().is_some_and(Vec::is_empty)
-        && count(&value["persistentObjects"], "total") == 0
-    {
-        println!("  none");
-    }
-    if let Some(withheld) = value["selection"]["withheld"].as_u64().filter(|n| *n > 0) {
-        println!("  ... {withheld} finding(s) withheld (--max)");
-    }
-    println!(
-        "\nState and coupling\n  Top variables (heuristic ranking: rules touched, then reads + writes)"
-    );
-    for variable in value["variables"].as_array().into_iter().flatten() {
-        let u = &variable["usage"];
-        println!(
-            "    {} {}: {} rule(s), {} read(s), {} write(s) [static]",
-            variable["kind"].as_str().unwrap_or("variable"),
-            variable["name"].as_str().unwrap_or("<unnamed>"),
-            count(u, "rules"),
-            count(u, "reads"),
-            count(u, "writes")
-        );
-    }
-}
-
-fn render_finding_group(group: &[serde_json::Value], ctx: &RenderContext<'_>, marks: &Marks) {
-    let first = &group[0];
-    let code = first["code"].as_str().unwrap_or("finding");
-    let msg = first["message"].as_str().unwrap_or_default();
-    let sev = finding_severity_label(first, ctx.presentation.color);
-    if group.len() == 1 {
-        println!("{}{sev}[{code}]: {msg}", marks.head);
-        if let Some(span) = first.get("span").filter(|span| span.is_object()) {
-            render_finding_location(span, ctx, &marks.pad, true);
-        }
-    } else {
-        println!(
-            "{}{sev}[{code}] ({} findings): {msg}",
-            marks.head,
-            group.len()
-        );
-        let located = renderable_group_spans(group);
-        for span in located.iter() {
-            render_finding_location(span, ctx, &marks.pad, false);
-        }
-    }
-    let mut notes = vec![format!(
-        "evidence: {}",
-        first["evidence"].as_str().unwrap_or("exact")
-    )];
-    if let Some(boundedness) = first.get("boundedness").and_then(serde_json::Value::as_str) {
-        notes.push(format!("boundedness: {boundedness}"));
-    }
-    if let Some(note) = unmapped_positions_note(&unmapped_positions(group)) {
-        notes.push(note);
-    }
-    println!(
-        "{}{}",
-        marks.pad,
-        dim(&format!("= {}", notes.join(" · ")), ctx.presentation.color)
-    );
 }
 
 fn renderable_group_spans(group: &[serde_json::Value]) -> Vec<&serde_json::Value> {
@@ -2087,10 +1368,10 @@ fn finding_severity_label(finding: &serde_json::Value, color: bool) -> String {
         .and_then(serde_json::Value::as_str)
         .unwrap_or("warning");
     if color {
-        let code = match severity {
-            "error" => "31",
-            "info" | "notice" => "36",
-            _ => "33",
+        let code = match finding_severity(finding) {
+            Severity::Error => "31",
+            Severity::Warning => "33",
+            Severity::Info => "36",
         };
         format!("\x1b[{code}m{severity}\x1b[0m")
     } else {
@@ -2544,36 +1825,6 @@ mod tests {
         assert_eq!(rank(serde_json::json!("info")), 2);
         assert_eq!(rank(serde_json::json!("notice")), 2);
         assert_eq!(rank(serde_json::Value::Null), 1);
-    }
-
-    #[test]
-    fn lint_footer_parts_carry_files_skipped_and_interactive_elapsed() {
-        let ctx = |interactive| RenderContext {
-            presentation: Presentation {
-                format: OutputFormat::Text,
-                renderer: Renderer::Terminal,
-                color: false,
-                interactive,
-                all: false,
-                width: MAX_WIDTH,
-            },
-            elapsed: Duration::from_millis(42),
-            source_base: None,
-            subject: None,
-        };
-        assert_eq!(
-            lint_footer_parts(2, 1, &ctx(true)),
-            vec![
-                "2 file(s) affected".to_string(),
-                "1 rule evaluation(s) skipped".to_string(),
-                "42 ms".to_string()
-            ]
-        );
-        assert_eq!(
-            lint_footer_parts(2, 0, &ctx(false)),
-            vec!["2 file(s) affected".to_string()]
-        );
-        assert!(lint_footer_parts(0, 0, &ctx(false)).is_empty());
     }
 
     #[test]

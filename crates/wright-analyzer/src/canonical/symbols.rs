@@ -153,6 +153,8 @@ pub enum PositionResolution<'a> {
 pub struct SemanticIndex {
     symbols: Vec<Symbol>,
     references: Vec<Reference>,
+    /// Positions in `references`, grouped by referenced symbol index.
+    by_symbol: Vec<Vec<usize>>,
     next_value_id: ValueId,
 }
 
@@ -227,6 +229,7 @@ impl SemanticIndex {
         let mut index = Self {
             symbols,
             references: Vec::new(),
+            by_symbol: Vec::new(),
             next_value_id: 0,
         };
         index.add_missing_declarations();
@@ -245,6 +248,17 @@ impl SemanticIndex {
                 index.walk_action(value, rule, action, program);
             }
         }
+        let groups = index
+            .references
+            .iter()
+            .map(|reference| reference.symbol.index() + 1)
+            .max()
+            .unwrap_or(0)
+            .max(index.symbols.len());
+        index.by_symbol = vec![Vec::new(); groups];
+        for (position, reference) in index.references.iter().enumerate() {
+            index.by_symbol[reference.symbol.index()].push(position);
+        }
         index
     }
 
@@ -255,10 +269,14 @@ impl SemanticIndex {
         self.symbols.get(id.index())
     }
     pub fn references(&self, symbol: SymbolId) -> Vec<&Reference> {
-        self.references
-            .iter()
-            .filter(|reference| reference.symbol == symbol)
-            .collect()
+        self.by_symbol
+            .get(symbol.index())
+            .map_or_else(Vec::new, |positions| {
+                positions
+                    .iter()
+                    .map(|&position| &self.references[position])
+                    .collect()
+            })
     }
 
     /// Resolve a 1-based `line`/`col` to the symbol whose identifier
@@ -290,15 +308,10 @@ impl SemanticIndex {
         }
     }
     pub(super) fn references_for_all_symbols(&self) -> Vec<Vec<&Reference>> {
-        let mut grouped = (0..self.symbols.len())
-            .map(|_| Vec::new())
-            .collect::<Vec<_>>();
-        for reference in &self.references {
-            if let Some(references) = grouped.get_mut(reference.symbol.index()) {
-                references.push(reference);
-            }
-        }
-        grouped
+        self.symbols
+            .iter()
+            .map(|symbol| self.references(symbol.id))
+            .collect()
     }
     pub fn usage(&self, symbol: SymbolId) -> UsageSummary {
         let mut usage = UsageSummary::default();

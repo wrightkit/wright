@@ -100,8 +100,7 @@ impl CompilerSession {
         loop {
             let sources = current_path_sources_without_stdin(&self.config);
             let candidate = self
-                .fix_outcomes(&envelope.result.findings, sources.as_ref())
-                .into_iter()
+                .fix_outcome_iter(&envelope.result.findings, sources.as_ref())
                 .find(|(outcome, _)| outcome.status == LintFixStatus::Preview);
             let Some((outcome, resolved)) = candidate else {
                 break;
@@ -185,17 +184,25 @@ impl CompilerSession {
         findings: &serde_json::Value,
         sources: Option<&BTreeMap<String, String>>,
     ) -> Vec<(LintFixOutcome, Option<ResolvedFix>)> {
-        let Some(findings) = findings.as_array() else {
-            return Vec::new();
-        };
+        self.fix_outcome_iter(findings, sources).collect()
+    }
+
+    /// Validates fixes lazily, so a caller that needs only the first
+    /// preview does not validate every remaining fix.
+    fn fix_outcome_iter<'a>(
+        &'a self,
+        findings: &'a serde_json::Value,
+        sources: Option<&'a BTreeMap<String, String>>,
+    ) -> impl Iterator<Item = (LintFixOutcome, Option<ResolvedFix>)> + 'a {
         #[cfg(not(target_arch = "wasm32"))]
         let provider = self.provider_fix_context();
         #[cfg(target_arch = "wasm32")]
         let provider: Option<Result<ProviderFixContext, Diagnostic>> = None;
         findings
-            .iter()
-            .filter_map(|finding| self.fix_outcome(finding, sources, provider.as_ref()))
-            .collect()
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(move |finding| self.fix_outcome(finding, sources, provider.as_ref()))
     }
 
     #[cfg(not(target_arch = "wasm32"))]

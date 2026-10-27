@@ -63,12 +63,7 @@ impl SourceTarget {
         cwd: impl Into<PathBuf>,
     ) -> Self {
         let cwd = cwd.into();
-        let entry = entry.into();
-        let entry = if entry.is_absolute() {
-            entry
-        } else {
-            cwd.join(entry)
-        };
+        let entry = cwd.join(entry.into());
         Self {
             language,
             entry,
