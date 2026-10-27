@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command as Process;
 
-use super::{Platform, UpdateError, fetch, fetch_text, sha256_hex, truncate};
+use super::{Platform, UpdateError, fetch, fetch_text, truncate};
 
 pub(super) fn install_version(
     client: &reqwest::blocking::Client,
@@ -59,21 +59,8 @@ pub(super) fn install_version(
 }
 
 fn staging_dir(install_dir: &Path) -> Result<PathBuf, UpdateError> {
-    let staging = install_dir.join(format!(
-        ".wright-update-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or_default()
-    ));
-    std::fs::create_dir_all(&staging).map_err(|e| {
-        UpdateError::failed(format!(
-            "could not create a staging directory in {}: {e}",
-            install_dir.display()
-        ))
-    })?;
-    Ok(staging)
+    wright_driver::store::reserve_staging_dir(install_dir, ".wright-update", "an update")
+        .map_err(UpdateError::failed)
 }
 
 fn unpack(archive: &[u8], dest: &Path, platform: Platform) -> Result<(), UpdateError> {
@@ -112,23 +99,20 @@ pub(super) fn verify_checksum(
     checksum_file: &str,
     archive_name: &str,
 ) -> Result<(), UpdateError> {
-    let published = checksum_file
-        .split_whitespace()
-        .next()
-        .ok_or_else(|| UpdateError::failed(format!("empty checksum file for {archive_name}")))?;
-    if published.len() != 64 || !published.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(UpdateError::failed(format!(
+    wright_driver::store::verify_sha256(archive, checksum_file).map_err(|error| match error {
+        wright_driver::store::ChecksumError::Empty => {
+            UpdateError::failed(format!("empty checksum file for {archive_name}"))
+        }
+        wright_driver::store::ChecksumError::Invalid(digest) => UpdateError::failed(format!(
             "invalid checksum file for {archive_name}: expected one SHA-256 hex digest (got '{}')",
-            truncate(published)
-        )));
-    }
-    let actual = sha256_hex(archive);
-    if !actual.eq_ignore_ascii_case(published) {
-        return Err(UpdateError::failed(format!(
-            "checksum verification failed for {archive_name} (published {published}, got {actual}); the download may be corrupted or tampered with — nothing was changed"
-        )));
-    }
-    Ok(())
+            truncate(&digest)
+        )),
+        wright_driver::store::ChecksumError::Mismatch(published, actual) => {
+            UpdateError::failed(format!(
+                "checksum verification failed for {archive_name} (published {published}, got {actual}); the download may be corrupted or tampered with — nothing was changed"
+            ))
+        }
+    })
 }
 
 fn ensure_writable(install_dir: &Path, platform: Platform) -> Result<(), UpdateError> {
@@ -223,10 +207,10 @@ mod tests {
     fn checksum_verification_accepts_good_and_rejects_bad() {
         let bytes = b"the archive bytes";
         let name = "wright-9.9.9-x86_64-unknown-linux-gnu.tar.gz";
-        let good = format!("{}  {name}\n", sha256_hex(bytes));
+        let good = format!("{}  {name}\n", wright_driver::sha256_hex(bytes));
         verify_checksum(bytes, &good, name).unwrap();
 
-        let bad = format!("{}  archive\n", sha256_hex(b"other bytes"));
+        let bad = format!("{}  archive\n", wright_driver::sha256_hex(b"other bytes"));
         let error = verify_checksum(bytes, &bad, "archive").unwrap_err();
         assert!(error.message().contains("checksum verification failed"));
 
