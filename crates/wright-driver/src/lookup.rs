@@ -518,28 +518,29 @@ fn opy_lookup(
     locale: Option<&str>,
     limit: usize,
 ) -> ToolResponse {
-    let mut provider = match session.language_provider(opy_provider::OPY_LANGUAGE_ID) {
-        Ok(provider) => provider,
-        Err(error) => {
-            return unavailable("opy", OWNER_OPY, LOOKUP_CAPABILITY, error.to_string());
-        }
-    };
     let client = wright_lpp::ClientInfo {
         name: SERVICE_NAME.to_string(),
         version: SERVICE_VERSION.to_string(),
     };
-    let negotiated = match provider.initialize_lookup(Some(&client)) {
-        Ok(result) => result.capabilities,
+    let mut provider = match session.connect_provider(
+        opy_provider::OPY_LANGUAGE_ID,
+        &client,
+        wright_lpp::LPP_LOOKUP_PROTOCOL_VERSION,
+        Some(crate::ConnectFloor::Entry),
+    ) {
+        Ok(connected) => connected.provider,
+        // A connect failure — an unresolvable provider, a refused
+        // handshake, a version mismatch — is a capability gap on this
+        // surface, the same contract the spawn/initialize failures
+        // reported before the shared connect path (#1004).
         Err(error) => {
-            let _ = provider.shutdown();
-            return match error.code() {
-                "protocol-version-mismatch" | "capability-unavailable" => {
-                    unavailable("opy", OWNER_OPY, LOOKUP_CAPABILITY, error.to_string())
-                }
-                _ => carried_refusal(error.code(), error.to_string()),
-            };
+            return unavailable("opy", OWNER_OPY, LOOKUP_CAPABILITY, error.to_string());
         }
     };
+    let negotiated = provider
+        .capabilities()
+        .expect("a connected provider negotiated")
+        .clone();
     if !negotiated.supports(Capability::Lookup) {
         let _ = provider.shutdown();
         return unavailable(

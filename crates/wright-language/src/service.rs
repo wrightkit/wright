@@ -1,10 +1,9 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
-use std::time::Duration;
 
 use serde::Serialize;
 use wright_analyzer::canonical::{PositionResolution, ReferenceKind, SemanticIndex, Symbol};
-use wright_driver::opy_provider::{OPY_LANGUAGE_ID, ResolvedOpyProvider};
+use wright_driver::opy_provider::OPY_LANGUAGE_ID;
 use wright_driver::{CompilerSession, InputSpec, SessionConfig, SourceKind};
 use wright_lpp::{Capability, LanguageProvider, ProviderError};
 
@@ -211,7 +210,12 @@ impl LanguageService {
         };
         let provider = match self.opy_provider() {
             Ok(provider) => provider,
-            Err(error) => return boundary("source-provider-unavailable", error.to_string()),
+            Err(error) => {
+                return boundary(
+                    &wright_driver::source_provider::provider_failure_code(&error),
+                    error.to_string(),
+                );
+            }
         };
         if !provider_supports(provider, Capability::Check) {
             return boundary(
@@ -243,7 +247,13 @@ impl LanguageService {
                         })
                 })
                 .collect(),
-            Err(error) => boundary(provider_failure_code(&error), error.to_string()),
+            // The shared provider-failure classification (#1004): a
+            // refusal reports `provider-refusal-<refusalCode>` — the
+            // driver contract — never the raw refusal code.
+            Err(error) => boundary(
+                &wright_driver::source_provider::provider_failure_code(&error),
+                error.to_string(),
+            ),
         }
     }
 
@@ -416,15 +426,10 @@ impl LanguageService {
             sources,
         };
 
-        if self.session.is_none() {
-            self.session = match CompilerSession::new(self.config.clone()) {
-                Ok(session) => Some(session),
-                Err(diagnostic) => {
-                    return RenameOutcome::Refused {
-                        code: diagnostic.code,
-                        message: diagnostic.message,
-                    };
-                }
+        if let Err(error) = self.session() {
+            return RenameOutcome::Refused {
+                code: wright_driver::source_provider::provider_failure_code(&error),
+                message: error.to_string(),
             };
         }
         let mutation = self
@@ -509,7 +514,7 @@ impl LanguageService {
 
     fn opy_provider(&mut self) -> Result<&mut dyn LanguageProvider, ProviderError> {
         if matches!(self.opy, OpyProviderState::Pending) {
-            self.opy = match connect_opy_provider(&self.config) {
+            self.opy = match self.connect_opy_provider() {
                 Ok(provider) => OpyProviderState::Ready(provider),
                 Err(error) => OpyProviderState::Unavailable(error),
             };
@@ -519,6 +524,43 @@ impl LanguageService {
             OpyProviderState::Unavailable(error) => Err(error.clone()),
             OpyProviderState::Pending => unreachable!("resolved above"),
         }
+    }
+
+    /// The shared session, built lazily on the first provider request so a
+    /// service that only serves Workshop documents never constructs one.
+    fn session(&mut self) -> Result<&CompilerSession, ProviderError> {
+        if self.session.is_none() {
+            match CompilerSession::new(self.config.clone()) {
+                Ok(session) => self.session = Some(session),
+                Err(diagnostic) => {
+                    return Err(ProviderError::lpp(
+                        wright_lpp::LppErrorKind::Refusal,
+                        serde_json::json!({ "refusalCode": diagnostic.code }),
+                        diagnostic.message,
+                    ));
+                }
+            }
+        }
+        Ok(self.session.as_ref().expect("session built above"))
+    }
+
+    /// The OPY provider session, connected through the driver's shared
+    /// connect path (#1004): `resolve()` lookup (no `installed()`
+    /// fallback), preferred-version initialize, and the LPP §19.2 retry.
+    fn connect_opy_provider(&mut self) -> Result<Box<dyn LanguageProvider>, ProviderError> {
+        let client = wright_lpp::ClientInfo {
+            name: wright_lpp::LPP_CLIENT_NAME.to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        };
+        Ok(self
+            .session()?
+            .connect_provider(
+                OPY_LANGUAGE_ID,
+                &client,
+                wright_lpp::LPP_PROTOCOL_VERSION,
+                None,
+            )?
+            .provider)
     }
 
     fn opy_document(&self, uri: &str) -> Option<wright_lpp::Document> {
@@ -561,73 +603,11 @@ impl LanguageService {
     }
 }
 
-const PROVIDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-
-fn connect_opy_provider(
-    config: &SessionConfig,
-) -> Result<Box<dyn LanguageProvider>, ProviderError> {
-    let resolved = if config.opy_provider.executable.is_some() {
-        Some(config.opy_provider.resolve()?)
-    } else {
-        config.opy_provider.installed()?
-    };
-    let Some(resolved) = resolved else {
-        return Err(ProviderError::NotConfigured {
-            language_id: OPY_LANGUAGE_ID.to_string(),
-        });
-    };
-    let client = wright_lpp::ClientInfo {
-        name: wright_lpp::LPP_CLIENT_NAME.to_string(),
-        version: env!("CARGO_PKG_VERSION").to_string(),
-    };
-    let spawn = |resolved: &ResolvedOpyProvider| {
-        wright_lpp::StdioLanguageProvider::spawn(
-            &resolved.executable,
-            &[],
-            PROVIDER_REQUEST_TIMEOUT,
-        )
-    };
-    let mut provider = spawn(&resolved)?;
-    let mut initialize = provider.initialize(Some(&client));
-    if initialize
-        .as_ref()
-        .is_err_and(|error| error.code() == "protocol-version-mismatch")
-    {
-        let supported = initialize
-            .as_ref()
-            .err()
-            .map(|error| error.supported_protocol_versions())
-            .unwrap_or_default();
-        let _ = provider.shutdown();
-        provider = spawn(&resolved)?;
-        initialize = match mutual_protocol_version(&supported) {
-            Some(version) => provider.initialize_version(version, Some(&client)),
-            None => Err(ProviderError::ProtocolVersionMismatch {
-                supported,
-                message: "no mutually supported LPP protocol version".to_string(),
-            }),
-        };
-    }
-    initialize.map(|_| Box::new(provider) as Box<dyn LanguageProvider>)
-}
-
-fn mutual_protocol_version(supported: &[String]) -> Option<&'static str> {
-    wright_lpp::LPP_SUPPORTED_PROTOCOL_VERSIONS
-        .iter()
-        .rev()
-        .copied()
-        .find(|version| supported.iter().any(|s| s == version))
-}
-
 fn provider_supports(provider: &dyn LanguageProvider, capability: Capability) -> bool {
     provider
         .capabilities()
         .map(|capabilities| capabilities.supports(capability))
         .unwrap_or(false)
-}
-
-fn provider_failure_code(error: &ProviderError) -> &str {
-    error.refusal_code().unwrap_or_else(|| error.code())
 }
 
 fn lpp_severity(severity: wright_lpp::DiagnosticSeverity) -> &'static str {

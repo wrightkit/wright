@@ -60,9 +60,11 @@ or changing an `.opy` document publishes the provider's `lpp/check` answer
 over the complete open-buffer overlay — the unsaved text under the client's
 own URI — with the provider's UTF-16 ranges carried through (#738). DEL/OSTW
 documents and OPY documents without a working provider publish an explicit
-`source-provider-unavailable` error, and a failed provider request publishes
-its structured error code on the document. A document that is neither
-publishes no diagnostics.
+`source-provider-unavailable` or provider-resolution error code, and a
+failed provider request publishes its structured error code on the
+document — a provider refusal carries the same `provider-refusal-<code>`
+classification the driver surfaces report (#1004). A document that is
+neither publishes no diagnostics.
 
 `textDocument/rename` on a source-language document routes through the
 provider-owned mutation path (#156): the

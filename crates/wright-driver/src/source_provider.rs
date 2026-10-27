@@ -326,7 +326,7 @@ fn request_context(operation: &str, target: &SourceTarget) -> String {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn provider_failure_code(error: &wright_lpp::ProviderError) -> String {
+pub fn provider_failure_code(error: &wright_lpp::ProviderError) -> String {
     match error.refusal_code() {
         Some(code) if code == "session-config-changed" => code.to_string(),
         Some(code) => format!("{PROVIDER_REFUSAL_CODE_PREFIX}{code}"),

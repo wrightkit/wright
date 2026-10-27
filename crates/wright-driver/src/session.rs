@@ -1,15 +1,11 @@
 mod diagnostics;
 mod edit;
-#[cfg(not(target_arch = "wasm32"))]
-mod protocol;
 mod registry;
 mod semantic;
 
 #[cfg(not(target_arch = "wasm32"))]
 use diagnostics::provider_error_diagnostic;
 use diagnostics::workshop_diag_for_provider_artifact;
-#[cfg(not(target_arch = "wasm32"))]
-use protocol::mutual_protocol_version;
 pub(crate) use semantic::*;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -379,59 +375,32 @@ impl CompilerSession {
         // WebAssembly, but no process transport exists to create one.
         #[cfg(not(target_arch = "wasm32"))]
         if self.source_provider.is_none() {
-            let spawn = |session: &Self| {
-                session
-                    .language_provider(opy_provider::OPY_LANGUAGE_ID)
-                    .map_err(|error| {
-                        crate::source_provider::provider_error(
-                            error,
-                            "the 'opy' source provider could not be started",
-                        )
-                        .diagnostic()
-                    })
-            };
-            let mut provider = spawn(self)?;
-            let client_info = lpp_client_info();
-            let mut initialize = provider.initialize_artifact_negotiation(Some(&client_info));
-            if initialize
-                .as_ref()
-                .is_err_and(|error| error.code() == "protocol-version-mismatch")
-            {
-                // LPP §19.2: retry at the highest mutually supported
-                // version the provider advertised, honoring the target's
-                // floor — entry requests need 1.1 project loading, and a
-                // directory target cannot drop below the 1.3
-                // source-identity contract it loads under (#638).
-                let supported = initialize
-                    .as_ref()
-                    .err()
-                    .map(|error| error.supported_protocol_versions())
-                    .unwrap_or_default();
-                let _ = provider.shutdown();
-                provider = spawn(self)?;
-                initialize = match mutual_protocol_version(&supported, resolved.target) {
-                    Some(version) => provider.initialize_version(version, Some(&client_info)),
-                    None => Err(wright_lpp::ProviderError::ProtocolVersionMismatch {
-                        supported,
-                        message: format!(
-                            "no mutually supported LPP protocol version serves a {:?} target",
-                            resolved.target
-                        ),
-                    }),
-                };
-            }
-            let init = initialize.map_err(|error| {
-                crate::source_provider::provider_error(
-                    error,
-                    "the 'opy' source provider could not be initialized",
+            // The shared connect path (#1004): entry requests prefer the
+            // 1.4 artifact-negotiation session, and the target's kind sets
+            // the retry floor — entry requests need 1.1 project loading,
+            // and a directory target cannot drop below the 1.3
+            // source-identity contract it loads under (#638).
+            let connected = self
+                .connect_provider(
+                    opy_provider::OPY_LANGUAGE_ID,
+                    &lpp_client_info(),
+                    wright_lpp::LPP_ARTIFACT_NEGOTIATION_PROTOCOL_VERSION,
+                    Some(resolved.target.into()),
                 )
-                .diagnostic()
-            })?;
+                .map_err(|error| {
+                    crate::source_provider::provider_error(
+                        error,
+                        "the 'opy' source provider could not be initialized",
+                    )
+                    .diagnostic()
+                })?;
             // A directory target's canonical identity is the provider's
             // `sourceIdentity` (LPP 1.3): the spec requires the client to
             // refuse a session that negotiated without the capability
             // (#638).
-            if resolved.target == InputTarget::Directory && !init.capabilities.source_identity {
+            if resolved.target == InputTarget::Directory
+                && !connected.initialize.capabilities.source_identity
+            {
                 return Err(crate::source_provider::provider_error(
                     wright_lpp::ProviderError::lpp(
                         wright_lpp::LppErrorKind::CapabilityUnavailable,
@@ -446,7 +415,7 @@ impl CompilerSession {
                 .diagnostic());
             }
             self.source_provider = Some(Box::new(crate::source_provider::LppSourceProvider::new(
-                provider,
+                connected.provider,
                 self.config.locale.clone(),
             )));
         }
@@ -639,12 +608,16 @@ impl CompilerSession {
     ///
     /// Providers are discovered by opaque language id through the session's
     /// provider registry; no source-language branch lives here. When no
-    /// provider is configured for the id, or when a required capability was
-    /// not negotiated, the failure is an explicit structured
-    /// `wright_lpp::ProviderError` — there is no silent fallback to
-    /// in-process compiler semantics. A session whose configuration changed
-    /// after construction refuses through the LPP refusal channel with
-    /// `refusalCode` `session-config-changed` (#511).
+    /// provider is configured for the id the failure is an explicit
+    /// structured `wright_lpp::ProviderError` — there is no silent fallback
+    /// to in-process compiler semantics. A session whose configuration
+    /// changed after construction refuses through the LPP refusal channel
+    /// with `refusalCode` `session-config-changed` (#511).
+    ///
+    /// Callers that intend to initialize the session should prefer
+    /// [`Self::connect_provider`], the shared connect path that also
+    /// negotiates the protocol version (#1004); this spawn-only seam
+    /// remains for hosts that initialize the returned provider themselves.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn language_provider(
         &self,
@@ -657,28 +630,48 @@ impl CompilerSession {
                 diagnostic.message,
             ));
         }
-        if id == opy_provider::OPY_LANGUAGE_ID && !self.config.providers.contains(id) {
-            let res = self.config.opy_provider.resolve()?;
-            let mut p = self.config.providers.clone();
-            p.register(wright_lpp::ProviderConfig::new(
-                opy_provider::OPY_LANGUAGE_ID,
-                res.executable,
-                Vec::new(),
-            ))
-            .expect("registered");
-            return p
-                .spawn(id)
-                .map(|b| Box::new(b) as Box<dyn wright_lpp::LanguageProvider>);
-        }
-        self.config
-            .providers
+        crate::connect::resolved_registry(&self.config, id)?
             .spawn(id)
             .map(|b| Box::new(b) as Box<dyn wright_lpp::LanguageProvider>)
     }
 
+    /// The shared LPP connect path (#1004): resolve `language_id`, spawn
+    /// the provider, initialize at `preferred_version`, and retry once at
+    /// the highest mutually supported version above `floor` on
+    /// `protocol-version-mismatch` (LPP §19.2). The session-config refusal
+    /// channel (`session-config-changed`, #511) precedes any spawn.
+    ///
+    /// Every Wright provider client — the source-provider session load,
+    /// provider mutation flows, lookup, and the language service —
+    /// connects through this function, so lookup, negotiation, and
+    /// failure classification cannot drift apart.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn connect_provider(
+        &self,
+        language_id: &str,
+        client: &wright_lpp::ClientInfo,
+        preferred_version: &str,
+        floor: Option<crate::connect::ConnectFloor>,
+    ) -> Result<crate::connect::ConnectedProvider, wright_lpp::ProviderError> {
+        if let Err(diagnostic) = self.verify_fixed_config() {
+            return Err(wright_lpp::ProviderError::lpp(
+                wright_lpp::LppErrorKind::Refusal,
+                serde_json::json!({ "refusalCode": diagnostic.code }),
+                diagnostic.message,
+            ));
+        }
+        crate::connect::connect_provider(
+            &self.config,
+            language_id,
+            client,
+            preferred_version,
+            floor,
+        )
+    }
+
     /// Run a provider-driven mutation flow (#139) over a fresh provider
-    /// session: spawn by opaque language id, initialize with `client`, run
-    /// the flow, and terminate gracefully.
+    /// session: connect by opaque language id through the shared connect
+    /// path (#1004), run the flow, and terminate gracefully.
     ///
     /// Any failure before the flow — an unconfigured language id, a spawn
     /// failure, a failed handshake — is the same structured
@@ -695,13 +688,15 @@ impl CompilerSession {
             &mut dyn wright_lpp::LanguageProvider,
         ) -> crate::provider_edit::ProviderMutation,
     ) -> crate::provider_edit::ProviderMutation {
-        let mut provider = match self.language_provider(language_id) {
-            Ok(provider) => provider,
+        let mut provider = match self.connect_provider(
+            language_id,
+            client,
+            wright_lpp::LPP_PROTOCOL_VERSION,
+            None,
+        ) {
+            Ok(connected) => connected.provider,
             Err(error) => return crate::provider_edit::provider_failure(&error),
         };
-        if let Err(error) = provider.initialize(Some(client)) {
-            return crate::provider_edit::provider_failure(&error);
-        }
         let mutation = flow(provider.as_mut());
         let _ = provider.shutdown();
         mutation
@@ -1008,14 +1003,17 @@ impl CompilerSession {
                 ));
             })?;
         let mut provider = self
-            .language_provider(opy_provider::OPY_LANGUAGE_ID)
+            .connect_provider(
+                opy_provider::OPY_LANGUAGE_ID,
+                &lpp_client_info(),
+                wright_lpp::LPP_PROTOCOL_VERSION,
+                None,
+            )
             .map_err(|e| {
-                self.diagnostics.push(provider_error_diagnostic(e, "start"));
-            })?;
-        provider.initialize(Some(&lpp_client_info())).map_err(|e| {
-            self.diagnostics
-                .push(provider_error_diagnostic(e, "initialize"));
-        })?;
+                self.diagnostics
+                    .push(provider_error_diagnostic(e, "initialize"));
+            })?
+            .provider;
         let result = provider
             .reconstruct(&wright_lpp::WorkshopArtifact {
                 format: "workshop-rs/text-v1".to_string(),
@@ -1319,45 +1317,6 @@ fn issue_span(span: Option<workshop_rs::source::Span>, path: &Path) -> SourceSpa
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    #[cfg(not(target_arch = "wasm32"))]
-    fn mutual_protocol_version_honors_the_target_floor() {
-        let supported =
-            |versions: &[&str]| versions.iter().map(|v| v.to_string()).collect::<Vec<_>>();
-
-        assert_eq!(
-            mutual_protocol_version(&supported(&["1.0", "1.1", "1.3"]), InputTarget::File),
-            Some("1.3")
-        );
-        assert_eq!(
-            mutual_protocol_version(&supported(&["1.1", "1.4"]), InputTarget::File),
-            Some("1.4")
-        );
-
-        assert_eq!(
-            mutual_protocol_version(&supported(&["1.0"]), InputTarget::File),
-            None
-        );
-        assert_eq!(
-            mutual_protocol_version(&supported(&["1.0", "1.1"]), InputTarget::File),
-            Some("1.1")
-        );
-
-        assert_eq!(
-            mutual_protocol_version(&supported(&["1.1", "1.2"]), InputTarget::Directory),
-            None
-        );
-        assert_eq!(
-            mutual_protocol_version(&supported(&["1.2", "1.3"]), InputTarget::Directory),
-            Some("1.3")
-        );
-
-        assert_eq!(
-            mutual_protocol_version(&supported(&["1.6"]), InputTarget::File),
-            None
-        );
-    }
 
     #[test]
     fn residual_classifications_map_fail_closed() {

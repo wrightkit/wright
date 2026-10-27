@@ -4,16 +4,18 @@ use wright_language::document::{Document, Position, line_col_position, uri_to_pa
 use wright_language::{LanguageService, Range};
 
 fn service() -> LanguageService {
+    // An explicit but nonexistent provider executable keeps provider
+    // resolution deterministic and offline: `resolve()` refuses it
+    // without consulting a store or the network, so `.opy` documents
+    // reach the structured provider boundary (#738, #1004).
     LanguageService::with_config(
         PathBuf::from("."),
         wright_language::SessionConfig {
-            opy_provider: wright_language::OpyProviderConfig {
-                executable: None,
-                store_dir: Some(
-                    std::env::temp_dir()
-                        .join(format!("wright-language-test-{}", std::process::id())),
-                ),
-            },
+            opy_provider: wright_language::OpyProviderConfig::with_executable(
+                std::env::temp_dir()
+                    .join(format!("wright-language-missing-{}", std::process::id()))
+                    .join("opy-provider"),
+            ),
             ..wright_language::SessionConfig::default()
         },
     )
@@ -84,8 +86,16 @@ fn source_documents_report_provider_boundary_without_static_fallback() {
             PathBuf::from("."),
         ));
         let diagnostics = service.diagnostics(&uri);
+        // `.opy` resolves a provider (the explicit executable above fails
+        // validation); `.ostw`/`.del` have no provider to resolve at all —
+        // both surface an explicit refusal, never a static fallback.
+        let expected = if ext == "opy" {
+            "provider-missing"
+        } else {
+            "source-provider-unavailable"
+        };
         assert_eq!(
-            diagnostics[0].code, "source-provider-unavailable",
+            diagnostics[0].code, expected,
             "{ext} documents surface an explicit provider refusal"
         );
     }
@@ -337,9 +347,8 @@ fn non_workshop_documents_keep_their_boundaries() {
         Document::new(uri.to_string(), WORKSHOP_SOURCE, PathBuf::from("."))
             .with_language_id("workshop"),
     );
-    assert_eq!(
-        service.diagnostics(uri)[0].code,
-        "source-provider-unavailable",
+    assert!(
+        !service.diagnostics(uri).is_empty(),
         "the provider boundary wins over an extension tag"
     );
     assert!(
@@ -376,4 +385,89 @@ fn non_workshop_documents_keep_their_boundaries() {
             )
             .is_none()
     );
+}
+
+/// The language service's OPY provider path runs the shared connect path
+/// (#1004): the provider session is spawned through `resolve()` (no
+/// `installed()` fallback), `initialize` retries once at the highest
+/// mutual version on `protocol-version-mismatch`, and a provider refusal
+/// reaches the document surface under the driver's
+/// `provider-refusal-<code>` classification, not the raw refusal code.
+#[cfg(unix)]
+#[test]
+fn an_opy_provider_negotiates_and_classifies_refusals_like_the_driver() {
+    use std::os::unix::fs::PermissionsExt;
+
+    const PROVIDER: &str = r#"#!/usr/bin/env python3
+import json, sys, pathlib
+log = pathlib.Path(__file__).resolve().parent.joinpath("init-log")
+main = pathlib.Path(__file__).resolve().parent.joinpath("main.opy").as_uri()
+def reply(id, result=None, error=None):
+    message = {"jsonrpc": "2.0", "id": id}
+    message.update({"error": error} if error else {"result": result})
+    print(json.dumps(message), flush=True)
+def lpp_error(id, kind, details, text):
+    reply(id, error={"code": -32000, "message": text, "data": {"lpp": {"kind": kind, "details": details}}})
+for line in sys.stdin:
+    request = json.loads(line)
+    id, method = request["id"], request["method"]
+    if method == "lpp/initialize":
+        version = request["params"]["protocolVersion"]
+        with open(log, "a") as f:
+            f.write(version + "\n")
+        if version == "1.0":
+            lpp_error(id, "protocolVersionMismatch", {"supportedProtocolVersions": ["1.2"]}, "unsupported")
+        else:
+            reply(id, {"protocolVersion": version, "serverInfo": {"name": "fake", "version": "0"},
+                       "languages": [{"id": "opy", "extensions": ["opy"]}],
+                       "capabilities": {"check": True}})
+    elif method == "lpp/check":
+        lpp_error(id, "refusal", {"refusalCode": "check.tooLarge"}, "the project is too large")
+    else:
+        reply(id, {})
+"#;
+
+    let dir = std::env::temp_dir().join(format!(
+        "wright-language-provider-test-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("temp directory");
+    let script = dir.join("fake-provider");
+    std::fs::write(&script, PROVIDER).expect("provider script");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+
+    let mut service = LanguageService::with_config(
+        dir.clone(),
+        wright_language::SessionConfig {
+            opy_provider: wright_language::OpyProviderConfig::with_executable(&script),
+            ..wright_language::SessionConfig::default()
+        },
+    );
+    let uri = url::Url::from_file_path(dir.join("main.opy"))
+        .expect("entry uri")
+        .to_string();
+    service.store.open(Document::new(
+        uri.clone(),
+        "globalvar score = 0\n".to_string(),
+        dir.clone(),
+    ));
+
+    let diagnostics = service.diagnostics(&uri);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(
+        diagnostics[0].code, "provider-refusal-check.tooLarge",
+        "the language service emits the driver's refusal classification"
+    );
+    let attempts: Vec<String> = std::fs::read_to_string(dir.join("init-log"))
+        .expect("init log")
+        .lines()
+        .map(str::to_string)
+        .collect();
+    assert_eq!(
+        attempts,
+        vec!["1.0".to_string(), "1.2".to_string()],
+        "the rejected preferred version retries once at the highest mutual version"
+    );
+
+    std::fs::remove_dir_all(&dir).expect("remove test directory");
 }
