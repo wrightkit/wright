@@ -21,14 +21,23 @@ use crate::cli::{ColorArg, CommonArgs, OutputFormatArg, RendererArg};
 
 pub(crate) mod addresses;
 mod common;
+mod findings;
 pub(crate) mod terminal;
 
 pub(crate) use addresses::{edge_caller, rule_address, rule_name, tree_rule};
 pub(crate) use common::{
     DETAIL_COMMANDS, block_flags, call_fan_counts, cfg_block_stats, cfg_edge_count,
-    diagnostic_counts, diagnostic_files, finding_files, findings_severity_counts,
-    fix_status_counts, fix_status_parts, group_runs, lookup_hint_args, normalize_finding_spans,
-    notable_callers, shown_diagnostics, shown_of, span_suffix,
+    diagnostic_counts, diagnostic_files, finding_files, finding_record, fix_status_counts,
+    fix_status_parts, grouped_findings, lookup_hint_args, meta_severity_counts,
+    normalize_finding_spans, notable_callers, severity_label, severity_rank, shown_diagnostics,
+    shown_of, sorted_findings, span_suffix, uniform_evidence,
+};
+pub(crate) use findings::{
+    finding_head, finding_location_line, finding_location_span, finding_section, lint_footer,
+};
+#[cfg(test)]
+use findings::{
+    finding_location, renderable_group_spans, unmapped_positions, unmapped_positions_note,
 };
 
 use crate::plain;
@@ -338,7 +347,7 @@ pub(crate) fn render<
     if pres.format == OutputFormat::Json {
         let mut value = serde_json::to_value(envelope).expect("serializes");
         if !matches!(envelope.command.as_str(), "compile" | "convert") {
-            wright_driver::essential::envelope(&mut value, pres.all);
+            wright_driver::essential::envelope(&mut value, &envelope.diagnostics, pres.all);
         }
         if envelope.command == "check" {
             value["schema_version"] = serde_json::Value::String("1".to_string());
@@ -368,14 +377,6 @@ pub(crate) struct RenderContext<'a> {
 
 pub(crate) fn diagnostics_on_stdout<T: serde::Serialize>(envelope: &Envelope<T>) -> bool {
     !envelope.ok && !envelope.gated && envelope.exit != 2 && envelope.exit != 4
-}
-
-pub(crate) fn severity_rank(severity: Severity) -> u8 {
-    match severity {
-        Severity::Error => 0,
-        Severity::Warning => 1,
-        Severity::Info => 2,
-    }
 }
 
 fn dim(value: &str, color: bool) -> String {
@@ -449,8 +450,8 @@ fn render_github<T: serde::Serialize + ResultPresentation + plain::PlainReport>(
         .iter()
         .filter_map(diagnostic_annotation)
         .collect();
-    for finding in envelope.result.github_findings() {
-        if let Some(annotation) = finding_annotation(&finding) {
+    for (finding, severity) in envelope.result.github_findings() {
+        if let Some(annotation) = finding_annotation(&finding, severity) {
             annotations.push(annotation);
         }
     }
@@ -525,8 +526,8 @@ fn diagnostic_annotation(diagnostic: &wright_driver::Diagnostic) -> Option<Githu
     })
 }
 
-fn finding_annotation(finding: &serde_json::Value) -> Option<GithubAnnotation> {
-    let kind = match finding_severity(finding) {
+fn finding_annotation(finding: &serde_json::Value, severity: Severity) -> Option<GithubAnnotation> {
+    let kind = match severity {
         Severity::Error => "error",
         Severity::Warning => "warning",
         Severity::Info => return None,
@@ -620,22 +621,13 @@ impl From<Severity> for SummaryStatus {
     }
 }
 
-fn finding_severity(finding: &serde_json::Value) -> Severity {
-    Severity::from_label(finding.get("severity").and_then(serde_json::Value::as_str))
-}
-
 fn max_finding_severity(
-    findings: &serde_json::Value,
+    meta: &[wright_driver::FindingMeta],
     selection: &Option<wright_driver::SelectionOutcome>,
 ) -> Option<Severity> {
     match selection {
         Some(selection) => selection.max_severity,
-        None => findings
-            .as_array()
-            .map_or(&[][..], Vec::as_slice)
-            .iter()
-            .map(finding_severity)
-            .max(),
+        None => meta.iter().map(|meta| meta.severity).max(),
     }
 }
 
@@ -647,7 +639,8 @@ pub(crate) trait ResultPresentation {
     fn artifact(&self) -> Option<&str> {
         None
     }
-    fn github_findings(&self) -> Vec<serde_json::Value> {
+    /// The result's findings paired with their typed severities (#1001).
+    fn github_findings(&self) -> Vec<(serde_json::Value, Severity)> {
         Vec::new()
     }
     fn max_finding_severity(&self) -> Option<Severity> {
@@ -693,8 +686,7 @@ impl ResultPresentation for LintResult {
                 selection.total, rules
             ));
         }
-        let counts =
-            findings_severity_counts(self.findings.as_array().map_or(&[][..], Vec::as_slice));
+        let counts = meta_severity_counts(&self.findings_meta);
         let mut parts = Vec::new();
         if counts[0] > 0 {
             parts.push(format!("{} error(s)", counts[0]));
@@ -720,11 +712,18 @@ impl ResultPresentation for LintResult {
         }
         Some(metadata)
     }
-    fn github_findings(&self) -> Vec<serde_json::Value> {
-        self.findings.as_array().cloned().unwrap_or_default()
+    fn github_findings(&self) -> Vec<(serde_json::Value, Severity)> {
+        self.findings
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .zip(&self.findings_meta)
+            .map(|(finding, meta)| (finding, meta.severity))
+            .collect()
     }
     fn max_finding_severity(&self) -> Option<Severity> {
-        max_finding_severity(&self.findings, &self.selection)
+        max_finding_severity(&self.findings_meta, &self.selection)
     }
 }
 
@@ -770,19 +769,26 @@ fn essential_metadata(value: &serde_json::Value) -> String {
 }
 
 impl ResultPresentation for EssentialResult {
-    fn github_findings(&self) -> Vec<serde_json::Value> {
-        ["findings", "risks"]
-            .iter()
-            .flat_map(|key| self.result[key].as_array().cloned().unwrap_or_default())
+    fn github_findings(&self) -> Vec<(serde_json::Value, Severity)> {
+        let key = match self.command {
+            wright_driver::result::EssentialCommand::Analyze => "risks",
+            _ => "findings",
+        };
+        self.result[key]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .zip(&self.findings_meta)
+            .map(|(finding, meta)| (finding, meta.severity))
             .collect()
     }
 
     fn metadata(&self) -> Option<String> {
         Some(if let Some(selection) = &self.selection {
-            let noun = if self.result["counts"].get("risks").is_some() {
-                "risk(s)"
-            } else {
-                "finding(s)"
+            let noun = match self.command {
+                wright_driver::result::EssentialCommand::Analyze => "risk(s)",
+                _ => "finding(s)",
             };
             format!("{} {noun}", selection.total)
         } else {
@@ -793,20 +799,7 @@ impl ResultPresentation for EssentialResult {
         if let Some(selection) = &self.selection {
             return selection.max_severity;
         }
-        ["findings", "risks"]
-            .iter()
-            .filter_map(|key| self.result["counts"].get(key))
-            .filter_map(|group| {
-                [
-                    ("error", Severity::Error),
-                    ("warning", Severity::Warning),
-                    ("info", Severity::Info),
-                ]
-                .into_iter()
-                .find(|(label, _)| group[label].as_u64().unwrap_or(0) > 0)
-                .map(|(_, severity)| severity)
-            })
-            .max()
+        self.max_severity
     }
 }
 
@@ -924,14 +917,18 @@ impl ResultPresentation for CostResult {
             count(exact, "waitActions"),
         ))
     }
-    fn github_findings(&self) -> Vec<serde_json::Value> {
+    fn github_findings(&self) -> Vec<(serde_json::Value, Severity)> {
         self.result["findings"]
             .as_array()
             .cloned()
             .unwrap_or_default()
+            .into_iter()
+            .zip(&self.findings_meta)
+            .map(|(finding, meta)| (finding, meta.severity))
+            .collect()
     }
     fn max_finding_severity(&self) -> Option<Severity> {
-        max_finding_severity(&self.result["findings"], &self.selection)
+        max_finding_severity(&self.findings_meta, &self.selection)
     }
 }
 
@@ -1247,138 +1244,6 @@ fn persistent_object_summary(objects: &serde_json::Value) -> String {
     format!("{} [static]", notes.join("; "))
 }
 
-pub(crate) fn finding_severity_rank(finding: &serde_json::Value) -> u8 {
-    severity_rank(finding_severity(finding))
-}
-
-fn finding_location_span(finding: &serde_json::Value) -> Option<serde_json::Value> {
-    if let Some(span) = finding.get("span").filter(|v| v.is_object()) {
-        return Some(span.clone());
-    }
-    let mut parts = finding["location"].as_str()?.rsplitn(3, ':');
-    let col = parts.next()?.parse::<u64>().ok()?;
-    let line = parts.next()?.parse::<u64>().ok()?;
-    let path = parts.next()?;
-    Some(serde_json::json!({"path":path,"start":{"line":line,"col":col}}))
-}
-
-fn renderable_group_spans(group: &[serde_json::Value]) -> Vec<&serde_json::Value> {
-    group
-        .iter()
-        .filter_map(|finding| finding.get("span"))
-        .filter(|span| span.is_object())
-        .filter(|span| {
-            span.get("path")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(is_real_source_path)
-        })
-        .collect()
-}
-
-fn render_finding_location(
-    span: &serde_json::Value,
-    ctx: &RenderContext<'_>,
-    indent: &str,
-    frame: bool,
-) {
-    let Some((display, readable)) = finding_location(span, ctx.source_base) else {
-        return;
-    };
-    let line = span_position(span, "start", "line").unwrap_or(0);
-    let col = span_position(span, "start", "col").unwrap_or(0);
-    println!("{indent}--> {display}:{line}:{col}");
-    if !frame {
-        return;
-    }
-    if let Some(context) =
-        readable.and_then(|path| source_context(&path, line as u32, col as u32, indent))
-    {
-        println!("{context}");
-    }
-}
-
-fn finding_location(
-    span: &serde_json::Value,
-    source_base: Option<&Path>,
-) -> Option<(String, Option<String>)> {
-    let path = span.get("path").and_then(serde_json::Value::as_str)?;
-    if !is_real_source_path(path) {
-        return None;
-    }
-    let reported = Path::new(path);
-    let candidates: Vec<String> = if reported.is_absolute() {
-        vec![path.to_string()]
-    } else {
-        source_base
-            .map(|base| base.join(reported).display().to_string())
-            .into_iter()
-            .chain([path.to_string()])
-            .collect()
-    };
-    for candidate in &candidates {
-        if Path::new(candidate).is_file() {
-            return Some((display_location_path(candidate), Some(candidate.clone())));
-        }
-    }
-    Some((display_location_path(path), None))
-}
-
-fn unmapped_positions(group: &[serde_json::Value]) -> Vec<(String, u64, u64)> {
-    group
-        .iter()
-        .filter_map(|finding| finding.get("span"))
-        .filter(|span| span.is_object())
-        .filter_map(|span| {
-            let path = span.get("path")?.as_str()?;
-            (!is_real_source_path(path)).then(|| {
-                (
-                    path.to_string(),
-                    span_position(span, "start", "line").unwrap_or(0),
-                    span_position(span, "start", "col").unwrap_or(0),
-                )
-            })
-        })
-        .collect()
-}
-
-fn unmapped_positions_note(positions: &[(String, u64, u64)]) -> Option<String> {
-    let first_path = &positions.first()?.0;
-    let shared = positions.iter().all(|(path, ..)| path == first_path);
-    let mut text = String::new();
-    for (index, (path, line, col)) in positions.iter().enumerate() {
-        if index > 0 {
-            text.push_str(", ");
-        }
-        if shared {
-            text.push_str(&format!("{line}:{col}"));
-        } else {
-            text.push_str(&format!("{path}:{line}:{col}"));
-        }
-    }
-    Some(if shared {
-        format!("at {first_path}:{text} (no source file)")
-    } else {
-        format!("at {text} (no source file)")
-    })
-}
-
-fn finding_severity_label(finding: &serde_json::Value, color: bool) -> String {
-    let severity = finding
-        .get("severity")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("warning");
-    if color {
-        let code = match finding_severity(finding) {
-            Severity::Error => "31",
-            Severity::Warning => "33",
-            Severity::Info => "36",
-        };
-        format!("\x1b[{code}m{severity}\x1b[0m")
-    } else {
-        severity.to_string()
-    }
-}
-
 pub(crate) fn display_location_path(path: &str) -> String {
     wright_driver::input::display_path(Path::new(path))
 }
@@ -1550,11 +1415,28 @@ mod tests {
         assert_eq!(escape_workflow_data("a,b:c%\n"), "a,b:c%25%0A");
     }
 
+    /// Build the typed finding metas a `GetFindings` fetch would have
+    /// produced for `findings` (#1001): tests construct the parallel
+    /// channel explicitly, the same way `SemanticService` derives it.
+    fn findings_meta(findings: &serde_json::Value) -> Vec<wright_driver::FindingMeta> {
+        findings
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|finding| wright_driver::FindingMeta {
+                severity: Severity::from_label(finding["severity"].as_str()),
+                code: finding["code"].as_str().unwrap_or_default().to_string(),
+                span_file: None,
+            })
+            .collect()
+    }
+
     fn summary_envelope(
         ok: bool,
         diagnostics: Vec<wright_driver::Diagnostic>,
         findings: serde_json::Value,
     ) -> Envelope<LintResult> {
+        let findings_meta = findings_meta(&findings);
         Envelope {
             wright: wright_driver::result::VersionInfo {
                 version: "test".to_string(),
@@ -1568,6 +1450,7 @@ mod tests {
             gated: false,
             result: LintResult {
                 findings,
+                findings_meta,
                 ..LintResult::default()
             },
             comparison: None,
@@ -1720,7 +1603,7 @@ mod tests {
     }
 
     #[test]
-    fn gate_reads_the_essential_projection_counts() {
+    fn gate_reads_the_essential_projection_severity() {
         let mut envelope = Envelope {
             wright: wright_driver::result::VersionInfo {
                 version: "test".to_string(),
@@ -1737,6 +1620,9 @@ mod tests {
                     "counts": {"risks": {"total": 2, "warning": 2, "error": 0, "info": 0}}
                 }),
                 selection: None,
+                command: wright_driver::result::EssentialCommand::Analyze,
+                findings_meta: Vec::new(),
+                max_severity: Some(Severity::Warning),
             },
             comparison: None,
         };
@@ -1775,6 +1661,7 @@ mod tests {
                 {"id": "a", "effectiveSeverity": "warning"},
                 {"id": "b", "effectiveSeverity": "error"},
             ]),
+            findings_meta: findings_meta(&findings),
             findings,
             selection,
             ..LintResult::default()
@@ -1815,16 +1702,10 @@ mod tests {
     }
 
     #[test]
-    fn finding_severity_rank_orders_errors_first_and_unknowns_as_warnings() {
-        let rank = |severity: serde_json::Value| {
-            finding_severity_rank(&serde_json::json!({"severity": severity}))
-        };
-        assert_eq!(rank(serde_json::json!("error")), 0);
-        assert_eq!(rank(serde_json::json!("warning")), 1);
-        assert_eq!(rank(serde_json::json!("unexpected")), 1);
-        assert_eq!(rank(serde_json::json!("info")), 2);
-        assert_eq!(rank(serde_json::json!("notice")), 2);
-        assert_eq!(rank(serde_json::Value::Null), 1);
+    fn severity_rank_orders_errors_first() {
+        assert_eq!(severity_rank(Severity::Error), 0);
+        assert_eq!(severity_rank(Severity::Warning), 1);
+        assert_eq!(severity_rank(Severity::Info), 2);
     }
 
     #[test]
@@ -1843,7 +1724,8 @@ mod tests {
 
         let pseudo = serde_json::json!({"path": "<stdin>", "start": {"line": 1, "col": 1}});
         assert!(finding_location(&pseudo, Some(&root)).is_none());
-        let positions = unmapped_positions(&[serde_json::json!({"span": pseudo})]);
+        let wrapped = serde_json::json!({"span": pseudo});
+        let positions = unmapped_positions(&[&wrapped]);
         assert_eq!(
             unmapped_positions_note(&positions).unwrap(),
             "at <stdin>:1:1 (no source file)"
@@ -1859,19 +1741,21 @@ mod tests {
     #[test]
     fn renderable_group_spans_counts_only_real_source_locations() {
         let real = |path: &str| serde_json::json!({"span": {"path": path, "start": {"line": 1, "col": 1}}});
-        let group = vec![
+        let group = [
             real("a.ws"),
             real("<stdin>"),
             serde_json::json!({"span": null}),
             real("b.ws"),
         ];
+        let group: Vec<_> = group.iter().collect();
         assert_eq!(renderable_group_spans(&group).len(), 2);
     }
 
     #[test]
     fn unmapped_positions_note_collapses_a_shared_pseudo_path() {
         let finding = |line: u64| serde_json::json!({"span": {"path": "<stdin>", "start": {"line": line, "col": 1}}});
-        let group = vec![finding(11), finding(14)];
+        let group = [finding(11), finding(14)];
+        let group: Vec<_> = group.iter().collect();
         assert_eq!(
             unmapped_positions_note(&unmapped_positions(&group)).unwrap(),
             "at <stdin>:11:1, 14:1 (no source file)"
@@ -1882,6 +1766,7 @@ mod tests {
     fn unmapped_positions_note_preserves_every_selected_position() {
         let finding = |line: u64| serde_json::json!({"span": {"path": "<stdin>", "start": {"line": line, "col": 1}}});
         let group: Vec<_> = (1..=12).map(finding).collect();
+        let group: Vec<_> = group.iter().collect();
         let note = unmapped_positions_note(&unmapped_positions(&group)).unwrap();
         for line in 1..=12 {
             assert!(

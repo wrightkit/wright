@@ -4,17 +4,17 @@ use std::path::Path;
 use serde_json::Value;
 use wright_driver::result::{
     CallGraphResult, CfgResult, CheckResult, CompileResult, ConvertResult, CostResult, Envelope,
-    EssentialResult, LintResult, RefsResult, RulesResult, SymbolsResult,
+    EssentialCommand, EssentialResult, LintResult, RefsResult, RulesResult, SymbolsResult,
 };
-use wright_driver::{Diagnostic, SelectionOutcome, Status};
+use wright_driver::{Diagnostic, SelectionOutcome, Severity, Status};
 
 use crate::present::{
     DETAIL_COMMANDS, RenderContext, ResultPresentation, block_flags, call_fan_counts,
     cfg_block_stats, cfg_edge_count, count, diagnostic_counts, diagnostic_files,
-    diagnostics_on_stdout, display_location_path, edge_caller, finding_files,
-    finding_severity_rank, findings_severity_counts, fix_status_counts, inline_location,
-    is_real_source_path, lookup_hint_args, notable_callers, query_items, render_node, rule_address,
-    rule_name, shown_diagnostics, summary_status, tree_rule,
+    diagnostics_on_stdout, display_location_path, edge_caller, finding_files, finding_record,
+    fix_status_counts, inline_location, is_real_source_path, lookup_hint_args,
+    meta_severity_counts, notable_callers, query_items, render_node, rule_address, rule_name,
+    severity_rank, shown_diagnostics, summary_status, tree_rule,
 };
 
 pub(crate) fn render<T: serde::Serialize + ResultPresentation + PlainReport>(
@@ -339,50 +339,6 @@ fn severity_fields(error: usize, warning: usize, info: usize) -> Vec<String> {
     ]
 }
 
-fn finding_record(finding: &Value) -> String {
-    let severity = finding["severity"].as_str().unwrap_or("warning");
-    let code = finding["code"].as_str().unwrap_or("finding");
-    let repeated = finding.get("repeated").filter(|r| r.is_object());
-    let mut items = vec![severity.to_string(), code.to_string()];
-    if let Some(count) = repeated.and_then(|r| r["count"].as_u64()) {
-        items.push(format!("count={count}"));
-    }
-    if let Some(span) = finding.get("span").filter(|span| span.is_object()) {
-        if let Some(at) = at_field(span) {
-            items.push(at);
-        }
-    } else if let Some(location) = finding["location"].as_str() {
-        items.push(format!("at={location}"));
-    }
-    if let Some(repeated) = repeated {
-        if let Some(span_kind) = repeated["spanKind"].as_str() {
-            items.push(field("spanKind", span_kind));
-        }
-        if let Some(expression) = repeated["expression"].as_str() {
-            items.push(field("expression", expression));
-        }
-    }
-    const CARRIED: &[&str] = &[
-        "code", "severity", "message", "span", "location", "fix", "repeated",
-    ];
-    if let Some(object) = finding.as_object() {
-        for (key, value) in object {
-            if CARRIED.contains(&key.as_str()) {
-                continue;
-            }
-            match value {
-                Value::String(text) => items.push(field(key, text)),
-                Value::Number(_) | Value::Bool(_) => items.push(format!("{key}={value}")),
-                _ => {}
-            }
-        }
-    }
-    if let Some(message) = finding["message"].as_str() {
-        items.push(field("message", message));
-    }
-    format!("finding: {}", items.join(" "))
-}
-
 fn by_code_field(counts: &std::collections::BTreeMap<String, usize>) -> Option<String> {
     if counts.is_empty() {
         return None;
@@ -590,7 +546,7 @@ impl PlainReport for LintResult {
         out: &mut Vec<String>,
     ) {
         let findings = self.findings.as_array().map_or(&[][..], Vec::as_slice);
-        let counts = findings_severity_counts(findings);
+        let counts = meta_severity_counts(&self.findings_meta);
         let total = self
             .selection
             .as_ref()
@@ -620,10 +576,15 @@ impl PlainReport for LintResult {
         }
         out.push(format!("summary: {}", fields.join(" ")));
 
-        let mut sorted = findings.to_vec();
-        sorted.sort_by_key(finding_severity_rank);
-        for finding in &sorted {
-            out.push(finding_record(finding));
+        let mut sorted: Vec<(&serde_json::Value, Severity)> = findings
+            .iter()
+            .zip(&self.findings_meta)
+            .map(|(finding, meta)| (finding, meta.severity))
+            .collect();
+        debug_assert_eq!(sorted.len(), findings.len());
+        sorted.sort_by_key(|(_, severity)| severity_rank(*severity));
+        for (finding, severity) in &sorted {
+            out.push(finding_record(finding, *severity));
         }
         if let Some(selection) = &self.selection {
             out.push(selected_record(
@@ -677,13 +638,10 @@ impl PlainReport for EssentialResult {
         _ctx: &RenderContext<'_>,
         out: &mut Vec<String>,
     ) {
-        let value = &self.result;
-        if value.get("hotspots").is_some() {
-            essential_analyze(self, out);
-        } else if value.get("program").is_some() {
-            essential_inspect(self, out);
-        } else {
-            essential_lint(self, out);
+        match self.command {
+            EssentialCommand::Analyze => essential_analyze(self, out),
+            EssentialCommand::Inspect => essential_inspect(self, out),
+            EssentialCommand::Lint => essential_lint(self, out),
         }
     }
 }
@@ -734,8 +692,8 @@ fn essential_lint(result: &EssentialResult, out: &mut Vec<String>) {
         fields.push(format!("affected={}", affected.len()));
     }
     out.push(format!("summary: {}", fields.join(" ")));
-    for finding in findings {
-        out.push(finding_record(finding));
+    for (finding, meta) in findings.iter().zip(&result.findings_meta) {
+        out.push(finding_record(finding, meta.severity));
     }
     truncation_records(&result.result, "lint", out);
     if let Some(selection) = &result.selection {
@@ -846,8 +804,13 @@ fn essential_analyze(result: &EssentialResult, out: &mut Vec<String>) {
         ],
     ));
 
-    for risk in value["risks"].as_array().into_iter().flatten() {
-        out.push(finding_record(risk));
+    for (risk, meta) in value["risks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .zip(&result.findings_meta)
+    {
+        out.push(finding_record(risk, meta.severity));
     }
     if truncation_keys(value).contains(&"risks") {
         out.push(truncation_line(value, "risks", "analyze"));
@@ -1287,10 +1250,17 @@ impl PlainReport for CostResult {
                 Vec::new(),
             ));
         }
-        let mut findings = result["findings"].as_array().cloned().unwrap_or_default();
-        findings.sort_by_key(finding_severity_rank);
-        for finding in &findings {
-            out.push(finding_record(finding));
+        let mut findings: Vec<(serde_json::Value, Severity)> = result["findings"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .zip(&self.findings_meta)
+            .map(|(finding, meta)| (finding, meta.severity))
+            .collect();
+        findings.sort_by_key(|(_, severity)| severity_rank(*severity));
+        for (finding, severity) in &findings {
+            out.push(finding_record(finding, *severity));
         }
         truncation_records(result, "inspect cost", out);
         if let Some(selection) = &self.selection {
@@ -1382,18 +1352,21 @@ mod tests {
 
     #[test]
     fn finding_record_carries_structured_fields_verbatim() {
-        let record = finding_record(&serde_json::json!({
-            "code": "repeated-value",
-            "severity": "warning",
-            "location": "src/ana.opy:42:5",
-            "message": "expr evaluated repeatedly",
-            "evidence": "static-indicator",
-            "repeated": {
-                "expression": "distance(x, y)",
-                "count": 3,
-                "spanKind": "enclosing-loop"
-            }
-        }));
+        let record = finding_record(
+            &serde_json::json!({
+                "code": "repeated-value",
+                "severity": "warning",
+                "location": "src/ana.opy:42:5",
+                "message": "expr evaluated repeatedly",
+                "evidence": "static-indicator",
+                "repeated": {
+                    "expression": "distance(x, y)",
+                    "count": 3,
+                    "spanKind": "enclosing-loop"
+                }
+            }),
+            Severity::Warning,
+        );
         assert_eq!(
             record,
             "finding: warning repeated-value count=3 at=src/ana.opy:42:5 spanKind=enclosing-loop expression=\"distance(x, y)\" evidence=static-indicator message=\"expr evaluated repeatedly\""

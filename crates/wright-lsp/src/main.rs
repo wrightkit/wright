@@ -709,11 +709,11 @@ fn publication_uri(service: &LanguageService, source: &str) -> Option<String> {
 fn convert_diagnostic(diagnostic: wright_language::SourceDiagnostic) -> LspDiagnostic {
     LspDiagnostic {
         range: convert_range(diagnostic.range),
-        severity: Some(match diagnostic.severity.as_str() {
-            "error" => DiagnosticSeverity::ERROR,
-            "warning" => DiagnosticSeverity::WARNING,
-            "hint" => DiagnosticSeverity::HINT,
-            _ => DiagnosticSeverity::INFORMATION,
+        severity: Some(match diagnostic.severity {
+            wright_language::DiagnosticSeverity::Error => DiagnosticSeverity::ERROR,
+            wright_language::DiagnosticSeverity::Warning => DiagnosticSeverity::WARNING,
+            wright_language::DiagnosticSeverity::Hint => DiagnosticSeverity::HINT,
+            wright_language::DiagnosticSeverity::Info => DiagnosticSeverity::INFORMATION,
         }),
         code: (!diagnostic.code.is_empty())
             .then_some(lsp_types::NumberOrString::String(diagnostic.code)),

@@ -120,25 +120,43 @@ impl FindingSelection {
         }
     }
 
-    /// Apply the selection to serialized findings (`code`, `severity`,
-    /// `span.path` fields); `file_bases` resolves `file` like
-    /// [`apply_diagnostics`](Self::apply_diagnostics).
-    pub fn apply_findings(
+    /// Apply the selection to serialized findings paired with their typed
+    /// identities (#1001): each finding's `FindingMeta` supplies severity
+    /// and code, so nothing re-parses them out of the serialized rows.
+    /// `meta` must be index-aligned with `findings` (the
+    /// `GetFindings`/`findings_meta` contract); the `file` selector still
+    /// resolves against each row's `span.path` spelling — it is part of
+    /// the wire projection, not the typed identity.
+    pub fn apply_findings_meta(
         &self,
         findings: Vec<serde_json::Value>,
+        meta: Vec<crate::result::FindingMeta>,
         file_bases: &[PathBuf],
-    ) -> (Vec<serde_json::Value>, Option<SelectionOutcome>) {
-        self.apply(
-            findings,
-            |finding| {
+    ) -> (
+        Vec<serde_json::Value>,
+        Vec<crate::result::FindingMeta>,
+        Option<SelectionOutcome>,
+    ) {
+        debug_assert_eq!(
+            findings.len(),
+            meta.len(),
+            "finding meta must parallel the payload"
+        );
+        let paired: Vec<(serde_json::Value, crate::result::FindingMeta)> =
+            findings.into_iter().zip(meta).collect();
+        let (kept, outcome) = self.apply(
+            paired,
+            |(json, meta)| {
                 (
-                    Severity::from_label(finding.get("severity").and_then(|v| v.as_str())),
-                    finding.get("code").and_then(|v| v.as_str()).unwrap_or(""),
-                    crate::service::json_span_path(finding),
+                    meta.severity,
+                    meta.code.as_str(),
+                    crate::service::json_span_path(json),
                 )
             },
             file_bases,
-        )
+        );
+        let (findings, meta): (Vec<_>, Vec<_>) = kept.into_iter().unzip();
+        (findings, meta, outcome)
     }
 
     fn apply<T>(
@@ -348,10 +366,25 @@ mod tests {
         serde_json::from_value(input).unwrap()
     }
 
+    /// The `FindingMeta` a `GetFindings` fetch would have produced for
+    /// `findings` — tests build the parallel typed channel explicitly
+    /// (#1001).
+    fn meta(findings: &[serde_json::Value]) -> Vec<crate::result::FindingMeta> {
+        findings
+            .iter()
+            .map(|finding| crate::result::FindingMeta {
+                severity: Severity::from_label(finding["severity"].as_str()),
+                code: finding["code"].as_str().unwrap_or_default().to_string(),
+                span_file: None,
+            })
+            .collect()
+    }
+
     #[test]
     fn inactive_selection_returns_items_untouched() {
         let items = vec![finding("a", "warning", None)];
-        let (kept, outcome) = FindingSelection::default().apply_findings(items.clone(), &[]);
+        let (kept, _, outcome) =
+            FindingSelection::default().apply_findings_meta(items.clone(), meta(&items), &[]);
         assert_eq!(kept, items);
         assert!(outcome.is_none());
     }
@@ -363,7 +396,11 @@ mod tests {
             finding("b", "warning", None),
             finding("c", "error", None),
         ];
-        let (kept, outcome) = selection(json!({"severity": "warning"})).apply_findings(items, &[]);
+        let (kept, _, outcome) = selection(json!({"severity": "warning"})).apply_findings_meta(
+            items.clone(),
+            meta(&items),
+            &[],
+        );
         assert_eq!(
             kept.iter()
                 .map(|f| f["code"].as_str().unwrap())
@@ -383,10 +420,18 @@ mod tests {
             finding("a", "warning", Some("y.ws")),
             finding("b", "warning", Some("x.ws")),
         ];
-        let (kept, _) = selection(json!({"rule": "a", "file": "x.ws"})).apply_findings(items, &[]);
+        let (kept, _, _) = selection(json!({"rule": "a", "file": "x.ws"})).apply_findings_meta(
+            items.clone(),
+            meta(&items),
+            &[],
+        );
         assert_eq!(kept.len(), 1);
-        let (kept, _) = selection(json!({"file": "x.ws"}))
-            .apply_findings(vec![finding("a", "warning", None)], &[]);
+        let items = vec![finding("a", "warning", None)];
+        let (kept, _, _) = selection(json!({"file": "x.ws"})).apply_findings_meta(
+            items.clone(),
+            meta(&items),
+            &[],
+        );
         assert!(kept.is_empty());
     }
 
@@ -412,18 +457,27 @@ mod tests {
         };
 
         let items = vec![finding("a", "warning", Some("sub/f.ws"))];
-        let (kept, _) = selection(json!({"file": abs.to_str().unwrap()}))
-            .apply_findings(items, &file_bases(&input));
+        let (kept, _, _) = selection(json!({"file": abs.to_str().unwrap()})).apply_findings_meta(
+            items.clone(),
+            meta(&items),
+            &file_bases(&input),
+        );
         assert_eq!(kept.len(), 1);
 
         let items = vec![finding("a", "warning", Some(abs.to_str().unwrap()))];
-        let (kept, _) =
-            selection(json!({"file": "sub/f.ws"})).apply_findings(items, &file_bases(&input));
+        let (kept, _, _) = selection(json!({"file": "sub/f.ws"})).apply_findings_meta(
+            items.clone(),
+            meta(&items),
+            &file_bases(&input),
+        );
         assert_eq!(kept.len(), 1);
 
         let items = vec![finding("a", "warning", Some("sub/f.ws"))];
-        let (kept, _) =
-            selection(json!({"file": "sub/other.ws"})).apply_findings(items, &file_bases(&input));
+        let (kept, _, _) = selection(json!({"file": "sub/other.ws"})).apply_findings_meta(
+            items.clone(),
+            meta(&items),
+            &file_bases(&input),
+        );
         assert!(kept.is_empty());
 
         std::fs::remove_dir_all(&root).unwrap();
@@ -437,7 +491,8 @@ mod tests {
             finding("c", "warning", None),
             finding("d", "warning", None),
         ];
-        let (kept, outcome) = selection(json!({"max": 1})).apply_findings(items, &[]);
+        let (kept, _, outcome) =
+            selection(json!({"max": 1})).apply_findings_meta(items.clone(), meta(&items), &[]);
         assert_eq!(kept.len(), 1);
         let outcome = outcome.unwrap();
         assert_eq!(outcome.total, 4);

@@ -9,3 +9,7 @@ pub use service::{
     SourceLocation, SourceSymbol, SourceTextEdit,
 };
 pub use wright_driver::{OpyProviderConfig, SessionConfig};
+/// The diagnostic-severity vocabulary `SourceDiagnostic` carries — the
+/// provider contract's enum, re-exported so consumers need no direct
+/// `wright-lpp` dependency (#1001).
+pub use wright_lpp::DiagnosticSeverity;

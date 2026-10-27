@@ -3,6 +3,8 @@ use std::cmp::Reverse;
 use serde_json::{Value, json};
 
 use crate::Severity;
+use crate::diag::Diagnostic;
+use crate::result::FindingMeta;
 
 pub const DEFAULT_ITEMS: usize = 20;
 const DEFAULT_FINDING_BYTES: usize = 5500;
@@ -13,11 +15,23 @@ fn list<'a>(value: &'a Value, key: &str) -> &'a [Value] {
 fn number(value: &Value, key: &str) -> u64 {
     value[key].as_u64().unwrap_or(0)
 }
-fn severity(value: &Value) -> Severity {
-    Severity::from_label(value["severity"].as_str())
-}
-fn counts(items: &[Value]) -> Value {
-    let count = |wanted| items.iter().filter(|item| severity(item) == wanted).count();
+/// Per-severity counts over findings whose typed identities the caller
+/// supplies (#1001): `meta` parallels `items` index for index (the
+/// `GetFindings`/selection order), so the projection never re-parses the
+/// fields it projects. A short `meta` is a caller bug — asserted in debug,
+/// unknowns count as warnings.
+fn counts(items: &[Value], meta: &[FindingMeta]) -> Value {
+    debug_assert_eq!(items.len(), meta.len(), "finding meta parallels the rows");
+    let severity = |index: usize| {
+        meta.get(index)
+            .map(|meta| meta.severity)
+            .unwrap_or(Severity::Warning)
+    };
+    let count = |wanted| {
+        (0..items.len())
+            .filter(|&index| severity(index) == wanted)
+            .count()
+    };
     let mut group = json!({
         "total": items.len(),
         "error": count(Severity::Error),
@@ -48,10 +62,22 @@ fn fields(value: &Value, keys: &[&str]) -> Value {
     }
     Value::Object(result)
 }
-fn findings(items: &[Value]) -> Vec<Value> {
+/// The essential finding rows paired with their typed identities
+/// (#1001): each emitted row keeps its `FindingMeta` so renderers read
+/// severities from the meta, not the projection. Sorted by the typed
+/// severity, most severe first — the same order the untyped projection
+/// produced.
+fn findings(items: &[Value], meta: &[FindingMeta]) -> Vec<(Value, FindingMeta)> {
+    debug_assert_eq!(items.len(), meta.len(), "finding meta parallels the rows");
     let mut items = items
         .iter()
-        .map(|finding| {
+        .zip(meta.iter().map(Some).chain(std::iter::repeat(None)))
+        .map(|(finding, meta)| {
+            let meta = meta.cloned().unwrap_or(FindingMeta {
+                severity: Severity::Warning,
+                code: finding["code"].as_str().unwrap_or_default().to_string(),
+                span_file: None,
+            });
             let mut item = fields(
                 finding,
                 &[
@@ -72,11 +98,79 @@ fn findings(items: &[Value]) -> Vec<Value> {
                     number(start, "col")
                 ));
             }
-            item
+            (item, meta)
         })
         .collect::<Vec<_>>();
-    items.sort_by_key(|item| Reverse(severity(item)));
+    items.sort_by_key(|(_, meta)| Reverse(meta.severity));
     items
+}
+
+/// `cap` over a finding pair list: truncate rows and metas together and
+/// record the truncation note under `key`, exactly as `cap` does on a
+/// bare array.
+fn cap_pairs(
+    output: &mut Value,
+    pairs: &mut Vec<(Value, FindingMeta)>,
+    key: &str,
+    limit: usize,
+    all: bool,
+) {
+    let total = pairs.len();
+    if all || total <= limit {
+        return;
+    }
+    let by_code = by_code_counts(
+        &pairs
+            .iter()
+            .map(|(item, _)| item.clone())
+            .collect::<Vec<_>>(),
+    );
+    pairs.truncate(limit);
+    let mut note =
+        json!({"total":total,"shown":limit,"truncated":total-limit,"expand":"--all / all: true"});
+    if let Some(by_code) = by_code {
+        note["byCode"] = by_code;
+    }
+    output["truncation"][key] = note;
+}
+
+/// `fit_finding_bytes` over a finding pair list: pop rows and metas
+/// together until the serialized output fits the default budget.
+fn fit_finding_pairs(
+    output: &mut Value,
+    pairs: &mut Vec<(Value, FindingMeta)>,
+    key: &str,
+    total: usize,
+) {
+    let by_code = by_code_counts(
+        &pairs
+            .iter()
+            .map(|(item, _)| item.clone())
+            .collect::<Vec<_>>(),
+    );
+    while serde_json::to_vec(output)
+        .expect("presentation serializes")
+        .len()
+        > DEFAULT_FINDING_BYTES
+    {
+        if pairs.pop().is_none() {
+            break;
+        }
+        output[key] = Value::Array(pairs.iter().map(|(item, _)| item.clone()).collect());
+        let shown = pairs.len();
+        let note = &mut output["truncation"][key];
+        if note["total"].is_null() {
+            note["total"] = json!(total);
+        }
+        if note["byCode"].is_null()
+            && let Some(by_code) = &by_code
+        {
+            note["byCode"] = by_code.clone();
+        }
+        note["shown"] = json!(shown);
+        note["truncated"] = json!(note["total"].as_u64().unwrap_or(total as u64) - shown as u64);
+        note["expand"] = json!("--all / all: true");
+    }
 }
 
 fn cap(result: &mut Value, key: &str, limit: usize, all: bool) {
@@ -128,9 +222,15 @@ fn fit_finding_bytes(output: &mut Value, total: usize) {
     }
 }
 
-pub fn lint(result: &Value, all: bool) -> Value {
+/// The `lint` essential projection and the typed identities of the
+/// emitted `findings` rows (#1001): `meta` parallels `result.findings`
+/// (the `GetFindings`/selection order); the returned metas parallel the
+/// emitted rows after sorting, capping, and byte-fitting, so renderers
+/// stay typed end to end.
+pub fn lint(result: &Value, meta: &[FindingMeta], all: bool) -> (Value, Vec<FindingMeta>) {
     let items = list(result, "findings");
-    let mut output = json!({"counts":{"findings":counts(items)},"findings":findings(items),"expand":"lint --all / all: true; lintRules for effective configuration and rule metadata","next":crate::result::next::LINT});
+    let mut pairs = findings(items, meta);
+    let mut output = json!({"counts":{"findings":counts(items, meta)},"expand":"lint --all / all: true; lintRules for effective configuration and rule metadata","next":crate::result::next::LINT});
     for key in ["ok", "exit", "selection", "fixes", "next", "snapshot"] {
         if let Some(value) = result.get(key) {
             output[key] = value.clone();
@@ -142,11 +242,13 @@ pub fn lint(result: &Value, all: bool) -> Value {
     {
         output["inputIdentity"] = identity.clone();
     }
-    cap(&mut output, "findings", DEFAULT_ITEMS, all);
+    cap_pairs(&mut output, &mut pairs, "findings", DEFAULT_ITEMS, all);
+    output["findings"] = Value::Array(pairs.iter().map(|(item, _)| item.clone()).collect());
     if !all {
-        fit_finding_bytes(&mut output, items.len());
+        fit_finding_pairs(&mut output, &mut pairs, "findings", items.len());
     }
-    output
+    let metas = pairs.into_iter().map(|(_, meta)| meta).collect();
+    (output, metas)
 }
 
 pub fn inspect(result: &Value, all: bool) -> Value {
@@ -155,7 +257,9 @@ pub fn inspect(result: &Value, all: bool) -> Value {
     output
 }
 
-pub fn analyze(result: &Value, all: bool) -> Value {
+/// The `analyze` essential projection and the typed identities of the
+/// emitted `risks` rows — the same pairing contract as [`lint`].
+pub fn analyze(result: &Value, risks_meta: &[FindingMeta], all: bool) -> (Value, Vec<FindingMeta>) {
     let facts = &result["facts"];
     let rules = list(facts, "rules");
     let risks = list(facts, "risks");
@@ -238,19 +342,18 @@ pub fn analyze(result: &Value, all: bool) -> Value {
             .or_default() += 1;
     }
     let object_summary = json!({"total":objects.len(),"byKind":by_kind,"withoutRetainedIdentity":objects.iter().filter(|object|object["identityRetained"]==false).count(),"visibleToAllPlayers":objects.iter().filter(|object|object["visibility"]=="all-players").count()});
-    let mut output = json!({"program":result["program"],"cost":facts["cost"],"complexity":complexity,"hotspots":hotspots,"conditionTrees":trees,"risks":findings(risks),"variables":variables,"persistentObjects":object_summary,"counts":{"risks":counts(risks),"persistentObjects":list(facts,"persistentObjects").len()},"expand":"--all / all: true; inspect symbols, refs, cfg, callgraph, cost for detail","next":crate::result::next::ANALYZE});
+    let mut risk_pairs = findings(risks, risks_meta);
+    let mut output = json!({"program":result["program"],"cost":facts["cost"],"complexity":complexity,"hotspots":hotspots,"conditionTrees":trees,"variables":variables,"persistentObjects":object_summary,"counts":{"risks":counts(risks, risks_meta),"persistentObjects":list(facts,"persistentObjects").len()},"expand":"--all / all: true; inspect symbols, refs, cfg, callgraph, cost for detail","next":crate::result::next::ANALYZE});
     if let Some(selection) = result.get("selection") {
         output["selection"] = selection.clone();
     }
-    for (key, limit) in [
-        ("hotspots", 5),
-        ("conditionTrees", 3),
-        ("variables", 5),
-        ("risks", 5),
-    ] {
+    for (key, limit) in [("hotspots", 5), ("conditionTrees", 3), ("variables", 5)] {
         cap(&mut output, key, limit, all);
     }
-    output
+    cap_pairs(&mut output, &mut risk_pairs, "risks", 5, all);
+    output["risks"] = Value::Array(risk_pairs.iter().map(|(item, _)| item.clone()).collect());
+    let metas = risk_pairs.into_iter().map(|(_, meta)| meta).collect();
+    (output, metas)
 }
 
 /// Cap project-sized query lists after explicit selections, preserving their totals.
@@ -320,10 +423,24 @@ pub fn cost(result: &Value, all: bool) -> Value {
     output
 }
 
-/// Preserve the complete-set verdict while bounding its displayed diagnostics.
-pub fn envelope(result: &mut Value, all: bool) {
-    if let Some(diagnostics) = result["diagnostics"].as_array_mut() {
-        diagnostics.sort_by_key(|item| Reverse(severity(item)));
+/// Preserve the complete-set verdict while bounding its displayed
+/// diagnostics. `diagnostics` carries the envelope's typed diagnostics
+/// (#1001) — the projection sorts them by `Diagnostic::severity`, never by
+/// re-parsing the serialized label.
+pub fn envelope(result: &mut Value, diagnostics: &[Diagnostic], all: bool) {
+    if let Some(values) = result["diagnostics"].as_array_mut() {
+        let mut order: Vec<usize> = (0..values.len()).collect();
+        order.sort_by_key(|&index| {
+            diagnostics
+                .get(index)
+                .map(|diagnostic| Reverse(diagnostic.severity))
+                .unwrap_or(Reverse(Severity::Warning))
+        });
+        let mut sorted = Vec::with_capacity(values.len());
+        for index in order {
+            sorted.push(values[index].clone());
+        }
+        *values = sorted;
     }
     cap(result, "diagnostics", DEFAULT_ITEMS, all);
 }
@@ -331,11 +448,24 @@ pub fn envelope(result: &mut Value, all: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn meta(severity: Severity) -> FindingMeta {
+        FindingMeta {
+            severity,
+            code: String::new(),
+            span_file: None,
+        }
+    }
+
     #[test]
     fn capped_findings_report_complete_counts_and_expansion() {
         let findings=(0..DEFAULT_ITEMS+1).map(|i|json!({"severity":if i==DEFAULT_ITEMS {"error"} else {"warning"},"code":format!("c{i}"),"message":"fix"})).collect::<Vec<_>>();
+        let meta = findings
+            .iter()
+            .map(|f| meta(Severity::from_label(f["severity"].as_str())))
+            .collect::<Vec<_>>();
         let input = json!({"findings":findings,"config":{"huge":true}});
-        let result = lint(&input, false);
+        let (result, metas) = lint(&input, &meta, false);
+        assert_eq!(metas.len(), DEFAULT_ITEMS);
         assert_eq!(result["counts"]["findings"]["error"], 1);
         assert_eq!(result["findings"][0]["severity"], "error");
         assert_eq!(
@@ -355,7 +485,10 @@ mod tests {
                 .contains("all")
         );
         assert_eq!(
-            lint(&input, true)["findings"].as_array().unwrap().len(),
+            lint(&input, &meta, true).0["findings"]
+                .as_array()
+                .unwrap()
+                .len(),
             DEFAULT_ITEMS + 1
         );
         assert!(result.get("config").is_none());
@@ -363,17 +496,19 @@ mod tests {
     #[test]
     fn diagnostics_cap_preserves_verdict_and_all_recovers_every_item() {
         let input = json!({"ok":false,"exit":1,"diagnostics":vec![json!({"severity":"error"});DEFAULT_ITEMS+1]});
+        let diagnostics =
+            vec![Diagnostic::error("x", crate::Stage::Analysis, "x"); DEFAULT_ITEMS + 1];
         let mut result = input.clone();
-        envelope(&mut result, false);
+        envelope(&mut result, &diagnostics, false);
         assert_eq!(result["ok"], false);
         assert_eq!(result["exit"], 1);
         assert_eq!(
             result["truncation"]["diagnostics"]["total"],
             DEFAULT_ITEMS + 1
         );
-        envelope(&mut result, true);
+        envelope(&mut result, &diagnostics, true);
         let mut complete = input;
-        envelope(&mut complete, true);
+        envelope(&mut complete, &diagnostics, true);
         assert_eq!(
             complete["diagnostics"].as_array().unwrap().len(),
             DEFAULT_ITEMS + 1
@@ -413,7 +548,8 @@ mod tests {
                 json!({"code":format!("risk-{}",id%2),"severity":"error","message":"long actionable evidence ".repeat(120)})
             })
             .collect::<Vec<_>>();
-        let result = lint(&json!({"findings": findings}), false);
+        let meta = vec![meta(Severity::Error); 6];
+        let (result, _) = lint(&json!({"findings": findings}), &meta, false);
         let note = &result["truncation"]["findings"];
         assert_eq!(note["total"], 6);
         assert_eq!(note["byCode"], json!({"risk-0": 3, "risk-1": 3}));
@@ -474,7 +610,8 @@ mod tests {
     #[test]
     fn long_findings_fit_the_default_budget_without_changing_the_verdict() {
         let input = json!({"ok":false,"exit":1,"findings":(0..4).map(|id|json!({"code":format!("risk-{id}"),"severity":"error","message":"long actionable evidence ".repeat(120)})).collect::<Vec<_>>()});
-        let result = lint(&input, false);
+        let meta = vec![meta(Severity::Error); 4];
+        let (result, _) = lint(&input, &meta, false);
         assert!(serde_json::to_vec(&result).unwrap().len() <= DEFAULT_FINDING_BYTES);
         assert_eq!(result["ok"], false);
         assert_eq!(result["exit"], 1);
@@ -489,7 +626,7 @@ mod tests {
                 .unwrap()
                 .contains("all")
         );
-        let complete = lint(&input, true);
+        let (complete, _) = lint(&input, &meta, true);
         assert_eq!(complete["findings"], input["findings"]);
         assert!(complete.get("truncation").is_none());
     }
