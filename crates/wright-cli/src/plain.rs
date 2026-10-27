@@ -12,9 +12,9 @@ use crate::present::{
     DETAIL_COMMANDS, RenderContext, ResultPresentation, block_flags, call_fan_counts,
     cfg_block_stats, cfg_edge_count, count, diagnostic_counts, diagnostic_files,
     diagnostics_on_stdout, display_location_path, edge_caller, finding_files, finding_record,
-    fix_status_counts, inline_location, is_real_source_path, lookup_hint_args,
-    meta_severity_counts, notable_callers, query_items, render_node, rule_address, rule_name,
-    severity_rank, shown_diagnostics, summary_status, tree_rule,
+    fix_status_counts, inline_location, is_real_source_path, lint_finding_failure,
+    lookup_hint_args, meta_severity_counts, notable_callers, query_items, render_node,
+    rule_address, rule_name, severity_rank, shown_diagnostics, summary_status, tree_rule,
 };
 
 pub(crate) fn render<T: serde::Serialize + ResultPresentation + PlainReport>(
@@ -47,7 +47,7 @@ pub(crate) fn render_lines<T: serde::Serialize + ResultPresentation + PlainRepor
     let mut err = Vec::new();
     out.push(verdict_line(envelope, ctx));
     let failed_to_stdout = diagnostics_on_stdout(envelope);
-    if !envelope.ok && !envelope.gated {
+    if !envelope.ok && !envelope.gated && !lint_finding_failure(envelope) {
         if envelope.diagnostics.is_empty() {
             (if failed_to_stdout { &mut out } else { &mut err }).push(format!(
                 "error: {}",
@@ -79,23 +79,20 @@ pub(crate) fn render_lines<T: serde::Serialize + ResultPresentation + PlainRepor
 
 fn verdict_word<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) -> String {
     if envelope.exit != 0 || !envelope.ok {
-        if envelope.gated {
-            return "FAIL".to_string();
-        }
         return match envelope.exit {
+            _ if envelope.gated => "FAIL",
             2 => "USAGE",
             3 => "UNSUPPORTED",
             _ => "ERROR",
         }
-        .to_string();
+        .to_owned();
     }
     match summary_status(envelope) {
-        "WARN" => "WARN".to_string(),
+        "WARN" => "WARN".into(),
         _ if crate::cli::is_query_command(&envelope.command) => envelope.command.to_uppercase(),
-        _ => "PASS".to_string(),
+        _ => "PASS".into(),
     }
 }
-
 fn verdict_line<T: serde::Serialize + ResultPresentation + PlainReport>(
     envelope: &Envelope<T>,
     ctx: &RenderContext<'_>,
@@ -113,10 +110,8 @@ fn verdict_line<T: serde::Serialize + ResultPresentation + PlainReport>(
 }
 
 pub(crate) fn display_root(root: &Path) -> String {
-    if let Ok(cwd) = std::env::current_dir()
-        && root == cwd
-    {
-        return ".".to_string();
+    if std::env::current_dir().is_ok_and(|cwd| cwd == root) {
+        return ".".into();
     }
     display_location_path(&root.display().to_string())
 }

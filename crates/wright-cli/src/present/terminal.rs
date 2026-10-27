@@ -11,16 +11,16 @@ use super::{
     call_fan_counts, cfg_block_stats, cfg_edge_count, count, diagnostic_counts, diagnostic_files,
     diagnostics_on_stdout, dim, display_location_path, edge_caller, finding_head,
     finding_location_line, finding_location_span, finding_section, fix_status_counts,
-    fix_status_parts, is_real_source_path, lint_footer, location_suffix, lookup_hint_args,
-    meta_severity_counts, normalize_finding_spans, notable_callers, persistent_object_summary,
-    query_items, render_diff_lines, render_node, rule_address, rule_name, shown_diagnostics,
-    shown_of, sorted_findings, source_context, span_suffix, summary_status, symbol_kind_heading,
-    tree_rule, uniform_evidence,
+    fix_status_parts, is_real_source_path, lint_finding_failure, lint_footer, location_suffix,
+    lookup_hint_args, meta_severity_counts, normalize_finding_spans, notable_callers,
+    persistent_object_summary, query_items, render_diff_lines, render_node, rule_address,
+    rule_name, shown_diagnostics, shown_of, sorted_findings, source_context, span_suffix,
+    summary_status, symbol_kind_heading, tree_rule, uniform_evidence,
 };
 
 fn tag_word<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) -> String {
     if envelope.gated {
-        return "FAIL".to_string();
+        return "FAIL".into();
     }
     if !envelope.ok {
         return match envelope.exit {
@@ -28,12 +28,12 @@ fn tag_word<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) ->
             wright_driver::result::exit::UNSUPPORTED => "UNSUPPORTED",
             _ => "ERROR",
         }
-        .to_string();
+        .into();
     }
     if crate::cli::is_query_command(&envelope.command) {
         return envelope.command.to_uppercase();
     }
-    summary_status(envelope).to_string()
+    summary_status(envelope).into()
 }
 
 pub(crate) fn tag(word: &str, color: bool) -> String {
@@ -93,7 +93,7 @@ pub(crate) fn pad(ctx: &RenderContext<'_>, depth: usize) -> String {
         return String::new();
     }
     if ctx.presentation.compact() {
-        "  ".to_string()
+        "  ".into()
     } else {
         "  ".repeat(depth)
     }
@@ -159,7 +159,7 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation + TerminalReport>(
     }
     let to_stdout = diagnostics_on_stdout(envelope);
     diagnostics(ctx, envelope, to_stdout);
-    if envelope.ok || envelope.gated {
+    if envelope.ok || envelope.gated || lint_finding_failure(envelope) {
         envelope.result.body(ctx);
         comparison(ctx, envelope.comparison.as_ref());
     } else if envelope.diagnostics.is_empty() {
@@ -176,12 +176,8 @@ fn headline<T: serde::Serialize + ResultPresentation + TerminalReport>(
     match envelope.command.as_str() {
         "check" => Some(diagnostic_summary(envelope)),
         "convert" => None,
-        _ if !envelope.ok && !envelope.gated => {
-            if envelope.diagnostics.is_empty() {
-                None
-            } else {
-                Some(diagnostic_summary(envelope))
-            }
+        _ if !envelope.ok && !envelope.gated && !lint_finding_failure(envelope) => {
+            (!envelope.diagnostics.is_empty()).then(|| diagnostic_summary(envelope))
         }
         _ => envelope.result.headline(),
     }

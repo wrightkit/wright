@@ -386,7 +386,11 @@ fn current_path_sources_without_stdin(
         .map(|resolved| BTreeMap::from([(resolved.display, resolved.text)]))
 }
 
+/// Recompute a `lint --fix` envelope's verdict after it appended
+/// diagnostics: the new diagnostics' exit may only raise the verdict
+/// lint's findings already produced (#1002) — an `error` finding or a
+/// gated verdict is never lowered back to `ok`.
 fn recompute_verdict(envelope: &mut Envelope<LintResult>) {
-    envelope.exit = exit_code_from(&envelope.diagnostics);
+    envelope.exit = envelope.exit.max(exit_code_from(&envelope.diagnostics));
     envelope.ok = envelope.exit == crate::result::exit::SUCCESS;
 }

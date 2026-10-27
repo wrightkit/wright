@@ -108,6 +108,12 @@ pub struct SessionConfig {
     /// Selection narrows presentation only; verdicts and exit codes are
     /// computed on the full set.
     pub selection: crate::select::FindingSelection,
+    /// The `--fail-on` gate (ADR-0030 decision 13, #1002): when the
+    /// complete result's highest diagnostic or finding severity reaches
+    /// this threshold the driver raises the verdict to `ok: false`,
+    /// `exit: 1`, and marks the envelope `gated`. The gate lives in the
+    /// driver so CLI, `serve`, MCP, and embedding produce one verdict.
+    pub fail_on: Option<crate::Severity>,
     /// The project run cache and cost-comparison options (ADR-0027, #723).
     /// Comparison is reported on `compile`/`inspect cost` when a reference
     /// exists; `--max-total` is an explicit gate that reads no cache.
@@ -197,6 +203,7 @@ impl SessionConfig {
             lint_package,
             lint_rule_paths,
             selection,
+            fail_on,
             run
         );
         #[cfg(not(target_arch = "wasm32"))]

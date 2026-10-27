@@ -52,7 +52,16 @@ impl<'a> ToolService<'a> {
                 crate::essential::envelope(&mut result, &diagnostics, *all);
             }
             ToolRequest::Lint { all, .. } => {
-                result = crate::essential::lint(&result, &self.selected_meta, *all).0
+                // The lint pipeline's serialized `Envelope<LintResult>`
+                // (#1002): the essential payload is the result member
+                // plus the envelope's verdict and issuing snapshot.
+                let mut payload = result["result"].clone();
+                for key in ["ok", "exit", "snapshot"] {
+                    if let Some(value) = result.get(key) {
+                        payload[key] = value.clone();
+                    }
+                }
+                result = crate::essential::lint(&payload, &self.selected_meta, *all).0
             }
             ToolRequest::References { symbol, all, .. } => {
                 let id = match self.symbol_address(symbol) {

@@ -33,7 +33,11 @@ See [architecture, commands, and conversion](cli/commands.md).
 
 ## `wright lint` and the lint configuration
 
-See [lint configuration and findings](cli/lint.md).
+See [lint configuration and findings](cli/lint.md). The lint verdict
+contract (#1002): any `error`-severity finding yields `ok: false` and
+`exit: 1`, and `wright lint` and the `lint` agent operation share the
+driver's lint pipeline, so both report the identical verdict for one
+input and lint configuration.
 
 ## Exit codes
 

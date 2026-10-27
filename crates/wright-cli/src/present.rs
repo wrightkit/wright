@@ -932,36 +932,28 @@ impl ResultPresentation for CostResult {
     }
 }
 
-pub(crate) fn gate<T: serde::Serialize + ResultPresentation>(
-    envelope: &mut Envelope<T>,
-    threshold: Severity,
-) {
-    if envelope.exit != wright_driver::result::exit::SUCCESS {
-        return;
-    }
-    let met = max_envelope_severity(envelope).is_some_and(|severity| severity >= threshold);
-    if met {
-        envelope.ok = false;
-        envelope.exit = wright_driver::result::exit::SOURCE_ERROR;
-        envelope.gated = true;
-    }
-}
-
-fn max_envelope_severity<T: serde::Serialize + ResultPresentation>(
+/// Whether a failed lint verdict came from an `error`-severity finding
+/// rather than a diagnostic (#1002): the report body still renders.
+pub(crate) fn lint_finding_failure<T: serde::Serialize + ResultPresentation>(
     envelope: &Envelope<T>,
-) -> Option<Severity> {
-    let diagnostics = match &envelope.selection {
-        Some(selection) => selection.max_severity,
-        None => envelope
+) -> bool {
+    envelope.command == "lint"
+        && !envelope.ok
+        && !envelope.gated
+        && envelope
             .diagnostics
             .iter()
-            .map(|diagnostic| diagnostic.severity)
-            .max(),
-    };
-    diagnostics
-        .into_iter()
-        .chain(envelope.result.max_finding_severity())
-        .max()
+            .all(|d| d.severity != Severity::Error)
+        && envelope
+            .result
+            .max_finding_severity()
+            .is_some_and(|severity| severity == Severity::Error)
+}
+
+/// The driver's `--fail-on` gate (#1002) applied the way `finish` does.
+#[cfg(test)]
+fn gate<T: serde::Serialize + ResultPresentation>(envelope: &mut Envelope<T>, threshold: Severity) {
+    envelope.apply_fail_on(threshold, envelope.result.max_finding_severity());
 }
 
 pub(crate) fn summary_status<T: serde::Serialize + ResultPresentation>(

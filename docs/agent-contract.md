@@ -191,7 +191,7 @@ the successful `result` payload.
 | `cfg` | required `rule` (index or `NAME`/`NAME#N`), `snapshot` when `rule` is numeric, optional selection and `all` | Control-flow graph for the rule, plus `selection` when a selection is applied |
 | `findings` | optional selection, optional `all` | `{"findings": [...], "snapshot": n}` — Wright static-analysis findings; `selection` joins when applied |
 | `persistentObjects` | optional `all` | `{"persistentObjects": [...], "snapshot": n}` — persistent Workshop object facts |
-| `lint` | optional selection, optional `all` | Finding counts by severity and actionable findings, with `snapshot` scoping the rule indexes it reports; effective policy is available from `lintRules` |
+| `lint` | optional selection, optional `all` | Finding counts by severity and actionable findings, `ok`/`exit` matching `wright lint`, `snapshot` on rules; policy from `lintRules` |
 | `lintRules` | none | Registered lint rules with full metadata and effective configuration; `snapshot` scopes the rule indexes `skipped` reports |
 | `callGraph` | optional selection, optional `all` | Subroutine call graph; edges carry `caller`, `callerAddress`, `callee`; `{"edges": [...], "selection": {...}}` when a selection is applied |
 | `costEstimate` | optional selection, optional `rule`, optional `all` | Exact generated-resource counts (`programRules` counts every declared rule, disabled included; `exact.emittedBytes` reports `null` plus `emittedBytesUnavailable` when emission fails, never `0`), `elementCount` (the Workshop structure counted against the client element budget; `rules` ranked largest first. `index` is the canonical rule position and each entry carries `address` and a resolved `span`; the 5 largest by default, `all: true` for every rule; when the count cannot run `elementCount` carries only `budget` — the known limit still reports — and `elementCountUnavailable` names the reason, never a zero (ADR-0030 decision 3)), findings (the configured set `lint` serves, with resolved `span`), `skipped` rule evaluations (the `lint` disclosure), and `selection` when applied. With `rule` (`NAME`/`NAME#N`) the result is the rule drill-down (#724): `rule` (identity `address`, `count`, `span`), `statements[]` (direct children ranked by recursive `count`, each with `name`, `count`, `span`) and `byNode[]` (each node's own `base_count + adjustment` cost summed per canonical node name with `occurrences`; the entries sum to the rule's `count`) | The default result carries no run-cache comparison — an agent requests one explicitly by passing the reference record as inline data, not a file path (ADR-0027, #723). |
@@ -380,12 +380,12 @@ and `costEstimate` add a `selection` member to their existing result objects.
 capped result still reports every code's real count (#791). Requests without
 selection fields receive the previous shapes unchanged.
 
-### Error-severity lint policy (#1010)
+### Lint verdict (#1002) / `error` policy (#1010)
 
-Any `error`-severity finding yields `ok: false` and `exit: 1`. Lint
-correctness is not guaranteed, so `error` is reserved for confirmed
-defects — only `runtime-validated` rules may emit it. The audit (none)
-and enforcement are in [cli/lint.md](cli/lint.md).
+`lint` and `wright lint` share one driver pipeline: an `error` finding
+yields `ok: false`, `exit: 1` (confirmed defects only — `runtime-validated`
+rules; [cli/lint.md](cli/lint.md)). `--fail-on <LEVEL>` configures
+`SessionConfig.fail_on`; no per-request `failOn`.
 
 ### Rule content (ADR-0024)
 
