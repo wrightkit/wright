@@ -19,6 +19,21 @@ pub enum RuleError {
     NamedParameterRequiresAction,
     AmbiguousValuePattern,
     ComparisonNeedsNumber,
+    /// A call pattern must carry exactly one of `name` or `names` (#970).
+    AmbiguousCallName,
+    CallNeedsName,
+    /// `matcher.scope` listed no scopes (#970).
+    EmptyScopeList,
+    /// `report: each-match` has nothing to report without `values` (#970).
+    EachMatchNeedsValues,
+    /// `within` is only meaningful inside the ancestor-aware `values`
+    /// search (#970).
+    WithinOutsideValues,
+    /// `evidence`/`severity` metadata are reserved to first-party packages
+    /// (#970, SPEC-309).
+    FirstPartyMetadataField {
+        field: &'static str,
+    },
 }
 
 impl fmt::Display for RuleError {
@@ -57,6 +72,27 @@ impl fmt::Display for RuleError {
             }
             RuleError::ComparisonNeedsNumber => {
                 write!(f, "comparison pattern value must be a number pattern")
+            }
+            RuleError::AmbiguousCallName => {
+                write!(f, "call pattern must not carry both 'name' and 'names'")
+            }
+            RuleError::CallNeedsName => {
+                write!(f, "call pattern requires 'name' or 'names'")
+            }
+            RuleError::EmptyScopeList => {
+                write!(f, "matcher scope list must not be empty")
+            }
+            RuleError::EachMatchNeedsValues => {
+                write!(f, "report 'each-match' requires a 'values' matcher")
+            }
+            RuleError::WithinOutsideValues => {
+                write!(f, "'within' is only allowed on a 'values' pattern")
+            }
+            RuleError::FirstPartyMetadataField { field } => {
+                write!(
+                    f,
+                    "metadata field '{field}' is only allowed in first-party rule packages"
+                )
             }
         }
     }

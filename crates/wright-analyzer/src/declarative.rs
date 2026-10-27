@@ -1,211 +1,40 @@
-use serde::Deserialize;
 use workshop_rs::catalog::{Catalog, Kind, Locale};
 use workshop_rs::source::Span;
 use workshop_rs::{Action as PublicAction, Program as PublicProgram, Value as PublicValue};
 
 use crate::analysis::{EvidenceClass, Severity};
-use crate::canonical::{Finding, matching_end};
+use crate::canonical::{
+    Finding, dead_actions, matching_end, value_identity_map, visit_action_roots,
+};
 
 mod error;
+mod pattern;
+mod schema;
+
 pub use error::RuleError;
+pub use schema::{
+    ActionKind, ActionPattern, CallPattern, ComparisonOperator, ComparisonPattern, Count,
+    EnumPattern, InArgs, NodePattern, ParameterPattern, ReportMode, RuleDefinition, RuleMatcher,
+    RuleMetadata, Scope, Scopes, ValuePattern, WithinPattern,
+};
 
-const DEFAULT_LOCALE: &str = "en-US";
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RuleDefinition {
-    pub id: String,
-    #[serde(default = "default_locale")]
-    pub locale: String,
-    pub metadata: RuleMetadata,
-    pub matcher: RuleMatcher,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RuleMetadata {
-    pub summary: String,
-    pub rationale: String,
-    pub documentation: String,
-    #[serde(rename = "known-limits")]
-    pub known_limits: String,
-    pub tags: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(rename_all = "kebab-case")]
-pub struct RuleMatcher {
-    pub event: Option<String>,
-    #[serde(default)]
-    pub scope: Scope,
-    pub conditions: Option<NodePattern>,
-    #[serde(default)]
-    pub actions: Vec<ActionPattern>,
-}
-
-#[derive(Debug, Clone, Copy, Default, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Scope {
-    #[default]
-    Rule,
-    While,
-    ForGlobalVariable,
-    ForPlayerVariable,
-    If,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct NodePattern {
-    #[serde(flatten)]
-    pub value: ValuePattern,
-    #[serde(default)]
-    pub count: Count,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ActionPattern {
-    pub kind: Option<ActionKind>,
-    pub name: Option<String>,
-    #[serde(default)]
-    pub args: Vec<ValuePattern>,
-    #[serde(default, alias = "params")]
-    pub parameters: Vec<ParameterPattern>,
-    #[serde(default)]
-    pub count: Count,
-    #[serde(default = "default_true")]
-    pub present: bool,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ParameterPattern {
-    pub name: String,
-    #[serde(flatten)]
-    pub value: ValuePattern,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ActionKind {
-    Any,
-    Call,
-    While,
-    ForGlobalVariable,
-    ForPlayerVariable,
-    If,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct Count {
-    pub min: Option<usize>,
-    pub max: Option<usize>,
-}
-
-impl Count {
-    fn accepts(&self, count: usize) -> bool {
-        self.min.is_none_or(|min| count >= min) && self.max.is_none_or(|max| count <= max)
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct ValuePattern {
-    pub number: Option<f64>,
-    pub string: Option<String>,
-    pub boolean: Option<bool>,
-    pub call: Option<CallPattern>,
-    #[serde(rename = "enum")]
-    pub enum_value: Option<EnumPattern>,
-    pub comparison: Option<ComparisonPattern>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ComparisonPattern {
-    pub operator: ComparisonOperator,
-    pub value: Box<ValuePattern>,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize)]
-pub enum ComparisonOperator {
-    #[serde(rename = "<")]
-    Less,
-    #[serde(rename = "<=")]
-    LessOrEqual,
-    #[serde(rename = ">")]
-    Greater,
-    #[serde(rename = ">=")]
-    GreaterOrEqual,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CallPattern {
-    pub name: String,
-    #[serde(default)]
-    pub args: Vec<ValuePattern>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EnumPattern {
-    pub domain: String,
-    pub member: String,
-}
+use pattern::{
+    CanonicalActionPattern, CanonicalNodePattern, CanonicalValuePattern, canonical_action,
+    canonical_node, canonical_value, public_action_matches, public_value_matches,
+    search_value_tree,
+};
+pub(crate) use schema::default_true;
 
 #[derive(Debug, Clone)]
 pub struct DeclarativeRule {
     id: String,
     metadata: RuleMetadata,
-    scope: Scope,
+    scopes: Vec<Scope>,
+    report: ReportMode,
     event: Option<String>,
     conditions: Option<CanonicalNodePattern>,
     actions: Vec<CanonicalActionPattern>,
-}
-
-#[derive(Debug, Clone)]
-struct CanonicalNodePattern {
-    value: CanonicalValuePattern,
-    count: Count,
-}
-
-#[derive(Debug, Clone)]
-struct CanonicalActionPattern {
-    kind: Option<ActionKind>,
-    name: Option<String>,
-    args: Vec<CanonicalValuePattern>,
-    parameters: Vec<(usize, CanonicalValuePattern)>,
-    count: Count,
-    present: bool,
-}
-
-#[derive(Debug, Clone)]
-enum CanonicalValuePattern {
-    Any,
-    Number(f64),
-    String(String),
-    Boolean(bool),
-    Call {
-        name: String,
-        args: Vec<CanonicalValuePattern>,
-    },
-    Enum {
-        domain: String,
-        member: String,
-    },
-    Comparison {
-        operator: ComparisonOperator,
-        value: Box<CanonicalValuePattern>,
-    },
-}
-
-impl RuleDefinition {
-    pub fn from_yaml_str(input: &str) -> Result<Self, RuleError> {
-        yaml_serde::from_str(input).map_err(RuleError::Yaml)
-    }
+    values: Vec<CanonicalValuePattern>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -241,6 +70,14 @@ impl DeclarativeRule {
             RuleIdentity::External => validate_identity(&id)?,
             RuleIdentity::FirstParty => validate_first_party_identity(&id)?,
         }
+        if identity != RuleIdentity::FirstParty {
+            if metadata.evidence.is_some() {
+                return Err(RuleError::FirstPartyMetadataField { field: "evidence" });
+            }
+            if metadata.severity.is_some() {
+                return Err(RuleError::FirstPartyMetadataField { field: "severity" });
+            }
+        }
         let locale = Locale::new(&locale_name);
         if !catalog.supports(&locale) {
             return Err(RuleError::UnsupportedLocale(locale_name));
@@ -250,7 +87,15 @@ impl DeclarativeRule {
             scope,
             conditions,
             actions,
+            values,
+            report,
         } = matcher;
+        if scope.list().is_empty() {
+            return Err(RuleError::EmptyScopeList);
+        }
+        if report == ReportMode::EachMatch && values.is_empty() {
+            return Err(RuleError::EachMatchNeedsValues);
+        }
         let event = event
             .as_deref()
             .map(|value| resolve(catalog, Kind::Event, &locale, value))
@@ -262,13 +107,19 @@ impl DeclarativeRule {
             .into_iter()
             .map(|pattern| canonical_action(pattern, catalog, &locale))
             .collect::<Result<Vec<_>, _>>()?;
+        let values = values
+            .into_iter()
+            .map(|pattern| canonical_value(pattern, catalog, &locale, true))
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
             id,
             metadata,
-            scope,
+            scopes: scope.list().to_vec(),
+            report,
             event,
             conditions,
             actions,
+            values,
         })
     }
 
@@ -281,14 +132,16 @@ impl DeclarativeRule {
     }
 
     /// Declarative matchers only report exact structural facts from canonical
-    /// Workshop representations; they do not claim runtime behavior.
+    /// Workshop representations; they do not claim runtime behavior. A
+    /// first-party package rule may declare its class (#970, #616 addendum).
     pub fn evidence(&self) -> EvidenceClass {
-        EvidenceClass::Exact
+        self.metadata.evidence.unwrap_or(EvidenceClass::Exact)
     }
 
-    /// The built-in policy default. Project configuration owns overrides.
+    /// The built-in policy default — or the first-party package's declared
+    /// default (#970). Project configuration owns overrides.
     pub fn default_severity(&self) -> Severity {
-        Severity::Warning
+        self.metadata.severity.unwrap_or(Severity::Warning)
     }
 
     /// Run a declarative matcher over the canonical public Workshop program.
@@ -321,12 +174,20 @@ impl DeclarativeRule {
         {
             return Vec::new();
         }
-        let dead = crate::canonical::dead_actions(&rule_data.actions);
-        let scopes = public_scopes(program, rule, rule_data, self.scope, &dead);
+        let dead = dead_actions(&rule_data.actions);
+        let value_ids = (!self.values.is_empty()).then(|| value_identity_map(program));
+        let scopes = public_scopes(program, rule, rule_data, &self.scopes, &dead);
         let mut findings = Vec::new();
-        for (scope_id, actions, values, anchor) in scopes {
+        for scope in scopes {
+            let PublicScope {
+                anchor_action,
+                actions,
+                values: gate_values,
+                roots,
+                anchor,
+            } = scope;
             if let Some(pattern) = &self.conditions {
-                let count = values
+                let count = gate_values
                     .iter()
                     .filter(|value| public_value_matches(value, &pattern.value))
                     .count();
@@ -350,85 +211,236 @@ impl DeclarativeRule {
             }) {
                 continue;
             }
-            let matched = counts.iter().copied().max().unwrap_or(1);
-            if min_matches.is_some_and(|min| matched < min)
+            if self.values.is_empty() {
+                let matched = counts.iter().copied().max().unwrap_or(1);
+                if min_matches.is_some_and(|min| matched < min)
+                    || max_matches.is_some_and(|max| matched > max)
+                {
+                    continue;
+                }
+                findings.push(self.finding(matched, anchor, rule, anchor_action, None));
+                continue;
+            }
+            // `values`: search every value tree of the scope for target nodes.
+            let mut matches: Vec<(Option<Span>, Option<usize>, Option<usize>)> = Vec::new();
+            for root in &roots {
+                let mut path = Vec::new();
+                let mut ancestors = Vec::new();
+                search_value_tree(
+                    root.value(),
+                    &mut ancestors,
+                    &self.values,
+                    &mut path,
+                    &mut |path, node| {
+                        let span = root.span_of(program, rule, path, anchor);
+                        let value_id = value_ids.as_ref().and_then(|ids| {
+                            ids.get(&(node as *const PublicValue as usize)).copied()
+                        });
+                        let owner_action = match root {
+                            ValueRoot::Condition { .. } => None,
+                            ValueRoot::Argument { action, .. } => Some(*action),
+                        };
+                        matches.push((span, value_id, owner_action));
+                    },
+                );
+            }
+            let matched = matches.len();
+            if matched == 0
+                || min_matches.is_some_and(|min| matched < min)
                 || max_matches.is_some_and(|max| matched > max)
             {
                 continue;
             }
-            findings.push(Finding {
-                code: self.id().to_string(),
-                severity: self.default_severity(),
-                message: format!(
-                    "{} (matched {matched} node{})",
-                    self.metadata().summary,
-                    if matched == 1 { "" } else { "s" }
-                ),
-                span: anchor,
-                rule,
-                action: scope_id,
-                value: None,
-                evidence: self.evidence(),
-                boundedness: None,
-                fix: None,
-                repeated: None,
-            });
+            match self.report {
+                ReportMode::EachMatch => {
+                    for (span, value_id, owner_action) in matches {
+                        // The native loop rules address the scope anchor
+                        // (the loop), not the statement owning the matched
+                        // value; a `rule` scope has no anchor, so it keeps
+                        // the owning statement (`nested-binder-lambda`).
+                        let action = anchor_action.or(owner_action);
+                        findings.push(self.finding(matched, span, rule, action, value_id));
+                    }
+                }
+                ReportMode::Scope => {
+                    findings.push(self.finding(matched, anchor, rule, anchor_action, None));
+                }
+            }
         }
         findings
     }
+
+    fn finding(
+        &self,
+        matched: usize,
+        span: Option<Span>,
+        rule: usize,
+        action: Option<usize>,
+        value: Option<usize>,
+    ) -> Finding {
+        Finding {
+            code: self.id().to_string(),
+            severity: self.default_severity(),
+            message: format!(
+                "{} (matched {matched} node{})",
+                self.metadata().summary,
+                if matched == 1 { "" } else { "s" }
+            ),
+            span,
+            rule,
+            action,
+            value,
+            evidence: self.evidence(),
+            boundedness: None,
+            fix: None,
+            repeated: None,
+        }
+    }
 }
 
-type PublicScope<'a> = (
-    Option<usize>,
-    Vec<&'a PublicAction>,
-    Vec<&'a PublicValue>,
-    Option<Span>,
-);
+/// One scope region a matcher inspects: `anchor_action` is the scope's own
+/// action index (`None` for a whole rule), `actions` are the live actions
+/// inside the scope for the `actions` matcher, `values` are the gate values
+/// for the `conditions` matcher, `roots` are the value trees the `values`
+/// matcher searches (#970), and `anchor` is the scope span.
+struct PublicScope<'a> {
+    anchor_action: Option<usize>,
+    actions: Vec<&'a PublicAction>,
+    values: Vec<&'a PublicValue>,
+    roots: Vec<ValueRoot<'a>>,
+    anchor: Option<Span>,
+}
+
+/// A value tree the `values` matcher searches, with enough addressing to
+/// anchor each match (#970).
+#[derive(Clone, Copy)]
+enum ValueRoot<'a> {
+    /// A live rule condition: spans resolve through
+    /// `condition_value_span(rule, condition, path)`.
+    Condition {
+        condition: usize,
+        value: &'a PublicValue,
+    },
+    /// A live action argument: spans resolve through
+    /// `action_argument_value_span(rule, action, argument, path)`. The
+    /// `action` is also the finding's owning action index.
+    Argument {
+        action: usize,
+        argument: usize,
+        value: &'a PublicValue,
+    },
+}
+
+impl<'a> ValueRoot<'a> {
+    fn value(&self) -> &'a PublicValue {
+        match self {
+            Self::Condition { value, .. } | Self::Argument { value, .. } => value,
+        }
+    }
+
+    /// The match span: the deepest recorded provenance on the path, else the
+    /// owning statement's span, else the scope anchor, else the rule.
+    fn span_of(
+        &self,
+        program: &PublicProgram,
+        rule: usize,
+        path: &[usize],
+        anchor: Option<Span>,
+    ) -> Option<Span> {
+        match self {
+            Self::Condition { condition, .. } => (0..=path.len())
+                .rev()
+                .find_map(|len| program.condition_value_span(rule, *condition, &path[..len]))
+                .or_else(|| program.rule_span(rule)),
+            Self::Argument {
+                action, argument, ..
+            } => (0..=path.len())
+                .rev()
+                .find_map(|len| {
+                    program.action_argument_value_span(rule, *action, *argument, &path[..len])
+                })
+                .or_else(|| program.action_span(rule, *action))
+                .or(anchor)
+                .or_else(|| program.rule_span(rule)),
+        }
+    }
+}
 
 fn public_scopes<'a>(
     program: &PublicProgram,
     rule_id: usize,
     rule: &'a workshop_rs::Rule,
-    scope: Scope,
+    scopes: &[Scope],
     dead: &[bool],
 ) -> Vec<PublicScope<'a>> {
-    if matches!(scope, Scope::Rule) {
-        return vec![(
-            None,
-            public_scope_actions(&rule.actions, dead, 0, rule.actions.len()),
-            rule.conditions
+    let mut result = Vec::new();
+    if scopes.contains(&Scope::Rule) {
+        let mut roots = Vec::new();
+        for (index, condition) in rule.conditions.iter().enumerate() {
+            if condition.disabled {
+                continue;
+            }
+            roots.push(ValueRoot::Condition {
+                condition: index,
+                value: &condition.value,
+            });
+        }
+        for (index, action) in rule.actions.iter().enumerate() {
+            if dead[index] {
+                continue;
+            }
+            visit_action_roots(action, &mut |argument, value| {
+                roots.push(ValueRoot::Argument {
+                    action: index,
+                    argument,
+                    value,
+                });
+            });
+        }
+        result.push(PublicScope {
+            anchor_action: None,
+            actions: public_scope_actions(&rule.actions, dead, 0, rule.actions.len()),
+            values: rule
+                .conditions
                 .iter()
                 .filter(|condition| !condition.disabled)
                 .map(|condition| &condition.value)
                 .collect(),
-            program.rule_span(rule_id),
-        )];
+            roots,
+            anchor: program.rule_span(rule_id),
+        });
     }
-
-    let mut result = Vec::new();
+    let wanted = |action: &PublicAction| {
+        scopes.iter().any(|scope| {
+            matches!(
+                (scope, action),
+                (Scope::While, PublicAction::While { .. })
+                    | (
+                        Scope::ForGlobalVariable,
+                        PublicAction::ForGlobalVariable { .. }
+                    )
+                    | (
+                        Scope::ForPlayerVariable,
+                        PublicAction::ForPlayerVariable { .. }
+                    )
+                    | (Scope::If, PublicAction::If { .. })
+            )
+        })
+    };
     for (index, action) in rule.actions.iter().enumerate() {
-        if dead[index] {
-            continue;
-        }
-        let matches_scope = matches!(
-            (scope, action),
-            (Scope::While, PublicAction::While { .. })
-                | (
-                    Scope::ForGlobalVariable,
-                    PublicAction::ForGlobalVariable { .. }
-                )
-                | (
-                    Scope::ForPlayerVariable,
-                    PublicAction::ForPlayerVariable { .. }
-                )
-                | (Scope::If, PublicAction::If { .. })
-        );
-        if !matches_scope {
+        if dead[index] || !wanted(action) {
             continue;
         }
         let Some(close) = matching_end(&rule.actions, index) else {
             continue;
         };
+        // `conditions` gate values keep the established semantics: a `while`
+        // scope sees its own condition, an `if` scope sees the chain's
+        // condition list. The `values` search range differs (#970 owner
+        // decision): a loop scope searches its live body-action arguments
+        // only — not the loop's own condition — and a nested loop's body is
+        // searched once per enclosing loop. An `if` scope's `values` search
+        // covers its condition list.
         let values = match action {
             PublicAction::While { condition } => vec![condition],
             PublicAction::If { condition } => {
@@ -436,14 +448,69 @@ fn public_scopes<'a>(
             }
             _ => Vec::new(),
         };
-        result.push((
-            Some(index),
-            public_scope_actions(&rule.actions, dead, index + 1, close),
+        let mut roots = Vec::new();
+        match action {
+            PublicAction::If { condition } => {
+                roots = public_if_condition_roots(&rule.actions, index, close, condition);
+            }
+            _ => {
+                for (body_index, body_action) in rule.actions[index + 1..close].iter().enumerate() {
+                    let action_id = index + 1 + body_index;
+                    if dead[action_id] {
+                        continue;
+                    }
+                    visit_action_roots(body_action, &mut |argument, value| {
+                        roots.push(ValueRoot::Argument {
+                            action: action_id,
+                            argument,
+                            value,
+                        });
+                    });
+                }
+            }
+        }
+        result.push(PublicScope {
+            anchor_action: Some(index),
+            actions: public_scope_actions(&rule.actions, dead, index + 1, close),
             values,
-            program.action_span(rule_id, index),
-        ));
+            roots,
+            anchor: program.action_span(rule_id, index),
+        });
     }
     result
+}
+
+/// The `values` search roots of an `if` scope: every condition of the
+/// chain, addressed as the owning action's argument 0 (#970).
+fn public_if_condition_roots<'a>(
+    actions: &'a [PublicAction],
+    start: usize,
+    close: usize,
+    first: &'a PublicValue,
+) -> Vec<ValueRoot<'a>> {
+    let mut roots = vec![ValueRoot::Argument {
+        action: start,
+        argument: 0,
+        value: first,
+    }];
+    let mut index = start + 1;
+    while index < close {
+        match &actions[index] {
+            PublicAction::ElseIf { condition } => roots.push(ValueRoot::Argument {
+                action: index,
+                argument: 0,
+                value: condition,
+            }),
+            _ => {
+                if let Some(nested_close) = matching_end(actions, index) {
+                    index = nested_close + 1;
+                    continue;
+                }
+            }
+        }
+        index += 1;
+    }
+    roots
 }
 
 fn public_scope_actions<'a>(
@@ -489,219 +556,6 @@ fn public_if_conditions<'a>(
     conditions
 }
 
-fn public_action_matches(action: &PublicAction, pattern: &CanonicalActionPattern) -> bool {
-    let kind_matches = match pattern.kind {
-        None | Some(ActionKind::Any) => true,
-        Some(ActionKind::Call) => matches!(action, PublicAction::Call { .. }),
-        Some(ActionKind::While) => matches!(action, PublicAction::While { .. }),
-        Some(ActionKind::ForGlobalVariable) => {
-            matches!(action, PublicAction::ForGlobalVariable { .. })
-        }
-        Some(ActionKind::ForPlayerVariable) => {
-            matches!(action, PublicAction::ForPlayerVariable { .. })
-        }
-        Some(ActionKind::If) => matches!(action, PublicAction::If { .. }),
-    };
-    if !kind_matches {
-        return false;
-    }
-    let PublicAction::Call { name, args } = action else {
-        return pattern.name.is_none() && pattern.args.is_empty();
-    };
-    if pattern
-        .name
-        .as_deref()
-        .is_some_and(|expected| expected != name)
-    {
-        return false;
-    }
-    pattern.args.iter().enumerate().all(|(index, expected)| {
-        args.get(index)
-            .is_some_and(|actual| public_value_matches(actual, expected))
-    }) && pattern.parameters.iter().all(|(index, expected)| {
-        args.get(*index)
-            .is_some_and(|actual| public_value_matches(actual, expected))
-    })
-}
-
-fn public_value_matches(value: &PublicValue, pattern: &CanonicalValuePattern) -> bool {
-    match (pattern, value) {
-        (CanonicalValuePattern::Any, _) => true,
-        (CanonicalValuePattern::Number(expected), PublicValue::Number(actual)) => {
-            expected == actual
-        }
-        (CanonicalValuePattern::String(expected), PublicValue::String(actual))
-        | (CanonicalValuePattern::String(expected), PublicValue::LocalizedString(actual)) => {
-            expected == actual
-        }
-        (CanonicalValuePattern::Boolean(expected), PublicValue::Bool(actual)) => expected == actual,
-        (
-            CanonicalValuePattern::Enum { domain, member },
-            PublicValue::Enum { value_type, value },
-        ) => domain == value_type && member == value,
-        (
-            CanonicalValuePattern::Call { name, args },
-            PublicValue::Call {
-                name: actual,
-                args: actual_args,
-            },
-        ) => {
-            name == actual
-                && args.len() <= actual_args.len()
-                && args
-                    .iter()
-                    .enumerate()
-                    .all(|(index, expected)| public_value_matches(&actual_args[index], expected))
-        }
-        (CanonicalValuePattern::Comparison { operator, value }, PublicValue::Number(actual)) => {
-            let CanonicalValuePattern::Number(expected) = value.as_ref() else {
-                return false;
-            };
-            match operator {
-                ComparisonOperator::Less => *actual < *expected,
-                ComparisonOperator::LessOrEqual => *actual <= *expected,
-                ComparisonOperator::Greater => *actual > *expected,
-                ComparisonOperator::GreaterOrEqual => *actual >= *expected,
-            }
-        }
-        _ => false,
-    }
-}
-
-fn canonical_node(
-    pattern: NodePattern,
-    catalog: &Catalog,
-    locale: &Locale,
-) -> Result<CanonicalNodePattern, RuleError> {
-    Ok(CanonicalNodePattern {
-        value: canonical_value(pattern.value, catalog, locale)?,
-        count: pattern.count,
-    })
-}
-
-fn canonical_action(
-    pattern: ActionPattern,
-    catalog: &Catalog,
-    locale: &Locale,
-) -> Result<CanonicalActionPattern, RuleError> {
-    let ActionPattern {
-        kind,
-        name,
-        args,
-        parameters: named_parameters,
-        count,
-        present,
-    } = pattern;
-    let name = name
-        .as_deref()
-        .map(|name| resolve(catalog, Kind::Action, locale, name))
-        .transpose()?;
-    let action_entry = name
-        .as_deref()
-        .and_then(|id| catalog.entry(Kind::Action, id));
-    let mut parameters = Vec::new();
-    for param in named_parameters {
-        let Some(entry) = action_entry else {
-            return Err(RuleError::NamedParameterRequiresAction);
-        };
-        let Some(index) = resolve_parameter(entry, locale, &param.name) else {
-            return Err(RuleError::UnknownParameter {
-                action: entry.id.clone(),
-                parameter: param.name,
-                locale: locale.to_string(),
-            });
-        };
-        parameters.push((index, canonical_value(param.value, catalog, locale)?));
-    }
-    Ok(CanonicalActionPattern {
-        kind,
-        name,
-        args: args
-            .into_iter()
-            .map(|value| canonical_value(value, catalog, locale))
-            .collect::<Result<_, _>>()?,
-        parameters,
-        count,
-        present,
-    })
-}
-
-fn resolve_parameter(
-    action: &workshop_rs::catalog::CatalogEntry,
-    locale: &Locale,
-    spelling: &str,
-) -> Option<usize> {
-    action.resolve_param(locale, spelling)
-}
-
-fn canonical_value(
-    pattern: ValuePattern,
-    catalog: &Catalog,
-    locale: &Locale,
-) -> Result<CanonicalValuePattern, RuleError> {
-    let selected = usize::from(pattern.number.is_some())
-        + usize::from(pattern.string.is_some())
-        + usize::from(pattern.boolean.is_some())
-        + usize::from(pattern.call.is_some())
-        + usize::from(pattern.enum_value.is_some())
-        + usize::from(pattern.comparison.is_some());
-    if selected > 1 {
-        return Err(RuleError::AmbiguousValuePattern);
-    }
-    if let Some(number) = pattern.number {
-        return Ok(CanonicalValuePattern::Number(number));
-    }
-    if let Some(string) = pattern.string {
-        return Ok(CanonicalValuePattern::String(string));
-    }
-    if let Some(boolean) = pattern.boolean {
-        return Ok(CanonicalValuePattern::Boolean(boolean));
-    }
-    if let Some(call) = pattern.call {
-        return Ok(CanonicalValuePattern::Call {
-            name: resolve_value_or_operator(catalog, locale, &call.name)?,
-            args: call
-                .args
-                .into_iter()
-                .map(|value| canonical_value(value, catalog, locale))
-                .collect::<Result<_, _>>()?,
-        });
-    }
-    if let Some(en) = pattern.enum_value {
-        let domain = resolve_enum_domain(catalog, locale, &en.domain)?;
-        let member = catalog
-            .resolve_enum_member(&domain, locale, &en.member)
-            .ok_or_else(|| RuleError::UnknownSpelling {
-                kind: "enum member",
-                spelling: en.member,
-                locale: locale.to_string(),
-            })?
-            .1;
-        return Ok(CanonicalValuePattern::Enum { domain, member });
-    }
-    if let Some(comparison) = pattern.comparison {
-        let value = canonical_value(*comparison.value, catalog, locale)?;
-        if !matches!(value, CanonicalValuePattern::Number(_)) {
-            return Err(RuleError::ComparisonNeedsNumber);
-        }
-        return Ok(CanonicalValuePattern::Comparison {
-            operator: comparison.operator,
-            value: Box::new(value),
-        });
-    }
-    Ok(CanonicalValuePattern::Any)
-}
-
-fn resolve_value_or_operator(
-    catalog: &Catalog,
-    locale: &Locale,
-    spelling: &str,
-) -> Result<String, RuleError> {
-    resolve(catalog, Kind::Value, locale, spelling).or_else(|value_error| {
-        resolve(catalog, Kind::Operator, locale, spelling).or(Err(value_error))
-    })
-}
-
 fn resolve(
     catalog: &Catalog,
     kind: Kind,
@@ -718,26 +572,6 @@ fn resolve(
         })
         .ok_or_else(|| RuleError::UnknownSpelling {
             kind: kind.as_str(),
-            spelling: spelling.to_string(),
-            locale: locale.to_string(),
-        })
-}
-
-fn resolve_enum_domain(
-    catalog: &Catalog,
-    locale: &Locale,
-    spelling: &str,
-) -> Result<String, RuleError> {
-    catalog
-        .enum_domain(spelling)
-        .map(|_| spelling.to_string())
-        .or_else(|| {
-            catalog
-                .resolve_enum_domain(locale, spelling)
-                .map(str::to_string)
-        })
-        .ok_or_else(|| RuleError::UnknownSpelling {
-            kind: "enum domain",
             spelling: spelling.to_string(),
             locale: locale.to_string(),
         })
@@ -768,12 +602,4 @@ fn validate_first_party_identity(id: &str) -> Result<(), RuleError> {
     } else {
         Err(RuleError::InvalidFirstPartyIdentity(id.to_string()))
     }
-}
-
-fn default_locale() -> String {
-    DEFAULT_LOCALE.to_string()
-}
-
-pub(crate) fn default_true() -> bool {
-    true
 }

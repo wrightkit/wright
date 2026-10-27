@@ -55,7 +55,13 @@ declarative matcher would distort a richer analysis.
 External rules use a namespaced identity; Wright-owned built-ins retain their
 existing bare stable IDs and reserve the `wright` namespace. Declarative
 metadata may explain support and limitations, but cannot self-certify
-correctness or override Wright's support classification.
+correctness or override Wright's support classification. The first-party
+package — and only it — may declare `evidence` and a default `severity` in
+rule metadata (#970): loading those fields from a community package or a
+`--rule-file` rule is a `lint-rule-error`. The matcher vocabulary stays
+bounded: scope lists, a deep `values` search with `within`/`in-args` ancestor
+constraints, `names` sets, and `report: each-match` (#970) extend coverage to
+per-node structural findings without becoming a general query language.
 
 ## Alternatives considered
 
