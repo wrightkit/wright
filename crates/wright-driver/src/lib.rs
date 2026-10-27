@@ -2,6 +2,8 @@
 
 pub mod cache;
 pub mod config;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod connect;
 pub mod diag;
 pub mod edit;
 pub mod essential;
@@ -32,6 +34,8 @@ pub use config::{
     InputSpec, LintConfig, LintPackageConfig, LintPackagePin, OutputFormat, RunOptions,
     SessionConfig, SourceKind,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use connect::{ConnectFloor, ConnectedProvider};
 pub use diag::{Diagnostic, ExitClass, Origin, Position, Severity, SourceSpan, Stage, Status};
 pub use input::{InputTarget, ResolvedInput, sha256_hex};
 #[cfg(not(target_arch = "wasm32"))]
