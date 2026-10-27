@@ -25,11 +25,7 @@ pub(crate) fn wright_data_base() -> PathBuf {
 /// `root`, retrying name collisions through `0..1024`. `noun` names what
 /// is being staged, article included, for the reservation failure ("an
 /// OPY provider", "a lint package"); the create error drops the article.
-pub(crate) fn reserve_staging_dir(
-    root: &Path,
-    prefix: &str,
-    noun: &str,
-) -> Result<PathBuf, String> {
+pub fn reserve_staging_dir(root: &Path, prefix: &str, noun: &str) -> Result<PathBuf, String> {
     let bare = noun
         .strip_prefix("an ")
         .or_else(|| noun.strip_prefix("a "))
@@ -89,7 +85,7 @@ pub(crate) fn promote_dir(
 
 /// The HTTPS client every bundled fetcher uses: the caller's user agent
 /// and a 60-second timeout.
-pub(crate) fn client(agent: &str) -> Result<reqwest::blocking::Client, reqwest::Error> {
+pub fn client(agent: &str) -> Result<reqwest::blocking::Client, reqwest::Error> {
     reqwest::blocking::Client::builder()
         .user_agent(agent)
         .timeout(std::time::Duration::from_secs(60))
@@ -98,7 +94,8 @@ pub(crate) fn client(agent: &str) -> Result<reqwest::blocking::Client, reqwest::
 
 /// The way a [`read_limited`] call failed, so each caller words its own
 /// diagnostic.
-pub(crate) enum ReadError {
+#[derive(Debug)]
+pub enum ReadError {
     /// The response body could not be read.
     Io(std::io::Error),
     /// The body exceeded the caller's byte limit.
@@ -107,7 +104,7 @@ pub(crate) enum ReadError {
 
 /// Read a response body capped at `limit` bytes: one byte past the limit
 /// reports [`ReadError::OverLimit`] instead of a truncated success.
-pub(crate) fn read_limited(
+pub fn read_limited(
     response: reqwest::blocking::Response,
     limit: u64,
 ) -> Result<Vec<u8>, ReadError> {
@@ -121,4 +118,35 @@ pub(crate) fn read_limited(
         return Err(ReadError::OverLimit);
     }
     Ok(body)
+}
+
+/// The way a [`verify_sha256`] call failed, so each caller words its own
+/// diagnostic.
+#[derive(Debug)]
+pub enum ChecksumError {
+    /// The checksum file held no digest.
+    Empty,
+    /// The first field was not a 64-digit SHA-256 hex digest.
+    Invalid(String),
+    /// The published digest did not match the archive. Carries
+    /// `(published, actual)`.
+    Mismatch(String, String),
+}
+
+/// The one SHA-256 checksum verification used by every download: the first
+/// whitespace-separated field of `checksum_file` must be a 64-digit hex
+/// digest matching the SHA-256 of `archive`.
+pub fn verify_sha256(archive: &[u8], checksum_file: &str) -> Result<(), ChecksumError> {
+    let published = checksum_file
+        .split_whitespace()
+        .next()
+        .ok_or(ChecksumError::Empty)?;
+    if published.len() != 64 || !published.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(ChecksumError::Invalid(published.to_string()));
+    }
+    let actual = crate::input::sha256_hex(archive);
+    if !actual.eq_ignore_ascii_case(published) {
+        return Err(ChecksumError::Mismatch(published.to_string(), actual));
+    }
+    Ok(())
 }

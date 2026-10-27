@@ -25,7 +25,7 @@ pub mod session;
 pub mod source_provider;
 pub(crate) mod statement_edit;
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) mod store;
+pub mod store;
 pub mod workshop_compat;
 
 pub use config::{

@@ -54,24 +54,21 @@ pub(super) fn verify_checksum(
     checksum_file: &str,
     archive_name: &str,
 ) -> Result<(), OpyProviderError> {
-    let published = checksum_file.split_whitespace().next().ok_or_else(|| {
-        OpyProviderError::integrity(format!("empty checksum file for {}", archive_name))
-    })?;
-    if published.len() != 64 || !published.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(OpyProviderError::integrity(format!(
+    crate::store::verify_sha256(archive, checksum_file).map_err(|error| match error {
+        crate::store::ChecksumError::Empty => {
+            OpyProviderError::integrity(format!("empty checksum file for {}", archive_name))
+        }
+        crate::store::ChecksumError::Invalid(_) => OpyProviderError::integrity(format!(
             "invalid SHA-256 checksum for {}",
             archive_name
-        )));
-    }
-    let expected = published;
-    let actual = crate::input::sha256_hex(archive);
-    if !actual.eq_ignore_ascii_case(expected) {
-        return Err(OpyProviderError::integrity(format!(
-            "SHA-256 verification failed for {} (published {expected}, got {actual}); the active provider was not changed",
-            archive_name
-        )));
-    }
-    Ok(())
+        )),
+        crate::store::ChecksumError::Mismatch(expected, actual) => {
+            OpyProviderError::integrity(format!(
+                "SHA-256 verification failed for {} (published {expected}, got {actual}); the active provider was not changed",
+                archive_name
+            ))
+        }
+    })
 }
 
 pub(super) fn extract_provider(
