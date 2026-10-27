@@ -204,6 +204,52 @@ finding:
 
 Non-`while-without-wait` findings carry `"boundedness": null`.
 
+## Error severity (#1010)
+
+Any `error`-severity finding yields `ok: false` and `exit: 1` on every
+verdict surface. Lint correctness is not guaranteed — rules can produce
+false positives and the analyzer itself can have implementation errors —
+so `error` is reserved for findings whose defect is confirmed, not
+indicated: only a rule whose evidence class is `runtime-validated` may
+emit `error`.
+
+### Audit: rules that can emit `error` severity
+
+| Rule | Kind | Evidence class | Verdict |
+| --- | --- | --- | --- |
+| *(none)* | — | — | — |
+
+All seven built-in native rules ship `warning` or `info` defaults:
+`min-wait-loop` (`static-indicator`), `duplicate-condition` (`exact`),
+`repeated-value` (`exact`), `while-without-wait` (`static-indicator`),
+`nested-binder-lambda` (`static-indicator`) → `warning`;
+`expensive-loop-check` (`heuristic`), `ongoing-condition-hot-path`
+(`heuristic`) → `info`. None is `runtime-validated`, so none justifies
+`error` and none needed a downgrade. Real-project runs over
+`tests/fixtures/workshop/real-world/*.ws` (overpy-cake, overpy-pixelart,
+overpy-client-to-server, reproducer-bastion-prophet) and the metrics
+corpus emit only `warning`/`info` findings.
+
+The boundaries that keep this true are enforced, not advisory:
+
+* External (`--rule-file`, community package) declarative rules cannot
+  declare `severity` at all — the field is rejected at load time as a
+  `lint-rule-error`, so they can never emit `error` by default.
+* A first-party (`wrightkit/lint-rules`) declarative rule may declare
+  `severity: error` only together with
+  `evidence: runtime-validated`; any other combination is a load-time
+  `lint-rule-error`, never a silent downgrade. The first-party package
+  currently ships no rules.
+* `severity: error` in a project lint config or
+  `--rule-severity <ID>:error` is explicit project policy, not a rule
+  default, and the verdict contract intentionally honors it.
+
+The `workshop.unknown-action`, `workshop.unknown-value`, and
+`workshop.opaque-action` completeness residuals are `error`-severity
+envelope *diagnostics* owned by `workshop-rs` catalog resolution — exact
+facts that appear in `diagnostics`, never in lint `findings`, and outside
+this audit's rule scope.
+
 ## Validated automated fixes (#556)
 
 An `exact`-evidence finding whose correction is mechanically unambiguous
