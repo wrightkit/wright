@@ -17,8 +17,8 @@ use wright_analyzer::registry::{LintConfig, LintRegistry};
 use crate::cache;
 use crate::config::{InputSpec, SessionConfig, SourceKind};
 use crate::diag::{
-    Diagnostic, Origin, Position, Severity, SourceSpan, Stage, Status, source_provider_unavailable,
-    source_span, workshop_diag,
+    Diagnostic, Origin, Position, Severity, SourceSpan, Stage, Status, class_for_stage,
+    source_provider_unavailable, source_span, workshop_diag,
 };
 use crate::input::{self, ResolvedInput};
 use crate::input_identity;
@@ -272,7 +272,7 @@ impl CompilerSession {
         if self.config.profile != wright_transform::Profile::Off
             && resolved.kind != SourceKind::Workshop
         {
-            return Err(Diagnostic::error(
+            return Err(Diagnostic::usage_error(
                 "profile-workshop-only",
                 Stage::Discovery,
                 format!(
@@ -647,7 +647,7 @@ impl CompilerSession {
             Some(name) => {
                 let locale = workshop_rs::catalog::Locale::new(name);
                 if !self.catalog.supports(&locale) {
-                    return Err(Diagnostic::error(
+                    return Err(Diagnostic::usage_error(
                         "invalid-locale",
                         Stage::Discovery,
                         format!(
@@ -838,6 +838,7 @@ impl CompilerSession {
                     code: "element-count-unavailable".to_string(),
                     stage: Stage::Emission,
                     severity: Severity::Info,
+                    class: class_for_stage(Stage::Emission),
                     message: format!(
                         "the canonical element count is unavailable ({}); the {WORKSHOP_CLIENT_ELEMENT_LIMIT}-element client import limit was not evaluated",
                         error
@@ -858,6 +859,7 @@ impl CompilerSession {
             code: "target-element-limit".to_string(),
             stage: Stage::Emission,
             severity: Severity::Warning,
+            class: class_for_stage(Stage::Emission),
             message: format!(
                 "generated Workshop program uses {total} elements, over the {WORKSHOP_CLIENT_ELEMENT_LIMIT}-element client import limit; the artifact was still emitted but is expected to fail Overwatch client import"
             ),
@@ -1004,6 +1006,7 @@ fn map_issue(
         stage: Stage::Analysis,
         severity,
         message,
+        class: class_for_stage(Stage::Analysis),
         status: Some(status),
         span: Some(issue_span(issue.span, path)),
         source: Some(origin.clone()),

@@ -12,7 +12,7 @@ use crate::CompilerSession;
 use crate::opy_provider;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::service::{SERVICE_NAME, SERVICE_VERSION};
-use crate::service::{ToolResponse, carried_refusal, refusal};
+use crate::service::{ToolResponse, carried_refusal, refusal, usage_refusal};
 
 const DEFAULT_LIMIT: usize = 3;
 const MAX_LIMIT: usize = 10;
@@ -58,7 +58,7 @@ pub(crate) fn lookup(
     if let Some(kind) = kind
         && !KINDS.contains(&kind)
     {
-        return refusal(
+        return usage_refusal(
             "invalid-kind",
             format!("kind must be one of {}; got '{kind}'", quoted_list(&KINDS)),
         );
@@ -66,7 +66,7 @@ pub(crate) fn lookup(
     match language {
         "workshop" => workshop_lookup(session, query, kind, within, locale, limit),
         "opy" => opy_lookup(session, query, kind, within, locale, limit),
-        other => refusal(
+        other => usage_refusal(
             "invalid-language",
             format!("lookup serves 'workshop' and 'opy'; got '{other}'"),
         ),
@@ -131,6 +131,46 @@ pub(crate) fn unavailable(
             },
         }),
     }
+}
+
+/// The exit class the `lookup` surface gives a provider failure
+/// (#1003), classified from the typed error so the exits this surface
+/// published before classes were typed stay unchanged: main mapped the
+/// *carried* code — `refusalCode` when the refusal carries one,
+/// otherwise the error's own code — so an `invalid-*` carried code
+/// stays usage whether it names an LPP `invalid-*` kind or a provider
+/// refusal code such as `invalid-selection` (the selector is a
+/// user-supplied argument). An unrecognized LPP kind (`lpp-error`) plus
+/// the session-state failures (`provider-not-initialized`,
+/// `provider-already-initialized`, `provider-shutdown`) stay source
+/// errors (their codes took main's non-`invalid-` arm). Everything
+/// else — `provider-refusal-*`, `project-load-failed`,
+/// `capability-unavailable`, the transport failures — keeps the shared
+/// provider classification, which already agrees with those exits.
+#[cfg(not(target_arch = "wasm32"))]
+fn lookup_failure_class(error: &wright_lpp::ProviderError) -> crate::diag::ExitClass {
+    use crate::diag::ExitClass;
+    if error
+        .refusal_code()
+        .unwrap_or_else(|| error.code())
+        .starts_with("invalid-")
+    {
+        return ExitClass::Usage;
+    }
+    if let wright_lpp::ProviderError::Lpp(lpp) = error
+        && let wright_lpp::LppErrorKind::Unknown(_) = lpp.kind
+    {
+        return ExitClass::SourceError;
+    }
+    if matches!(
+        error,
+        wright_lpp::ProviderError::NotInitialized { .. }
+            | wright_lpp::ProviderError::AlreadyInitialized
+            | wright_lpp::ProviderError::ShutDown { .. }
+    ) {
+        return ExitClass::SourceError;
+    }
+    crate::source_provider::provider_failure_class(error)
 }
 
 fn workshop_lookup(
@@ -555,10 +595,13 @@ fn opy_lookup(
             if gap {
                 return unavailable("opy", OWNER_OPY, LOOKUP_CAPABILITY, error.to_string());
             }
-            return carried_refusal(
-                &crate::source_provider::provider_failure_code(&error),
-                error.to_string(),
-            );
+            return ToolResponse::Error {
+                error: crate::service::ToolErrorInfo::carried(
+                    crate::source_provider::provider_failure_code(&error),
+                    error.to_string(),
+                )
+                .with_class(lookup_failure_class(&error)),
+            };
         }
     };
     let negotiated = provider
@@ -607,10 +650,13 @@ fn opy_lookup(
     let mut entries = match outcome {
         Ok(answer) => answer.entries,
         Err(error) => {
-            return carried_refusal(
-                error.refusal_code().unwrap_or_else(|| error.code()),
-                error.to_string(),
-            );
+            return ToolResponse::Error {
+                error: crate::service::ToolErrorInfo::carried(
+                    error.refusal_code().unwrap_or_else(|| error.code()),
+                    error.to_string(),
+                )
+                .with_class(lookup_failure_class(&error)),
+            };
         }
     };
     for entry in &mut entries {
@@ -740,3 +786,6 @@ fn lpp_default_text(value: &Value) -> String {
         other => other.to_string(),
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests;

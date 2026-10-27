@@ -153,9 +153,11 @@ impl<'a> ToolService<'a> {
     }
 
     pub(super) fn loader_error(diagnostic: Diagnostic) -> super::ToolErrorInfo {
-        let mut error = super::ToolErrorInfo::carried(diagnostic.code, diagnostic.message);
-        error.fields = diagnostic.fields;
-        error
+        super::ToolErrorInfo {
+            class: diagnostic.class,
+            fields: diagnostic.fields,
+            ..super::ToolErrorInfo::carried(diagnostic.code, diagnostic.message)
+        }
     }
 
     pub(super) fn adopt(&mut self, loaded: Loaded) {

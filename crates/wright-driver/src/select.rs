@@ -94,7 +94,7 @@ impl FindingSelection {
     /// program or the run fails `invalid-selection` — a selector can never
     /// silently empty a result. Call after `apply_diagnostics` so the
     /// unmatched filter cannot drop its own refusal; a refusal raises
-    /// `exit` to `SOURCE_ERROR`. `source_files` is `None` when nothing
+    /// `exit` to `USAGE`. `source_files` is `None` when nothing
     /// loaded (the input error already reports the failure).
     pub fn finish_diagnostics(
         &self,
@@ -110,11 +110,14 @@ impl FindingSelection {
             .and_then(|(file, files)| file_error(file, files, file_bases))
         {
             Some((message, fields)) => {
-                let mut diagnostic =
-                    Diagnostic::error("invalid-selection", crate::diag::Stage::Discovery, message);
+                let mut diagnostic = Diagnostic::usage_error(
+                    "invalid-selection",
+                    crate::diag::Stage::Discovery,
+                    message,
+                );
                 diagnostic.fields = fields;
                 diagnostics.push(diagnostic);
-                (diagnostics, exit.max(crate::result::exit::SOURCE_ERROR))
+                (diagnostics, exit.max(crate::result::exit::USAGE))
             }
             None => (diagnostics, exit),
         }

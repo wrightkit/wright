@@ -299,12 +299,9 @@ fn validate_pipeline(
 
 /// A provider's `Err` outcome as the finished non-ok mutation. The
 /// diagnostic keeps the shared provider-failure classification
-/// (`crate::source_provider::provider_failure_code`/`provider_failure_stage`):
-/// a deliberate refusal reports `provider-refusal-<refusalCode>` at the
-/// frontend stage, a capability gap `capability-unavailable`, and
-/// transport/process failures their typed `provider-*` code at the
-/// internal stage (#570). `provider_code` carries the refusal's
-/// `refusalCode` verbatim or the failure's typed code; nothing is applied.
+/// (`crate::source_provider::provider_failure_code`/`_stage`/`_class`),
+/// and `provider_code` carries the refusal's `refusalCode` verbatim or the
+/// failure's typed code (#570).
 pub fn provider_failure(error: &wright_lpp::ProviderError) -> ProviderMutation {
     ProviderMutation {
         ok: false,
@@ -382,6 +379,7 @@ fn provider_diagnostic(error: &wright_lpp::ProviderError) -> Diagnostic {
         (false, _) => format!("the provider failed the edit request: {}", error),
     };
     Diagnostic::carried_error(code, stage, message)
+        .with_class(crate::source_provider::provider_failure_class(error))
 }
 
 #[cfg(test)]

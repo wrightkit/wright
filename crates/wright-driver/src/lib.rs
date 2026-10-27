@@ -36,7 +36,7 @@ pub use config::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use connect::{ConnectFloor, ConnectedProvider};
-pub use diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage, Status};
+pub use diag::{Diagnostic, ExitClass, Origin, Position, Severity, SourceSpan, Stage, Status};
 pub use input::{InputTarget, ResolvedInput, sha256_hex};
 #[cfg(not(target_arch = "wasm32"))]
 pub use lint_package::{

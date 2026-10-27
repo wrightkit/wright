@@ -271,7 +271,7 @@ Resolution never guesses.
   `--max`, `inspect cfg` adds `--only` (a block kind) and `--max`, and
   `inspect callgraph` adds `--caller`, `--callee`, and `--max`. With any
   selection flag the JSON result wraps the list in `{<items>, "selection":
-  {"total", "withheld"}}`; an unknown filter value exits 1 with an
+  {"total", "withheld"}}`; an unknown filter value exits 2 with an
   `invalid-selection` diagnostic.
 * `inspect cost` accepts the finding-selection options, applied to its
   findings list exactly as on `costEstimate`. Its `elementCount` member is
@@ -318,7 +318,7 @@ Resolution never guesses.
   actions ranked by recursive `count`) and `By node name` (each node's own
   `base_count + adjustment` cost summed per canonical node name, with
   occurrences). The `byNode` entries reconcile to the rule's `count`. An
-  unknown rule name exits 1 with an `invalid-selection` diagnostic. The
+  unknown rule name exits 2 with an `invalid-selection` diagnostic. The
   agent `costEstimate` operation accepts the same optional `rule` and
   returns `rule`, `statements[]` and `byNode[]` as additive fields.
 * `persistentObjects` has no standalone command; `analyze` reports aggregate

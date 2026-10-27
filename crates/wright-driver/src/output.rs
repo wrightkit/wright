@@ -48,9 +48,10 @@ pub(crate) fn write_program(
         if let Some(entry) = entry
             && same_file(&path, entry)
         {
-            return Err(Diagnostic::error(
+            return Err(Diagnostic::classed_error(
                 "output-is-input",
                 Stage::Discovery,
+                crate::diag::ExitClass::Usage,
                 format!(
                     "refusing to overwrite the input '{}'; choose another path with -o",
                     display_path(&path)
@@ -60,9 +61,10 @@ pub(crate) fn write_program(
         let replace = match write.overwrite {
             Overwrite::Force => true,
             Overwrite::Refuse => {
-                return Err(Diagnostic::error(
+                return Err(Diagnostic::classed_error(
                     "output-exists",
                     Stage::Discovery,
+                    crate::diag::ExitClass::Usage,
                     format!(
                         "'{}' already exists; pass --force (agent request: force) to overwrite it, or choose another path with -o",
                         display_path(&path)
@@ -102,9 +104,10 @@ fn default_path(entry: Option<&Path>) -> Result<PathBuf, Diagnostic> {
         });
     match name {
         Some(name) => Ok(PathBuf::from(format!("{name}.ow"))),
-        None => Err(Diagnostic::error(
+        None => Err(Diagnostic::classed_error(
             "output-unnamed",
             Stage::Discovery,
+            crate::diag::ExitClass::Usage,
             "the input has no file name to derive the output name from; choose a path with -o"
                 .to_string(),
         )),

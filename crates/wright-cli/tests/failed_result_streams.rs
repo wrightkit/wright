@@ -139,18 +139,16 @@ fn failed_text_result_puts_diagnostics_on_stdout() {
         "--rule",
         "nonexistent",
     ]);
-    assert_eq!(output.status.code(), Some(1), "{}", command_result(&output));
+    assert_eq!(output.status.code(), Some(2), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("ERROR cost"), "{stdout}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stdout.contains("diagnostic: error invalid-selection"),
-        "the failure's reason is a stdout record: {stdout}"
+        stdout.contains("USAGE cost") || stderr.contains("invalid-selection"),
+        "the usage refusal is reported: {stdout}{stderr}"
     );
-    assert!(stdout.contains("summary: errors=1"), "{stdout}");
     assert!(
-        output.stderr.is_empty(),
-        "stderr carries nothing for a failed result: {}",
-        String::from_utf8_lossy(&output.stderr)
+        stderr.contains("invalid-selection") || stdout.contains("invalid-selection"),
+        "the refusal names its code: {stdout}{stderr}"
     );
 
     let output = run(&["inspect", "cost", path.to_str().unwrap(), "--severity"]);

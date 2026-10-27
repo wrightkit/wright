@@ -101,6 +101,27 @@ pub(crate) fn carried_refusal(code: &str, message: impl Into<String>) -> ToolRes
     }
 }
 
+/// A refusal for a wrong caller argument (an `invalid-*` request): the
+/// caller's value is rejected, so the exit class is usage.
+pub(crate) fn usage_refusal(code: &str, message: impl Into<String>) -> ToolResponse {
+    ToolResponse::Error {
+        error: ToolErrorInfo::new(code, message).with_class(crate::diag::ExitClass::Usage),
+    }
+}
+
+/// The `invalid-selection` refusal as a `ToolErrorInfo`: a selector is a
+/// user-supplied argument, so every `invalid-selection` is a usage error on
+/// every path (#1003).
+pub(crate) fn invalid_selection_error(
+    message: String,
+    fields: serde_json::Map<String, serde_json::Value>,
+) -> ToolErrorInfo {
+    ToolErrorInfo {
+        fields,
+        ..ToolErrorInfo::new("invalid-selection", message).with_class(crate::diag::ExitClass::Usage)
+    }
+}
+
 pub(crate) fn invalid_selection(message: String) -> ToolResponse {
     invalid_selection_fields(message, Default::default())
 }
@@ -110,10 +131,7 @@ pub(crate) fn invalid_selection_fields(
     fields: serde_json::Map<String, serde_json::Value>,
 ) -> ToolResponse {
     ToolResponse::Error {
-        error: ToolErrorInfo {
-            fields,
-            ..ToolErrorInfo::new("invalid-selection", message)
-        },
+        error: invalid_selection_error(message, fields),
     }
 }
 

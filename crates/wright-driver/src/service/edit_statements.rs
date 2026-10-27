@@ -89,7 +89,8 @@ impl<'a> ToolService<'a> {
                         error: ToolErrorInfo::new(
                             "invalid-selection",
                             format!("unknown rule {id}"),
-                        ),
+                        )
+                        .with_class(crate::diag::ExitClass::Usage),
                     };
                 }
                 Address::Name(name) => {
@@ -281,8 +282,12 @@ impl<'a> ToolService<'a> {
     /// error as a refused validation.
     fn refresh_refusal(&mut self) -> Option<EditValidation> {
         if let Err(error) = self.refresh() {
-            let mut diagnostic =
-                Diagnostic::carried_error(error.code, Stage::Discovery, error.message);
+            let mut diagnostic = Diagnostic::carried_classed_error(
+                error.code,
+                Stage::Discovery,
+                error.class,
+                error.message,
+            );
             diagnostic.fields = error.fields;
             return Some(EditValidation::refused(vec![diagnostic]));
         }

@@ -93,9 +93,10 @@ fn error_envelope(
         command: command.to_string(),
         ok: false,
         exit: error.exit_code(),
-        diagnostics: vec![Diagnostic::error(
+        diagnostics: vec![Diagnostic::carried_classed_error(
             error.code(),
             stage_of(error),
+            error.exit_class(),
             error.to_string(),
         )],
         selection: None,
@@ -176,6 +177,8 @@ fn list(store: &LintPackageStore) -> Built {
                 dir: Some(entry.dir.display().to_string()),
                 code: Some(damage.code().to_string()),
                 message: Some(damage.to_string()),
+                class: Some(damage.exit_class()),
+                stage: Some(stage_of(damage)),
                 ..LintPackageRow::default()
             },
             None => installed_row(
@@ -257,6 +260,8 @@ fn remove(store: &LintPackageStore, args: &cli::PackageRemoveArgs) -> Built {
                 dir: Some(entry.dir.display().to_string()),
                 code: Some(error.code().to_string()),
                 message: Some(error.to_string()),
+                class: Some(error.exit_class()),
+                stage: Some(stage_of(&error)),
                 ..LintPackageRow::default()
             },
         };
@@ -306,6 +311,8 @@ fn check_row(store: &LintPackageStore, entry: &StoreEntry) -> LintPackageRow {
         row.status = "error".to_string();
         row.code = Some(damage.code().to_string());
         row.message = Some(damage.to_string());
+        row.class = Some(damage.exit_class());
+        row.stage = Some(stage_of(damage));
         return row;
     }
     match store.check_remote(&entry.source, None, &entry.sha) {
@@ -321,11 +328,15 @@ fn check_row(store: &LintPackageStore, entry: &StoreEntry) -> LintPackageRow {
             row.status = "unavailable".to_string();
             row.code = Some("lint-package-not-found".to_string());
             row.message = Some(reason);
+            row.class = Some(wright_driver::ExitClass::Internal);
+            row.stage = Some(Stage::Discovery);
         }
         RemoteCheck::Error(error) => {
             row.status = "error".to_string();
             row.code = Some(error.code().to_string());
             row.message = Some(error.to_string());
+            row.class = Some(error.exit_class());
+            row.stage = Some(stage_of(&error));
         }
     }
     row
@@ -349,6 +360,8 @@ fn update_row(store: &LintPackageStore, entry: &StoreEntry) -> LintPackageRow {
             status: "error".to_string(),
             code: Some(error.code().to_string()),
             message: Some(error.to_string()),
+            class: Some(error.exit_class()),
+            stage: Some(stage_of(&error)),
             ..row
         },
     }
@@ -391,17 +404,14 @@ fn row_failure(row: &LintPackageRow) -> Option<(Diagnostic, u8)> {
         row.source,
         row.message.as_deref().unwrap_or("operation failed")
     );
-    let stage = match code {
-        "lint-package-source" | "lint-package-not-found" => Stage::Discovery,
-        "lint-package-invalid" => Stage::Validation,
-        _ => Stage::Internal,
-    };
-    let exit = match code {
-        "lint-package-source" => exit::USAGE,
-        "lint-package-invalid" => exit::SOURCE_ERROR,
-        _ => exit::INTERNAL,
-    };
-    Some((Diagnostic::error(code, stage, message), exit))
+    // The row's class and stage were classified from the typed error when the
+    // row was built; they are never re-derived from the code string.
+    let class = row.class.unwrap_or(wright_driver::ExitClass::Internal);
+    let stage = row.stage.unwrap_or(Stage::Internal);
+    Some((
+        Diagnostic::carried_classed_error(code, stage, class, message),
+        class.exit_code(),
+    ))
 }
 
 fn parse_source(

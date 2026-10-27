@@ -39,7 +39,8 @@ pub use capabilities::{Capabilities, OPERATIONS};
 /// vocabulary (#888).
 pub use refusal::compose_fields;
 pub(crate) use refusal::{
-    carried_refusal, invalid_selection, invalid_selection_fields, refusal, resolve_candidates,
+    carried_refusal, invalid_selection, invalid_selection_error, invalid_selection_fields, refusal,
+    resolve_candidates, usage_refusal,
 };
 
 pub use crate::request::{
@@ -558,7 +559,7 @@ impl<'a> ToolService<'a> {
     ) -> Result<(), ToolErrorInfo> {
         selection
             .validate(self.session.lint_registry())
-            .map_err(|message| ToolErrorInfo::new("invalid-selection", message))?;
+            .map_err(|message| invalid_selection_error(message, Default::default()))?;
         let loaded = &self.snapshot().loaded;
         if let Some(file) = selection.file.as_deref()
             && let Some((message, fields)) = crate::select::file_error(
@@ -567,10 +568,7 @@ impl<'a> ToolService<'a> {
                 &crate::select::file_bases(&loaded.input),
             )
         {
-            return Err(ToolErrorInfo {
-                fields,
-                ..ToolErrorInfo::new("invalid-selection", message)
-            });
+            return Err(invalid_selection_error(message, fields));
         }
         Ok(())
     }

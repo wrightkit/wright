@@ -557,23 +557,14 @@ fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
                         .expect("error serializes")
                 ),
                 OutputFormatArg::Text => {
-                    if pres.is_terminal() {
-                        present::terminal::lookup_error(
-                            pres,
-                            if error.code.starts_with("invalid-") {
-                                "USAGE"
-                            } else {
-                                "ERROR"
-                            },
-                            &error.code,
-                            &error.message,
-                        );
+                    let word = if error.class == wright_driver::ExitClass::Usage {
+                        "USAGE"
                     } else {
-                        let word = if error.code.starts_with("invalid-") {
-                            "USAGE"
-                        } else {
-                            "ERROR"
-                        };
+                        "ERROR"
+                    };
+                    if pres.is_terminal() {
+                        present::terminal::lookup_error(pres, word, &error.code, &error.message);
+                    } else {
                         println!(
                             "{word} lookup {}",
                             plain::field("language", args.language.as_str())
@@ -586,11 +577,7 @@ fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
                     }
                 }
             }
-            if error.code.starts_with("invalid-") {
-                ExitCode::from(exit::USAGE)
-            } else {
-                ExitCode::from(exit::SOURCE_ERROR)
-            }
+            ExitCode::from(error.class.exit_code())
         }
     }
 }

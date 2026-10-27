@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 /// The severity of a diagnostic.
 pub use wright_analyzer::analysis::Severity;
+/// The exit class a diagnostic's producer assigns (#1003).
+pub use wright_analyzer::service::ExitClass;
 /// The origin of a loaded program.
 pub use wright_analyzer::service::Origin;
 
@@ -51,6 +53,17 @@ pub enum Status {
     Unsupported,
 }
 
+/// The class a `stage` belongs to by default: `internal` and `reconstruction`
+/// are their own classes; every other stage is a source/user error unless the
+/// creator overrides it.
+pub(crate) fn class_for_stage(stage: Stage) -> ExitClass {
+    match stage {
+        Stage::Internal => ExitClass::Internal,
+        Stage::Reconstruction => ExitClass::Unsupported,
+        _ => ExitClass::SourceError,
+    }
+}
+
 /// A 1-based line/column position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Position {
@@ -78,6 +91,10 @@ pub struct Diagnostic {
     pub severity: Severity,
     /// Human-readable message; wording is not part of the machine contract.
     pub message: String,
+    /// The exit class this diagnostic belongs to; set where it is created.
+    /// In-process only — it never serializes.
+    #[serde(skip)]
+    pub class: ExitClass,
     /// The residual's support classification, when this diagnostic reports a
     /// Workshop completeness residual.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -116,7 +133,9 @@ impl Diagnostic {
     ///
     /// `code` must obey the diagnostic-code grammar
     /// (`wright_analyzer::service::valid_code`); a violation is a bug, so it
-    /// fails a debug assertion.
+    /// fails a debug assertion. The diagnostic's exit class defaults to the
+    /// stage's class; use [`with_class`](Self::with_class) for a usage or
+    /// unsupported error that a stage alone does not mark.
     pub fn error(code: impl Into<String>, stage: Stage, message: impl Into<String>) -> Diagnostic {
         Self::coded(code, stage, message, |code| {
             debug_assert!(
@@ -126,6 +145,45 @@ impl Diagnostic {
         })
     }
 
+    /// An error diagnostic whose exit class differs from the stage's class
+    /// (a usage or unsupported refusal reported under a source stage).
+    pub fn classed_error(
+        code: impl Into<String>,
+        stage: Stage,
+        class: ExitClass,
+        message: impl Into<String>,
+    ) -> Diagnostic {
+        Self::error(code, stage, message).with_class(class)
+    }
+
+    /// An error diagnostic whose exit class is usage — the caller's
+    /// argument was wrong (#1003).
+    pub fn usage_error(
+        code: impl Into<String>,
+        stage: Stage,
+        message: impl Into<String>,
+    ) -> Diagnostic {
+        Self::classed_error(code, stage, ExitClass::Usage, message)
+    }
+
+    /// Override the exit class set at creation.
+    pub fn with_class(mut self, class: ExitClass) -> Diagnostic {
+        self.class = class;
+        self
+    }
+
+    /// A carried error diagnostic with an explicit exit class.
+    pub fn carried_classed_error(
+        code: impl Into<String>,
+        stage: Stage,
+        class: ExitClass,
+        message: impl Into<String>,
+    ) -> Diagnostic {
+        Self::carried_error(code, stage, message).with_class(class)
+    }
+
+    /// A carried error diagnostic; the exit class defaults to the stage's
+    /// class.
     pub(crate) fn carried_error(
         code: impl Into<String>,
         stage: Stage,
@@ -152,6 +210,7 @@ impl Diagnostic {
             stage,
             severity: Severity::Error,
             message: message.into(),
+            class: class_for_stage(stage),
             status: None,
             span: None,
             source: None,
