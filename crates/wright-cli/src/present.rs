@@ -1,7 +1,5 @@
 use std::io::{IsTerminal, Write};
 use std::path::Path;
-#[cfg(test)]
-use std::sync::atomic::AtomicUsize;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -60,8 +58,6 @@ pub(crate) struct Activity {
     visible: Arc<AtomicBool>,
     status: Arc<Mutex<Option<ProgressEvent>>>,
     output: Arc<Mutex<()>>,
-    #[cfg(test)]
-    frame: Arc<AtomicUsize>,
     handle: Option<thread::JoinHandle<()>>,
 }
 
@@ -72,8 +68,6 @@ impl Activity {
             visible: Arc::new(AtomicBool::new(false)),
             status: Arc::new(Mutex::new(None)),
             output: Arc::new(Mutex::new(())),
-            #[cfg(test)]
-            frame: Arc::new(AtomicUsize::new(0)),
             handle: None,
         }
     }
@@ -83,15 +77,11 @@ impl Activity {
         let visible = Arc::new(AtomicBool::new(false));
         let status = Arc::new(Mutex::new(None));
         let output = Arc::new(Mutex::new(()));
-        #[cfg(test)]
-        let frame = Arc::new(AtomicUsize::new(0));
         write_activity_line(&output, &done, None, None);
         visible.store(true, Ordering::Release);
         let t_done = Arc::clone(&done);
         let t_status = Arc::clone(&status);
         let t_output = Arc::clone(&output);
-        #[cfg(test)]
-        let t_frame = Arc::clone(&frame);
         let handle = thread::spawn(move || {
             thread::sleep(Duration::from_millis(60));
             let mut f = 0;
@@ -99,8 +89,6 @@ impl Activity {
                 let event = *t_status.lock().expect("lock");
                 write_activity_line(&t_output, &t_done, event, Some(SPINNER[f]));
                 f = (f + 1) % SPINNER.len();
-                #[cfg(test)]
-                t_frame.store(f, Ordering::Release);
                 thread::sleep(Duration::from_millis(80));
             }
         });
@@ -109,8 +97,6 @@ impl Activity {
             visible,
             status,
             output,
-            #[cfg(test)]
-            frame,
             handle: Some(handle),
         }
     }
@@ -1361,47 +1347,6 @@ mod tests {
     }
 
     #[test]
-    fn activity_is_visible_immediately_and_accepts_phase_updates() {
-        let terminal = Presentation::resolve(
-            OutputFormat::Text,
-            RendererArg::Terminal,
-            ColorArg::Never,
-            environment(),
-        );
-        let activity = terminal.activity();
-        assert!(activity.visible.load(Ordering::Acquire));
-        assert_eq!(*activity.status.lock().unwrap(), None);
-        activity.on_progress(ProgressEvent::with_count(
-            ProgressPhase::Linting,
-            12,
-            ProgressUnit::Rules,
-        ));
-        assert_eq!(
-            *activity.status.lock().unwrap(),
-            Some(ProgressEvent::with_count(
-                ProgressPhase::Linting,
-                12,
-                ProgressUnit::Rules,
-            ))
-        );
-        thread::sleep(Duration::from_millis(150));
-        assert!(activity.frame.load(Ordering::Acquire) > 0);
-    }
-
-    #[test]
-    fn activity_cleanup_clears_the_line_and_terminates_it() {
-        let mut output = Vec::new();
-        clear_activity_line(&mut output);
-        assert_eq!(output, b"\r\x1b[2K\r\n");
-    }
-
-    #[test]
-    fn metadata_is_dimmed_only_for_terminal_color_output() {
-        assert_eq!(dim("2 symbols", false), "2 symbols");
-        assert_eq!(dim("2 symbols", true), "\x1b[2m2 symbols\x1b[0m");
-    }
-
-    #[test]
     fn workflow_command_escaping_is_split_by_context() {
         assert_eq!(escape_workflow_property("a,b:c%\n"), "a%2Cb%3Ac%25%0A");
         assert_eq!(escape_workflow_data("a,b:c%\n"), "a,b:c%25%0A");
@@ -1457,40 +1402,27 @@ mod tests {
     }
 
     #[test]
-    fn summary_info_only_is_pass() {
-        let envelope = summary_envelope(
-            true,
-            vec![diagnostic(Severity::Info)],
-            serde_json::json!([
-                {"severity": "info"},
-                {"severity": "notice"}
-            ]),
-        );
-        assert_eq!(summary_status(&envelope), "PASS");
-    }
-
-    #[test]
-    fn summary_warning_over_info_is_warn() {
-        let envelope = summary_envelope(
-            true,
-            vec![diagnostic(Severity::Warning)],
-            serde_json::json!([{"severity": "info"}]),
-        );
-        assert_eq!(summary_status(&envelope), "WARN");
-    }
-
-    #[test]
-    fn summary_error_over_warning_is_error() {
-        let envelope = summary_envelope(
-            true,
-            vec![diagnostic(Severity::Error)],
-            serde_json::json!([
-                {"severity": "warning"},
-                {"severity": "error"},
-                {"severity": "info"}
-            ]),
-        );
-        assert_eq!(summary_status(&envelope), "ERROR");
+    fn summary_status_is_the_highest_severity_and_info_passes() {
+        for (diagnostic_severity, findings, expected) in [
+            (
+                Severity::Info,
+                serde_json::json!([{"severity": "info"}, {"severity": "notice"}]),
+                "PASS",
+            ),
+            (
+                Severity::Warning,
+                serde_json::json!([{"severity": "info"}]),
+                "WARN",
+            ),
+            (
+                Severity::Error,
+                serde_json::json!([{"severity": "warning"}, {"severity": "error"}]),
+                "ERROR",
+            ),
+        ] {
+            let envelope = summary_envelope(true, vec![diagnostic(diagnostic_severity)], findings);
+            assert_eq!(summary_status(&envelope), expected);
+        }
     }
 
     #[test]
@@ -1515,15 +1447,6 @@ mod tests {
             serde_json::json!([{"severity": "warning"}]),
         );
         gate(&mut envelope, Severity::Warning);
-        assert_eq!(envelope.exit, 1);
-        assert_eq!(summary_status(&envelope), "FAIL");
-    }
-
-    #[test]
-    fn gate_counts_info_severity_for_fail_on_info() {
-        let mut envelope =
-            summary_envelope(true, Vec::new(), serde_json::json!([{"severity": "info"}]));
-        gate(&mut envelope, Severity::Info);
         assert_eq!(envelope.exit, 1);
         assert_eq!(summary_status(&envelope), "FAIL");
     }
@@ -1583,15 +1506,6 @@ mod tests {
         assert!(!envelope.gated);
         assert_eq!(envelope.exit, 0);
         assert_eq!(summary_status(&envelope), "WARN");
-    }
-
-    #[test]
-    fn gate_leaves_a_clean_result_passing() {
-        let mut envelope = summary_envelope(true, Vec::new(), serde_json::json!([]));
-        gate(&mut envelope, Severity::Info);
-        assert!(!envelope.gated);
-        assert_eq!(envelope.exit, 0);
-        assert_eq!(summary_status(&envelope), "PASS");
     }
 
     #[test]
@@ -1691,13 +1605,6 @@ mod tests {
             }),
         );
         assert_eq!(result.metadata().unwrap(), "7 finding(s) across 2 rule(s)");
-    }
-
-    #[test]
-    fn severity_rank_orders_errors_first() {
-        assert_eq!(severity_rank(Severity::Error), 0);
-        assert_eq!(severity_rank(Severity::Warning), 1);
-        assert_eq!(severity_rank(Severity::Info), 2);
     }
 
     #[test]

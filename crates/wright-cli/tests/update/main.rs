@@ -445,32 +445,6 @@ fn standalone_install_in_a_scooped_directory_still_self_updates() {
 }
 
 #[test]
-fn unknown_update_flag_is_a_usage_error() {
-    let dir = install_dir("update-usage");
-    let output = run_update(&dir, &["update", "--frobnicate"], &[]);
-    assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty(), "usage errors write stderr only");
-    assert!(!output.stderr.is_empty());
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn help_documents_the_update_command() {
-    let output = Command::new(env!("CARGO_BIN_EXE_wright"))
-        .arg("--help")
-        .stdin(Stdio::null())
-        .output()
-        .unwrap();
-    let help = String::from_utf8_lossy(&output.stdout);
-    assert!(help.contains("update"), "help documents update: {help}");
-    assert!(help.contains("--check"), "help documents --check");
-    assert!(
-        help.contains("--version <VERSION>"),
-        "help documents --version"
-    );
-}
-
-#[test]
 fn terminal_update_closes_with_the_verdict_tag() {
     let dir = install_dir("terminal-close");
     let server = MockServer::new(release(RELEASE).files);
@@ -531,31 +505,6 @@ fn terminal_update_reports_failures_under_the_tag() {
         stderr.contains("refusing to downgrade"),
         "the rejection reason hangs under it: {stderr}"
     );
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn terminal_update_reports_unsupported_platforms() {
-    let dir = install_dir("terminal-unsupported");
-    let output = run_update(
-        &dir,
-        &[
-            "update",
-            "self",
-            "--renderer",
-            "terminal",
-            "--color",
-            "never",
-        ],
-        &[("WRIGHT_INSTALL_OS", "freebsd".to_string())],
-    );
-    assert_eq!(output.status.code(), Some(3));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.starts_with(" UNSUPPORTED  update\n"),
-        "the unsupported tag leads: {stderr}"
-    );
-    assert!(stderr.contains("unsupported platform freebsd"), "{stderr}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

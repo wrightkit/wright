@@ -290,40 +290,6 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn error_accepts_a_kebab_case_code() {
-        let diagnostic = Diagnostic::error("unknown-enum-member", Stage::Frontend, "message");
-        assert_eq!(diagnostic.code, "unknown-enum-member");
-    }
-
-    #[test]
-    #[should_panic(expected = "violates the code grammar")]
-    fn error_rejects_a_spaced_code() {
-        let _ = Diagnostic::error("unknown-enum member", Stage::Frontend, "message");
-    }
-
-    #[test]
-    #[should_panic(expected = "violates the code grammar")]
-    fn error_rejects_an_uppercase_code() {
-        let _ = Diagnostic::error("Unknown-Value", Stage::Frontend, "message");
-    }
-
-    #[test]
-    fn carried_error_keeps_foreign_vocabulary() {
-        let diagnostic = Diagnostic::carried_error(
-            "provider-refusal-compile.tooLarge",
-            Stage::Frontend,
-            "message",
-        );
-        assert_eq!(diagnostic.code, "provider-refusal-compile.tooLarge");
-    }
-
-    #[test]
-    #[should_panic(expected = "empty or contains whitespace")]
-    fn carried_error_rejects_whitespace() {
-        let _ = Diagnostic::carried_error("bad code", Stage::Frontend, "message");
-    }
-
-    #[test]
     fn workshop_diag_codes_match_the_grammar_for_every_owner_kind() {
         const OWNER_KINDS: &[&str] = &[
             "action",

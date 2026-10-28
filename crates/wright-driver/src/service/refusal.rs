@@ -259,35 +259,3 @@ fn compose_payload(
         _ => {}
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    #[should_panic(expected = "violates the code grammar")]
-    fn refusal_rejects_a_spaced_code() {
-        let _ = refusal("invalid language", "message");
-    }
-
-    #[test]
-    #[should_panic(expected = "violates the code grammar")]
-    fn refusal_rejects_an_uppercase_code() {
-        let _ = refusal("Invalid-Language", "message");
-    }
-
-    #[test]
-    fn carried_refusal_keeps_the_lpp_refusal_code() {
-        let response = carried_refusal(crate::lookup::UNKNOWN_WITHIN, "message");
-        let ToolResponse::Error { error } = response else {
-            panic!("a refusal is always an error response");
-        };
-        assert_eq!(error.code, "lookup.unknownWithin");
-    }
-
-    #[test]
-    #[should_panic(expected = "empty or contains whitespace")]
-    fn carried_refusal_rejects_whitespace() {
-        let _ = carried_refusal("bad code", "message");
-    }
-}

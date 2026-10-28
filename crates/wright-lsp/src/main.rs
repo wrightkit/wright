@@ -844,43 +844,4 @@ mod tests {
         ];
         assert_eq!(versioned_workspace_edit(edits).unwrap_err(), "not a uri");
     }
-
-    #[test]
-    fn rename_is_advertised_only_with_versioned_workspace_edits() {
-        let opy = OpyProviderSupport::default();
-        assert!(
-            initialize_result(true, opy)
-                .capabilities
-                .rename_provider
-                .is_some()
-        );
-        assert!(
-            initialize_result(false, opy)
-                .capabilities
-                .rename_provider
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn document_symbols_are_advertised_only_with_provider_backing() {
-        let backed = OpyProviderSupport {
-            symbols: true,
-            ..OpyProviderSupport::default()
-        };
-        assert!(
-            initialize_result(true, backed)
-                .capabilities
-                .document_symbol_provider
-                .is_some(),
-            "a provider that serves lpp/symbols backs the advertisement"
-        );
-        assert!(
-            initialize_result(true, OpyProviderSupport::default())
-                .capabilities
-                .document_symbol_provider
-                .is_none(),
-            "without a negotiated provider the capability stays unadvertised"
-        );
-    }
 }

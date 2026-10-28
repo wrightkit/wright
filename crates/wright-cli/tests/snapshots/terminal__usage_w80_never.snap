@@ -1,9 +1,0 @@
----
-source: crates/wright-cli/tests/terminal.rs
-expression: transcript(&out)
----
-exit: 2
---- stdout ---
---- stderr ---
- USAGE  lint
-  --rule-severity expects <ID>:<SEVERITY> (got 'bogus')

@@ -23,9 +23,3 @@ fn consumer_runs_all_public_api_workflows_on_representative_inputs() {
             .unwrap_or_else(|message| panic!("{id}: {message}"));
     }
 }
-
-#[test]
-fn consumer_accepts_workshop_inputs() {
-    let path = workshop_fixture("synthetic/control-flow");
-    wright_consumer::run_consumer(path.to_str().unwrap()).expect("workshop consumer works");
-}

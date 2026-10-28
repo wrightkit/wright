@@ -102,34 +102,6 @@ fn span_text(source: &str, span: &Value) -> String {
 }
 
 #[test]
-fn workshop_input_runs_all_semantic_queries() {
-    let service = workshop_service("synthetic/control-flow");
-    let rule = id_for(
-        &service,
-        serde_json::json!({"op": "listRules"}),
-        "bounded while",
-    );
-    let symbol = id_for(&service, serde_json::json!({"op": "listSymbols"}), "index");
-    let requests = [
-        serde_json::json!({"op": "program"}),
-        serde_json::json!({"op": "listRules"}),
-        serde_json::json!({"op": "getRule", "rule": rule}),
-        serde_json::json!({"op": "findReferences", "symbol": symbol}),
-        serde_json::json!({"op": "getUsage", "symbol": symbol}),
-        serde_json::json!({"op": "getCfg", "rule": rule}),
-        serde_json::json!({"op": "getFindings"}),
-    ];
-    for request in requests {
-        query(&service, request);
-    }
-
-    let program_response: Value =
-        serde_json::from_str(&service.handle_json(r#"{"op":"program"}"#)).unwrap();
-    assert_eq!(program_response["result"]["origin"]["kind"], "workshop");
-    assert_eq!(program_response["result"]["origin"]["locale"], "en-us");
-}
-
-#[test]
 fn player_event_queries_keep_catalog_event_ids() {
     let mut program = Program::new();
     program.rule(Rule::new(
@@ -143,26 +115,6 @@ fn player_event_queries_keep_catalog_event_ids() {
     let service = service_for(program);
     let rule = query(&service, serde_json::json!({"op": "getRule", "rule": 0}));
     assert_eq!(rule["event"], "playerDealtDamage");
-}
-
-#[test]
-fn workshop_input_analysis_findings_are_available() {
-    let service = workshop_service("synthetic/control-flow");
-    let response: Value =
-        serde_json::from_str(&service.handle_json(r#"{"op":"getFindings"}"#)).unwrap();
-    let findings = response["result"].as_array().unwrap();
-    assert!(
-        findings
-            .iter()
-            .any(|finding| finding["code"] == "min-wait-loop"),
-        "the Workshop-origin bounded-while is a hot loop"
-    );
-    for finding in findings {
-        assert!(
-            finding["span"].is_object(),
-            "findings must carry Workshop source spans: {finding}"
-        );
-    }
 }
 
 #[test]

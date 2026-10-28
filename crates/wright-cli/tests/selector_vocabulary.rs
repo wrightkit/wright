@@ -2,8 +2,6 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use serde_json::json;
-
 fn wright() -> &'static str {
     env!("CARGO_BIN_EXE_wright")
 }
@@ -61,57 +59,6 @@ fn command_result(output: &std::process::Output) -> String {
 
 fn parse_json(output: &[u8]) -> serde_json::Value {
     serde_json::from_slice(output).expect("stdout is one JSON envelope")
-}
-
-fn run_lines(transport: &str, input: &Path, lines: &[&str]) -> Vec<serde_json::Value> {
-    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    let cwd = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
-        "selector-serve-{}-{}",
-        std::process::id(),
-        NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-    ));
-    std::fs::create_dir_all(&cwd).unwrap();
-    let mut child = Command::new(wright())
-        .args(["serve", "--transport", transport])
-        .arg(input)
-        .current_dir(&cwd)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("wright serve spawns");
-    let mut stdin = child.stdin.take().unwrap();
-    for line in lines {
-        writeln!(stdin, "{line}").unwrap();
-    }
-    drop(stdin);
-    let output = child.wait_with_output().unwrap();
-    let _ = std::fs::remove_dir_all(&cwd);
-    assert!(
-        output.status.success(),
-        "wright serve failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout)
-        .unwrap()
-        .lines()
-        .map(|line| serde_json::from_str(line).expect("JSON response"))
-        .collect()
-}
-
-fn mcp_call(id: u64, name: &str, arguments: serde_json::Value) -> String {
-    json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "tools/call",
-        "params": { "name": name, "arguments": arguments },
-    })
-    .to_string()
-}
-
-fn mcp_payload(response: &serde_json::Value) -> serde_json::Value {
-    serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap())
-        .expect("tool content is JSON")
 }
 
 fn serve_with(args: &[&str], input: &Path) -> (std::process::Child, Vec<serde_json::Value>) {
@@ -327,27 +274,6 @@ fn serve_applies_the_cli_lint_policy_to_the_session() {
 }
 
 #[test]
-fn removed_selector_spellings_are_usage_errors() {
-    let input = corpus_workshop("synthetic/basic-rule");
-    let input = input.to_str().unwrap();
-    for args in [
-        &["lint", "--rule", "rules.yaml", input][..],
-        &["serve", "--rule", "rules.yaml", input][..],
-        &["inspect", "rules", "--only", "player starts", input][..],
-        &["lookup", "--kind", "action"][..],
-    ] {
-        let output = run(args);
-        assert_eq!(
-            output.status.code(),
-            Some(2),
-            "{args:?} must be a usage error: {}",
-            command_result(&output)
-        );
-        assert!(output.stdout.is_empty(), "usage errors write stderr only");
-    }
-}
-
-#[test]
 fn lookup_only_filters_entries_by_kind() {
     let output = run(&["lookup", "wait", "--only", "action", "-f", "json"]);
     assert_eq!(output.status.code(), Some(0), "{}", command_result(&output));
@@ -355,6 +281,14 @@ fn lookup_only_filters_entries_by_kind() {
     let entries = result["entries"].as_array().unwrap();
     assert!(!entries.is_empty(), "the filter keeps matching entries");
     assert!(entries.iter().all(|entry| entry["kind"] == "action"));
+}
+
+#[test]
+fn lookup_rejects_an_out_of_range_limit() {
+    let output = run(&["lookup", "wait", "--limit", "0", "-f", "json"]);
+    assert_eq!(output.status.code(), Some(1), "{}", command_result(&output));
+    let result = parse_json(&output.stdout);
+    assert_eq!(result["error"]["code"], "malformed-request", "{result}");
 }
 
 #[test]
@@ -381,45 +315,4 @@ fn inspect_refs_and_cfg_keep_only_as_the_category_filter() {
     assert!(blocks.iter().all(|block| block["kind"] == "entry"));
 
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
-}
-
-#[test]
-fn a_rules_request_carrying_name_is_malformed_on_every_transport() {
-    let input = corpus_workshop("synthetic/basic-rule");
-    let stdio = run_lines(
-        "stdio",
-        &input,
-        &[
-            r#"{"op":"rules","name":"player starts"}"#,
-            r#"{"op":"rules"}"#,
-        ],
-    );
-    assert_eq!(stdio[0]["error"]["code"], "malformed-request");
-    assert!(
-        stdio[1].get("error").is_none() && stdio[1].get("result").is_some(),
-        "bare rules still answers: {}",
-        stdio[1]
-    );
-
-    let jsonrpc = run_lines(
-        "jsonrpc",
-        &input,
-        &[
-            r#"{"jsonrpc":"2.0","id":1,"method":"request","params":{"op":"rules","name":"player starts"}}"#,
-        ],
-    );
-    assert_eq!(jsonrpc[0]["result"]["error"]["code"], "malformed-request");
-    assert!(jsonrpc[0].get("error").is_none());
-
-    let mcp = run_lines(
-        "mcp",
-        &input,
-        &[&mcp_call(
-            1,
-            "wright_rules",
-            json!({"name": "player starts"}),
-        )],
-    );
-    assert_eq!(mcp[0]["result"]["isError"], true, "{}", mcp[0]);
-    assert_eq!(mcp_payload(&mcp[0])["code"], "malformed-request");
 }

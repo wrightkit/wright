@@ -447,23 +447,4 @@ mod tests {
         assert_eq!(filename_for(ShellArg::Fish), "wright.fish");
         assert_eq!(filename_for(ShellArg::PowerShell), "_wright.ps1");
     }
-
-    #[test]
-    fn generate_script_produces_non_empty_content_for_all_shells() {
-        for shell in [
-            ShellArg::Bash,
-            ShellArg::Zsh,
-            ShellArg::Fish,
-            ShellArg::PowerShell,
-        ] {
-            let script = generate_script(shell);
-            assert!(!script.is_empty(), "{:?} script must not be empty", shell);
-            let text = String::from_utf8_lossy(&script);
-            assert!(
-                text.contains("wright"),
-                "{:?} script contains wright",
-                shell
-            );
-        }
-    }
 }

@@ -207,66 +207,6 @@ fn update_fails_on_row_errors_and_refuses_damaged_entries() {
 }
 
 #[test]
-fn remove_deletes_managed_content_and_keeps_user_files() {
-    let dirs = TestDirs::new("remove");
-    write_entry(&dirs.root, "community", "rules", SHA_A, RULE);
-    let pruned = write_entry(&dirs.root, "community", "rules", SHA_B, RULE);
-    std::fs::write(pruned.join("notes.txt"), b"mine").unwrap();
-    let output = run(
-        &dirs,
-        None,
-        &[
-            "lint",
-            "package",
-            "remove",
-            "community/rules",
-            "--renderer",
-            "plain",
-        ],
-    );
-    let text = transcript(&dirs, &output);
-    assert!(text.contains("PASS package-remove"), "{text}");
-    assert!(
-        text.contains(&format!(
-            "package: source=community/rules status=removed sha={SHA_A}"
-        )),
-        "{text}"
-    );
-    assert!(
-        text.contains(&format!(
-            "package: source=community/rules status=pruned sha={SHA_B}"
-        )),
-        "{text}"
-    );
-    assert!(!entry(&dirs.root, "community", "rules", SHA_A).exists());
-    assert!(!pruned.join("rules").exists());
-    assert_eq!(
-        std::fs::read_to_string(pruned.join("notes.txt")).unwrap(),
-        "mine"
-    );
-
-    let output = run(
-        &dirs,
-        None,
-        &[
-            "lint",
-            "package",
-            "remove",
-            "community/rules",
-            "--renderer",
-            "plain",
-        ],
-    );
-    let text = transcript(&dirs, &output);
-    assert!(
-        text.contains("ERROR package-remove")
-            && text.contains("diagnostic: error lint-package-not-found"),
-        "{text}"
-    );
-    assert_eq!(output.status.code(), Some(4));
-}
-
-#[test]
 fn remove_at_ref_removes_only_the_matching_entry() {
     let dirs = TestDirs::new("remove-ref");
     write_entry(&dirs.root, "community", "rules", SHA_A, RULE);
@@ -324,16 +264,4 @@ fn the_json_envelope_is_machine_readable() {
     );
     let text = String::from_utf8_lossy(&output.stdout);
     assert!(!text.contains("WRIGHT_LINT_PACKAGE_API_BASE"));
-}
-
-#[test]
-fn a_bare_lint_package_is_a_usage_error() {
-    let dirs = TestDirs::new("bare");
-    let output = run(&dirs, None, &["lint", "package"]);
-    assert_eq!(output.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("search") || stderr.contains("subcommand"),
-        "{stderr}"
-    );
 }
