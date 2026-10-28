@@ -12,8 +12,10 @@ agents.
 - **Cost and risk analysis.** Workshop element cost, hotspots, and server-load
   risk indicators, each labeled exact, static, or heuristic.
 - **Semantic queries.** Symbols, references, control flow, call graph, cost.
-- **Validated edits.** Source edits that preview a diff before writing.
-- **Agent and editor integration.** `wright serve` (JSON-RPC and MCP) and
+- **Validated edits.** `lint --fix` previews each fix as a validated diff;
+  agents validate edit transactions through `wright serve`.
+- **Agent and editor integration.** `wright serve` (JSON-RPC and MCP),
+  `wright agent install` for the agent guide and MCP registration, and
   `wright-lsp`.
 - **CI-friendly output.** JSON reports and GitHub Actions annotations.
 
@@ -22,7 +24,7 @@ agents.
 | Source | Status |
 | --- | --- |
 | Raw Workshop | ✅ Supported |
-| OverPy (`.opy`) | 🟡 `check`, `compile`, `lint`, `analyze` via the `opy-rs` provider |
+| OverPy (`.opy`) | 🟡 `check`, `compile`, `lint`, `analyze`, `inspect`, `lookup`, Workshop → OPY `convert`, and LSP via the `opy-rs` provider |
 | DEL / OSTW | ⚪ Recognized, not yet supported |
 
 Language parsing and compilation live in dedicated engines:
@@ -37,30 +39,38 @@ language features instead of working around them.
 # macOS
 brew install wrightkit/tap/wright
 
-# macOS and Linux
+# macOS and Linux x86_64
 curl -fsSL https://install.wrightkit.dev/wright/install.sh | bash
 ```
 
-On Windows, use the PowerShell installer at
-`https://install.wrightkit.dev/wright/install.ps1`. Archives, the nightly
-channel, and building from source are covered in [`docs/release.md`](docs/release.md).
+```powershell
+# Windows x86_64
+irm https://install.wrightkit.dev/wright/install.ps1 | iex
+```
 
-Update with `wright update`.
+Every channel installs `wright` and `wright-lsp`. Scoop, WinGet, release
+archives, and the nightly channel are covered in [`docs/release.md`](docs/release.md).
+
+Update a standalone install with `wright update`. Homebrew, Scoop, and WinGet
+installs upgrade through their package manager.
 
 ## Usage
 
 ```sh
-wright check [INPUT]            # correctness diagnostics
-wright lint [INPUT]             # lint findings
-wright analyze [INPUT]          # cost, hotspots, and risk indicators
-wright inspect [INPUT]          # semantic summary
-wright compile [INPUT]          # write <input>.ow; --to LOCALE selects the output locale
-wright serve [INPUT]            # agent session over stdio or MCP
+wright check [INPUT]                 # correctness diagnostics
+wright lint [INPUT]                  # lint findings
+wright analyze [INPUT]               # cost, hotspots, and risk indicators
+wright inspect [INPUT]               # semantic summary
+wright compile [INPUT]               # write <input stem>.ow; -o PATH, --to LOCALE
+wright convert [INPUT] --target opy  # reconstruct Workshop as OverPy
+wright lookup [QUERY]                # resolve a display name or guess to the accepted spelling
+wright serve [INPUT]                 # agent session over stdio or MCP
 ```
 
-`INPUT` is a file, a project directory, or `-` for stdin; omit it to use the
-current directory. Add `--format json` for machine-readable output. See
-[`docs/cli.md`](docs/cli.md) for the full command reference.
+`INPUT` is a file or a project directory; omit it to use the current
+directory. Most commands also read raw Workshop from `-` (stdin). Add
+`--format json` for machine-readable output. See [`docs/cli.md`](docs/cli.md)
+for the full command reference.
 
 ## Documentation
 
