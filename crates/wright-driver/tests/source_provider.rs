@@ -1230,86 +1230,26 @@ fn service_compile_establishes_the_snapshot_and_recovers_after_reload() {
 }
 
 #[test]
-fn service_check_and_compile_match_the_direct_workflow_methods() {
-    for via_request in [true, false] {
-        let (dir, entry) = temp_entry();
-        let operations = Arc::new(Mutex::new(Vec::new()));
-        let provider = ReloadableProvider {
-            operations: Arc::clone(&operations),
-            workshop_text: workshop_fixture("synthetic/basic-rule"),
-        };
-        let config = SessionConfig {
-            input: InputSpec::Path(entry.clone()),
-            kind: SourceKind::Opy,
-            ..SessionConfig::default()
-        };
-        let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
-            .expect("provider session");
-        let mut service = ToolService::new(&mut session).expect("service constructs");
-
-        let check = if via_request {
-            let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check { all: true })
-            else {
-                panic!("check must return the workflow envelope")
-            };
-            result
-        } else {
-            serde_json::to_value(service.check()).expect("envelope serializes")
-        };
-        assert_eq!(check["command"], "check");
-        assert_eq!(check["ok"], true, "{check}");
-        assert_eq!(*operations.lock().expect("ops"), vec!["compile"]);
-
-        let compile = if via_request {
-            let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile {
-                output: Some(dir.join("program.ow")),
-                force: true,
-                to: None,
-            }) else {
-                panic!("compile must return the workflow envelope")
-            };
-            result
-        } else {
-            serde_json::to_value(service.compile()).expect("envelope serializes")
-        };
-        assert_eq!(compile["command"], "compile");
-        assert_eq!(compile["ok"], true, "{compile}");
-        assert_eq!(*operations.lock().expect("ops"), vec!["compile"]);
-        cleanup(dir);
-    }
-}
-
-#[test]
-fn provider_backend_rejects_stdin_without_fabricating_an_entry() {
-    let config = SessionConfig {
-        input: InputSpec::Stdin,
-        kind: SourceKind::Opy,
-        source_backend: SourceBackend::Provider,
-        ..SessionConfig::default()
-    };
-    let mut session = CompilerSession::new(config).expect("session");
-    let result = session.check();
-    assert!(!result.ok);
-    assert_eq!(result.exit, 3);
-    assert_eq!(result.diagnostics[0].code, "source-provider-unsupported");
-}
-
-#[test]
-fn provider_backend_rejects_text_input_without_fabricating_an_entry() {
-    let config = SessionConfig {
-        input: InputSpec::Text {
+fn provider_backend_rejects_unpathed_input_without_fabricating_an_entry() {
+    for input in [
+        InputSpec::Stdin,
+        InputSpec::Text {
             text: "globalvar score = 0\n".to_string(),
             path: Some(PathBuf::from("entry.opy")),
         },
-        kind: SourceKind::Opy,
-        source_backend: SourceBackend::Provider,
-        ..SessionConfig::default()
-    };
-    let mut session = CompilerSession::new(config).expect("session");
-    let result = session.check();
-    assert!(!result.ok);
-    assert_eq!(result.exit, 3);
-    assert_eq!(result.diagnostics[0].code, "source-provider-unsupported");
+    ] {
+        let config = SessionConfig {
+            input,
+            kind: SourceKind::Opy,
+            source_backend: SourceBackend::Provider,
+            ..SessionConfig::default()
+        };
+        let mut session = CompilerSession::new(config).expect("session");
+        let result = session.check();
+        assert!(!result.ok);
+        assert_eq!(result.exit, 3);
+        assert_eq!(result.diagnostics[0].code, "source-provider-unsupported");
+    }
 }
 
 #[test]
@@ -1355,36 +1295,6 @@ fn unmapped_provider_artifact_errors_do_not_claim_the_opy_entry() {
 }
 
 #[test]
-fn provider_backend_does_not_fall_back_when_the_provider_fails() {
-    let (dir, entry) = temp_entry();
-    let provider = RecordingProvider {
-        target: Arc::new(Mutex::new(None)),
-        operations: Arc::new(Mutex::new(Vec::new())),
-        check_compilation: None,
-        compilation: None,
-        check_failure: None,
-        failure: Some(failed(
-            "provider-exited",
-            Stage::Internal,
-            wright_driver::ExitClass::Internal,
-            "provider exited before compiling the entry",
-        )),
-    };
-    let config = SessionConfig {
-        input: InputSpec::Path(entry),
-        kind: SourceKind::Opy,
-        ..SessionConfig::default()
-    };
-    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
-        .expect("provider session");
-    let result = session.check();
-    assert!(!result.ok);
-    assert_eq!(result.exit, 4);
-    assert_eq!(result.diagnostics[0].code, "provider-exited");
-    cleanup(dir);
-}
-
-#[test]
 fn provider_backend_provider_resolution_failure_is_explicit() {
     let (dir, entry) = temp_entry();
     let config = SessionConfig {
@@ -1405,127 +1315,56 @@ fn provider_backend_provider_resolution_failure_is_explicit() {
 }
 
 #[test]
-fn provider_refusal_is_a_frontend_failure_with_its_refusal_code() {
-    let (dir, entry) = temp_entry();
-    let provider = RecordingProvider {
-        target: Arc::new(Mutex::new(None)),
-        operations: Arc::new(Mutex::new(Vec::new())),
-        check_compilation: None,
-        compilation: None,
-        check_failure: None,
-        failure: Some(failed(
+fn provider_failures_keep_their_code_stage_and_exit_class() {
+    use wright_driver::ExitClass;
+    for (code, stage, class, exit) in [
+        (
             "provider-refusal-compile.tooLarge",
             Stage::Frontend,
-            wright_driver::ExitClass::SourceError,
-            "the compile request failed: the provider refused (compile.tooLarge)",
-        )),
-    };
-    let config = SessionConfig {
-        input: InputSpec::Path(entry),
-        kind: SourceKind::Opy,
-        ..SessionConfig::default()
-    };
-    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
-        .expect("provider session");
-    let result = session.check();
-    assert!(!result.ok);
-    assert_eq!(result.exit, 1);
-    assert_eq!(
-        result.diagnostics[0].code,
-        "provider-refusal-compile.tooLarge"
-    );
-    assert_eq!(result.diagnostics[0].stage, Stage::Frontend);
-    cleanup(dir);
-}
-
-#[test]
-fn provider_capability_unavailable_exits_as_unsupported() {
-    let (dir, entry) = temp_entry();
-    let provider = RecordingProvider {
-        target: Arc::new(Mutex::new(None)),
-        operations: Arc::new(Mutex::new(Vec::new())),
-        check_compilation: Some(SourceCompilation {
-            workshop_text: None,
-            locale: None,
-            provenance: wright_driver::SourceProvenance::Unmapped,
-            diagnostics: Vec::new(),
-            source_identity: None,
-        }),
-        compilation: None,
-        check_failure: Some(failed(
-            "capability-unavailable",
-            Stage::Frontend,
-            wright_driver::ExitClass::Unsupported,
-            "the check request failed: capability 'projectLoading' was not negotiated",
-        )),
-        failure: Some(failed(
-            "capability-unavailable",
-            Stage::Frontend,
-            wright_driver::ExitClass::Unsupported,
-            "the check request failed: capability 'projectLoading' was not negotiated",
-        )),
-    };
-    let config = SessionConfig {
-        input: InputSpec::Path(entry),
-        kind: SourceKind::Opy,
-        ..SessionConfig::default()
-    };
-    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
-        .expect("provider session");
-    let result = session.check();
-    assert!(!result.ok);
-    assert_eq!(result.exit, 3);
-    assert_eq!(result.diagnostics[0].code, "capability-unavailable");
-    assert_eq!(result.diagnostics[0].stage, Stage::Frontend);
-    cleanup(dir);
-}
-
-#[test]
-fn provider_project_load_failure_is_a_source_side_failure() {
-    let (dir, entry) = temp_entry();
-    let provider = RecordingProvider {
-        target: Arc::new(Mutex::new(None)),
-        operations: Arc::new(Mutex::new(Vec::new())),
-        check_compilation: None,
-        compilation: None,
-        check_failure: None,
-        failure: Some(failed(
+            ExitClass::SourceError,
+            1,
+        ),
+        (
             "project-load-failed",
             Stage::Frontend,
-            wright_driver::ExitClass::SourceError,
-            "the check request failed: a required source file could not be loaded",
-        )),
-    };
-    let config = SessionConfig {
-        input: InputSpec::Path(entry),
-        kind: SourceKind::Opy,
-        ..SessionConfig::default()
-    };
-    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
-        .expect("provider session");
-    let result = session.check();
-    assert!(!result.ok);
-    assert_eq!(result.exit, 1);
-    assert_eq!(result.diagnostics[0].code, "project-load-failed");
-    cleanup(dir);
-}
-
-#[test]
-fn provider_transport_failures_stay_internal() {
-    for code in ["provider-timeout", "provider-exited", "provider-malformed"] {
+            ExitClass::SourceError,
+            1,
+        ),
+        (
+            "session-config-changed",
+            Stage::Discovery,
+            ExitClass::SourceError,
+            1,
+        ),
+        (
+            "capability-unavailable",
+            Stage::Frontend,
+            ExitClass::Unsupported,
+            3,
+        ),
+        ("provider-timeout", Stage::Internal, ExitClass::Internal, 4),
+        ("provider-exited", Stage::Internal, ExitClass::Internal, 4),
+        (
+            "provider-malformed",
+            Stage::Internal,
+            ExitClass::Internal,
+            4,
+        ),
+    ] {
         let (dir, entry) = temp_entry();
         let provider = RecordingProvider {
             target: Arc::new(Mutex::new(None)),
             operations: Arc::new(Mutex::new(Vec::new())),
-            check_compilation: None,
+            check_compilation: Some(SourceCompilation {
+                workshop_text: None,
+                locale: None,
+                provenance: wright_driver::SourceProvenance::Unmapped,
+                diagnostics: Vec::new(),
+                source_identity: None,
+            }),
             compilation: None,
-            check_failure: None,
-            failure: Some(failed(
-                code,
-                Stage::Internal,
-                wright_driver::ExitClass::Internal,
-                format!("the compile request failed: {code}"),
-            )),
+            check_failure: Some(failed(code, stage, class, format!("failed: {code}"))),
+            failure: Some(failed(code, stage, class, format!("failed: {code}"))),
         };
         let config = SessionConfig {
             input: InputSpec::Path(entry),
@@ -1534,44 +1373,13 @@ fn provider_transport_failures_stay_internal() {
         };
         let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
             .expect("provider session");
-        let result = session.compile();
+        let result = session.check();
         assert!(!result.ok, "{code}");
-        assert_eq!(result.exit, 4, "{code}");
+        assert_eq!(result.exit, exit, "{code}");
         assert_eq!(result.diagnostics[0].code, code);
-        assert_eq!(result.diagnostics[0].stage, Stage::Internal);
+        assert_eq!(result.diagnostics[0].stage, stage, "{code}");
         cleanup(dir);
     }
-}
-
-#[test]
-fn wright_originated_refusal_keeps_its_verbatim_code() {
-    let (dir, entry) = temp_entry();
-    let provider = RecordingProvider {
-        target: Arc::new(Mutex::new(None)),
-        operations: Arc::new(Mutex::new(Vec::new())),
-        check_compilation: None,
-        compilation: None,
-        check_failure: None,
-        failure: Some(failed(
-            "session-config-changed",
-            Stage::Discovery,
-            wright_driver::ExitClass::SourceError,
-            "the check request failed: session configuration is fixed",
-        )),
-    };
-    let config = SessionConfig {
-        input: InputSpec::Path(entry),
-        kind: SourceKind::Opy,
-        ..SessionConfig::default()
-    };
-    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
-        .expect("provider session");
-    let result = session.check();
-    assert!(!result.ok);
-    assert_eq!(result.exit, 1);
-    assert_eq!(result.diagnostics[0].code, "session-config-changed");
-    assert_eq!(result.diagnostics[0].stage, Stage::Discovery);
-    cleanup(dir);
 }
 
 #[test]

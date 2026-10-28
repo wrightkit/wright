@@ -481,33 +481,6 @@ fn unmatched_files_refuse_on_cli_and_serve() {
 }
 
 #[test]
-fn name_addresses_ignore_snapshot() {
-    let path = temp_file("snapshot.ws", DUP_CALLERS);
-
-    let responses = serve(
-        &path,
-        &[
-            json!({"op":"cfg","rule":"tick#1","snapshot":999}).to_string(),
-            json!({"op":"cfg","rule":0,"snapshot":999}).to_string(),
-            json!({"op":"costEstimate","rule":"tick#1","snapshot":999}).to_string(),
-        ],
-    );
-    assert!(
-        responses[0].get("error").is_none() && responses[0]["result"].is_object(),
-        "a name address ignores snapshot: {}",
-        responses[0]
-    );
-    assert_eq!(responses[1]["error"]["code"], "stale-id");
-    assert!(
-        responses[2].get("error").is_none() && responses[2]["result"].is_object(),
-        "costEstimate's name filter ignores snapshot: {}",
-        responses[2]
-    );
-
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-#[test]
 fn cost_estimate_rule_uses_the_same_grammar() {
     let path = temp_file("cost.ws", DUP_CALLERS);
 

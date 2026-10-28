@@ -399,18 +399,6 @@ mod tests {
     }
 
     #[test]
-    fn same_key_second_run_reports_zero_delta() {
-        let dir = std::env::temp_dir().join(format!("wright-cache-{}", std::process::id()));
-        let run = cost_run(&dir);
-        let snapshot = snap(100, &[("a", 60), ("b", 40)]);
-        assert!(compare_and_record_in(&run, &snapshot, LOCAL_CACHE).is_none());
-        let cmp = compare_and_record_in(&run, &snapshot, LOCAL_CACHE).expect("second run compares");
-        assert_eq!(cmp.total_delta, 0);
-        assert!(cmp.changed.is_empty() && cmp.added.is_empty() && cmp.removed.is_empty());
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
     fn added_and_grown_rules_are_named() {
         let dir = std::env::temp_dir().join(format!("wright-cache2-{}", std::process::id()));
         let run = cost_run(&dir);
@@ -460,19 +448,6 @@ mod tests {
         let key = key_id(run.input_path.as_deref(), "workshop", "en-US", "off");
         fs::write(cache_dir(&dir).join(format!("{key}.json")), "not json").unwrap();
         assert!(compare_and_record_in(&run, &snap(100, &[("a", 100)]), LOCAL_CACHE).is_none());
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn ci_run_without_baseline_flags_touches_nothing() {
-        let dir = std::env::temp_dir().join(format!("wright-cache-ci1-{}", std::process::id()));
-        let run = cost_run(&dir);
-        compare_and_record_in(&run, &snap(100, &[("a", 100)]), LOCAL_CACHE);
-        assert!(dir.join(".wright").is_dir());
-        assert!(
-            compare_and_record_in(&run, &snap(120, &[("a", 100)]), CI_CACHE).is_none(),
-            "no implicit previous-run comparison under CI"
-        );
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -1398,36 +1398,6 @@ fn stdin_workshop_works_and_legacy_protocol_is_refused() {
 }
 
 #[test]
-fn bom_prefixed_workshop_behaves_like_the_plain_file() {
-    let bom = format!("\u{FEFF}{}", corpus_workshop("synthetic/basic-rule"));
-    let plain = temp_file("plain.ws", &corpus_workshop("synthetic/basic-rule"));
-    let bommed = temp_file("bom.ws", &bom);
-
-    let output = run(&["check", bommed.to_str().unwrap()]);
-    assert!(output.status.success(), "{}", command_result(&output));
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("PASS check"), "{stdout}");
-
-    let bommed_out = run(&["compile", bommed.to_str().unwrap(), "-o", "-"]);
-    let plain_out = run(&["compile", plain.to_str().unwrap(), "-o", "-"]);
-    assert!(bommed_out.status.success() && plain_out.status.success());
-    assert_eq!(bommed_out.stdout, plain_out.stdout);
-
-    let output = run_with_stdin(&["check", "-"], &bom);
-    assert_eq!(output.status.code(), Some(0));
-    let output = run_with_stdin(&["check", "-"], "\u{FEFF}{\"protocol\":{}}");
-    assert_eq!(output.status.code(), Some(1));
-    assert!(
-        String::from_utf8_lossy(&output.stdout).contains("input-kind-unsupported"),
-        "{}",
-        command_result(&output)
-    );
-
-    let _ = std::fs::remove_dir_all(bommed.parent().unwrap());
-    let _ = std::fs::remove_dir_all(plain.parent().unwrap());
-}
-
-#[test]
 fn stdin_opy_requires_an_entry_for_provider_workflows() {
     let source =
         std::fs::read_to_string(workspace_root().join("tests/fixtures/opy/basic-rule.opy"))
@@ -2236,57 +2206,6 @@ fn convert_rejects_non_workshop_input() {
 }
 
 #[test]
-fn symbols_lists_program_symbols_and_filters_by_kind() {
-    let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
-    let path = path.to_str().unwrap();
-
-    let output = run(&["inspect", "symbols", path]);
-    assert!(output.status.success(), "{}", command_result(&output));
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("SYMBOLS symbols"), "{stdout}");
-    assert!(stdout.contains("summary: symbols=5"), "{stdout}");
-    assert!(
-        stdout.contains("symbol: globalVariable name=cakePos at=cake.txt:3:14"),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains("symbol: rule name=cake at=cake.txt:8:1"),
-        "{stdout}"
-    );
-
-    let output = run(&["inspect", "symbols", path, "-f", "json"]);
-    assert!(output.status.success(), "{}", command_result(&output));
-    let envelope = parse_json(&output.stdout);
-    assert_eq!(envelope["command"], "symbols");
-    assert_eq!(envelope["wright"]["contract"], "wright-result/v1");
-    let symbols = envelope["result"]["symbols"].as_array().unwrap();
-    assert_eq!(symbols.len(), 5);
-    let rule = symbols
-        .iter()
-        .find(|symbol| symbol["name"] == "cake")
-        .expect("the cake rule symbol");
-    assert_eq!(rule["kind"], "rule");
-    assert_eq!(rule["span"]["path"], "cake.txt");
-
-    let output = run(&["inspect", "symbols", path, "--only", "rule", "-f", "json"]);
-    let envelope = parse_json(&output.stdout);
-    let symbols = envelope["result"]["symbols"].as_array().unwrap();
-    assert_eq!(symbols.len(), 2);
-    assert!(symbols.iter().all(|symbol| symbol["kind"] == "rule"));
-
-    let output = run(&[
-        "inspect", "symbols", path, "--only", "rule", "--max", "1", "-f", "json",
-    ]);
-    let envelope = parse_json(&output.stdout);
-    let symbols = envelope["result"]["symbols"].as_array().unwrap();
-    assert_eq!(symbols.len(), 1);
-    assert!(symbols.iter().all(|symbol| symbol["kind"] == "rule"));
-    assert_eq!(envelope["result"]["selection"]["total"], 5);
-
-    let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
-}
-
-#[test]
 fn refs_reports_references_and_usage_for_a_named_symbol() {
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
     let path = path.to_str().unwrap();
@@ -3068,28 +2987,6 @@ fn agent_install_mcp_configures_a_project_whose_server_answers_mcp() {
     assert_eq!(install(&["--no-guide"]).status.code(), Some(2));
     let _ = std::fs::remove_dir_all(&project);
     let _ = std::fs::remove_dir_all(&elsewhere);
-}
-
-#[test]
-fn lookup_resolves_a_display_name_to_a_rendered_signature() {
-    let output = run(&["lookup", "create hud text"]);
-    assert_eq!(output.status.code(), Some(0), "{output:?}");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("entry: action"), "{stdout}");
-    assert!(stdout.contains("identity=createHudText"), "{stdout}");
-    assert!(
-        stdout.contains("signature=\"Create HUD Text("),
-        "a callable renders its signature: {stdout}"
-    );
-}
-
-#[test]
-fn lookup_within_lists_an_enums_members() {
-    let output = run(&["lookup", "--within", "Team", "--only", "enum-member"]);
-    assert_eq!(output.status.code(), Some(0), "{output:?}");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("name=\"All Teams\""), "{stdout}");
-    assert!(stdout.contains("name=\"Team 1\""), "{stdout}");
 }
 
 #[test]

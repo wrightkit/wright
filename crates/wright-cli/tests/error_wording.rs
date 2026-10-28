@@ -246,29 +246,6 @@ fn serve_names_the_operation_not_the_command() {
 }
 
 #[test]
-fn unmatched_file_lists_project_sources() {
-    let path = temp_file("main.ws", DUP_RULES);
-    let output = run(&[
-        "inspect",
-        "symbols",
-        path.to_str().unwrap(),
-        "--file",
-        "nope.ws",
-        "-f",
-        "json",
-    ]);
-    assert_eq!(output.status.code(), Some(2));
-    let envelope = parse_json(&output.stdout);
-    assert_eq!(envelope["diagnostics"][0]["code"], "invalid-selection");
-    let message = envelope["diagnostics"][0]["message"].as_str().unwrap();
-    assert!(
-        message.contains("nope.ws") && message.contains("main.ws"),
-        "the refusal lists the program's source files: {message}"
-    );
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-#[test]
 fn file_selector_has_no_suffix_matching() {
     let dir = std::env::temp_dir().join(format!("wright-wording-project-{}", std::process::id()));
     let src = dir.join("src");

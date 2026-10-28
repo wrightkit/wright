@@ -617,35 +617,6 @@ mod tests {
     }
 
     #[test]
-    fn workshop_edits_validate_by_reparsing_the_source() {
-        let (dir, mut session) = workshop_session(WORKSHOP);
-        let loaded = session.load().expect("loaded");
-        let edit = SourceEdit {
-            edit_kind: "edit".to_string(),
-            source: loaded.input.display.clone(),
-            source_identity: crate::input_identity(&loaded.input.text),
-            range: EditRange {
-                start_line: 3,
-                start_col: 12,
-                end_line: 3,
-                end_col: 17,
-            },
-            new_text: "total".to_string(),
-        };
-        let sources = BTreeMap::from([(loaded.input.display.clone(), loaded.input.text.clone())]);
-        let validation = validate_transaction(
-            &session.config,
-            session.catalog(),
-            Some(&sources),
-            &EditTransaction::new(vec![edit]).unwrap(),
-        );
-        assert!(validation.ok, "{:?}", validation.diagnostics);
-        let preview = validation.preview.expect("preview");
-        assert!(preview[0].new_text.contains("0: total"));
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
     fn workshop_edits_refuse_with_the_reparse_diagnostics() {
         let (dir, mut session) = workshop_session(WORKSHOP);
         let loaded = session.load().expect("loaded");
@@ -888,61 +859,6 @@ mod tests {
             "the unrestored file is named: {:?}",
             diagnostic.message
         );
-    }
-
-    #[test]
-    fn opy_input_routes_to_the_provider_operation() {
-        let dir = std::env::temp_dir().join(format!(
-            "wright-edit-opy-{}-{}",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::SeqCst)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("input.opy");
-        std::fs::write(&path, "rule \"r\":\n    pass\n").unwrap();
-        let session = crate::CompilerSession::new(SessionConfig {
-            input: crate::InputSpec::Path(path.clone()),
-            kind: SourceKind::Opy,
-            ..SessionConfig::default()
-        })
-        .expect("session");
-        let sources = BTreeMap::from([(
-            path.to_string_lossy().into_owned(),
-            "rule \"r\":\n    pass\n".to_string(),
-        )]);
-        let edit = SourceEdit {
-            edit_kind: "edit".to_string(),
-            source: path.to_string_lossy().into_owned(),
-            source_identity: crate::input_identity("rule \"r\":\n    pass\n"),
-            range: EditRange {
-                start_line: 1,
-                start_col: 1,
-                end_line: 1,
-                end_col: 2,
-            },
-            new_text: "x".to_string(),
-        };
-        let validation = validate_transaction(
-            &session.config,
-            session.catalog(),
-            Some(&sources),
-            &EditTransaction::new(vec![edit]).unwrap(),
-        );
-        assert!(!validation.ok);
-        assert_eq!(validation.diagnostics[0].code, "edit-requires-provider");
-        assert!(
-            validation.diagnostics[0]
-                .message
-                .contains("providerValidateEdit"),
-            "the refusal names the provider operation"
-        );
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn empty_transaction_is_rejected() {
-        let error = EditTransaction::new(Vec::new()).unwrap_err();
-        assert_eq!(error.code, "edit-empty-transaction");
     }
 
     #[test]

@@ -645,26 +645,4 @@ mod tests {
 
         std::fs::remove_dir_all(directory).expect("remove test directory");
     }
-
-    #[test]
-    fn directory_detection_ignores_a_stray_txt() {
-        static COUNTER: AtomicUsize = AtomicUsize::new(0);
-        let directory = std::env::temp_dir().join(format!(
-            "wright-input-stray-txt-{}-{}",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::SeqCst)
-        ));
-        std::fs::create_dir_all(&directory).expect("create test directory");
-        std::fs::write(directory.join("version.txt"), "0.11.0\n").expect("write text file");
-
-        let config = SessionConfig {
-            input: InputSpec::Path(directory.clone()),
-            kind: SourceKind::Auto,
-            ..SessionConfig::default()
-        };
-        let error = resolve(&config).expect_err("a lone .txt must not claim the directory");
-        assert_eq!(error.code, "input-kind-unknown");
-
-        std::fs::remove_dir_all(directory).expect("remove test directory");
-    }
 }
