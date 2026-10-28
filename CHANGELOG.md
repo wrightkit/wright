@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.41.0](https://github.com/wrightkit/wright/compare/v0.40.0...v0.41.0) (2026-10-28)
+
+
+### Features
+
+* run lint through one driver pipeline and move --fail-on into the driver ([#1020](https://github.com/wrightkit/wright/issues/1020)) ([22b2e79](https://github.com/wrightkit/wright/commit/22b2e7929acb33e3692af6846482b810fae862b3)), closes [#1002](https://github.com/wrightkit/wright/issues/1002)
+
+
+### Dependencies
+
+* bump workshop-rs to 1.28.1 ([#1024](https://github.com/wrightkit/wright/issues/1024)) ([1f42610](https://github.com/wrightkit/wright/commit/1f4261059d0ad5a35fc23d5e529e745af46b7e28))
+
 ## [0.40.0](https://github.com/wrightkit/wright/compare/v0.39.3...v0.40.0) (2026-10-27)
 
 
