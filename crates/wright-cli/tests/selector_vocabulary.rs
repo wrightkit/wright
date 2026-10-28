@@ -284,6 +284,14 @@ fn lookup_only_filters_entries_by_kind() {
 }
 
 #[test]
+fn lookup_rejects_an_out_of_range_limit() {
+    let output = run(&["lookup", "wait", "--limit", "0", "-f", "json"]);
+    assert_eq!(output.status.code(), Some(1), "{}", command_result(&output));
+    let result = parse_json(&output.stdout);
+    assert_eq!(result["error"]["code"], "malformed-request", "{result}");
+}
+
+#[test]
 fn inspect_refs_and_cfg_keep_only_as_the_category_filter() {
     let path = temp_file("cake.txt", &corpus_text("real-world/overpy-cake"));
     let path = path.to_str().unwrap();

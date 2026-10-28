@@ -116,6 +116,70 @@ fn install_fetches_into_the_store_and_never_activates() {
 }
 
 #[test]
+fn package_failures_report_their_code_and_exit_class() {
+    let gone = TestServer::serve(|_| Response::not_found());
+    let malformed = package_server(
+        "community",
+        "rules",
+        SHA_A,
+        tarball(&[("o-r-bad/rules/bad.yaml", b"id: bad\nmetadata: []\n")]),
+    );
+    let limited = TestServer::serve(|_| Response {
+        status: "403 Forbidden",
+        headers: vec![
+            ("x-ratelimit-remaining".to_string(), "0".to_string()),
+            ("x-ratelimit-reset".to_string(), "1893456000".to_string()),
+        ],
+        body: b"API rate limit exceeded".to_vec(),
+    });
+    let cases: [(&TestServer, &[&str], &str, &str, i32); 4] = [
+        (
+            &gone,
+            &["install", "gitlab.com/community/rules"],
+            "USAGE package-install",
+            "lint-package-source",
+            2,
+        ),
+        (
+            &malformed,
+            &["install", "community/rules"],
+            "ERROR package-install",
+            "lint-package-invalid",
+            1,
+        ),
+        (
+            &gone,
+            &["install", "community/rules"],
+            "ERROR package-install",
+            "lint-package-not-found",
+            4,
+        ),
+        (
+            &limited,
+            &["search"],
+            "ERROR package-search",
+            "lint-package-rate-limited",
+            4,
+        ),
+    ];
+    for (server, command, header, code, exit) in cases {
+        let dirs = TestDirs::new(code);
+        let args: Vec<&str> = ["lint", "package"]
+            .into_iter()
+            .chain(command.iter().copied())
+            .chain(["--renderer", "plain"])
+            .collect();
+        let output = run(&dirs, Some(server), &args);
+        let text = transcript(&dirs, &output);
+        assert!(
+            text.contains(header) && text.contains(&format!("diagnostic: error {code}")),
+            "{code}: {text}"
+        );
+        assert_eq!(output.status.code(), Some(exit), "{code}: {text}");
+    }
+}
+
+#[test]
 fn list_reports_installed_and_damaged_entries() {
     let dirs = TestDirs::new("list");
     write_entry(&dirs.root, "community", "rules", SHA_A, RULE);
