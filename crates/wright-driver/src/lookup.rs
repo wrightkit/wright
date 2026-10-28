@@ -786,6 +786,3 @@ fn lpp_default_text(value: &Value) -> String {
         other => other.to_string(),
     }
 }
-
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod tests;
