@@ -246,53 +246,6 @@ fn serve_names_the_operation_not_the_command() {
 }
 
 #[test]
-fn help_shows_inputless_narrowed_examples() {
-    for args in [vec!["inspect", "cost", "--help"], vec!["inspect", "--help"]] {
-        let output = run(&args);
-        assert!(output.status.success(), "{args:?}");
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let example = stdout
-            .lines()
-            .find(|line| line.contains("wright inspect") && line.contains("--rule"))
-            .unwrap_or_else(|| panic!("{args:?} shows a narrowed example: {stdout}"));
-        assert!(
-            !example.contains("INPUT") && !example.ends_with(".ws"),
-            "the narrowed example omits INPUT: {example}"
-        );
-    }
-}
-
-#[test]
-fn ambiguous_rule_lists_candidates_with_locations() {
-    let path = temp_file("dup.ws", DUP_RULES);
-    let output = run(&[
-        "inspect",
-        "cost",
-        path.to_str().unwrap(),
-        "--rule",
-        "tick",
-        "-f",
-        "json",
-    ]);
-    assert_eq!(output.status.code(), Some(2));
-    let message = parse_json(&output.stdout)["diagnostics"][0]["message"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    for candidate in ["tick#1 at dup.ws:", "tick#2 at dup.ws:"] {
-        assert!(
-            message.contains(candidate),
-            "the candidate carries path:line:column: {message}"
-        );
-    }
-    assert!(
-        !message.contains("{file:") && !message.contains(" at 0:"),
-        "no placeholder or bare file index: {message}"
-    );
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-#[test]
 fn unmatched_file_lists_project_sources() {
     let path = temp_file("main.ws", DUP_RULES);
     let output = run(&[

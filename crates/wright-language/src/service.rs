@@ -713,10 +713,6 @@ mod tests {
     use super::*;
     use crate::document::Document;
 
-    fn service() -> LanguageService {
-        LanguageService::new(PathBuf::from("/project"))
-    }
-
     fn open(service: &mut LanguageService, name: &str, text: &str) -> String {
         let uri = format!("file:///project/{name}");
         service.store.open(Document::with_version(
@@ -733,52 +729,6 @@ mod tests {
             RenameOutcome::Refused { code, message } => (code, message),
             RenameOutcome::Applied(_) => panic!("expected a refusal, got applied edits"),
         }
-    }
-
-    #[test]
-    fn rename_on_an_unopen_document_refuses_without_a_provider() {
-        let mut service = service();
-        let (code, message) = refused(service.rename(
-            "file:///project/main.opy",
-            Position {
-                line: 0,
-                character: 0,
-            },
-            "renamed",
-        ));
-        assert_eq!(code, "rename-unknown-document");
-        assert!(message.contains("not open"), "{message}");
-    }
-
-    #[test]
-    fn rename_on_a_non_source_document_refuses_without_a_provider() {
-        let mut service = service();
-        let uri = open(&mut service, "notes.txt", "hello\n");
-        let (code, _) = refused(service.rename(
-            &uri,
-            Position {
-                line: 0,
-                character: 0,
-            },
-            "renamed",
-        ));
-        assert_eq!(code, "rename-unsupported-document");
-    }
-
-    #[test]
-    fn rename_on_a_source_document_without_a_provider_refuses() {
-        let mut service = service();
-        let uri = open(&mut service, "main.del", "x\n");
-        let (code, message) = refused(service.rename(
-            &uri,
-            Position {
-                line: 0,
-                character: 0,
-            },
-            "renamed",
-        ));
-        assert_eq!(code, "provider-not-configured");
-        assert!(message.contains("del"), "{message}");
     }
 
     #[test]

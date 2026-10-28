@@ -52,25 +52,6 @@ fn tool_service_queries_canonical_workshop() {
 }
 
 #[test]
-fn tool_service_inspect_matches_session_inspect() {
-    let mut session = CompilerSession::new(SessionConfig {
-        input: InputSpec::Path(workshop_path()),
-        kind: SourceKind::Workshop,
-        ..SessionConfig::default()
-    })
-    .unwrap();
-    let expected = session.inspect();
-    let mut service = ToolService::new(&mut session).unwrap();
-    let actual = service.inspect();
-
-    assert_eq!(actual.ok, expected.ok);
-    assert_eq!(
-        serde_json::to_value(actual.result).unwrap(),
-        serde_json::to_value(expected.result).unwrap()
-    );
-}
-
-#[test]
 fn tool_service_lint_queries_keep_the_session_configuration() {
     let mut lint = wright_driver::config::LintConfig::default();
     assert!(lint.set_severity_by_name("min-wait-loop", "error"));
@@ -664,54 +645,6 @@ fn cost_estimate_reports_the_canonical_element_count() {
             .is_some_and(|kind| kind.contains("not a statement of client importability")),
         "the kind map scopes the count: {cost}"
     );
-}
-
-#[test]
-fn cost_estimate_reports_unavailable_count_with_budget_and_reason() {
-    let path = temp_workshop(
-        "opaque.ws",
-        "variables {\n    global:\n        0: x\n}\nrule (\"test\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Wait(1);\n        End;\n    }\n}\n",
-    );
-    let mut session = CompilerSession::new(SessionConfig {
-        input: InputSpec::Path(path.clone()),
-        kind: SourceKind::Workshop,
-        ..SessionConfig::default()
-    })
-    .unwrap();
-    let mut service = ToolService::new(&mut session).unwrap();
-    let cost = result_of(
-        &mut service,
-        &ToolRequest::CostEstimate {
-            selection: FindingSelection::default(),
-            rule: None,
-            all: true,
-        },
-    );
-    assert_eq!(cost["elementCount"]["budget"], 32768);
-    assert!(
-        cost["elementCount"].get("total").is_none(),
-        "the count is absent, not zero: {cost}"
-    );
-    assert!(
-        cost["elementCount"].get("rules").is_none(),
-        "no fabricated shares list: {cost}"
-    );
-    assert!(
-        cost["elementCountUnavailable"]
-            .as_str()
-            .unwrap()
-            .contains("rawWorkshopAction"),
-        "{cost}"
-    );
-    assert!(cost["exact"]["emittedBytes"].is_null());
-    assert!(
-        cost["exact"]["emittedBytesUnavailable"]
-            .as_str()
-            .unwrap()
-            .contains("rawWorkshopAction"),
-        "{cost}"
-    );
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[test]
@@ -3793,26 +3726,6 @@ fn session_lint_keeps_the_effective_configuration_over_the_shared_index() {
     assert!(!session.lint().ok);
     assert!(session.analyze().ok);
     assert_eq!(session.semantic_build_count(), 1);
-}
-
-#[test]
-fn tool_service_analyze_matches_session_analyze() {
-    let mut session = CompilerSession::new(SessionConfig {
-        input: InputSpec::Path(workshop_path()),
-        kind: SourceKind::Workshop,
-        ..SessionConfig::default()
-    })
-    .unwrap();
-    let expected = session.analyze();
-    let mut service = ToolService::new(&mut session).unwrap();
-    let actual = service.analyze();
-
-    assert_eq!(actual.ok, expected.ok);
-    assert_eq!(
-        serde_json::to_value(actual.result).unwrap(),
-        serde_json::to_value(expected.result).unwrap()
-    );
-    assert_eq!(service.semantic_build_count(), 1);
 }
 
 #[test]

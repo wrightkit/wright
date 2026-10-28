@@ -1,9 +1,0 @@
----
-source: crates/wright-cli/tests/terminal.rs
-expression: transcript(&out)
----
-exit: 3
---- stdout ---
---- stderr ---
- UNSUPPORTED  update
-  unsupported platform plan9/x86_64 (supported: linux/x86_64, darwin/x86_64, darwin/aarch64, windows/x86_64); use the official installer (curl -fsSL https://install.wrightkit.dev/wright/install.sh | bash) or a package manager

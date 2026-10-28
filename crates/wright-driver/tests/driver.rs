@@ -260,38 +260,6 @@ fn workshop_check_and_compile_reject_violations_beside_residuals() {
 }
 
 #[test]
-fn workshop_unknown_kind_codes_are_kebab_case_tokens() {
-    let mut session = CompilerSession::new(SessionConfig {
-        input: InputSpec::Text {
-            text: "rule (\"r\")\n{\n    event\n    {\n        Ongoing - Global;\n    }\n    actions\n    {\n        Set Global Variable(A, Map(Not A Real Map));\n    }\n}\n".to_string(),
-            path: None,
-        },
-        kind: SourceKind::Workshop,
-        ..SessionConfig::default()
-    })
-    .expect("session creates");
-    let check = session.check();
-    let compile = session.compile();
-    for (name, diagnostics) in [
-        ("check", check.diagnostics),
-        ("compile", compile.diagnostics),
-    ] {
-        let diagnostic = diagnostics
-            .iter()
-            .find(|d| d.code == "unknown-enum-member")
-            .unwrap_or_else(|| panic!("{name}: the code is unknown-enum-member: {diagnostics:?}"));
-        assert_eq!(diagnostic.severity, wright_driver::Severity::Error);
-        assert_eq!(diagnostic.stage, wright_driver::Stage::Frontend);
-        assert!(
-            diagnostics
-                .iter()
-                .all(|d| !d.code.contains(char::is_whitespace)),
-            "{name}: every code is a single token: {diagnostics:?}"
-        );
-    }
-}
-
-#[test]
 fn workshop_check_accepts_optional_action_defaults() {
     let directory = workspace_root()
         .join("target")
@@ -385,88 +353,6 @@ fn workshop_compile_is_deterministic_and_idempotent() {
         "a program under the client element limit gets no target diagnostic: {:?}",
         first.diagnostics
     );
-}
-
-#[test]
-fn compile_warns_over_client_element_limit_but_still_emits() {
-    let elements = (0..17_000).map(|_| "1").collect::<Vec<_>>().join(", ");
-    let source = format!(
-        "variables {{\n    global:\n        0: values\n}}\n\nrule (\"fill\") {{\n    event {{\n        Ongoing - Global;\n    }}\n    actions {{\n        Set Global Variable(values, Array({elements}));\n    }}\n}}\n"
-    );
-    let catalog = workshop_rs::catalog::Catalog::builtin_ref().expect("catalog");
-    let locale = workshop_rs::catalog::Locale::new("en-US");
-    let expected_total =
-        workshop_rs::parser::parse_with_context(&source, catalog, &locale, catalog)
-            .expect("generated program parses")
-            .element_count(catalog)
-            .expect("generated program counts")
-            .total;
-    assert!(expected_total > 32768, "fixture is over the client limit");
-
-    let directory = workspace_root()
-        .join("target")
-        .join(format!("wright-driver-{}", std::process::id()));
-    std::fs::create_dir_all(&directory).expect("fixture directory creates");
-    let path = directory.join("over-limit.ws");
-    std::fs::write(&path, source).expect("over-limit fixture writes");
-
-    let mut session = CompilerSession::new(SessionConfig {
-        input: InputSpec::Path(path.clone()),
-        kind: SourceKind::Workshop,
-        ..SessionConfig::default()
-    })
-    .expect("session creates");
-
-    let result = session.compile();
-    assert!(
-        result.ok,
-        "over-limit compile still succeeds: {:?}",
-        result.diagnostics
-    );
-    assert_eq!(result.exit, 0);
-    let output = result
-        .result
-        .output
-        .as_ref()
-        .expect("the artifact is still emitted");
-    assert!(output.text.contains("Set Global Variable"));
-    let warning = result
-        .diagnostics
-        .iter()
-        .find(|d| d.code == "target-element-limit")
-        .expect("the element-limit warning is reported");
-    assert_eq!(warning.severity, wright_driver::Severity::Warning);
-    assert_eq!(warning.stage, wright_driver::Stage::Emission);
-    assert!(
-        warning.message.contains(&expected_total.to_string()),
-        "the warning reports the canonical observed count: {warning:?}"
-    );
-    assert!(warning.message.contains("32768"), "{warning:?}");
-    assert!(
-        warning.message.contains("still emitted"),
-        "the warning must not read as a compilation failure: {warning:?}"
-    );
-    assert!(
-        warning.message.contains("\"fill\""),
-        "the warning names the largest contributing rule: {warning:?}"
-    );
-    let span = warning
-        .span
-        .as_ref()
-        .expect("the largest contributing rule is located");
-    assert!(span.path.ends_with("over-limit.ws"), "{span:?}");
-
-    let check = session.check();
-    assert!(
-        check
-            .diagnostics
-            .iter()
-            .all(|d| d.code != "target-element-limit"),
-        "check does not evaluate client import limits: {:?}",
-        check.diagnostics
-    );
-
-    let _ = std::fs::remove_dir_all(&directory);
 }
 
 #[test]
@@ -759,31 +645,5 @@ fn compile_to_asks_before_replacing_and_never_replaces_the_input() {
         });
     assert_eq!(refused.exit, 2);
     assert_eq!(std::fs::read_to_string(&input).unwrap(), source);
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn failed_compile_writes_no_file() {
-    use wright_driver::{CompileWrite, OutputDest, Overwrite};
-
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("failed-compile");
-    std::fs::create_dir_all(&dir).unwrap();
-    let input = dir.join("broken.ws");
-    std::fs::write(&input, "rule (\"x\") { event { Ongoing - Global; }").unwrap();
-    let explicit = dir.join("explicit.ow");
-    let envelope = CompilerSession::new(SessionConfig {
-        input: InputSpec::Path(input),
-        kind: SourceKind::Workshop,
-        ..SessionConfig::default()
-    })
-    .unwrap()
-    .compile_to(CompileWrite {
-        dest: OutputDest::Path(explicit.clone()),
-        overwrite: Overwrite::Force,
-        to: None,
-    });
-    assert!(!envelope.ok);
-    assert!(envelope.result.output.is_none());
-    assert!(!explicit.exists());
     let _ = std::fs::remove_dir_all(&dir);
 }

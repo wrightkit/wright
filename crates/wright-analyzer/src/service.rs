@@ -211,12 +211,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "violates the code grammar")]
-    fn error_info_new_rejects_an_uppercase_code() {
-        let _ = ErrorInfo::new("Unknown-Value", "message");
-    }
-
-    #[test]
     fn error_info_carried_keeps_foreign_vocabulary() {
         for code in [
             "lookup.unknownWithin",

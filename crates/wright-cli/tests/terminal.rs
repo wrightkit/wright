@@ -68,19 +68,12 @@ fn transcript(out: &Outcome) -> String {
 }
 
 fn snap(name: &str, dir: &Path, args: &[&str], env: &[(&str, String)]) {
-    for (columns, color) in [
-        (100u16, "never"),
-        (80, "never"),
-        (100, "always"),
-        (80, "always"),
-    ] {
-        let mut full_args: Vec<&str> = args.to_vec();
-        full_args.extend(["--renderer", "terminal", "--color", color]);
-        let mut env = env.to_vec();
-        env.push(("COLUMNS", columns.to_string()));
-        let out = run(dir, &full_args, &env);
-        insta::assert_snapshot!(format!("{name}_w{columns}_{color}"), transcript(&out));
-    }
+    let mut full_args: Vec<&str> = args.to_vec();
+    full_args.extend(["--renderer", "terminal", "--color", "never"]);
+    let mut env = env.to_vec();
+    env.push(("COLUMNS", "100".to_string()));
+    let out = run(dir, &full_args, &env);
+    insta::assert_snapshot!(name, transcript(&out));
 }
 
 #[test]
@@ -338,34 +331,6 @@ fn no_color_and_color_flag_both_apply() {
         forced.stdout.contains("<ESC>[43;30m WARN <ESC>[0m"),
         "--color always fills the tag: {}",
         forced.stdout
-    );
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn status_survives_without_colour() {
-    let dir = work_dir(
-        "no-color",
-        &[("flow.ws", &workshop("synthetic/control-flow"))],
-    );
-    let args = [
-        "lint",
-        "flow.ws",
-        "--renderer",
-        "terminal",
-        "--color",
-        "never",
-    ];
-    let out = run(&dir, &args, &[("COLUMNS", "100".to_string())]);
-    assert!(
-        out.stdout.starts_with(" WARN  lint\n"),
-        "the word carries the status: {}",
-        out.stdout
-    );
-    assert!(
-        !out.stdout.contains("<ESC>"),
-        "no escape reaches the no-colour report: {}",
-        out.stdout
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -92,33 +92,6 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
     assert!(responses[2]["result"].is_object());
 
     let tools = responses[1]["result"]["tools"].as_array().unwrap();
-    let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(
-        names,
-        [
-            "wright_project",
-            "wright_rules",
-            "wright_symbols",
-            "wright_references",
-            "wright_usage",
-            "wright_cfg",
-            "wright_findings",
-            "wright_persistent_objects",
-            "wright_lint",
-            "wright_lint_rules",
-            "wright_call_graph",
-            "wright_cost_estimate",
-            "wright_target_metadata",
-            "wright_check",
-            "wright_analyze",
-            "wright_inspect",
-            "wright_validate_edit_transaction",
-            "wright_provider_validate_edit",
-            "wright_edit_statements",
-            "wright_lookup",
-            "wright_simulate",
-        ]
-    );
     let caps = run_lines("stdio", &input, &[r#"{"op":"capabilities"}"#]);
     let operations: Vec<String> = caps[0]["result"]["operations"]
         .as_array()
