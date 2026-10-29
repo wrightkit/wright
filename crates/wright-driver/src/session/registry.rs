@@ -12,9 +12,6 @@ pub(super) fn compose(config: &SessionConfig) -> Result<LintRegistry, Diagnostic
     crate::lint_package::activate_pinned(&config.lint, &config.lint_package, &mut registry)?;
     for path in &config.lint_rule_paths {
         registry.load_path(path).map_err(|error| {
-            // #1028: a missing or unreadable `--rule-file` path is a usage
-            // error; a file that loads but is invalid content stays a
-            // source error.
             let class = match error {
                 RuleRegistryError::Io(..) => ExitClass::Usage,
                 _ => ExitClass::SourceError,

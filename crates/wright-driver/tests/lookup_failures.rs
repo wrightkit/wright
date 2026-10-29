@@ -383,9 +383,6 @@ fn lookup_surfaces_every_failure_kind_with_its_code_and_exit_class() {
     // The session machinery's own failure kinds at the service
     // boundary: construction diagnostics keep their own code and class,
     // and `session-config-changed` refuses `ToolService::new` itself.
-    // `lint-rule-error` splits by failure kind (#1028): a missing or
-    // unreadable `--rule-file` path is `Usage`, while a file that loads
-    // but is invalid content is `SourceError`.
     let session_failures: &[(&str, &str, ExitClass)] = &[
         ("invalid-selection", "invalid-selection", ExitClass::Usage),
         (

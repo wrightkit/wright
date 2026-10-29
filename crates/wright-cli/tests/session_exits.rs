@@ -1,10 +1,3 @@
-//! Session-construction exits follow the diagnostic's declared class
-//! (#1028): `lint-rule-error` splits by failure kind — a missing or
-//! unreadable `--rule-file` path is a usage error (2), while a file
-//! that loads but is invalid content is a source error (1). Each of
-//! the three session-construction surfaces must exit by the class the
-//! diagnostic carries, not a fixed wrapper exit.
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

@@ -468,9 +468,6 @@ fn check_surfaces_every_failure_kind_with_its_code_and_exit_class() {
     assert_eq!(diagnostic.class, ExitClass::Usage);
     assert_eq!(diagnostic.class.exit_code(), ExitClass::Usage.exit_code());
 
-    // `lint-rule-error` splits by failure kind (#1028): a missing or
-    // unreadable `--rule-file` path is a usage error, while a file that
-    // loads but is invalid content is a source error.
     {
         let dir = temp_dir("check-rule-file");
         let Err(diagnostic) = CompilerSession::new(SessionConfig {
