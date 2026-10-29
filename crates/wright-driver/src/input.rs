@@ -20,6 +20,11 @@ pub struct ResolvedInput {
     pub display: String,
     pub identity: String,
     pub origin: Origin,
+    /// The complete disk-observation set the provider declared for the
+    /// load (LPP `compileInputs`, #1005) — like `identity`, set after
+    /// resolution by the provider path. `None` when the provider does not
+    /// advertise compile-input completeness, or for a non-provider load.
+    pub compile_inputs: Option<Vec<PathBuf>>,
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
@@ -108,6 +113,75 @@ pub(crate) fn digest_files(files: Vec<PathBuf>) -> DiskFingerprint {
     DiskFingerprint::Digest(sha256_hex(&hasher.finalize()))
 }
 
+/// The fingerprint of a provider-declared compile-input set (LPP
+/// `compileInputs`, #1005). Each declared path contributes the observation
+/// the declaration records — existence and kind, a symlink's target, a
+/// file's contents, a listed directory's entry names and kinds, or a
+/// marker for any other kind — so any change the compile could observe
+/// invalidates the snapshot while files outside the declared set stay
+/// unread and the read never blocks on a non-file kind. Callers trust the
+/// declaration only when the provider advertised `compileInputs`.
+pub(crate) fn digest_declared_inputs(inputs: &[PathBuf]) -> DiskFingerprint {
+    let mut inputs = inputs.to_vec();
+    inputs.sort();
+    inputs.dedup();
+    let mut hasher = Sha256::new();
+    for path in &inputs {
+        hasher.update(path.as_os_str().as_encoded_bytes());
+        hasher.update([0]);
+        match std::fs::symlink_metadata(path) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                hasher.update(b"link");
+                if let Ok(target) = std::fs::read_link(path) {
+                    hasher.update(target.as_os_str().as_encoded_bytes());
+                }
+            }
+            Ok(meta) if meta.is_dir() => {
+                hasher.update(b"dir");
+                let mut entries: Vec<Vec<u8>> = std::fs::read_dir(path)
+                    .map(|read| {
+                        read.flatten()
+                            .map(|entry| {
+                                let kind = entry
+                                    .file_type()
+                                    .map(|kind| {
+                                        if kind.is_dir() {
+                                            b'd'
+                                        } else if kind.is_symlink() {
+                                            b'l'
+                                        } else {
+                                            b'f'
+                                        }
+                                    })
+                                    .unwrap_or(b'?');
+                                let mut bytes = entry.file_name().into_encoded_bytes();
+                                bytes.push(kind);
+                                bytes
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                entries.sort();
+                for entry in entries {
+                    hasher.update(&entry);
+                    hasher.update([0]);
+                }
+            }
+            Ok(meta) if meta.is_file() => {
+                hasher.update(b"file");
+                match std::fs::read(path) {
+                    Ok(bytes) => hasher.update(&bytes),
+                    Err(_) => hasher.update([0xff]),
+                }
+            }
+            Ok(_) => hasher.update(b"other"),
+            Err(_) => hasher.update(b"missing"),
+        }
+        hasher.update([0]);
+    }
+    DiskFingerprint::Digest(sha256_hex(&hasher.finalize()))
+}
+
 pub fn resolve(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
     match &config.input {
         InputSpec::Path(path) => resolve_path(path, config),
@@ -187,6 +261,7 @@ fn resolve_file(
         display,
         identity: sha256_hex(&bytes),
         origin,
+        compile_inputs: None,
     })
 }
 
@@ -233,6 +308,7 @@ fn resolve_directory(
         display,
         identity: String::new(),
         origin,
+        compile_inputs: None,
     })
 }
 
@@ -414,6 +490,7 @@ fn resolve_text(
         display,
         identity: sha256_hex(text.as_bytes()),
         origin,
+        compile_inputs: None,
     })
 }
 
@@ -445,6 +522,7 @@ fn resolve_stdin(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
         display: "<stdin>".to_string(),
         identity: sha256_hex(&bytes),
         origin,
+        compile_inputs: None,
     })
 }
 
@@ -610,6 +688,80 @@ mod tests {
             .expect("create dir symlink");
         let _ = digest_tree(&directory);
 
+        std::fs::remove_dir_all(directory).expect("remove test directory");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn digest_declared_inputs_observes_each_declared_kind() {
+        let directory = temp_dir("declared");
+        let member = directory.join("main.opy");
+        let missing = directory.join("missing.opy");
+        let undeclared = directory.join("notes.md");
+        std::fs::write(&member, "v1\n").expect("write member");
+        std::fs::write(&undeclared, "v1\n").expect("write undeclared");
+        let inputs = vec![directory.clone(), member.clone(), missing.clone()];
+        let baseline = digest_declared_inputs(&inputs);
+
+        std::fs::write(&undeclared, "v2\n").expect("edit undeclared");
+        assert_eq!(
+            baseline,
+            digest_declared_inputs(&inputs),
+            "a path outside the declared set is not observed"
+        );
+
+        std::fs::write(&member, "v2\n").expect("edit member");
+        assert_ne!(
+            baseline,
+            digest_declared_inputs(&inputs),
+            "a declared file's contents are observed"
+        );
+        std::fs::write(&member, "v1\n").expect("restore member");
+        assert_eq!(baseline, digest_declared_inputs(&inputs));
+
+        std::fs::write(directory.join("added.opy"), "n\n").expect("add member");
+        assert_ne!(
+            baseline,
+            digest_declared_inputs(&inputs),
+            "a declared directory's entries are observed"
+        );
+        std::fs::remove_file(directory.join("added.opy")).expect("remove member");
+
+        std::fs::write(&missing, "m\n").expect("create missing");
+        assert_ne!(
+            baseline,
+            digest_declared_inputs(&inputs),
+            "a declared missing path's existence is observed"
+        );
+        std::fs::remove_file(&missing).expect("restore missing");
+        assert_eq!(baseline, digest_declared_inputs(&inputs));
+
+        let link = directory.join("link.opy");
+        std::os::unix::fs::symlink(&member, &link).expect("create symlink");
+        let linked = digest_declared_inputs(std::slice::from_ref(&link));
+        std::fs::remove_file(&link).expect("unlink");
+        std::os::unix::fs::symlink(&undeclared, &link).expect("relink");
+        assert_ne!(
+            linked,
+            digest_declared_inputs(&[link]),
+            "a declared symlink's target is observed"
+        );
+
+        std::fs::remove_dir_all(directory).expect("remove test directory");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn digest_declared_inputs_does_not_block_on_a_fifo() {
+        let directory = temp_dir("fifo");
+        let member = directory.join("member.opy");
+        let mkfifo = std::process::Command::new("mkfifo").arg(&member).status();
+        assert!(mkfifo.expect("spawn mkfifo").success());
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || drop(sender.send(digest_declared_inputs(&[member]))));
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(15))
+            .expect("a declared FIFO must not block the freshness check");
         std::fs::remove_dir_all(directory).expect("remove test directory");
     }
 

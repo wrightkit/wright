@@ -16,7 +16,7 @@ use crate::types::{
 };
 use crate::{
     LPP_ARTIFACT_NEGOTIATION_PROTOCOL_VERSION, LPP_DIRECTORY_TARGET_PROTOCOL_VERSION,
-    LPP_LOOKUP_PROTOCOL_VERSION, LPP_PROTOCOL_VERSION,
+    LPP_LOOKUP_PROTOCOL_VERSION, LPP_PROTOCOL_VERSION, protocol_version_at_least,
 };
 
 /// The negotiated result of a successful `lpp/initialize`.
@@ -205,8 +205,8 @@ pub trait LanguageProvider {
         capability_unavailable("projectLoading", "lpp/compile")
     }
 
-    /// `lpp/compile` over a file or directory target in an LPP 1.4 session,
-    /// stating the artifact formats the client accepts, most preferred first.
+    /// `lpp/compile` over a file or directory target, most-preferred
+    /// artifact format first (LPP 1.4+).
     fn compile_target_accepting(
         &mut self,
         _target: &ProjectEntry,
@@ -538,10 +538,10 @@ impl LanguageProvider for StdioLanguageProvider {
     ) -> Result<CompileResult, ProviderError> {
         self.require_capability(Capability::ProjectLoading)?;
         let negotiated = self.capabilities()?.protocol_version.clone();
-        if negotiated != LPP_ARTIFACT_NEGOTIATION_PROTOCOL_VERSION {
+        if !protocol_version_at_least(&negotiated, LPP_ARTIFACT_NEGOTIATION_PROTOCOL_VERSION) {
             return Err(ProviderError::ProtocolVersionMismatch {
                 supported: vec![negotiated],
-                message: "acceptedArtifactFormats is valid only in an LPP 1.4 session".to_string(),
+                message: "acceptedArtifactFormats requires LPP 1.4 or later".to_string(),
             });
         }
         let mut params = entry_params(target, project_root, locale);
@@ -1009,7 +1009,7 @@ mod tests {
     }
 
     #[test]
-    fn accepted_artifact_formats_are_sent_only_in_an_lpp_14_session() {
+    fn accepted_artifact_formats_need_lpp_14_or_later() {
         let target = ProjectEntry {
             uri: "file:///project/main.opy".to_string(),
             language_id: "opy".to_string(),

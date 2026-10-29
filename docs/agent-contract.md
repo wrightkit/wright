@@ -242,7 +242,8 @@ A request that consults the program needs a valid current snapshot at
 request time. When none exists, the request performs the deferred initial
 load; when one exists, the service fingerprints the input's observable file
 set: a file input's own content, a directory input's resolved members, or
-every file under a source-language project's entry directory. It reloads
+a source-language project's declared compile inputs (LPP 1.7
+`compileInputs`), or every file under its entry directory. It reloads
 when the set changes, so an edit, an added file, or a removed file is reflected
 in the next `symbols`, `references`, `check`, `lint`, or other
 program-reading request without restarting the session. An unchanged input

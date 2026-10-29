@@ -6,9 +6,11 @@
 
 `.opy` `check`, `compile`, `lint`, `analyze`, and `inspect` inputs use the
 owner-backed `opy-rs` implementation through Wright's narrow LPP adapter.
-Wright first negotiates LPP 1.4; a provider without it keeps the LPP 1.1
-file-target or LPP 1.2 directory-target session. No Node or OverPy is
-involved, and provider failures never fall back to the native frontend.
+Wright first negotiates LPP 1.7; a provider without it falls back to the
+highest mutual version — LPP 1.4 sessions keep artifact negotiation, and
+older providers keep the LPP 1.1 file-target or LPP 1.2 directory-target
+session. No Node or OverPy is involved, and provider failures never fall
+back to the native frontend.
 `lint`, `analyze`, `inspect`, and the `inspect` query subcommands parse the
 provider's canonical Workshop artifact through `workshop-rs` and reuse the
 existing Wright analyzer and lint registry, so they require the provider's

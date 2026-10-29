@@ -326,6 +326,7 @@ mod tests {
                 kind: "workshop".to_string(),
                 locale: Some("en-US".to_string()),
             },
+            compile_inputs: None,
         };
         let locale = workshop_rs::catalog::Locale::new("en-US");
         for kind in OWNER_KINDS {

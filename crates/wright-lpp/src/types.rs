@@ -147,6 +147,15 @@ pub struct CompileResult {
         skip_serializing_if = "Option::is_none"
     )]
     pub source_identity: Option<String>,
+    /// The complete set of filesystem inputs an entry-based compile read
+    /// (LPP 1.7 `compileInputs`): absolute `file:` URIs, present only when
+    /// the provider advertised the capability.
+    #[serde(
+        rename = "compileInputs",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub compile_inputs: Option<Vec<String>>,
     pub artifact: Option<WorkshopArtifact>,
 }
 
@@ -309,7 +318,7 @@ impl Capability {
 /// means not offered, so every field defaults rather than failing
 /// `provider-malformed` (#638). Ids newer than this client knows are
 /// retained in `other` instead of being silently dropped.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Capabilities {
     #[serde(default)]
     pub check: bool,
@@ -340,6 +349,10 @@ pub struct Capabilities {
     /// pre-1.6 sessions.
     #[serde(rename = "resolveIds", default)]
     pub resolve_ids: bool,
+    /// `compileInputs` entry-based compile results (LPP 1.7). Absent in
+    /// pre-1.7 sessions.
+    #[serde(rename = "compileInputs", default)]
+    pub compile_inputs: bool,
     /// Capability ids this client does not model — retained rather than
     /// silently dropped so negotiation diagnostics can see what the
     /// provider offered.
