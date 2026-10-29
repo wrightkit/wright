@@ -80,6 +80,7 @@ fn negotiated() -> wright_lpp::NegotiatedCapabilities {
             source_identity: false,
             lookup: false,
             resolve_ids: false,
+            compile_inputs: false,
             other: Default::default(),
         },
     }

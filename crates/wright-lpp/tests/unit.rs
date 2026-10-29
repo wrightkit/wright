@@ -720,18 +720,13 @@ fn malformed_initialize_response_fails_the_initialize_only() {
 fn capability_require_refuses_unnegotiated_capabilities() {
     let capabilities = Capabilities {
         check: true,
-        compile: false,
-        project_loading: false,
         reconstruct: true,
         symbols: true,
         definition: true,
         references: true,
         rename: true,
         edit_validation: true,
-        source_identity: false,
-        lookup: false,
-        resolve_ids: false,
-        other: std::collections::BTreeMap::new(),
+        ..Default::default()
     };
     assert!(capabilities.require(Capability::Check).is_ok());
     let error = capabilities

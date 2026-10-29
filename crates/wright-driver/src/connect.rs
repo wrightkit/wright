@@ -187,6 +187,10 @@ mod tests {
             None
         );
         assert_eq!(
+            mutual_protocol_version(&supported(&["1.5", "1.7"]), Some(ConnectFloor::Entry)),
+            Some("1.7")
+        );
+        assert_eq!(
             mutual_protocol_version(&supported(&["1.0"]), None),
             Some("1.0")
         );

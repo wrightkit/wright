@@ -457,6 +457,7 @@ mod tests {
                 kind: "workshop".to_string(),
                 locale: None,
             },
+            compile_inputs: None,
         };
 
         let items = vec![finding("a", "warning", Some("sub/f.ws"))];

@@ -12,26 +12,30 @@ use crate::diag::Diagnostic;
 use crate::input;
 use crate::{CompilerSession, Loaded, Provenance};
 
-/// The snapshot's disk-observation set (#1005): where the load's declared
-/// member list covers every disk input the snapshot depends on, freshness
-/// hashes exactly those files instead of walking the whole input tree.
+/// The snapshot's disk-observation set (#1005): where the load declares
+/// every disk input the snapshot depends on, freshness hashes exactly
+/// those observations instead of walking the whole input tree.
 ///
-/// `Provenance::Source` names the single parsed file, so its member list
-/// is complete when the input spec targets that file — members are
-/// display paths resolved against `cwd`, the same base the provider
-/// document set uses for non-mapped members. A directory spec still
-/// observes membership changes (an added `.ws` file flips a Workshop
-/// directory load to `input-kind-ambiguous`), so it keeps the directory
-/// fingerprint even though the resolved member list has one entry.
-/// A mapped provider artifact's `files` table is not complete — opy-rs
-/// omits compile-time `.js` script inputs (`#!postCompileHook`,
-/// `__script__`) whose edits change the artifact (opy-rs#654) — so
-/// mapped loads keep the whole-tree fingerprint the provider contract
-/// implies until the member list covers them. Unmapped artifacts,
-/// check-only loads, and caller-held text inputs declare no member list
-/// and keep the previous fingerprint (or `Detached`).
+/// A provider that advertised `compileInputs` (LPP 1.7) declares the
+/// complete observation set of its compile — files read, directories
+/// listed, missing paths, symlinks and their targets — and the
+/// fingerprint hashes those paths. `Provenance::Source` names the single
+/// parsed file, so its member list is complete when the input spec
+/// targets that file — members are display paths resolved against `cwd`,
+/// the same base the provider document set uses for non-mapped members.
+/// A directory spec still observes membership changes (an added `.ws`
+/// file flips a Workshop directory load to `input-kind-ambiguous`), so
+/// it keeps the directory fingerprint even though the resolved member
+/// list has one entry. A provider without `compileInputs` declares no
+/// complete member list — a mapped artifact's `files` table omits
+/// compile-time `.js` inputs (opy-rs#654) — so its loads keep the
+/// whole-tree fingerprint, as do unmapped artifacts, check-only loads,
+/// and caller-held text inputs.
 fn loaded_fingerprint(config: &crate::SessionConfig, loaded: &Loaded) -> input::DiskFingerprint {
     let resolved = &loaded.input;
+    if let Some(inputs) = &resolved.compile_inputs {
+        return input::digest_declared_inputs(inputs);
+    }
     let file_input = match &config.input {
         InputSpec::Path(path) => !resolved.cwd.join(path).is_dir(),
         _ => false,

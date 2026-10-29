@@ -1,8 +1,9 @@
 //! The provider-backed request-count and freshness contracts (#1005):
-//! `check` issues one provider compile per run, and a mapped snapshot's
-//! freshness observes the whole input tree — including the compile-time
-//! `.js` inputs the mapped `files` table does not yet declare
-//! (opy-rs#654) — so a non-source edit still invalidates it.
+//! `check` issues one provider compile per run, and a snapshot's
+//! freshness observes exactly the provider's declared compile inputs
+//! when the session negotiated `compileInputs` (LPP 1.7) — the whole
+//! input tree otherwise, since an undeclaring provider's member list can
+//! omit compile-time `.js` inputs (opy-rs#654).
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -42,10 +43,12 @@ fn cleanup(dir: PathBuf) {
 
 /// A provider that serves the same compilation on every call — the
 /// request-count and freshness tests need a repeatable compile across
-/// reloads.
+/// reloads. `compile_inputs` models the LPP `compileInputs` declaration:
+/// `Some` is the complete observation set of the staged compile.
 struct CloningProvider {
     operations: Arc<Mutex<Vec<&'static str>>>,
     compilation: SourceCompilation,
+    compile_inputs: Option<Vec<PathBuf>>,
 }
 
 impl SourceProvider for CloningProvider {
@@ -66,6 +69,10 @@ impl SourceProvider for CloningProvider {
             .expect("operation lock")
             .push("compile");
         Ok(self.compilation.clone())
+    }
+
+    fn compile_inputs(&self) -> Option<Vec<PathBuf>> {
+        self.compile_inputs.clone()
     }
 }
 
@@ -91,6 +98,7 @@ fn provider_backend_check_issues_one_compile_per_run() {
     let provider = CloningProvider {
         operations: Arc::clone(&operations),
         compilation: SourceCompilation::success(workshop_fixture("synthetic/basic-rule")),
+        compile_inputs: None,
     };
     let config = SessionConfig {
         input: InputSpec::Path(entry),
@@ -116,6 +124,7 @@ fn provider_backend_check_serves_compile_from_its_own_snapshot() {
     let provider = CloningProvider {
         operations: Arc::clone(&operations),
         compilation: SourceCompilation::success(workshop_fixture("synthetic/basic-rule")),
+        compile_inputs: None,
     };
     let config = SessionConfig {
         input: InputSpec::Path(entry),
@@ -135,12 +144,12 @@ fn provider_backend_check_serves_compile_from_its_own_snapshot() {
 }
 
 #[test]
-fn a_mapped_project_still_observes_files_the_member_list_omits() {
+fn an_undeclaring_provider_keeps_the_whole_tree_fingerprint() {
     let (dir, entry) = temp_entry();
-    // The mapped `files` table lists source members only; a `.js` hook
-    // consumed at compile time is an input the member list omits until
-    // opy-rs registers it (opy-rs#654), so the snapshot keeps the
-    // whole-tree fingerprint and a script edit still invalidates it.
+    // The provider declares no `compileInputs` set, so the snapshot
+    // cannot bound its observation set by the mapped `files` table — it
+    // omits compile-time `.js` inputs (opy-rs#654) — and keeps the
+    // whole-tree fingerprint: a script edit still invalidates it.
     let script = dir.join("hook.js");
     std::fs::write(&script, "// postCompileHook input").expect("script input");
     let text = workshop_fixture("synthetic/control-flow");
@@ -155,6 +164,7 @@ fn a_mapped_project_still_observes_files_the_member_list_omits() {
             diagnostics: Vec::new(),
             source_identity: None,
         },
+        compile_inputs: None,
     };
     let config = SessionConfig {
         input: InputSpec::Path(entry),
@@ -194,6 +204,86 @@ fn a_mapped_project_still_observes_files_the_member_list_omits() {
         service.reload_count(),
         2,
         "a member change invalidates the snapshot exactly once"
+    );
+    cleanup(dir);
+}
+
+#[test]
+fn a_declared_compile_input_set_bounds_the_fingerprint() {
+    let (dir, entry) = temp_entry();
+    // The provider advertises a complete compile-input set (LPP 1.7):
+    // the entry, the source member, and the compile-time `.js` script.
+    // Freshness hashes exactly that observation set — an edit to a file
+    // outside it is never read, while an edit to a declared input still
+    // invalidates the snapshot (#1005).
+    let member = dir.join("main.opy");
+    let script = dir.join("hook.js");
+    let unrelated = dir.join("notes.md");
+    let text = workshop_fixture("synthetic/control-flow");
+    std::fs::write(&member, &text).expect("member source");
+    std::fs::write(&script, "// postCompileHook input").expect("script input");
+    std::fs::write(&unrelated, "# project notes").expect("unrelated file");
+    let provenance = mapped_provenance(&text, &member);
+    let provider = CloningProvider {
+        operations: Arc::new(Mutex::new(Vec::new())),
+        compilation: SourceCompilation {
+            workshop_text: Some(text),
+            locale: None,
+            provenance,
+            diagnostics: Vec::new(),
+            source_identity: None,
+        },
+        compile_inputs: Some(vec![entry.clone(), member.clone(), script.clone()]),
+    };
+    let config = SessionConfig {
+        input: InputSpec::Path(entry),
+        kind: SourceKind::Opy,
+        ..SessionConfig::default()
+    };
+    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
+        .expect("provider session");
+    assert!(
+        session.compile().ok,
+        "the mapped provider load establishes a snapshot"
+    );
+    let mut service = ToolService::new(&mut session).expect("service loads");
+
+    for _ in 0..3 {
+        let ToolResponse::Ok { .. } = service.handle(&ToolRequest::Project) else {
+            panic!("project reads the established snapshot")
+        };
+    }
+    assert_eq!(service.reload_count(), 0);
+
+    std::fs::write(&unrelated, "# edited project notes").expect("edit unrelated");
+    std::fs::write(dir.join("added.txt"), "a new undeclared file").expect("add file");
+    let ToolResponse::Ok { .. } = service.handle(&ToolRequest::Project) else {
+        panic!("undeclared files leave the snapshot fresh")
+    };
+    assert_eq!(
+        service.reload_count(),
+        0,
+        "files outside the declared input set are not observed (#1005)"
+    );
+
+    std::fs::write(&script, "// an edited compile-time input").expect("edit script");
+    let ToolResponse::Ok { .. } = service.handle(&ToolRequest::Project) else {
+        panic!("a declared input edit reloads into a fresh snapshot")
+    };
+    assert_eq!(
+        service.reload_count(),
+        1,
+        "a declared compile-time input change invalidates the snapshot once"
+    );
+
+    std::fs::write(&member, "// an edited project member").expect("edit member");
+    let ToolResponse::Ok { .. } = service.handle(&ToolRequest::Project) else {
+        panic!("a declared member edit reloads into a fresh snapshot")
+    };
+    assert_eq!(
+        service.reload_count(),
+        2,
+        "a declared member change invalidates the snapshot exactly once"
     );
     cleanup(dir);
 }

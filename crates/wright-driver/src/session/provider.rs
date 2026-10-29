@@ -45,15 +45,16 @@ impl CompilerSession {
         #[cfg(not(target_arch = "wasm32"))]
         if self.source_provider.is_none() {
             // The shared connect path (#1004): entry requests prefer the
-            // 1.4 artifact-negotiation session, and the target's kind sets
-            // the retry floor — entry requests need 1.1 project loading,
-            // and a directory target cannot drop below the 1.3
+            // highest session the client implements so compile answers
+            // can carry `compileInputs` (LPP 1.7, #1005), and the target's
+            // kind sets the retry floor — entry requests need 1.1 project
+            // loading, and a directory target cannot drop below the 1.3
             // source-identity contract it loads under (#638).
             let connected = self
                 .connect_provider(
                     opy_provider::OPY_LANGUAGE_ID,
                     &lpp_client_info(),
-                    wright_lpp::LPP_ARTIFACT_NEGOTIATION_PROTOCOL_VERSION,
+                    wright_lpp::LPP_COMPILE_INPUTS_PROTOCOL_VERSION,
                     Some(resolved.target.into()),
                 )
                 .map_err(|error| {
@@ -124,6 +125,12 @@ impl CompilerSession {
             },
             ProviderOperation::Compile => provider.compile(&target).map_err(|e| e.diagnostic())?,
         };
+        // The provider's declared compile inputs ride the resolved input
+        // into `Loaded`, where the freshness check hashes exactly that
+        // observation set instead of the whole entry tree (#1005). `None`
+        // — a provider without the `compileInputs` capability, or a
+        // check-only answer — keeps the wider fingerprint.
+        resolved.compile_inputs = provider.compile_inputs();
         if (operation == ProviderOperation::Compile || compilation.workshop_text.is_some())
             && resolved.target == InputTarget::Directory
         {
