@@ -287,3 +287,56 @@ fn a_declared_compile_input_set_bounds_the_fingerprint() {
     );
     cleanup(dir);
 }
+
+#[test]
+fn an_empty_compile_input_declaration_keeps_staleness_detection() {
+    let (dir, entry) = temp_entry();
+    // An advertised-but-empty `compileInputs` declaration is malformed —
+    // an entry-based compile necessarily observed at least the entry — so
+    // freshness falls back to the whole-tree fingerprint instead of
+    // freezing on the empty set's constant digest (#1005).
+    let text = workshop_fixture("synthetic/control-flow");
+    std::fs::write(dir.join("main.opy"), &text).expect("member source");
+    let provenance = mapped_provenance(&text, &dir.join("main.opy"));
+    let provider = CloningProvider {
+        operations: Arc::new(Mutex::new(Vec::new())),
+        compilation: SourceCompilation {
+            workshop_text: Some(text),
+            locale: None,
+            provenance,
+            diagnostics: Vec::new(),
+            source_identity: None,
+        },
+        compile_inputs: Some(Vec::new()),
+    };
+    let config = SessionConfig {
+        input: InputSpec::Path(entry),
+        kind: SourceKind::Opy,
+        ..SessionConfig::default()
+    };
+    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
+        .expect("provider session");
+    assert!(
+        session.compile().ok,
+        "the mapped provider load establishes a snapshot"
+    );
+    let mut service = ToolService::new(&mut session).expect("service loads");
+
+    for _ in 0..3 {
+        let ToolResponse::Ok { .. } = service.handle(&ToolRequest::Project) else {
+            panic!("project reads the established snapshot")
+        };
+    }
+    assert_eq!(service.reload_count(), 0);
+
+    std::fs::write(dir.join("hook.js"), "// an edited compile-time input").expect("edit input");
+    let ToolResponse::Ok { .. } = service.handle(&ToolRequest::Project) else {
+        panic!("a disk change reloads into a fresh snapshot")
+    };
+    assert_eq!(
+        service.reload_count(),
+        1,
+        "an empty declaration falls back to the whole-tree fingerprint (#1005)"
+    );
+    cleanup(dir);
+}

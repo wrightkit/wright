@@ -116,10 +116,11 @@ pub(crate) fn digest_files(files: Vec<PathBuf>) -> DiskFingerprint {
 /// The fingerprint of a provider-declared compile-input set (LPP
 /// `compileInputs`, #1005). Each declared path contributes the observation
 /// the declaration records — existence and kind, a symlink's target, a
-/// file's contents, or a listed directory's entry names and kinds — so any
-/// change the compile could observe invalidates the snapshot while files
-/// outside the declared set stay unread. Callers trust the declaration
-/// only when the provider advertised `compileInputs`.
+/// file's contents, a listed directory's entry names and kinds, or a
+/// marker for any other kind — so any change the compile could observe
+/// invalidates the snapshot while files outside the declared set stay
+/// unread and the read never blocks on a non-file kind. Callers trust the
+/// declaration only when the provider advertised `compileInputs`.
 pub(crate) fn digest_declared_inputs(inputs: &[PathBuf]) -> DiskFingerprint {
     let mut inputs = inputs.to_vec();
     inputs.sort();
@@ -166,13 +167,14 @@ pub(crate) fn digest_declared_inputs(inputs: &[PathBuf]) -> DiskFingerprint {
                     hasher.update([0]);
                 }
             }
-            Ok(_) => {
+            Ok(meta) if meta.is_file() => {
                 hasher.update(b"file");
                 match std::fs::read(path) {
                     Ok(bytes) => hasher.update(&bytes),
                     Err(_) => hasher.update([0xff]),
                 }
             }
+            Ok(_) => hasher.update(b"other"),
             Err(_) => hasher.update(b"missing"),
         }
         hasher.update([0]);
@@ -745,6 +747,21 @@ mod tests {
             "a declared symlink's target is observed"
         );
 
+        std::fs::remove_dir_all(directory).expect("remove test directory");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn digest_declared_inputs_does_not_block_on_a_fifo() {
+        let directory = temp_dir("fifo");
+        let member = directory.join("member.opy");
+        let mkfifo = std::process::Command::new("mkfifo").arg(&member).status();
+        assert!(mkfifo.expect("spawn mkfifo").success());
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || drop(sender.send(digest_declared_inputs(&[member]))));
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(15))
+            .expect("a declared FIFO must not block the freshness check");
         std::fs::remove_dir_all(directory).expect("remove test directory");
     }
 

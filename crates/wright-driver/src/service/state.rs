@@ -30,10 +30,14 @@ use crate::{CompilerSession, Loaded, Provenance};
 /// complete member list — a mapped artifact's `files` table omits
 /// compile-time `.js` inputs (opy-rs#654) — so its loads keep the
 /// whole-tree fingerprint, as do unmapped artifacts, check-only loads,
-/// and caller-held text inputs.
+/// and caller-held text inputs. An advertised-but-empty declaration is
+/// malformed — a compile necessarily observed at least its entry — so it
+/// falls back like an undeclared set.
 fn loaded_fingerprint(config: &crate::SessionConfig, loaded: &Loaded) -> input::DiskFingerprint {
     let resolved = &loaded.input;
-    if let Some(inputs) = &resolved.compile_inputs {
+    if let Some(inputs) = &resolved.compile_inputs
+        && !inputs.is_empty()
+    {
         return input::digest_declared_inputs(inputs);
     }
     let file_input = match &config.input {
