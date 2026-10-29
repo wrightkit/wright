@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.41.1](https://github.com/wrightkit/wright/compare/v0.41.0...v0.41.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* exit session-construction failures by diagnostic class ([#1031](https://github.com/wrightkit/wright/issues/1031)) ([f3b958e](https://github.com/wrightkit/wright/commit/f3b958efba5beff22ed2dfdf7d5e8f32f6f16a64)), closes [#1028](https://github.com/wrightkit/wright/issues/1028)
+
+
+### Performance Improvements
+
+* bound serve freshness to provider-declared compile inputs ([#1029](https://github.com/wrightkit/wright/issues/1029)) ([5915a02](https://github.com/wrightkit/wright/commit/5915a025444ad3e503806e6386e2287235adc6f1)), closes [#1005](https://github.com/wrightkit/wright/issues/1005)
+
 ## [0.41.0](https://github.com/wrightkit/wright/compare/v0.40.0...v0.41.0) (2026-10-28)
 
 
