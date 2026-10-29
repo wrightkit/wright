@@ -2,9 +2,11 @@
 //! the three public surfaces the classification contract covers;
 //! `lookup` keeps its own table in `lookup_failures.rs` and the
 //! language-service diagnostic surface keeps its own in
-//! `wright-language`. Every row drives `session.check()` end to end and
-//! pins the error diagnostic's `code`, its `class`, and the envelope
-//! `exit` the class resolves to: a wrapper that re-classifies a failure
+//! `wright-language`. Every row drives the boundary that surfaces the
+//! diagnostic — `CompilerSession::new` for the session-construction
+//! rows, `session.check()` end to end for the rest — and pins the error
+//! diagnostic's `code`, its `class`, and the `exit` code the class
+//! resolves to: a wrapper that re-classifies a failure
 //! — a refusal reported as `unavailable`, a session diagnostic relabeled
 //! `provider-refusal-*`, or a dropped `Diagnostic::class` — fails its
 //! row.
@@ -201,8 +203,9 @@ fn opy_entry(dir: &Path) -> PathBuf {
 
 /// `check`'s failure table: every provider failure kind and every
 /// session failure kind that reaches the `session.check()` envelope,
-/// pinned by the error diagnostic's `code`, its `class`, and the
-/// envelope `exit` the class resolves to.
+/// plus the session-construction refusals observed at
+/// `CompilerSession::new`, pinned by the error diagnostic's `code`, its
+/// `class`, and the `exit` code the class resolves to.
 #[test]
 fn check_surfaces_every_failure_kind_with_its_code_and_exit_class() {
     let lpp = |kind, details| ProviderError::lpp(kind, details, "the provider failed");
@@ -451,36 +454,22 @@ fn check_surfaces_every_failure_kind_with_its_code_and_exit_class() {
     // The session machinery's own refusal kinds: construction
     // diagnostics (observed as the session boundary's `Err`), the
     // fixed-config refusal, and the `source-provider-*` load refusals.
-    let dir = temp_dir("check-construction");
-    for (configure, code, class) in [
-        (
-            Box::new(|config: &mut SessionConfig| {
-                config.selection = FindingSelection {
-                    rule: Some("no-such-rule".to_string()),
-                    ..FindingSelection::default()
-                };
-            }) as Box<dyn FnOnce(&mut SessionConfig)>,
-            "invalid-selection",
-            ExitClass::Usage,
-        ),
-        (
-            Box::new(|config: &mut SessionConfig| {
-                config.lint_rule_paths = vec![dir.join("missing-rule.opy")];
-            }) as Box<dyn FnOnce(&mut SessionConfig)>,
-            "lint-rule-error",
-            ExitClass::SourceError,
-        ),
-    ] {
-        let mut config = SessionConfig::default();
-        configure(&mut config);
-        let Err(diagnostic) = CompilerSession::new(config) else {
-            panic!("{code} must refuse session construction");
-        };
-        assert_eq!(diagnostic.code, code);
-        assert_eq!(diagnostic.class, class);
-        assert_eq!(diagnostic.class.exit_code(), class.exit_code());
-    }
-    std::fs::remove_dir_all(&dir).expect("cleanup");
+    // `lint-rule-error` is deliberately unpinned: its declared
+    // `SourceError` class disagrees with the CLI wrappers, which exit
+    // `USAGE` for every session-construction failure — the discrepancy
+    // awaits a separate owner decision.
+    let Err(diagnostic) = CompilerSession::new(SessionConfig {
+        selection: FindingSelection {
+            rule: Some("no-such-rule".to_string()),
+            ..FindingSelection::default()
+        },
+        ..SessionConfig::default()
+    }) else {
+        panic!("an unknown rule must refuse session construction");
+    };
+    assert_eq!(diagnostic.code, "invalid-selection");
+    assert_eq!(diagnostic.class, ExitClass::Usage);
+    assert_eq!(diagnostic.class.exit_code(), ExitClass::Usage.exit_code());
 
     // `session-config-changed` — the fixed-config refusal.
     {

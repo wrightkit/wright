@@ -1,7 +1,7 @@
 //! The failure-classification table for the language-service diagnostic
-//! surface — the third table the driver-side `failure_classification`
-//! test file describes (its `check` and `lookup` tables cover the other
-//! two surfaces). Every row drives `LanguageService::diagnostics` on an
+//! surface — the third table beside the driver-side `check_failures.rs`
+//! and `lookup_failures.rs` tables, which cover the other two surfaces.
+//! Every row drives `LanguageService::diagnostics` on an
 //! open `.opy` buffer and pins the published diagnostic's `code` and its
 //! `error` severity: this surface carries no exit class — a boundary
 //! failure publishes one error diagnostic whose code is the only
