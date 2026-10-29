@@ -1,7 +1,7 @@
-use wright_analyzer::registry::LintRegistry;
+use wright_analyzer::registry::{LintRegistry, RuleRegistryError};
 
 use crate::config::SessionConfig;
-use crate::diag::{Diagnostic, Stage};
+use crate::diag::{Diagnostic, ExitClass, Stage};
 
 pub(super) fn compose(config: &SessionConfig) -> Result<LintRegistry, Diagnostic> {
     let mut registry = LintRegistry::default();
@@ -12,7 +12,14 @@ pub(super) fn compose(config: &SessionConfig) -> Result<LintRegistry, Diagnostic
     crate::lint_package::activate_pinned(&config.lint, &config.lint_package, &mut registry)?;
     for path in &config.lint_rule_paths {
         registry.load_path(path).map_err(|error| {
-            Diagnostic::error("lint-rule-error", Stage::Analysis, error.to_string())
+            // #1028: a missing or unreadable `--rule-file` path is a usage
+            // error; a file that loads but is invalid content stays a
+            // source error.
+            let class = match error {
+                RuleRegistryError::Io(..) => ExitClass::Usage,
+                _ => ExitClass::SourceError,
+            };
+            Diagnostic::classed_error("lint-rule-error", Stage::Analysis, class, error.to_string())
         })?;
     }
     if let Err(message) = config.selection.validate(&registry) {

@@ -130,14 +130,14 @@ pub(crate) fn run(args: ServeArgs) -> ExitCode {
         Ok(session) => session,
         Err(diagnostic) => {
             eprintln!("wright: {}", diagnostic.message);
-            return ExitCode::from(2);
+            return ExitCode::from(diagnostic.class.exit_code());
         }
     };
     let mut service = match ToolService::new(&mut session) {
         Ok(service) => service,
         Err(diagnostic) => {
             eprintln!("wright: {}", diagnostic.message);
-            return ExitCode::from(2);
+            return ExitCode::from(diagnostic.class.exit_code());
         }
     };
 

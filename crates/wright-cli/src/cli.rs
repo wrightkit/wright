@@ -190,6 +190,9 @@ pub(crate) struct ReportArgs {
     pub(crate) common: CommonArgs,
     #[command(flatten)]
     pub(crate) select: SelectArgs,
+    /// Load a local YAML rule file or directory (repeatable).
+    #[arg(long = "rule-file", value_name = "PATH")]
+    pub(crate) rule_file: Vec<PathBuf>,
 }
 
 /// Arguments of `analyze`: shared workflow options, finding selection, and
@@ -294,6 +297,9 @@ pub(crate) struct LookupArgs {
     /// Override the first-party OPY provider executable.
     #[arg(long, value_name = "PATH")]
     pub(crate) opy_provider: Option<PathBuf>,
+    /// Load a local YAML rule file or directory (repeatable).
+    #[arg(long = "rule-file", value_name = "PATH")]
+    pub(crate) rule_file: Vec<PathBuf>,
     /// Output format.
     #[arg(short = 'f', long, value_enum, default_value_t = OutputFormatArg::Text)]
     pub(crate) format: OutputFormatArg,
