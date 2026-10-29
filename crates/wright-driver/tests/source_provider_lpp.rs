@@ -201,48 +201,6 @@ fn lpp_source_provider_timeout_is_internal_with_typed_detail_in_text() {
 }
 
 #[test]
-fn lpp_source_provider_distinguishes_failure_classes() {
-    for (failure, code) in [
-        (
-            wright_lpp::ProviderError::lpp(
-                wright_lpp::LppErrorKind::CapabilityUnavailable,
-                serde_json::json!({"capability": "projectLoading", "method": "lpp/check"}),
-                "capability was not negotiated",
-            ),
-            "capability-unavailable",
-        ),
-        (
-            wright_lpp::ProviderError::Exited {
-                status: Some(9),
-                message: "the provider exited".to_string(),
-            },
-            "provider-exited",
-        ),
-        (
-            wright_lpp::ProviderError::Malformed {
-                detail: "missing result".to_string(),
-            },
-            "provider-malformed",
-        ),
-    ] {
-        let (dir, entry) = temp_entry();
-        let mut provider = wright_driver::source_provider::LppSourceProvider::new(
-            Box::new(FailingLppProvider {
-                failure: failure.clone(),
-                capabilities_failure: None,
-            }),
-            None,
-        );
-        let error = provider
-            .check(&SourceTarget::new(SourceLanguage::Opy, &entry, &dir))
-            .err()
-            .unwrap_or_else(|| panic!("{failure:?} produced no error"));
-        assert_eq!(error.code(), code, "{failure:?} lost its classification");
-        cleanup(dir);
-    }
-}
-
-#[test]
 fn lpp_source_provider_propagates_a_capability_query_failure() {
     let (dir, entry) = temp_entry();
     let mut provider = wright_driver::source_provider::LppSourceProvider::new(

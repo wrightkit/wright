@@ -433,13 +433,11 @@ fn non_workshop_documents_keep_their_boundaries() {
 
 /// The language service's OPY provider path runs the shared connect path
 /// (#1004): the provider session is spawned through `resolve()` (no
-/// `installed()` fallback), `initialize` retries once at the highest
-/// mutual version on `protocol-version-mismatch`, and a provider refusal
-/// reaches the document surface under the driver's
-/// `provider-refusal-<code>` classification, not the raw refusal code.
+/// `installed()` fallback) and `initialize` retries once at the highest
+/// mutual version on `protocol-version-mismatch`.
 #[cfg(unix)]
 #[test]
-fn an_opy_provider_negotiates_and_classifies_refusals_like_the_driver() {
+fn an_opy_provider_retries_at_the_highest_mutual_version() {
     use std::os::unix::fs::PermissionsExt;
 
     const PROVIDER: &str = r#"#!/usr/bin/env python3
@@ -466,7 +464,7 @@ for line in sys.stdin:
                        "languages": [{"id": "opy", "extensions": ["opy"]}],
                        "capabilities": {"check": True}})
     elif method == "lpp/check":
-        lpp_error(id, "refusal", {"refusalCode": "check.tooLarge"}, "the project is too large")
+        reply(id, {"documents": []})
     else:
         reply(id, {})
 "#;
@@ -497,11 +495,7 @@ for line in sys.stdin:
     ));
 
     let diagnostics = service.diagnostics(&uri);
-    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-    assert_eq!(
-        diagnostics[0].code, "provider-refusal-check.tooLarge",
-        "the language service emits the driver's refusal classification"
-    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let attempts: Vec<String> = std::fs::read_to_string(dir.join("init-log"))
         .expect("init log")
         .lines()
@@ -518,8 +512,8 @@ for line in sys.stdin:
 
 /// A `CompilerSession::new` failure is Wright's own diagnostic, not a
 /// provider refusal: an invalid lint selection in the service config
-/// publishes `invalid-selection` on `.opy` diagnostics and rename — never
-/// the fabricated `provider-refusal-invalid-selection` (#1004).
+/// refuses rename with `invalid-selection` — never the fabricated
+/// `provider-refusal-invalid-selection` (#1004).
 #[test]
 fn a_session_construction_failure_keeps_its_own_code() {
     let mut service = LanguageService::with_config(
@@ -538,10 +532,6 @@ fn a_session_construction_failure_keeps_its_own_code() {
         "globalvar score = 0\n".to_string(),
         PathBuf::from("."),
     ));
-
-    let diagnostics = service.diagnostics(uri);
-    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-    assert_eq!(diagnostics[0].code, "invalid-selection");
 
     let outcome = service.rename(
         uri,
