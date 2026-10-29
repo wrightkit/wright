@@ -496,6 +496,7 @@ pub(crate) fn activate_pinned(
     let pin_error = |message: String| {
         let error = LintPackageError::source(message);
         Diagnostic::error(error.code(), Stage::Discovery, error.to_string())
+            .with_class(error.exit_class())
     };
     let store = packages.store();
     for pin in &lint.packages {
@@ -505,6 +506,7 @@ pub(crate) fn activate_pinned(
                 Stage::Discovery,
                 format!("lint package pin '{}': {error}", pin.repo),
             )
+            .with_class(error.exit_class())
         })?;
         if let Some(reference) = reference {
             return Err(pin_error(format!(
@@ -529,6 +531,7 @@ pub(crate) fn activate_pinned(
                 stage,
                 format!("lint package '{source}' at {}: {error}", pin.sha),
             )
+            .with_class(error.exit_class())
         })?;
         let rules_dir = installed.rules_dir();
         let loaded = if source.is_first_party() {

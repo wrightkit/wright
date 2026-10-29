@@ -8,6 +8,7 @@ mod mcp;
 mod plain;
 mod present;
 mod serve;
+mod session;
 mod tooldefs;
 mod update;
 mod usage_hint;
@@ -176,6 +177,7 @@ fn run_workflow(command: Command) -> ExitCode {
         Command::Check(args) => {
             let mut config = config_from_common(&args.common);
             config.selection = selection_from_args(&args.select);
+            config.lint_rule_paths = args.rule_file;
             run_configured(
                 "check",
                 config,
@@ -360,10 +362,7 @@ pub(crate) fn run_configured<
 ) -> ExitCode {
     let mut session = match wright_driver::CompilerSession::new(config) {
         Ok(session) => session,
-        Err(diagnostic) => {
-            present::terminal::report_error(presentation, "USAGE", name, &diagnostic.message);
-            return ExitCode::from(exit::USAGE);
-        }
+        Err(diagnostic) => return session::refuse(presentation, name, &diagnostic),
     };
 
     ExitCode::from(run_command(&mut session, run, presentation, subject))
@@ -467,6 +466,7 @@ fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
             text: String::new(),
             path: None,
         },
+        lint_rule_paths: args.rule_file.clone(),
         opy_provider: wright_driver::OpyProviderConfig {
             executable: args.opy_provider.clone(),
             ..wright_driver::OpyProviderConfig::default()
@@ -475,17 +475,11 @@ fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
     };
     let mut session = match wright_driver::CompilerSession::new(config) {
         Ok(session) => session,
-        Err(diagnostic) => {
-            present::terminal::report_error(pres, "USAGE", "lookup", &diagnostic.message);
-            return ExitCode::from(exit::USAGE);
-        }
+        Err(diagnostic) => return session::refuse(pres, "lookup", &diagnostic),
     };
     let mut service = match wright_driver::service::ToolService::new(&mut session) {
         Ok(service) => service,
-        Err(diagnostic) => {
-            present::terminal::report_error(pres, "USAGE", "lookup", &diagnostic.message);
-            return ExitCode::from(exit::USAGE);
-        }
+        Err(diagnostic) => return session::refuse(pres, "lookup", &diagnostic),
     };
     let request = wright_driver::service::ToolRequest::Lookup {
         language: args.language.as_str().to_string(),

@@ -455,10 +455,6 @@ fn check_surfaces_every_failure_kind_with_its_code_and_exit_class() {
     // The session machinery's own refusal kinds: construction
     // diagnostics (observed as the session boundary's `Err`), the
     // fixed-config refusal, and the `source-provider-*` load refusals.
-    // `lint-rule-error` is deliberately unpinned: its declared
-    // `SourceError` class disagrees with the CLI wrappers, which exit
-    // `USAGE` for every session-construction failure — the discrepancy
-    // awaits a separate owner decision.
     let Err(diagnostic) = CompilerSession::new(SessionConfig {
         selection: FindingSelection {
             rule: Some("no-such-rule".to_string()),
@@ -471,6 +467,34 @@ fn check_surfaces_every_failure_kind_with_its_code_and_exit_class() {
     assert_eq!(diagnostic.code, "invalid-selection");
     assert_eq!(diagnostic.class, ExitClass::Usage);
     assert_eq!(diagnostic.class.exit_code(), ExitClass::Usage.exit_code());
+
+    {
+        let dir = temp_dir("check-rule-file");
+        let Err(diagnostic) = CompilerSession::new(SessionConfig {
+            lint_rule_paths: vec![dir.join("missing.yaml")],
+            ..SessionConfig::default()
+        }) else {
+            panic!("a missing --rule-file must refuse session construction");
+        };
+        assert_eq!(diagnostic.code, "lint-rule-error");
+        assert_eq!(diagnostic.class, ExitClass::Usage);
+        assert_eq!(diagnostic.class.exit_code(), ExitClass::Usage.exit_code());
+
+        let invalid = write_file(&dir, "invalid.yaml", "id: [unclosed\n");
+        let Err(diagnostic) = CompilerSession::new(SessionConfig {
+            lint_rule_paths: vec![invalid],
+            ..SessionConfig::default()
+        }) else {
+            panic!("an invalid --rule-file must refuse session construction");
+        };
+        assert_eq!(diagnostic.code, "lint-rule-error");
+        assert_eq!(diagnostic.class, ExitClass::SourceError);
+        assert_eq!(
+            diagnostic.class.exit_code(),
+            ExitClass::SourceError.exit_code()
+        );
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
 
     // `session-config-changed` — the fixed-config refusal.
     {

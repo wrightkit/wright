@@ -383,16 +383,26 @@ fn lookup_surfaces_every_failure_kind_with_its_code_and_exit_class() {
     // The session machinery's own failure kinds at the service
     // boundary: construction diagnostics keep their own code and class,
     // and `session-config-changed` refuses `ToolService::new` itself.
-    // `lint-rule-error` is deliberately unpinned: its declared
-    // `SourceError` class disagrees with the CLI wrappers, which exit
-    // `USAGE` for every session-construction failure — the discrepancy
-    // awaits a separate owner decision.
-    let session_failures: &[(&str, ExitClass)] = &[
-        ("invalid-selection", ExitClass::Usage),
-        ("session-config-changed", ExitClass::SourceError),
+    let session_failures: &[(&str, &str, ExitClass)] = &[
+        ("invalid-selection", "invalid-selection", ExitClass::Usage),
+        (
+            "session-config-changed",
+            "session-config-changed",
+            ExitClass::SourceError,
+        ),
+        (
+            "lint-rule-error:missing",
+            "lint-rule-error",
+            ExitClass::Usage,
+        ),
+        (
+            "lint-rule-error:invalid",
+            "lint-rule-error",
+            ExitClass::SourceError,
+        ),
     ];
-    for (code, class) in session_failures {
-        let diagnostic = match *code {
+    for (name, code, class) in session_failures {
+        let diagnostic = match *name {
             "session-config-changed" => {
                 let mut session = CompilerSession::new(SessionConfig {
                     input: InputSpec::Path(workshop_path()),
@@ -418,11 +428,35 @@ fn lookup_surfaces_every_failure_kind_with_its_code_and_exit_class() {
                 };
                 diagnostic
             }
-            _ => unreachable!("{code} has no session-boundary trigger"),
+            "lint-rule-error:missing" => {
+                let dir = temp_dir("lookup-rule-file");
+                let Err(diagnostic) = CompilerSession::new(SessionConfig {
+                    lint_rule_paths: vec![dir.join("missing.yaml")],
+                    ..SessionConfig::default()
+                }) else {
+                    panic!("a missing --rule-file must refuse the session");
+                };
+                std::fs::remove_dir_all(&dir).expect("cleanup");
+                diagnostic
+            }
+            "lint-rule-error:invalid" => {
+                let dir = temp_dir("lookup-rule-file");
+                let path = dir.join("invalid.yaml");
+                std::fs::write(&path, "id: [unclosed\n").expect("write file");
+                let Err(diagnostic) = CompilerSession::new(SessionConfig {
+                    lint_rule_paths: vec![path],
+                    ..SessionConfig::default()
+                }) else {
+                    panic!("an invalid --rule-file must refuse the session");
+                };
+                std::fs::remove_dir_all(&dir).expect("cleanup");
+                diagnostic
+            }
+            _ => unreachable!("{name} has no session-boundary trigger"),
         };
-        assert_eq!(diagnostic.code, *code);
-        assert_eq!(diagnostic.class, *class);
-        assert_eq!(diagnostic.class.exit_code(), class.exit_code());
+        assert_eq!(diagnostic.code, *code, "{name}");
+        assert_eq!(diagnostic.class, *class, "{name}");
+        assert_eq!(diagnostic.class.exit_code(), class.exit_code(), "{name}");
     }
 }
 
