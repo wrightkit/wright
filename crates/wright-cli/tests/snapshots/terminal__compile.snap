@@ -4,6 +4,11 @@ expression: transcript(&out)
 ---
 exit: 0
 --- stdout ---
- PASS  compile
+ WARN  compile
   wrote out.ow (sha256 3b0737bb0468d36746566bc7cd7885f62ea421c335210e67801446566254e330)
 --- stderr ---
+warning[min-wait-loop]: loop body waits at the workshop minimum rate; the loop runs at maximum frequency
+  --> flow.ws:11:9
+  | 11 |         While(Compare(Global.index, <, 3));
+  |    |         ^
+  = analysis
