@@ -192,11 +192,12 @@ jobs:
 
           run_workflow() {
             local command="$1"
+            shift
             local output
             local status
 
             set +e
-            output="$(target/debug/wright "$command" --kind workshop "$PROJECT" --format json)"
+            output="$(target/debug/wright "$command" "$@" --kind workshop "$PROJECT" --format json)"
             status=$?
             set -e
 
@@ -220,16 +221,22 @@ jobs:
             printf '%s' "$output"
           }
 
-          check_output="$(run_workflow check)"
-          lint_output="$(run_workflow lint)"
+          check_output="$(run_workflow check --all)"
+          lint_output="$(run_workflow lint --all)"
           inspect_output="$(run_workflow inspect)"
           jq -e -n \
             --argjson check "$check_output" \
             --argjson lint "$lint_output" \
             --argjson inspect "$inspect_output" \
             --argjson expected_exit "$EXPECTED_EXIT" \
-            '(
-              $check.diagnostics == $lint.diagnostics and
+            'def diagnostic_contract:
+              map({code, severity, evidence,
+                location: (.location // (if .span then
+                  "\(.span.path):\(.span.start.line):\(.span.start.col)"
+                  else null end))}) | sort;
+            (
+              ($check.diagnostics | diagnostic_contract) ==
+                (($lint.diagnostics + ($lint.result.findings // [])) | diagnostic_contract) and
               $check.ok == $lint.ok and
               $check.exit == $lint.exit and
               (if $expected_exit == 0
