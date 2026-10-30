@@ -93,17 +93,8 @@ scopes. The binder values (`filteredArray`, `sortedArray`, `mappedArray`,
 `isTrueForAll`, `isTrueForAny`) evaluate every argument after the first per
 array element, binding `Current Array Element`/`Current Array Index`; a
 binder nested inside that per-element argument shadows the outer element
-inside the inner binder's own argument. The warning requires a read of
-`Current Array Element` or `Current Array Index` in the inner call's array
-source or its own per-element arguments. In particular, an `any([...])` or
-`all([...])` inside an OPY `filter(lambda p: ...)` can build its input array
-from the outer element, then rebind the element in its predicate. Calls
-without either read, reads confined to a deeper binder's per-element
-arguments, and binders chained through array-source arguments do not trigger
-this rule. Silence does not establish client importability.
-
-The shape is semantically valid and may be intentional, but it is the
-structural signature measured on
+inside the inner binder's own argument. The shape is semantically valid and
+may be intentional, but it is the structural signature measured on
 client-rejected Workshop builds and absent from measured accepted ones
 (`workshop-rs` `docs/import-limits.md`; #713). It is a warning, not a
 confirmed client import boundary.
