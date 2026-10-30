@@ -380,17 +380,7 @@ const ELEMENT_BINDER_VALUES: &[&str] = &[
     "sortedArray",
 ];
 
-/// `nested-binder-lambda` (#713): report each binder call that occurs
-/// inside an enclosing binder's per-element argument — any argument after
-/// the array source at index 0. The inner call rebinds `Current Array
-/// Element`/`Current Array Index` inside its own per-element argument,
-/// shadowing the enclosing element, and the shape is the one structural
-/// signature measured so far that separates client-rejected Workshop
-/// builds from accepted ones: the `OWBastion/Bastion#391`-era build and the
-/// import-limits verbatim reproducer carry it (1 and 16 occurrences), the
-/// measured accepted builds carry none (`workshop-rs`
-/// `docs/import-limits.md`). Correlation, not a confirmed client limit —
-/// the finding's evidence class says so.
+// Client-rejected nested-binding evidence: wrightkit/wright#713 and #1032.
 fn nested_binder_findings(
     program: &Program,
     rule_id: RuleId,
@@ -432,10 +422,10 @@ fn nested_binder_findings(
             code: NESTED_BINDER_LAMBDA.id.into(),
             severity: NESTED_BINDER_LAMBDA.default_severity,
             message: format!(
-                "`{inner}` nested in `{outer}`'s per-element argument binds \
-                 `Current Array Element` to the inner array, shadowing the \
-                 outer element; nested-binder shapes appear in Workshop \
-                 builds the game client rejected on import"
+                "`{inner}` nested in `{outer}`'s per-element argument reads \
+                 `Current Array Element`/`Current Array Index` across nested \
+                 binding scopes; this shape may be rejected by the Workshop \
+                 client on import (the exact client limit is unconfirmed)"
             ),
             span,
             rule: rule_id,
@@ -456,8 +446,10 @@ fn collect_nested_binders<'a>(
     out: &mut Vec<(Vec<usize>, &'a str, &'a Value, &'a str)>,
 ) {
     let binder = match value {
-        Value::Call { name, .. } if ELEMENT_BINDER_VALUES.contains(&name.as_str()) => {
-            if let Some(outer) = enclosing {
+        Value::Call { name, args } if ELEMENT_BINDER_VALUES.contains(&name.as_str()) => {
+            if let Some(outer) = enclosing
+                && args.iter().any(reads_array_binding)
+            {
                 out.push((path.clone(), name.as_str(), value, outer));
             }
             Some(name.as_str())
@@ -468,16 +460,24 @@ fn collect_nested_binders<'a>(
         path.push(index);
         collect_nested_binders(
             child,
-            if index >= 1 {
-                binder.or(enclosing)
-            } else {
-                enclosing
-            },
+            binder.filter(|_| index >= 1).or(enclosing),
             path,
             out,
         );
         path.pop();
     }
+}
+
+fn reads_array_binding(value: &Value) -> bool {
+    if let Value::Call { name, args } = value {
+        if matches!(name.as_str(), "currentArrayElement" | "currentArrayIndex") {
+            return true;
+        }
+        if ELEMENT_BINDER_VALUES.contains(&name.as_str()) {
+            return args.first().is_some_and(reads_array_binding);
+        }
+    }
+    value_children(value).into_iter().any(reads_array_binding)
 }
 
 fn duplicate_condition_findings(
