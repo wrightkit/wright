@@ -474,7 +474,7 @@ fn check_over_malformed_input_exits_one_with_structured_diagnostics() {
 }
 
 #[test]
-fn check_excludes_configurable_lint_findings() {
+fn check_reports_configurable_lint_findings() {
     let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
     let output = run(&["check", path.to_str().unwrap(), "-f", "json"]);
     assert_eq!(output.status.code(), Some(0), "warnings do not fail check");
@@ -484,7 +484,7 @@ fn check_excludes_configurable_lint_findings() {
             .as_array()
             .unwrap()
             .iter()
-            .all(|diagnostic| diagnostic["code"] != "min-wait-loop")
+            .any(|diagnostic| diagnostic["code"] == "min-wait-loop")
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -781,7 +781,7 @@ fn lint_rule_flags_control_findings() {
 #[test]
 fn lint_flags_are_usage_errors_for_other_commands() {
     for flags in [
-        &["check", "--disable-rule", "min-wait-loop"][..],
+        &["convert", "--disable-rule", "min-wait-loop"][..],
         &["analyze", "--rule-severity", "min-wait-loop:info"][..],
     ] {
         let output = run(flags);
@@ -1561,7 +1561,7 @@ fn check_tty_clears_progress_then_renders_verdict_and_elapsed() {
     transcript.extend_from_slice(&output.stderr);
     let transcript = String::from_utf8_lossy(&transcript);
     let verdict = transcript
-        .find(" PASS  check")
+        .find(" WARN  check")
         .expect("the final verdict renders");
     assert!(
         transcript[..verdict].contains("\x1b[2K"),

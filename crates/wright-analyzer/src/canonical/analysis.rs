@@ -30,15 +30,9 @@ pub struct Finding {
     pub value: Option<ValueId>,
     pub evidence: EvidenceClass,
     pub boundedness: Option<Boundedness>,
-    /// The mechanically determined correction for this finding, when one
-    /// exists and its safety preconditions hold (#556). The plan names the
-    /// spans to rewrite; the driver materializes it into a validated
-    /// source-edit transaction.
+    /// The correction plan for a finding whose safety preconditions hold.
     pub fix: Option<LintFix>,
-    /// The repeated-expression facts behind a `repeated-value` finding
-    /// (#791): the expression, how often the loop scope evaluates it, and
-    /// which location `span` reports. Renderers consume these fields
-    /// instead of parsing `message`; `None` on every other finding.
+    /// The expression, evaluation count, and reported span of a repeated value.
     pub repeated: Option<RepeatedValue>,
 }
 

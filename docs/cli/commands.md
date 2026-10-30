@@ -31,9 +31,9 @@ result.
 
 | Command | Purpose | Text-mode stdout |
 | --- | --- | --- |
-| `wright compile [INPUT] [--to LOCALE]` | Parse, lower, validate, emit Workshop text; warn on known client import limits | verdict, diagnostics, the written path, and the output SHA-256; the program goes to `<input stem>.ow` (or `-o PATH`; `-o -` prints only the program); `--to` emits in another Workshop client locale |
+| `wright compile [INPUT] [--to LOCALE]` | Parse, lower, validate, lint, emit Workshop text; warn on known client import limits | verdict, diagnostics, the written path, and the output SHA-256; the program goes to `<input stem>.ow` (or `-o PATH`; `-o -` prints only the program); `--to` emits in another Workshop client locale |
 | `wright convert [INPUT] --target opy\|ostw` | Reconstruct validated Workshop input as canonical OPY or OSTW source through a provider that negotiates `reconstruct` (the shipped OPY provider does since 0.3.19; no OSTW provider is shipped) | the reconstructed source |
-| `wright check [INPUT]` | Parse, lower, validate, and report correctness diagnostics | verdict and validation diagnostics |
+| `wright check [INPUT]` | Parse, lower, validate, and run enabled lint rules | verdict and validation/lint diagnostics |
 | `wright analyze [INPUT] [--all]` | Summarize Workshop cost, ranked complexity hotspots, performance/stability risk indicators, and cross-cutting state | overview, cost, top hotspots, complexity, risks, and top variables with exact/static/heuristic evidence labels; `--all` lifts list caps |
 | `wright lint [INPUT] [--all] [--fix [--write]]` | Parse, lower, lint; report findings | finding counts by severity and actionable findings; `--all` lifts list caps; `--fix` previews each offered fix's validated diff, `--write` applies them |
 | `wright lint package <search\|install\|list\|outdated\|update\|remove>` | Discover, install, and manage GitHub lint rule packages in the Wright-owned store keyed by commit SHA (#844); takes no `INPUT` and never activates a package | per-package rows: source, status, SHA, entry directory, rule ids, and error detail ([lint configuration and findings](lint.md#lint-rule-packages-wright-lint-package-844)) |
@@ -82,6 +82,20 @@ a static DEL/OSTW adapter. Every DEL/OSTW workflow fails with the structured
 an upstream/static fallback. DEL/OSTW provider support is not currently
 shipped with Wright and is outside this contract. OPY, Workshop, and protocol
 inputs continue through their existing owner-backed paths.
+
+### `wright check` and `wright compile` lint diagnostics
+
+Both commands run the default-enabled lint rules and include their findings in
+`diagnostics` and the normal severity counts. Codes, severities, source spans,
+and evidence classes match `wright lint`; JSON uses the existing diagnostic
+shape, with `stage: "analysis"` and an `evidence` field. Static indicators
+retain their evidence class and do not guarantee client importability.
+
+Both commands accept the same `--lint-config PATH`, `--rule-file PATH`,
+`--disable-rule ID`, and `--rule-severity ID:SEVERITY` policy options as
+`lint`. The lint configuration file applies first, then flag overrides.
+Warnings keep exit 0 unless `--fail-on` gates them. A finding raised to `error`
+exits 1; `compile` writes no artifact for an error-level finding.
 
 ### `wright compile` output (ADR-0025)
 
