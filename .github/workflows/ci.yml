@@ -615,7 +615,7 @@ jobs:
           toolchain: 1.97.1
           targets: wasm32-unknown-unknown
           cache-shared-key: wasm-release
-          cache-save: true # TEMP: seed in the PR to measure
+          cache-save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
