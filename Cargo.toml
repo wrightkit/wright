@@ -41,9 +41,17 @@ debug = 1
 [profile.dev.package."*"]
 debug = false
 
+# workshop-rs builds with opt-level 1 in its own repository. Unoptimized,
+# its source-offset scan made the 17k-element compile test take about 135 s.
+[profile.dev.package.workshop-rs]
+opt-level = 1
+
 [profile.test]
 debug = 1
 
 [profile.test.package."*"]
 debug = false
+
+[profile.test.package.workshop-rs]
+opt-level = 1
 
