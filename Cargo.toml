@@ -41,9 +41,17 @@ debug = 1
 [profile.dev.package."*"]
 debug = false
 
+# workshop-rs is optimized here because, unoptimized,
+# its source-offset scan made the 17k-element compile test take about 135 s.
+[profile.dev.package.workshop-rs]
+opt-level = 2
+
 [profile.test]
 debug = 1
 
 [profile.test.package."*"]
 debug = false
+
+[profile.test.package.workshop-rs]
+opt-level = 2
 
