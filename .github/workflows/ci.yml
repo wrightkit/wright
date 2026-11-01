@@ -501,9 +501,8 @@ jobs:
         uses: wrightkit/.github/.github/actions/setup-rust@ci/speed-up
         with:
           toolchain: 1.97.1
-          cache-shared-key: dist-validation-${{ runner.os }}-stable-dev
-          cache-targets: false
-          cache-save: ${{ github.ref == 'refs/heads/main' }}
+          cache-shared-key: dist-build-${{ runner.os }}-stable-dev
+          cache-save: true # TEMP: seed in the PR to measure
 
       - name: Build CLI and LSP
         shell: bash
