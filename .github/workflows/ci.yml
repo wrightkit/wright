@@ -502,7 +502,7 @@ jobs:
         with:
           toolchain: 1.97.1
           cache-shared-key: dist-build-${{ runner.os }}-stable-dev
-          cache-save: true # TEMP: seed in the PR to measure
+          cache-save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build CLI and LSP
         shell: bash
