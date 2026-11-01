@@ -20,7 +20,7 @@ jobs:
     name: Workflow lint
     needs: paths
     if: needs.paths.outputs.workflows == 'true'
-    uses: wrightkit/.github/.github/workflows/actionlint.yml@main
+    uses: wrightkit/.github/.github/workflows/actionlint.yml@ci/speed-up
 
   paths:
     name: Detect paths
@@ -107,7 +107,7 @@ jobs:
     name: Rust (stable)
     needs: paths
     if: needs.paths.outputs.rust_core == 'true'
-    uses: wrightkit/.github/.github/workflows/rust-quality.yml@main
+    uses: wrightkit/.github/.github/workflows/rust-quality.yml@ci/speed-up
     with:
       toolchain: 1.97.1
       cache-shared-key: linux-quality-stable-dev-test
@@ -124,7 +124,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Rust
-        uses: wrightkit/.github/.github/actions/setup-rust@main
+        uses: wrightkit/.github/.github/actions/setup-rust@ci/speed-up
         with:
           toolchain: 1.97.1
           cache-shared-key: linux-quality-stable-dev-test
@@ -259,7 +259,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Rust
-        uses: wrightkit/.github/.github/actions/setup-rust@main
+        uses: wrightkit/.github/.github/actions/setup-rust@ci/speed-up
         with:
           toolchain: 1.97.1
           cache-shared-key: linux-quality-stable-dev-test
@@ -292,7 +292,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Rust
-        uses: wrightkit/.github/.github/actions/setup-rust@main
+        uses: wrightkit/.github/.github/actions/setup-rust@ci/speed-up
         with:
           toolchain: 1.97.1
           cache-shared-key: linux-quality-stable-dev-test
@@ -498,7 +498,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Rust
-        uses: wrightkit/.github/.github/actions/setup-rust@main
+        uses: wrightkit/.github/.github/actions/setup-rust@ci/speed-up
         with:
           toolchain: 1.97.1
           cache-shared-key: dist-validation-${{ runner.os }}-stable-dev
@@ -610,7 +610,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Rust
-        uses: wrightkit/.github/.github/actions/setup-rust@main
+        uses: wrightkit/.github/.github/actions/setup-rust@ci/speed-up
         with:
           toolchain: 1.97.1
           targets: wasm32-unknown-unknown
