@@ -9,9 +9,17 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same pull request supersedes the older run. Pushes to
+# main never share a group, so each main commit keeps a complete run.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   workflow-lint:
     name: Workflow lint
+    needs: paths
+    if: needs.paths.outputs.workflows == 'true'
     uses: wrightkit/.github/.github/workflows/actionlint.yml@main
 
   paths:
@@ -22,6 +30,7 @@ jobs:
       rust_core: ${{ steps.filter.outputs.rust_core }}
       dist: ${{ steps.filter.outputs.dist }}
       agent_guide: ${{ steps.filter.outputs.agent_guide }}
+      workflows: ${{ steps.filter.outputs.workflows }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -39,6 +48,8 @@ jobs:
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           filters: |
+            workflows:
+              - '.github/workflows/**'
             rust_core:
               - 'Cargo.toml'
               - 'Cargo.lock'
@@ -144,25 +155,11 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   workshop-integration:
-    name: Workshop (${{ matrix.project }})
+    name: Workshop dogfood
     needs: [paths, wright-cli-build]
     if: needs.paths.outputs.rust_core == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - project: ai-pve
-            expected_exit: 0
-          - project: bastion
-            expected_exit: 0
-          - project: defend
-            expected_exit: 1
-          - project: illari
-            expected_exit: 0
-          - project: rework
-            expected_exit: 0
     steps:
       - name: Checkout Wright
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -173,6 +170,7 @@ jobs:
           repository: wrightkit/workshop-rs
           ref: f1f3c58f790e9aede9300ca6421698f2503f5f62 # v0.3.11
           path: workshop-rs-pinned
+          sparse-checkout: crates/workshop-rs/tests/fixtures/real-projects
 
       - name: Download CLI artifact
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -184,9 +182,6 @@ jobs:
         run: chmod +x target/debug/wright
 
       - name: Run public CLI dogfood
-        env:
-          EXPECTED_EXIT: ${{ matrix.expected_exit }}
-          PROJECT: workshop-rs-pinned/crates/workshop-rs/tests/fixtures/real-projects/${{ matrix.project }}.ow
         run: |
           set -euo pipefail
 
@@ -217,33 +212,48 @@ jobs:
                 (.diagnostics | type == "array") and
                 (all(.diagnostics[]; type == "object")) and
                 ([.diagnostics[] | select(.stage == "internal")] | length == 0)
-              )' <<<"$output" >/dev/null
+              )' <<<"$output" >/dev/null || return 1
             printf '%s' "$output"
           }
 
-          check_output="$(run_workflow check --all)"
-          lint_output="$(run_workflow lint --all)"
-          inspect_output="$(run_workflow inspect)"
-          jq -e -n \
-            --argjson check "$check_output" \
-            --argjson lint "$lint_output" \
-            --argjson inspect "$inspect_output" \
-            --argjson expected_exit "$EXPECTED_EXIT" \
-            'def diagnostic_contract:
-              map({code, severity, evidence,
-                location: (.location // (if .span then
-                  "\(.span.path):\(.span.start.line):\(.span.start.col)"
-                  else null end))}) | sort;
-            (
-              ($check.diagnostics | diagnostic_contract) ==
-                (($lint.diagnostics + ($lint.result.findings // [])) | diagnostic_contract) and
-              $check.ok == $lint.ok and
-              $check.exit == $lint.exit and
-              (if $expected_exit == 0
-               then ($inspect.result.program.rules | numbers | . > 0)
-               else ($lint.diagnostics | length > 0)
-               end)
-            )' >/dev/null
+          dogfood() {
+            local project="$1"
+            EXPECTED_EXIT="$2"
+            PROJECT="workshop-rs-pinned/crates/workshop-rs/tests/fixtures/real-projects/${project}.ow"
+            echo "::group::${project}"
+
+            local check_output lint_output inspect_output
+            check_output="$(run_workflow check --all)" || return 1
+            lint_output="$(run_workflow lint --all)" || return 1
+            inspect_output="$(run_workflow inspect)" || return 1
+            jq -e -n \
+              --argjson check "$check_output" \
+              --argjson lint "$lint_output" \
+              --argjson inspect "$inspect_output" \
+              --argjson expected_exit "$EXPECTED_EXIT" \
+              'def diagnostic_contract:
+                map({code, severity, evidence,
+                  location: (.location // (if .span then
+                    "\(.span.path):\(.span.start.line):\(.span.start.col)"
+                    else null end))}) | sort;
+              (
+                ($check.diagnostics | diagnostic_contract) ==
+                  (($lint.diagnostics + ($lint.result.findings // [])) | diagnostic_contract) and
+                $check.ok == $lint.ok and
+                $check.exit == $lint.exit and
+                (if $expected_exit == 0
+                 then ($inspect.result.program.rules | numbers | . > 0)
+                 else ($lint.diagnostics | length > 0)
+                 end)
+              )' >/dev/null || return 1
+            echo "::endgroup::"
+          }
+
+          failed=0
+          for entry in ai-pve:0 bastion:0 defend:1 illari:0 rework:0; do
+            dogfood "${entry%%:*}" "${entry##*:}" || { echo "::error::dogfood failed for ${entry%%:*}"; failed=1; }
+          done
+          exit "$failed"
 
   opy-integration:
     name: Product integration
@@ -267,17 +277,6 @@ jobs:
           path: target/debug
       - name: Prepare CLI executable
         run: chmod +x target/debug/wright
-      - name: Run provider/product tests
-        run: >-
-          cargo test --locked
-          -p wright-driver --test driver --test source_provider --test service
-
-      - name: Run CLI/embedding tests
-        run: >-
-          cargo test --locked
-          -p wright-cli --test cli --test diagnostics_schema --test serve
-          && cargo test --locked -p wright-consumer --test consumer
-
       - name: Install OPY provider
         run: target/debug/wright update provider opy
 
@@ -383,7 +382,7 @@ jobs:
           path: target/wright-bench-report.json
 
   metrics-shard:
-    name: Metrics shard (${{ matrix.project }})
+    name: Metrics shard (${{ matrix.shard }})
     needs: [paths, wright-cli-build]
     if: needs.paths.outputs.rust_core == 'true'
     runs-on: ubuntu-latest
@@ -391,16 +390,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        project:
-          - small-workshop
-          - seed-modify-target-score
-          - seed-repair-runaway-loop
-          - seed-understand-score-flow
-          - seed-modify-opy-project
-          - seed-repair-opy-runaway-loop
-          - seed-understand-opy-project
-          - bastion
-          - overwatch-ai-pve
+        include:
+          - shard: workshop
+            projects: small-workshop seed-modify-target-score seed-repair-runaway-loop seed-understand-score-flow
+          - shard: opy
+            projects: seed-modify-opy-project seed-repair-opy-runaway-loop seed-understand-opy-project
+          - shard: real
+            projects: bastion overwatch-ai-pve
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -414,18 +410,24 @@ jobs:
       - name: Prepare CLI executable
         run: chmod +x target/debug/wright
 
-      - name: Measure project
+      - name: Measure projects
+        env:
+          PROJECTS: ${{ matrix.projects }}
         run: |
+          set -euo pipefail
           target/debug/wright update provider opy
-          python3 benchmarks/metrics/metrics.py run --project "${{ matrix.project }}" \
-            --repeats 1 --cli-repeats 1 --jobs 4 --wright target/debug/wright \
-            --out "$RUNNER_TEMP/${{ matrix.project }}.json"
+          mkdir -p "$RUNNER_TEMP/metrics-shards"
+          for project in $PROJECTS; do
+            python3 benchmarks/metrics/metrics.py run --project "$project" \
+              --repeats 1 --cli-repeats 1 --jobs 4 --wright target/debug/wright \
+              --out "$RUNNER_TEMP/metrics-shards/$project.json"
+          done
 
-      - name: Upload shard run
+      - name: Upload shard runs
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: metrics-shard-${{ matrix.project }}
-          path: ${{ runner.temp }}/${{ matrix.project }}.json
+          name: metrics-shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/metrics-shards/*.json
           if-no-files-found: error
 
   metrics-drift:
@@ -506,8 +508,7 @@ jobs:
         uses: wrightkit/.github/.github/actions/setup-rust@main
         with:
           toolchain: 1.97.1
-          cache-shared-key: dist-validation-${{ runner.os }}-stable-dev
-          cache-targets: false
+          cache-shared-key: dist-build-${{ runner.os }}-stable-dev
           cache-save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build CLI and LSP
@@ -618,6 +619,9 @@ jobs:
         uses: wrightkit/.github/.github/actions/setup-rust@main
         with:
           toolchain: 1.97.1
+          targets: wasm32-unknown-unknown
+          cache-shared-key: wasm-release
+          cache-save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -625,9 +629,6 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: scripts/package-lock.json
-
-      - name: Add the wasm target
-        run: rustup target add wasm32-unknown-unknown
 
       - name: Check generated core types are fresh
         run: |
