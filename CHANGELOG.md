@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.41.2](https://github.com/wrightkit/wright/compare/v0.41.1...v0.41.2) (2026-11-02)
+
+
+### Performance Improvements
+
+* **ci:** cancel superseded PR runs, drop duplicate test runs, merge small jobs ([#1041](https://github.com/wrightkit/wright/issues/1041)) ([e651ba4](https://github.com/wrightkit/wright/commit/e651ba40b7709218b43b3ec84a9afa16e969d960))
+
 ## [0.41.1](https://github.com/wrightkit/wright/compare/v0.41.0...v0.41.1) (2026-10-29)
 
 
