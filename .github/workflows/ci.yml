@@ -231,7 +231,6 @@ jobs:
               --argjson inspect "$inspect_output" \
               --argjson expected_exit "$EXPECTED_EXIT" \
               '(
-                $check.diagnostics == $lint.diagnostics and
                 $check.ok == $lint.ok and
                 $check.exit == $lint.exit and
                 (if $expected_exit == 0

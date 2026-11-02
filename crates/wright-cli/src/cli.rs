@@ -88,13 +88,13 @@ UPDATE OPTIONS:
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
-    /// Parse, lower, validate, and emit Workshop text.
+    /// Parse, lower, validate, lint, and emit Workshop text.
     Compile(CompileArgs),
     /// Reconstruct validated Workshop input as canonical OPY source; OSTW is
     /// recognized but unavailable because DEL/OSTW provider support is not
     /// currently shipped.
     Convert(ConvertArgs),
-    /// Check frontend, project, semantic, and validation correctness.
+    /// Check frontend, project, semantic, validation, and lint diagnostics.
     Check(ReportArgs),
     /// Summarize Workshop cost, complexity hotspots, risk indicators, and
     /// cross-cutting state.
@@ -136,6 +136,8 @@ pub(crate) enum Command {
 pub(crate) struct CompileArgs {
     #[command(flatten)]
     pub(crate) common: CommonArgs,
+    #[command(flatten)]
+    pub(crate) policy: crate::serve::LintPolicyArgs,
     /// Write the program to PATH instead of `<input stem>.ow`; `-` prints the
     /// program to stdout and nothing else.
     #[arg(short = 'o', long, value_name = "PATH")]
@@ -190,9 +192,8 @@ pub(crate) struct ReportArgs {
     pub(crate) common: CommonArgs,
     #[command(flatten)]
     pub(crate) select: SelectArgs,
-    /// Load a local YAML rule file or directory (repeatable).
-    #[arg(long = "rule-file", value_name = "PATH")]
-    pub(crate) rule_file: Vec<PathBuf>,
+    #[command(flatten)]
+    pub(crate) policy: crate::serve::LintPolicyArgs,
 }
 
 /// Arguments of `analyze`: shared workflow options, finding selection, and

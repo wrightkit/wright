@@ -33,7 +33,9 @@ The following lint-policy flags configure the registry and are repeatable:
   `nested-binder-lambda`).
 * `--rule-severity <ID>:<off|warn|error>`: override a rule's project policy.
 
-These flags are usage errors on every other workflow command (exit 2).
+`compile` and `check` accept these four flags too; their enabled lint findings
+appear in normal diagnostics. These flags are usage errors on the other
+workflow commands (exit 2).
 `wright serve` accepts the same four flags at startup (#594): they configure
 the served session's lint policy identically, so `lint`/`lintRules` over
 stdio, JSON-RPC, or MCP report the same effective enablement, severity,
@@ -152,10 +154,12 @@ documentation, known limits, evidence class, tags) is served once by the
 
 The core workflows have separate contracts:
 
-* `check` is the correctness gate. It reports discovery, source implementation, project,
-  semantic, lowering, and validation diagnostics. Ordinary configurable lint
-  findings such as `duplicate-condition` and `min-wait-loop` are not emitted
-  by default.
+* `check` reports discovery, source implementation, project, semantic, lowering,
+  and validation diagnostics together with the enabled lint findings.
+  `compile` also reports enabled lint findings before writing its artifact.
+  Both preserve the lint codes, severities, source spans, and evidence classes
+  in their diagnostics and accept the same policy flags; see
+  [command behavior](commands.md#wright-check-and-wright-compile-lint-diagnostics).
 * `lint` executes the configurable `LintRegistry` and returns stable rule IDs,
   severity, evidence class, boundedness where applicable, source spans,
   a per-rule id/effective-severity list, and effective configuration.

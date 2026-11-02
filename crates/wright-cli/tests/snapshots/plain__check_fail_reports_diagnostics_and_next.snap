@@ -5,8 +5,9 @@ expression: "transcript(&run_in(&dir, &[\"check\", \"mixed.ws\"]))"
 exit 1
 == stdout
 ERROR check root=. kind=workshop locale=en-us
-summary: errors=1 warnings=0 notes=0 affected=1
+summary: errors=1 warnings=1 notes=0 affected=1
 diagnostic: error workshop.unknown-value.futurevaluething at=mixed.ws:11:26 stage=analysis status=unsupported message="Workshop construct 'FutureValueThing' is unsupported (truly-unresolved-identifier)"
+diagnostic: warning while-without-wait at=mixed.ws:12:3 stage=analysis message="loop body contains no wait call and the loop condition is statically true, so the loop repeats without yielding and never terminates on its own; it runs without bound while the rule is active (exact server impact is not statically measurable)"
 next: wright lint
 next: wright analyze
 next: wright inspect

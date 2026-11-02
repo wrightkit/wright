@@ -352,11 +352,11 @@ fn verdict_exit_and_counts_match_plain_and_json() {
     let cases = [
         Case {
             args: &["check", "flow.ws"],
-            tag_line: " PASS  check",
-            plain_word: "PASS check",
+            tag_line: " WARN  check",
+            plain_word: "WARN check",
             exit: 0,
-            count_line: "0 diagnostics",
-            reported: 0,
+            count_line: "1 warning",
+            reported: 1,
         },
         Case {
             args: &["lint", "flow.ws"],

@@ -557,10 +557,7 @@ impl CompilerSession {
         })
     }
 
-    /// Compile and deliver the program as `write` directs (ADR-0025). A
-    /// failed compile or a refused destination writes nothing. `write.to`
-    /// selects the output locale (#759); `None` emits the loaded input's
-    /// locale.
+    /// Compile to the destination and locale in `write`, refusing output on failure.
     pub fn compile_to(&mut self, write: CompileWrite<'_>) -> Envelope<CompileResult> {
         let mut result = CompileResult::default();
         let (output, entry) = match self.compile_output(write.to.as_deref()) {
@@ -671,6 +668,7 @@ impl CompilerSession {
             None => None,
         };
         let loaded = self.load_with_operation(ProviderOperation::Compile)?;
+        self.attach_lint_diagnostics(&loaded);
         let locale = named.unwrap_or_else(|| Self::locale_for(&loaded));
         self.progress(ProgressEvent::new(ProgressPhase::Emission));
         let text = hotpath::measure_block!("compile::emit", {
@@ -697,6 +695,7 @@ impl CompilerSession {
             |session, loaded| {
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
                 session.attach_workshop_completeness(&loaded);
+                session.attach_lint_diagnostics(&loaded);
                 CheckResult {
                     program: Some(semantic::check_program_summary(&loaded)),
                     next: crate::result::next::list(crate::result::next::CHECK),

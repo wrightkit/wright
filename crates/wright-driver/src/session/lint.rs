@@ -14,6 +14,37 @@ use crate::progress::{ProgressEvent, ProgressPhase, ProgressUnit};
 use crate::result::{Envelope, LintResult};
 
 impl CompilerSession {
+    pub(super) fn attach_lint_diagnostics(&mut self, loaded: &Loaded) {
+        self.progress(ProgressEvent::new(ProgressPhase::Linting));
+        let findings = self.lint_registry.run(&loaded.program, &self.config.lint);
+        for finding in findings {
+            let mut diagnostic = crate::Diagnostic::carried_error(
+                &finding.code,
+                crate::Stage::Analysis,
+                &finding.message,
+            );
+            diagnostic.severity = finding.severity;
+            diagnostic.span = finding.span.map(|span| {
+                crate::diag::source_span(
+                    span,
+                    super::semantic::span_path(Some(span.file.index() as u64), loaded),
+                )
+            });
+            diagnostic.source = Some(super::loaded_origin(loaded));
+            diagnostic.fields.insert(
+                "evidence".into(),
+                serde_json::json!(finding.evidence.as_str()),
+            );
+            if let Some(boundedness) = finding.boundedness {
+                diagnostic.fields.insert(
+                    "boundedness".into(),
+                    serde_json::json!(boundedness.as_str()),
+                );
+            }
+            self.diagnostics.push(diagnostic);
+        }
+    }
+
     /// `lint` over an already-served snapshot (#1002): the same
     /// pipeline [`Self::lint`] runs — the service's snapshot is the
     /// loaded input, so the `lint` operation and `wright lint` share one
