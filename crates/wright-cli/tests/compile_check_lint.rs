@@ -79,6 +79,17 @@ fn check_and_compile_carry_the_same_lint_diagnostics_and_verdict() {
                     assert_eq!(diagnostic[field], finding[field], "{command}: {field}");
                 }
                 assert_eq!(diagnostic["stage"], "analysis");
+                let span = &diagnostic["span"];
+                assert_eq!(
+                    format!(
+                        "{}:{}:{}",
+                        span["path"].as_str().unwrap(),
+                        span["start"]["line"],
+                        span["start"]["col"]
+                    ),
+                    finding["location"].as_str().unwrap(),
+                    "{command}: location"
+                );
             }
             if command == "compile" && args.contains(&"nested-binder-lambda:error") {
                 assert!(result["result"]["output"].is_null(), "{result}");
