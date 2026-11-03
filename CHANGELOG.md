@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.41.3](https://github.com/wrightkit/wright/compare/v0.41.2...v0.41.3) (2026-11-03)
+
+
+### Bug Fixes
+
+* include lint findings in compile and check diagnostics ([#1035](https://github.com/wrightkit/wright/issues/1035)) ([180c343](https://github.com/wrightkit/wright/commit/180c3436b6aa43ced1544caeaa32006d7bd7dd84))
+
 ## [0.41.2](https://github.com/wrightkit/wright/compare/v0.41.1...v0.41.2) (2026-11-02)
 
 
