@@ -36,7 +36,10 @@ inputs:
    canonical validation, their diagnostics are included as well. A complete
    compiler backend is not a prerequisite for diagnostic `check`, and an
    unavailable requested stage remains an explicit owner/provider outcome.
-   Ordinary configurable lint findings are not part of this gate by default.
+   Since Issue #1032, `check` and `compile` also report the enabled `lint`
+   findings in their diagnostics and counts, under the same rule configuration
+   and severity overrides as `lint`. A warning does not fail either command; a
+   rule raised to `error` does.
 2. **`lint`** applies configurable Wright or local rules to semantic facts and
    reports rule findings. Findings retain stable rule identity, effective
    severity, support classification, boundedness where applicable, and
@@ -67,7 +70,7 @@ framework is not required before a useful, deterministic report exists.
 
 - CLI, driver, tool, and agent consumers must preserve the workflow-specific
   result types while sharing common envelopes and semantic inputs.
-- Changes to lint policy do not silently change the correctness gate.
+- Lint policy changes alter the `check` and `compile` verdict only through an explicit rule severity of `error`.
 - New analysis facts can be introduced without creating a lint rule or
   assigning project severity.
 - The `AnalyzeResult` payload is a facts/report contract rather than a finding
