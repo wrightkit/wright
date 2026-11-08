@@ -481,8 +481,12 @@ impl LintPackageStore {
             std::fs::remove_dir_all(&rules_dir)
                 .map_err(|e| io("remove the damaged lint rules", &rules_dir, e))?;
         }
-        std::fs::rename(staging.join("rules"), &rules_dir)
-            .map_err(|e| io("repair the lint package directory", dir, e))
+        match std::fs::rename(staging.join("rules"), &rules_dir) {
+            Ok(()) => Ok(()),
+            // A concurrent install repaired the entry first.
+            Err(_) if rules::intact_package(dir) => Ok(()),
+            Err(e) => Err(io("repair the lint package directory", dir, e)),
+        }
     }
 
     fn promote(&self, staging: &Path, final_dir: &Path) -> Result<(), LintPackageError> {

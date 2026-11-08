@@ -423,6 +423,37 @@ fn an_entry_whose_rules_dir_was_removed_is_repaired_by_install() {
 }
 
 #[test]
+fn concurrent_installs_repair_one_damaged_entry() {
+    let archive = package_tarball(RULE);
+    let server = TestServer::serve(move |request| {
+        if request.path == format!("/community/rules/tar.gz/{SHA_A}") {
+            Response::ok(archive.clone())
+        } else {
+            Response::not_found()
+        }
+    });
+    for round in 0..20 {
+        let dir = TestDir::new(&format!("concurrent-repair-{round}"));
+        std::fs::create_dir_all(dir.path().join("community/rules").join(SHA_A)).unwrap();
+        let store = store(dir.path(), &server);
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                let (store, barrier) = (store.clone(), barrier.clone());
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    store.install(&source(), Some(SHA_A)).map(|_| ())
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().unwrap().unwrap();
+        }
+        assert!(store.installed(&source(), SHA_A).is_some());
+    }
+}
+
+#[test]
 fn source_parsing_accepts_github_spellings_and_rejects_others() {
     let (src, reference) = LintPackageSource::parse("community/rules").unwrap();
     assert_eq!(src.slug(), "community/rules");
