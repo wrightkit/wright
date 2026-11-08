@@ -28,23 +28,7 @@ pub(super) fn install_version(
     let result = (|| -> Result<(), UpdateError> {
         unpack(&archive, &staging, platform)?;
         let payload = validated_payload(&staging, version, platform)?;
-        // The matched pair is swapped lsp-first: `wright-lsp` may be held
-        // open by an editor on Windows, and failing there changes nothing.
-        let lsp = platform.exe("wright-lsp");
-        replace_binary(
-            &payload.join(&lsp),
-            &install_dir.join(&lsp),
-            platform,
-            false,
-        )?;
-        let wright = platform.exe("wright");
-        replace_binary(
-            &payload.join(&wright),
-            &install_dir.join(&wright),
-            platform,
-            true,
-        )?;
-        Ok(())
+        swap_pair(&payload, install_dir, &staging, platform)
     })();
     let _ = std::fs::remove_dir_all(&staging);
     result?;
@@ -56,6 +40,37 @@ pub(super) fn install_version(
     );
     let _ = crate::completion::refresh_installed_completions();
     Ok(())
+}
+
+/// Swap the matched pair lsp-first: `wright-lsp` may be held open by an editor
+/// on Windows, and failing there changes nothing. If the `wright` swap then
+/// fails, the previous `wright-lsp` is restored from a backup in `staging`.
+fn swap_pair(
+    payload: &Path,
+    install_dir: &Path,
+    staging: &Path,
+    platform: Platform,
+) -> Result<(), UpdateError> {
+    let lsp = platform.exe("wright-lsp");
+    let installed_lsp = install_dir.join(&lsp);
+    let backup = staging.join(format!("{lsp}.previous"));
+    let backed_up = std::fs::copy(&installed_lsp, &backup).is_ok();
+    replace_binary(&payload.join(&lsp), &installed_lsp, platform, false)?;
+    let wright = platform.exe("wright");
+    replace_binary(
+        &payload.join(&wright),
+        &install_dir.join(&wright),
+        platform,
+        true,
+    )
+    .map_err(|error| {
+        let outcome = if backed_up && std::fs::rename(&backup, &installed_lsp).is_ok() {
+            format!("the previous {lsp} was restored")
+        } else {
+            format!("{lsp} was already replaced with the new version and could not be restored")
+        };
+        UpdateError::failed(format!("{}; {outcome}", error.message()))
+    })
 }
 
 fn staging_dir(install_dir: &Path) -> Result<PathBuf, UpdateError> {
@@ -259,6 +274,35 @@ mod tests {
             assert!(error.message().contains("failed to extract"));
             let _ = std::fs::remove_dir_all(&staged);
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_wright_swap_restores_previous_lsp() {
+        let platform = detect_platform_for("linux", "x86_64").unwrap();
+        let root = scratch_dir("swap-fail");
+        let (payload, install, staging) = (
+            root.join("payload"),
+            root.join("install"),
+            root.join("staging"),
+        );
+        for dir in [&payload, &install, &staging] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        std::fs::write(payload.join("wright-lsp"), b"new-lsp").unwrap();
+        std::fs::write(payload.join("wright"), b"new-wright").unwrap();
+        std::fs::write(install.join("wright-lsp"), b"old-lsp").unwrap();
+        // A non-empty directory at the destination makes the rename fail.
+        std::fs::create_dir_all(install.join("wright")).unwrap();
+        std::fs::write(install.join("wright").join("keep"), b"").unwrap();
+
+        let error = swap_pair(&payload, &install, &staging, platform).unwrap_err();
+        assert!(error.message().contains("previous wright-lsp was restored"));
+        assert_eq!(
+            std::fs::read(install.join("wright-lsp")).unwrap(),
+            b"old-lsp"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     fn scratch_dir(tag: &str) -> PathBuf {
