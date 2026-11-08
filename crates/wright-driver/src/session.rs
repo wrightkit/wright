@@ -496,11 +496,9 @@ impl CompilerSession {
         cache::compare_and_record_in(&run, &snapshot, environment)
     }
 
-    pub(crate) fn named_baseline_missing(&self) -> Option<String> {
+    pub(crate) fn baseline_error(&self) -> Option<String> {
         let run = self.cost_run(self.loaded.as_ref()?);
-        let name = run.baseline.as_deref()?;
-        let environment = cache::CacheEnvironment::from_env();
-        (!environment.ci && !cache::baseline_exists_in(&run, environment)).then(|| name.to_string())
+        cache::baseline_error(&run, cache::CacheEnvironment::from_env())
     }
 
     #[allow(unsafe_code)] // hotpath 0.28 emits `#[unsafe(export_name)]` statics
@@ -570,6 +568,20 @@ impl CompilerSession {
         {
             return self.finish("compile", result);
         }
+        if let Some(message) = self.baseline_error() {
+            self.diagnostics.push(Diagnostic::error(
+                "invalid-selection",
+                Stage::Emission,
+                message,
+            ));
+            let mut envelope = self.finish("compile", result);
+            envelope.ok = false;
+            envelope.exit = crate::result::exit::SOURCE_ERROR;
+            // A real failure outranks the gate: `gated` must not claim
+            // it caused this exit.
+            envelope.gated = false;
+            return envelope;
+        }
         let written = {
             let this = &*self;
             let CompileWrite {
@@ -604,34 +616,18 @@ impl CompilerSession {
             }
         };
         let mut comparison = None;
-        let mut missing_baseline = None;
         match written {
             Ok(written_to) => {
                 result.output = Some(CompiledOutput {
                     written_to,
                     ..output
                 });
-                missing_baseline = self.named_baseline_missing();
-                if missing_baseline.is_none() {
-                    comparison = self.run_cost_comparison();
-                }
+                comparison = self.run_cost_comparison();
             }
             Err(diagnostic) => self.diagnostics.push(diagnostic),
         }
         let mut envelope = self.finish("compile", result);
         envelope.comparison = comparison.map(|c| c.to_json());
-        if let Some(name) = missing_baseline {
-            envelope.diagnostics.push(Diagnostic::error(
-                "invalid-selection",
-                Stage::Emission,
-                format!("unknown baseline '{}': no record under .wright/ for this input kind/locale/profile", name),
-            ));
-            envelope.ok = false;
-            envelope.exit = crate::result::exit::SOURCE_ERROR;
-            // A real failure outranks the gate: `gated` must not claim
-            // it caused this exit.
-            envelope.gated = false;
-        }
         envelope
     }
 
