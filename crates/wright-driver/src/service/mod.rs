@@ -48,15 +48,14 @@ pub use crate::request::{
 };
 
 pub use state::ServiceState;
-use state::Snapshot;
+use state::Slot;
 
 /// The session-aware tool service.
 pub struct ToolService<'a> {
     session: &'a mut CompilerSession,
-    snapshot: Option<Snapshot>,
+    slot: Slot,
     generation: u64,
     reloads: usize,
-    invalidated: bool,
     selected_meta: Vec<FindingMeta>,
 }
 
@@ -79,10 +78,9 @@ impl<'a> ToolService<'a> {
         session.verify_fixed_config()?;
         let mut service = ToolService {
             session,
-            snapshot: None,
+            slot: Slot::Empty,
             generation: 0,
             reloads: 0,
-            invalidated: false,
             selected_meta: Vec::new(),
         };
         if let Ok(loaded) = service.session.load() {
@@ -103,7 +101,7 @@ impl<'a> ToolService<'a> {
     /// program), or `None` while the configured project cannot load (#512).
     /// The first successful program-reading request populates it.
     pub fn loaded(&self) -> Option<&Loaded> {
-        self.snapshot.as_ref().map(|snapshot| &snapshot.loaded)
+        self.slot.snapshot().map(|snapshot| &snapshot.loaded)
     }
 
     /// The served program's generation (#595) — the value responses report
@@ -111,7 +109,7 @@ impl<'a> ToolService<'a> {
     /// carry. `None` while no snapshot is adopted (deferred initial load or
     /// the invalidated state after a failed load).
     pub fn snapshot_generation(&self) -> Option<u64> {
-        self.snapshot.as_ref().map(|_| self.generation)
+        self.slot.snapshot().map(|_| self.generation)
     }
 
     /// Full semantic-service builds behind this service's session (#513) —
