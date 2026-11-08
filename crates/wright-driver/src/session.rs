@@ -111,7 +111,9 @@ pub struct CompilerSession {
     catalog: &'static workshop_rs::catalog::Catalog,
     lint_registry: Arc<LintRegistry>,
     loaded: Option<Loaded>,
-    loaded_operation: Option<ProviderOperation>,
+    /// A provider compile established the snapshot. `drop_loaded` keeps it:
+    /// `reload()` = `drop_loaded()` + `load()`, and `load()` needs it set.
+    provider_compiled: bool,
     semantic: Option<SessionSemantic>,
     semantic_builds: usize,
     diagnostics: Vec<Diagnostic>,
@@ -141,7 +143,7 @@ impl CompilerSession {
             catalog,
             lint_registry: Arc::new(lint_registry),
             loaded: None,
-            loaded_operation: None,
+            provider_compiled: false,
             semantic: None,
             semantic_builds: 0,
             diagnostics: Vec::new(),
@@ -213,9 +215,7 @@ impl CompilerSession {
     /// reaches the caller (#655).
     pub fn load(&mut self) -> Result<Loaded, Diagnostic> {
         self.verify_fixed_config()?;
-        if self.config.source_backend == SourceBackend::Provider
-            && self.loaded_operation != Some(ProviderOperation::Compile)
-        {
+        if self.config.source_backend == SourceBackend::Provider && !self.provider_compiled {
             return Err(SourceProviderError::Unsupported {
                 message: "the provider session holds no canonical compile result — the provider declined its compile operation or no compile-producing workflow has run".to_string(),
             }
@@ -249,11 +249,7 @@ impl CompilerSession {
             // Only the provider backend produces an Opy `Loaded`; a
             // native load refuses Opy input before this point.
             let is_provider = loaded.input.kind == SourceKind::Opy;
-            if !is_provider
-                || self.loaded_operation == Some(provider_operation)
-                || (self.loaded_operation == Some(ProviderOperation::Compile)
-                    && provider_operation == ProviderOperation::Check)
-            {
+            if !is_provider || self.provider_compiled {
                 self.diagnostics
                     .extend(loaded.load_diagnostics.iter().cloned());
                 return Ok(loaded.clone());
@@ -1055,3 +1051,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod provider_reload_tests;
