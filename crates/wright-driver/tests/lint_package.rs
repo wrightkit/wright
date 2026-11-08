@@ -382,15 +382,44 @@ fn the_github_token_reaches_only_the_api_host() {
 }
 
 #[test]
-fn a_damaged_store_entry_is_refused_not_overwritten() {
+fn an_entry_without_rule_files_is_repaired_by_install() {
     let dir = TestDir::new("damaged");
-    let broken = dir.path().join("community/rules").join(SHA_A).join("rules");
-    std::fs::create_dir_all(&broken).unwrap();
-    let server = TestServer::serve(|_| Response::not_found());
+    let entry = dir.path().join("community/rules").join(SHA_A);
+    std::fs::create_dir_all(entry.join("rules")).unwrap();
+    std::fs::write(entry.join("notes.txt"), "keep").unwrap();
+    let archive = package_tarball(RULE);
+    let server = TestServer::serve(move |request| {
+        if request.path == format!("/community/rules/tar.gz/{SHA_A}") {
+            Response::ok(archive.clone())
+        } else {
+            Response::not_found()
+        }
+    });
     let store = store(dir.path(), &server);
-    let error = store.install(&source(), Some(SHA_A)).unwrap_err();
-    assert_eq!(error.code(), "lint-package-install");
-    assert!(server.requests().is_empty(), "no download was attempted");
+    let installed = store.install(&source(), Some(SHA_A)).unwrap();
+    assert!(installed.downloaded);
+    assert_eq!(installed.rules, ["community/minimum-wait"]);
+    assert!(store.installed(&source(), SHA_A).is_some());
+    assert!(entry.join("notes.txt").is_file());
+}
+
+#[test]
+fn an_entry_whose_rules_dir_was_removed_is_repaired_by_install() {
+    let dir = TestDir::new("rules-removed");
+    let entry = dir.path().join("community/rules").join(SHA_A);
+    std::fs::create_dir_all(&entry).unwrap();
+    let archive = package_tarball(RULE);
+    let server = TestServer::serve(move |request| {
+        if request.path == format!("/community/rules/tar.gz/{SHA_A}") {
+            Response::ok(archive.clone())
+        } else {
+            Response::not_found()
+        }
+    });
+    let store = store(dir.path(), &server);
+    let installed = store.install(&source(), Some(SHA_A)).unwrap();
+    assert!(installed.downloaded);
+    assert!(store.installed(&source(), SHA_A).is_some());
 }
 
 #[test]
