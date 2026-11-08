@@ -12,7 +12,7 @@ impl<'a> ToolService<'a> {
     /// (#888).
     pub fn handle(&mut self, request: &ToolRequest) -> ToolResponse {
         let response = self.handle_response(request);
-        let loaded = self.snapshot.as_ref().map(|snapshot| &snapshot.loaded);
+        let loaded = self.slot.snapshot().map(|snapshot| &snapshot.loaded);
         match response {
             ToolResponse::Error { mut error } => {
                 compose_fields(

@@ -70,10 +70,27 @@ pub(super) struct Snapshot {
 /// `snapshot` values a borrowed one would. Constructed by
 /// [`ToolService::into_state`], restored by [`ToolService::resume`].
 pub struct ServiceState {
-    pub(super) snapshot: Option<Snapshot>,
+    pub(super) slot: Slot,
     pub(super) generation: u64,
     pub(super) reloads: usize,
-    pub(super) invalidated: bool,
+}
+
+/// What the service holds: never loaded, invalidated by a failed or
+/// superseded load (the next successful load counts as a reload), or a
+/// fresh snapshot. `adopt` is the only transition into `Fresh`.
+pub(super) enum Slot {
+    Empty,
+    Invalidated,
+    Fresh(Box<Snapshot>),
+}
+
+impl Slot {
+    pub(super) fn snapshot(&self) -> Option<&Snapshot> {
+        match self {
+            Slot::Fresh(snapshot) => Some(snapshot),
+            _ => None,
+        }
+    }
 }
 
 impl<'a> ToolService<'a> {
@@ -89,10 +106,9 @@ impl<'a> ToolService<'a> {
         session.verify_fixed_config()?;
         Ok(ToolService {
             session,
-            snapshot: state.snapshot,
+            slot: state.slot,
             generation: state.generation,
             reloads: state.reloads,
-            invalidated: state.invalidated,
             selected_meta: Vec::new(),
         })
     }
@@ -101,21 +117,16 @@ impl<'a> ToolService<'a> {
     /// [`ToolService::resume`] restores it.
     pub fn into_state(self) -> ServiceState {
         ServiceState {
-            snapshot: self.snapshot,
+            slot: self.slot,
             generation: self.generation,
             reloads: self.reloads,
-            invalidated: self.invalidated,
         }
     }
 
     pub(super) fn refresh(&mut self) -> Result<(), super::ToolErrorInfo> {
-        let Some(snapshot) = &self.snapshot else {
+        let Some(snapshot) = self.slot.snapshot() else {
             let loaded = self.session.load().map_err(Self::loader_error)?;
             self.adopt(loaded);
-            if self.invalidated {
-                self.reloads += 1;
-                self.invalidated = false;
-            }
             return Ok(());
         };
         let fingerprint = loaded_fingerprint(&self.session.config, &snapshot.loaded);
@@ -135,12 +146,11 @@ impl<'a> ToolService<'a> {
     }
 
     pub(super) fn invalidate(&mut self) {
-        self.snapshot = None;
-        self.invalidated = true;
+        self.slot = Slot::Invalidated;
     }
 
     pub(super) fn refresh_workflow(&mut self) {
-        let Some(snapshot) = &self.snapshot else {
+        let Some(snapshot) = self.slot.snapshot() else {
             return;
         };
         let fingerprint = loaded_fingerprint(&self.session.config, &snapshot.loaded);
@@ -148,12 +158,12 @@ impl<'a> ToolService<'a> {
             return;
         }
         self.session.drop_loaded();
-        self.snapshot = None;
+        self.slot = Slot::Empty;
         self.reloads += 1;
     }
 
     pub(super) fn adopt_session_snapshot(&mut self) {
-        if self.snapshot.is_none()
+        if self.slot.snapshot().is_none()
             && let Some(loaded) = self.session.cached_loaded()
         {
             self.adopt(loaded);
@@ -174,17 +184,20 @@ impl<'a> ToolService<'a> {
             .then(|| semantic.with_lint_config(self.session.config.lint.clone()));
         let fingerprint = loaded_fingerprint(&self.session.config, &loaded);
         self.generation += 1;
-        self.snapshot = Some(Snapshot {
+        if matches!(self.slot, Slot::Invalidated) {
+            self.reloads += 1;
+        }
+        self.slot = Slot::Fresh(Box::new(Snapshot {
             loaded,
             semantic,
             lint_semantic,
             fingerprint,
-        });
+        }));
     }
 
     pub(super) fn snapshot(&self) -> &Snapshot {
-        self.snapshot
-            .as_ref()
+        self.slot
+            .snapshot()
             .expect("the refresh gate guarantees a snapshot")
     }
 
