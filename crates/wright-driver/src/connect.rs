@@ -75,7 +75,8 @@ pub fn connect_provider(
             .err()
             .map(|error| error.supported_protocol_versions())
             .unwrap_or_default();
-        let _ = provider.shutdown();
+        // The old provider never initialized, so `shutdown` would be
+        // rejected; reassigning drops it, and `Drop` kills the process.
         provider = spawn()?;
         initialize = match mutual_protocol_version(&supported, floor) {
             Some(version) => provider.initialize_version(version, Some(client)),
