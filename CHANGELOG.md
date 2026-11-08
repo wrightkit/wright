@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.41.4](https://github.com/wrightkit/wright/compare/v0.41.3...v0.41.4) (2026-11-08)
+
+
+### Bug Fixes
+
+* count a reload once after a repaired load failure ([#1052](https://github.com/wrightkit/wright/issues/1052)) ([e06a591](https://github.com/wrightkit/wright/commit/e06a5917bd75633f5f332a89358b5861fa89c6d8)), closes [#1047](https://github.com/wrightkit/wright/issues/1047)
+* reject an unusable named baseline before compile writes output ([#1061](https://github.com/wrightkit/wright/issues/1061)) ([3367857](https://github.com/wrightkit/wright/commit/3367857263eb09a6d04658917d8e131bb8e65699)), closes [#1054](https://github.com/wrightkit/wright/issues/1054)
+* restore wright-lsp when the wright swap fails during update ([#1059](https://github.com/wrightkit/wright/issues/1059)) ([488306e](https://github.com/wrightkit/wright/commit/488306e7dea277aee6cae7afdfe6ebb99e1a9a21)), closes [#1055](https://github.com/wrightkit/wright/issues/1055)
+
+
+### Code Refactoring
+
+* remove dead shutdown call in connect_provider ([#1050](https://github.com/wrightkit/wright/issues/1050)) ([87efb9f](https://github.com/wrightkit/wright/commit/87efb9fc09d4ddabf29dd4d7f5acbd60af095a78)), closes [#1049](https://github.com/wrightkit/wright/issues/1049)
+* replace session loaded_operation with a bool ([#1051](https://github.com/wrightkit/wright/issues/1051)) ([d1f2a54](https://github.com/wrightkit/wright/commit/d1f2a54f09c69595405a307ee3fa339f3211202f)), closes [#1048](https://github.com/wrightkit/wright/issues/1048)
+
 ## [0.41.3](https://github.com/wrightkit/wright/compare/v0.41.2...v0.41.3) (2026-11-03)
 
 
