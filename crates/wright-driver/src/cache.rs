@@ -344,6 +344,27 @@ pub(crate) fn baseline_exists_in(run: &CostRun, environment: CacheEnvironment) -
     read_baseline(&dir, name, &key).is_some()
 }
 
+/// Why the explicitly named `--baseline` cannot be used outside CI, as the
+/// usage-error message: caching is disabled, or no usable record exists.
+/// `None` under CI (ADR-0030 decision 14), without `--baseline`, or when the
+/// record is usable.
+pub(crate) fn baseline_error(run: &CostRun, environment: CacheEnvironment) -> Option<String> {
+    let name = run.baseline.as_deref()?;
+    if environment.ci {
+        return None;
+    }
+    if environment.disabled(run.no_cache) {
+        return Some(format!(
+            "cannot use baseline '{name}': caching is disabled (--no-cache or WRIGHT_NO_CACHE)"
+        ));
+    }
+    (!baseline_exists_in(run, environment)).then(|| {
+        format!(
+            "unknown baseline '{name}': no record under .wright/ for this input kind/locale/profile"
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -512,6 +533,30 @@ mod tests {
             "decision 12: differently keyed entries never compare"
         );
         assert!(!baseline_exists_in(&other_key, LOCAL_CACHE));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn baseline_error_separates_disabled_cache_from_a_missing_record() {
+        let dir = std::env::temp_dir().join(format!("wright-cache-err-{}", std::process::id()));
+        let mut save = cost_run(&dir);
+        save.save_baseline = Some("v1".to_string());
+        compare_and_record_in(&save, &snap(100, &[("a", 100)]), LOCAL_CACHE);
+
+        let mut existing = cost_run(&dir);
+        existing.baseline = Some("v1".to_string());
+        assert_eq!(baseline_error(&existing, LOCAL_CACHE), None);
+        existing.no_cache = true;
+        let disabled = baseline_error(&existing, LOCAL_CACHE).expect("disabled");
+        assert!(disabled.contains("caching is disabled"), "{disabled}");
+        assert!(!disabled.contains("unknown"), "{disabled}");
+        assert_eq!(baseline_error(&existing, CI_CACHE), None);
+
+        let mut missing = cost_run(&dir);
+        missing.baseline = Some("nope".to_string());
+        let unknown = baseline_error(&missing, LOCAL_CACHE).expect("missing");
+        assert!(unknown.contains("unknown baseline 'nope'"), "{unknown}");
+        assert_eq!(baseline_error(&missing, CI_CACHE), None);
         let _ = fs::remove_dir_all(&dir);
     }
 }

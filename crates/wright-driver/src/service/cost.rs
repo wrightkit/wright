@@ -139,18 +139,9 @@ impl<'a> ToolService<'a> {
         }
         let cost_run = self.session.cost_run(loaded);
         let cache_environment = crate::cache::CacheEnvironment::from_env();
-        if run.baseline.is_some()
-            && !cache_environment.ci
-            && !crate::cache::baseline_exists_in(&cost_run, cache_environment)
-        {
-            return Err(ToolErrorInfo::new(
-                "invalid-selection",
-                format!(
-                    "unknown baseline '{}': no record under .wright/ for this input kind/locale/profile",
-                    run.baseline.as_deref().unwrap_or_default()
-                ),
-            )
-            .with_class(crate::diag::ExitClass::Usage));
+        if let Some(message) = crate::cache::baseline_error(&cost_run, cache_environment) {
+            return Err(ToolErrorInfo::new("invalid-selection", message)
+                .with_class(crate::diag::ExitClass::Usage));
         }
         let Some(snapshot) = self.session.cost_snapshot(loaded) else {
             return Ok(None);

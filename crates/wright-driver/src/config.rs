@@ -137,8 +137,9 @@ pub struct RunOptions {
     /// `--no-cache`: neither read nor write `.wright/`.
     pub no_cache: bool,
     /// `--baseline <name>`: compare against the named reference instead of
-    /// the previous run. An unknown name given explicitly is a usage error
-    /// outside CI; under CI it turns the comparison off silently.
+    /// the previous run. An unknown name, or any name while caching is
+    /// disabled, given explicitly is an error outside CI that fails before
+    /// output is written; under CI it turns the comparison off silently.
     pub baseline: Option<String>,
     /// `--save-baseline <name>`: record the current run under `name`.
     pub save_baseline: Option<String>,
