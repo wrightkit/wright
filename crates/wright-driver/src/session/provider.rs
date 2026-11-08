@@ -269,7 +269,7 @@ impl CompilerSession {
         // of which workflow asked for it (#1005): a `check` whose compile
         // returned an artifact holds a canonical compile result, and
         // `load()` may serve it.
-        self.loaded_operation = Some(ProviderOperation::Compile);
+        self.provider_compiled = true;
         Ok(loaded)
     }
 }
