@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.41.6](https://github.com/wrightkit/wright/compare/v0.41.5...v0.41.6) (2026-11-09)
+
+
+### Performance Improvements
+
+* use mimalloc as the wright CLI global allocator ([#1064](https://github.com/wrightkit/wright/issues/1064)) ([0629eed](https://github.com/wrightkit/wright/commit/0629eed5bd0152f29be6a039f99131aae3d50b22)), closes [#1063](https://github.com/wrightkit/wright/issues/1063)
+
 ## [0.41.5](https://github.com/wrightkit/wright/compare/v0.41.4...v0.41.5) (2026-11-09)
 
 
