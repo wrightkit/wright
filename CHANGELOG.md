@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.41.5](https://github.com/wrightkit/wright/compare/v0.41.4...v0.41.5) (2026-11-09)
+
+
+### Bug Fixes
+
+* repair incomplete lint package and OPY provider store entries ([#1060](https://github.com/wrightkit/wright/issues/1060)) ([c36db5b](https://github.com/wrightkit/wright/commit/c36db5bd42d52ca64e1177280b70bb29d04d158b)), closes [#1056](https://github.com/wrightkit/wright/issues/1056)
+
 ## [0.41.4](https://github.com/wrightkit/wright/compare/v0.41.3...v0.41.4) (2026-11-08)
 
 
