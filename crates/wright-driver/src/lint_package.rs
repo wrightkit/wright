@@ -233,7 +233,7 @@ impl LintPackageStore {
     ) -> Result<InstalledPackage, LintPackageError> {
         let sha = self.resolve(source, reference)?;
         let dir = self.package_dir(source, &sha);
-        if dir.exists() {
+        if rules::intact_package(&dir) {
             let rules = rules::validate_stored(&dir, source.is_first_party())?;
             return Ok(InstalledPackage {
                 source: source.clone(),
@@ -253,7 +253,11 @@ impl LintPackageStore {
             rules::extract_rules(&archive, &staging)?;
             let validated =
                 rules::validate_package(&staging.join("rules"), source.is_first_party())?;
-            self.promote(&staging, &dir)?;
+            if dir.exists() {
+                self.repair(&staging, &dir)?;
+            } else {
+                self.promote(&staging, &dir)?;
+            }
             Ok(validated)
         })();
         let _ = std::fs::remove_dir_all(&staging);
@@ -464,6 +468,25 @@ impl LintPackageStore {
             "a lint package",
         )
         .map_err(LintPackageError::install)
+    }
+
+    /// Replace the managed `rules/` tree of an incomplete entry, keeping
+    /// any unrelated file beside it.
+    fn repair(&self, staging: &Path, dir: &Path) -> Result<(), LintPackageError> {
+        let rules_dir = dir.join("rules");
+        let io = |what: &str, path: &Path, e: std::io::Error| {
+            LintPackageError::install(format!("cannot {what} '{}': {e}", path.display()))
+        };
+        if rules_dir.exists() {
+            std::fs::remove_dir_all(&rules_dir)
+                .map_err(|e| io("remove the damaged lint rules", &rules_dir, e))?;
+        }
+        match std::fs::rename(staging.join("rules"), &rules_dir) {
+            Ok(()) => Ok(()),
+            // A concurrent install repaired the entry first.
+            Err(_) if rules::intact_package(dir) => Ok(()),
+            Err(e) => Err(io("repair the lint package directory", dir, e)),
+        }
     }
 
     fn promote(&self, staging: &Path, final_dir: &Path) -> Result<(), LintPackageError> {
