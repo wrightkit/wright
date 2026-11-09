@@ -39,3 +39,6 @@ workshop-rs.workspace = true
 
 [target."cfg(windows)".dependencies]
 self-replace = "1.5.0"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+mimalloc = "0.1.52"
