@@ -184,7 +184,17 @@ impl LocalProviderErrorKind {
     }
 }
 
+/// The `ProviderError::code` values that mean the provider process is gone
+/// or unusable. Holders match on these when they only carry the code.
+pub const PROVIDER_DEATH_CODES: [&str; 3] = ["provider-exited", "provider-io", "provider-timeout"];
+
 impl ProviderError {
+    /// The provider process is gone or unusable: a holder drops it and
+    /// reconnects on the next request (#1057, #1058).
+    pub fn is_death(&self) -> bool {
+        PROVIDER_DEATH_CODES.contains(&self.code())
+    }
+
     pub fn code(&self) -> &'static str {
         match self {
             Self::NotConfigured { .. } => "provider-not-configured",

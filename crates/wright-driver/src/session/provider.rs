@@ -19,8 +19,27 @@ use crate::input::{InputTarget, ResolvedInput};
 use crate::opy_provider;
 use crate::progress::{ProgressEvent, ProgressPhase};
 use crate::source_provider::{
-    SourceLanguage, SourceProvenance, SourceProviderError, SourceTarget, provider_uri_path,
+    SourceLanguage, SourceProvenance, SourceProvider, SourceProviderError, SourceTarget,
+    provider_uri_path,
 };
+
+/// The session's source provider. Only a provider the session connected
+/// itself can be respawned after it dies; an injected one cannot be
+/// recreated, so it stays (`docs/embedding.md`).
+pub(super) struct ProviderSlot {
+    provider: Box<dyn SourceProvider>,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    spawned: bool,
+}
+
+impl ProviderSlot {
+    pub(super) fn injected(provider: Box<dyn SourceProvider>) -> Self {
+        Self {
+            provider,
+            spawned: false,
+        }
+    }
+}
 
 impl CompilerSession {
     pub(super) fn load_from_source_provider(
@@ -84,14 +103,20 @@ impl CompilerSession {
                 )
                 .diagnostic());
             }
-            self.source_provider = Some(Box::new(crate::source_provider::LppSourceProvider::new(
-                connected.provider,
-                self.config.locale.clone(),
-            )));
+            self.source_provider = Some(ProviderSlot {
+                provider: Box::new(crate::source_provider::LppSourceProvider::new(
+                    connected.provider,
+                    self.config.locale.clone(),
+                )),
+                spawned: true,
+            });
         }
-        let Some(provider) = self.source_provider.as_mut() else {
+        let Some(slot) = self.source_provider.as_mut() else {
             return Err(SourceProviderError::NotConfigured { language }.diagnostic());
         };
+        #[cfg(not(target_arch = "wasm32"))]
+        let spawned = slot.spawned;
+        let provider = slot.provider.as_mut();
         if provider.language() != language {
             return Err(Diagnostic::error(
                 "source-provider-language",
@@ -103,7 +128,7 @@ impl CompilerSession {
                 ),
             ));
         }
-        let compilation = match operation {
+        let outcome = match operation {
             // The OPY provider contract makes `compile` diagnostics a
             // superset of `check` diagnostics — compile runs the same
             // source pipeline check runs, then the integration stage — so
@@ -112,18 +137,29 @@ impl CompilerSession {
             // declines compile (an unnegotiated capability) falls back to
             // its own check answer.
             ProviderOperation::Check => match provider.compile(&target) {
-                Ok(compilation) => compilation,
+                Ok(compilation) => Ok(compilation),
                 Err(error)
                     if matches!(error, SourceProviderError::Unsupported { .. })
                         || error.code() == "capability-unavailable" =>
                 {
-                    provider
-                        .check(&target)
-                        .map_err(|error| error.diagnostic())?
+                    provider.check(&target)
                 }
-                Err(error) => return Err(error.diagnostic()),
+                Err(error) => Err(error),
             },
-            ProviderOperation::Compile => provider.compile(&target).map_err(|e| e.diagnostic())?,
+            ProviderOperation::Compile => provider.compile(&target),
+        };
+        let compilation = match outcome {
+            Ok(compilation) => compilation,
+            Err(error) => {
+                // A dead spawned provider is dropped, which kills its process,
+                // so the next load respawns it (#1057 policy, #1058). Other
+                // failures and injected providers stay.
+                #[cfg(not(target_arch = "wasm32"))]
+                if spawned && wright_lpp::PROVIDER_DEATH_CODES.contains(&error.code()) {
+                    self.source_provider = None;
+                }
+                return Err(error.diagnostic());
+            }
         };
         // The provider's declared compile inputs ride the resolved input
         // into `Loaded`, where the freshness check hashes exactly that

@@ -382,15 +382,18 @@ for line in sys.stdin:
         reply(id, {})
 "#;
 
-/// Records one line per spawn in `starts` next to the script. `argv[1]`:
-/// `die-once` exits on the first `lpp/check` (marker file `died`);
-/// `init-exit` exits during `lpp/initialize`.
+/// Records one line per spawn in `starts` and its pid in `pid` next to the
+/// script. `argv[1]`: `die-once` exits on the first `lpp/check` (marker
+/// file `died`); `stall-once` sleeps on the first `lpp/check` without
+/// reading stdin again (same marker); `init-exit` exits during
+/// `lpp/initialize`.
 #[cfg(unix)]
 const LIFECYCLE_PROVIDER: &str = r#"#!/usr/bin/env python3
-import json, os, sys, pathlib
+import json, os, sys, time, pathlib
 here = pathlib.Path(__file__).resolve().parent
 with open(here / "starts", "a") as f:
     f.write("start\n")
+(here / "pid").write_text(str(os.getpid()))
 mode = sys.argv[1]
 for line in sys.stdin:
     request = json.loads(line)
@@ -405,6 +408,8 @@ for line in sys.stdin:
     elif method == "lpp/check":
         if not (here / "died").exists():
             (here / "died").write_text("")
+            if mode == "stall-once":
+                time.sleep(60)
             os._exit(3)
         result = {"documents": []}
     else:
@@ -412,17 +417,33 @@ for line in sys.stdin:
     print(json.dumps({"jsonrpc": "2.0", "id": id, "result": result}), flush=True)
 "#;
 
+/// The timeout also covers `lpp/initialize`, which waits for interpreter
+/// start-up; the stalled request itself never answers, so only a bound far
+/// above start-up time keeps these tests independent of machine load.
 #[cfg(unix)]
-fn lifecycle_service(tag: &str, mode: &str) -> (LanguageService, PathBuf, String) {
+const STALL_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[cfg(unix)]
+fn lifecycle_script(tag: &str) -> (PathBuf, PathBuf) {
     use std::os::unix::fs::PermissionsExt;
 
     let dir = temp_dir(tag);
     let script = dir.join("fake-provider");
     std::fs::write(&script, LIFECYCLE_PROVIDER).expect("provider script");
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    (dir, script)
+}
+
+#[cfg(unix)]
+fn lifecycle_service(
+    tag: &str,
+    mode: &str,
+    timeout: Option<Duration>,
+) -> (LanguageService, PathBuf, String) {
+    let (dir, script) = lifecycle_script(tag);
     let mut service = LanguageService::with_config(
         dir.clone(),
-        registered(script, vec![mode.to_string()], None),
+        registered(script, vec![mode.to_string()], timeout),
     );
     let uri = open_opy(&mut service, &dir);
     (service, dir, uri)
@@ -440,7 +461,7 @@ fn spawn_count(dir: &Path) -> usize {
 #[cfg(unix)]
 #[test]
 fn a_provider_that_dies_after_ready_is_respawned_on_the_next_request() {
-    let (mut service, dir, uri) = lifecycle_service("respawn", "die-once");
+    let (mut service, dir, uri) = lifecycle_service("respawn", "die-once", None);
 
     let first = service.diagnostics(&uri);
     assert_eq!(first.len(), 1, "{first:?}");
@@ -459,7 +480,7 @@ fn a_provider_that_dies_after_ready_is_respawned_on_the_next_request() {
 #[cfg(unix)]
 #[test]
 fn a_connect_failure_stays_latched_across_requests() {
-    let (mut service, dir, uri) = lifecycle_service("latched", "init-exit");
+    let (mut service, dir, uri) = lifecycle_service("latched", "init-exit", None);
 
     for _ in 0..3 {
         let diagnostics = service.diagnostics(&uri);
@@ -467,6 +488,74 @@ fn a_connect_failure_stays_latched_across_requests() {
         assert_eq!(diagnostics[0].code, "provider-exited");
     }
     assert_eq!(spawn_count(&dir), 1);
+
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+/// After a request timeout the client is dead: the provider process is
+/// killed and the next request fails at once, without writing a large
+/// overlay into a provider that no longer reads stdin (#1058).
+#[cfg(unix)]
+#[test]
+fn a_timeout_kills_the_provider_and_the_next_request_does_not_block() {
+    use std::collections::BTreeMap;
+    use std::sync::mpsc;
+    use wright_lpp::{LanguageProvider, StdioLanguageProvider};
+
+    let (dir, script) = lifecycle_script("timeout-kill");
+    let mut provider =
+        StdioLanguageProvider::spawn(&script, &["stall-once".to_string()], STALL_TIMEOUT)
+            .expect("provider spawns");
+    provider.initialize(None).expect("initialize");
+
+    let error = provider
+        .check(&BTreeMap::new(), None)
+        .expect_err("the stalled check times out");
+    assert_eq!(error.code(), "provider-timeout");
+
+    let pid = std::fs::read_to_string(dir.join("pid")).expect("pid");
+    let alive = std::process::Command::new("kill")
+        .args(["-0", pid.trim()])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .expect("kill runs")
+        .success();
+    assert!(!alive, "the provider process {pid} is still running");
+
+    let overlay = wright_lpp::Document {
+        uri: "file:///big.opy".to_string(),
+        language_id: "opy".to_string(),
+        version: 1,
+        text: "x".repeat(4 * 1024 * 1024),
+    };
+    let documents = BTreeMap::from([(overlay.uri.clone(), overlay)]);
+    let (done, result) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = done.send(provider.check(&documents, None).map(|_| ()));
+    });
+    let next = result
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the next request must not block");
+    assert_eq!(next.expect_err("client is dead").code(), "provider-timeout");
+
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+/// The request after a timeout reaches a new provider (#1057 policy).
+#[cfg(unix)]
+#[test]
+fn the_request_after_a_timeout_reaches_a_new_provider() {
+    let (mut service, dir, uri) =
+        lifecycle_service("timeout-respawn", "stall-once", Some(STALL_TIMEOUT));
+
+    let first = service.diagnostics(&uri);
+    assert_eq!(first.len(), 1, "{first:?}");
+    assert_eq!(first[0].code, "provider-timeout");
+    assert_eq!(spawn_count(&dir), 1);
+
+    let second = service.diagnostics(&uri);
+    assert!(second.is_empty(), "{second:?}");
+    assert_eq!(spawn_count(&dir), 2);
 
     std::fs::remove_dir_all(&dir).expect("cleanup");
 }

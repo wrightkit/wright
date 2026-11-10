@@ -119,7 +119,7 @@ pub struct CompilerSession {
     semantic_builds: usize,
     diagnostics: Vec<Diagnostic>,
     progress_observer: Option<Arc<dyn ProgressObserver>>,
-    source_provider: Option<Box<dyn SourceProvider>>,
+    source_provider: Option<provider::ProviderSlot>,
 }
 
 struct SessionSemantic {
@@ -163,7 +163,7 @@ impl CompilerSession {
     ) -> Result<CompilerSession, Diagnostic> {
         config.source_backend = SourceBackend::Provider;
         let mut session = Self::new(config)?;
-        session.source_provider = Some(provider);
+        session.source_provider = Some(provider::ProviderSlot::injected(provider));
         Ok(session)
     }
 

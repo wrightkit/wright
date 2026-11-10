@@ -111,7 +111,12 @@ as unavailable until the service restarts, and the LSP session continues
 without OPY backing. A provider that reached `Ready` and then fails a
 request with a death error (`provider-exited`, `provider-io`, or
 `provider-timeout`) is dropped, its process is killed, and the next request
-reconnects. There is no backoff timer.
+reconnects. There is no backoff timer. A request timeout kills the provider
+process and makes its client refuse every later request at once, so a
+provider that stopped reading stdin cannot block a later write. The
+retained driver `CompilerSession` (`wright serve`, MCP) follows the same
+rule: a death error from an OPY source provider the session spawned drops
+the provider, and the next load reconnects. An injected provider stays.
 
 Every provider request sends the open-document overlay: the text the editor
 holds, at the buffer's version, under the URI the client opened — including

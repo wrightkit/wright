@@ -276,17 +276,12 @@ fn missing_response_times_out_deterministically() {
 }
 
 #[test]
-fn late_response_after_timeout_is_ignored_and_session_survives() {
+fn request_after_timeout_fails_without_writing() {
     let (mut client, fake) = FakeProvider::spawn_with_timeout(
         vec![
             FakeStep::Respond(ok_response(init_result_json())),
             FakeStep::NoResponse,
-            FakeStep::RespondRaw(
-                "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"documents\":[]}}".to_string(),
-            ),
-            FakeStep::Spontaneous(
-                "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"documents\":[]}}".to_string(),
-            ),
+            FakeStep::Hold(Duration::from_millis(200)),
         ],
         Duration::from_millis(50),
     );
@@ -296,10 +291,11 @@ fn late_response_after_timeout_is_ignored_and_session_survives() {
         first.expect_err("first check times out").code(),
         "provider-timeout"
     );
-    let second = client
-        .request("lpp/check", json!({ "documents": {} }))
-        .expect("second check succeeds after a late response");
-    assert_eq!(second, json!({ "documents": [] }));
+    let second = client.request("lpp/check", json!({ "documents": {} }));
+    assert_eq!(second.expect_err("dead").code(), "provider-timeout");
+    fake.next_request().expect("initialize");
+    fake.next_request().expect("first check");
+    fake.assert_no_request();
     fake.join();
 }
 
