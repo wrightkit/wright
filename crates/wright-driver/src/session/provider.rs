@@ -28,6 +28,7 @@ use crate::source_provider::{
 /// recreated, so it stays (`docs/embedding.md`).
 pub(super) struct ProviderSlot {
     provider: Box<dyn SourceProvider>,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     spawned: bool,
 }
 
@@ -113,6 +114,7 @@ impl CompilerSession {
         let Some(slot) = self.source_provider.as_mut() else {
             return Err(SourceProviderError::NotConfigured { language }.diagnostic());
         };
+        #[cfg(not(target_arch = "wasm32"))]
         let spawned = slot.spawned;
         let provider = slot.provider.as_mut();
         if provider.language() != language {
@@ -152,6 +154,7 @@ impl CompilerSession {
                 // A dead spawned provider is dropped, which kills its process,
                 // so the next load respawns it (#1057 policy, #1058). Other
                 // failures and injected providers stay.
+                #[cfg(not(target_arch = "wasm32"))]
                 if spawned && wright_lpp::PROVIDER_DEATH_CODES.contains(&error.code()) {
                     self.source_provider = None;
                 }
