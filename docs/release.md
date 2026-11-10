@@ -220,6 +220,22 @@ https://releases.wrightkit.dev/wright/nightly/version
 https://releases.wrightkit.dev/wright/nightly/<commit>/wright-<version>-<target-triple>.<ext>
 ```
 
+### R2 retention and redirect
+
+R2 keeps the newest 3 stable versions and the newest 5 nightly commits
+([ADR-0038](adr/0038-r2-retention-and-github-redirect.md)).
+`scripts/prune-r2.py` deletes older prefixes after the channel pointer
+advances. Stable pruning runs only when the repository variable
+`R2_REDIRECT_WORKER_DEPLOYED` is `true`.
+
+The Worker in `scripts/r2-redirect-worker.ts` (config in
+`dist/r2-redirect/wrangler.toml`) serves both bucket hostnames. A pruned stable
+archive or checksum redirects (302) to the same file in the GitHub Release.
+Deploy order: remove the bucket's direct custom domains for `releases` and
+`install`, run `wrangler deploy` in `dist/r2-redirect/`, verify one pruned
+version redirects, then set `R2_REDIRECT_WORKER_DEPLOYED=true`. Nightly objects
+have no GitHub copy and return 404 after pruning.
+
 ### Manual GitHub Release fallback
 
 The download URL is deterministic:
