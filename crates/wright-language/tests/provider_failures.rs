@@ -381,3 +381,92 @@ for line in sys.stdin:
     else:
         reply(id, {})
 "#;
+
+/// Records one line per spawn in `starts` next to the script. `argv[1]`:
+/// `die-once` exits on the first `lpp/check` (marker file `died`);
+/// `init-exit` exits during `lpp/initialize`.
+#[cfg(unix)]
+const LIFECYCLE_PROVIDER: &str = r#"#!/usr/bin/env python3
+import json, os, sys, pathlib
+here = pathlib.Path(__file__).resolve().parent
+with open(here / "starts", "a") as f:
+    f.write("start\n")
+mode = sys.argv[1]
+for line in sys.stdin:
+    request = json.loads(line)
+    id, method = request["id"], request["method"]
+    if method == "lpp/initialize":
+        if mode == "init-exit":
+            os._exit(3)
+        result = {"protocolVersion": request["params"]["protocolVersion"],
+                  "serverInfo": {"name": "fake", "version": "0"},
+                  "languages": [{"id": "opy", "extensions": ["opy"]}],
+                  "capabilities": {"check": True}}
+    elif method == "lpp/check":
+        if not (here / "died").exists():
+            (here / "died").write_text("")
+            os._exit(3)
+        result = {"documents": []}
+    else:
+        result = {}
+    print(json.dumps({"jsonrpc": "2.0", "id": id, "result": result}), flush=True)
+"#;
+
+#[cfg(unix)]
+fn lifecycle_service(tag: &str, mode: &str) -> (LanguageService, PathBuf, String) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = temp_dir(tag);
+    let script = dir.join("fake-provider");
+    std::fs::write(&script, LIFECYCLE_PROVIDER).expect("provider script");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    let mut service = LanguageService::with_config(
+        dir.clone(),
+        registered(script, vec![mode.to_string()], None),
+    );
+    let uri = open_opy(&mut service, &dir);
+    (service, dir, uri)
+}
+
+#[cfg(unix)]
+fn spawn_count(dir: &Path) -> usize {
+    std::fs::read_to_string(dir.join("starts"))
+        .map(|log| log.lines().count())
+        .unwrap_or(0)
+}
+
+/// A provider that dies after `Ready` is dropped; the next request
+/// spawns a new one and succeeds (#1057).
+#[cfg(unix)]
+#[test]
+fn a_provider_that_dies_after_ready_is_respawned_on_the_next_request() {
+    let (mut service, dir, uri) = lifecycle_service("respawn", "die-once");
+
+    let first = service.diagnostics(&uri);
+    assert_eq!(first.len(), 1, "{first:?}");
+    assert_eq!(first[0].code, "provider-exited");
+    assert_eq!(spawn_count(&dir), 1);
+
+    let second = service.diagnostics(&uri);
+    assert!(second.is_empty(), "{second:?}");
+    assert_eq!(spawn_count(&dir), 2);
+
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+/// A connect failure latches: later requests report it without another
+/// spawn (#1057).
+#[cfg(unix)]
+#[test]
+fn a_connect_failure_stays_latched_across_requests() {
+    let (mut service, dir, uri) = lifecycle_service("latched", "init-exit");
+
+    for _ in 0..3 {
+        let diagnostics = service.diagnostics(&uri);
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].code, "provider-exited");
+    }
+    assert_eq!(spawn_count(&dir), 1);
+
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+}

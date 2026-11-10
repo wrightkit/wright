@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
+mod opy;
 mod workshop;
 
 use serde::Serialize;
@@ -10,6 +11,7 @@ use wright_driver::{CompilerSession, SessionConfig, Severity};
 use wright_lpp::{Capability, DiagnosticSeverity, LanguageProvider};
 
 use crate::document::{Document, DocumentStore, Position, Range, line_col_position, uri_to_path};
+use opy::OpyProviderState;
 use workshop::WorkshopAnalysis;
 
 #[derive(Debug, Clone, Serialize)]
@@ -90,14 +92,6 @@ pub struct OpyProviderSupport {
 pub struct HoverInfo {
     pub contents: String,
     pub range: Range,
-}
-
-enum OpyProviderState {
-    Pending,
-    Ready(Box<dyn LanguageProvider>),
-    // The `(code, message)` a connect failure reports — provider error
-    // classified, or a session-construction diagnostic verbatim (#1004).
-    Unavailable(String, String),
 }
 
 pub struct LanguageService {
@@ -239,7 +233,11 @@ impl LanguageService {
                 "the negotiated OPY provider does not serve lpp/check".to_string(),
             );
         }
-        match provider.check(&documents, root.as_deref()) {
+        let checked = provider.check(&documents, root.as_deref());
+        if let Err(error) = &checked {
+            self.retire_dead_provider(error);
+        }
+        match checked {
             Ok(result) => result
                 .documents
                 .iter()
@@ -300,7 +298,11 @@ impl LanguageService {
         if !provider_supports(provider, Capability::Symbols) {
             return None;
         }
-        let result = provider.symbols(&documents, root.as_deref()).ok()?;
+        let result = provider.symbols(&documents, root.as_deref());
+        if let Err(error) = &result {
+            self.retire_dead_provider(error);
+        }
+        let result = result.ok()?;
         Some(
             result
                 .documents
@@ -325,8 +327,11 @@ impl LanguageService {
             if !provider_supports(provider, Capability::Definition) {
                 return None;
             }
-            return provider
-                .definition(&document, position)
+            let result = provider.definition(&document, position);
+            if let Err(error) = &result {
+                self.retire_dead_provider(error);
+            }
+            return result
                 .ok()
                 .map(|result| result.locations.iter().map(source_location).collect());
         }
@@ -358,8 +363,11 @@ impl LanguageService {
             if !provider_supports(provider, Capability::References) {
                 return None;
             }
-            return provider
-                .references(&document, position, include_declaration)
+            let result = provider.references(&document, position, include_declaration);
+            if let Err(error) = &result {
+                self.retire_dead_provider(error);
+            }
+            return result
                 .ok()
                 .map(|result| result.locations.iter().map(source_location).collect());
         }
@@ -508,22 +516,6 @@ impl LanguageService {
         Some(document)
     }
 
-    /// The connected OPY provider, or the classified `(code, message)`
-    /// its connect failure latched.
-    fn opy_provider(&mut self) -> Result<&mut dyn LanguageProvider, (String, String)> {
-        if matches!(self.opy, OpyProviderState::Pending) {
-            self.opy = match self.connect_opy_provider() {
-                Ok(provider) => OpyProviderState::Ready(provider),
-                Err(failure) => OpyProviderState::Unavailable(failure.0, failure.1),
-            };
-        }
-        match &mut self.opy {
-            OpyProviderState::Ready(provider) => Ok(provider.as_mut()),
-            OpyProviderState::Unavailable(code, message) => Err((code.clone(), message.clone())),
-            OpyProviderState::Pending => unreachable!("resolved above"),
-        }
-    }
-
     /// The shared session, built lazily on the first provider request so a
     /// service that only serves Workshop documents never constructs one. A
     /// construction failure is Wright's own diagnostic, not a provider
@@ -533,33 +525,6 @@ impl LanguageService {
             self.session = Some(CompilerSession::new(self.config.clone())?);
         }
         Ok(self.session.as_ref().expect("session built above"))
-    }
-
-    /// The OPY provider session, connected through the driver's shared
-    /// connect path (#1004). The `(code, message)` failure the surface
-    /// reports is a provider error classified through
-    /// `provider_failure_code`, or a session-construction diagnostic
-    /// carried verbatim.
-    fn connect_opy_provider(&mut self) -> Result<Box<dyn LanguageProvider>, (String, String)> {
-        let client = wright_lpp::ClientInfo {
-            name: wright_lpp::LPP_CLIENT_NAME.to_string(),
-            version: env!("CARGO_PKG_VERSION").to_string(),
-        };
-        self.session()
-            .map_err(|d| (d.code.clone(), d.message.clone()))?
-            .connect_provider(
-                OPY_LANGUAGE_ID,
-                &client,
-                wright_lpp::LPP_PROTOCOL_VERSION,
-                None,
-            )
-            .map(|connected| connected.provider)
-            .map_err(|e| {
-                (
-                    wright_driver::source_provider::provider_failure_code(&e),
-                    e.to_string(),
-                )
-            })
     }
 
     fn opy_document(&self, uri: &str) -> Option<wright_lpp::Document> {

@@ -105,9 +105,13 @@ in-process OPY implementation. The provider session resolves at
 explicit `--opy-provider <PATH>` executable, the installed provider
 store, or a bootstrap download of the released provider — and
 `lpp/initialize` runs inside the LSP handshake so the advertised surface
-is truthful. The session is retained and shared by every later request; an
-unresolvable or failed provider latches as unavailable and the LSP session
-continues without OPY backing.
+is truthful. The session is retained and shared by every later request. A
+connect failure (resolution, download, spawn, or `lpp/initialize`) latches
+as unavailable until the service restarts, and the LSP session continues
+without OPY backing. A provider that reached `Ready` and then fails a
+request with a death error (`provider-exited`, `provider-io`, or
+`provider-timeout`) is dropped, its process is killed, and the next request
+reconnects. There is no backoff timer.
 
 Every provider request sends the open-document overlay: the text the editor
 holds, at the buffer's version, under the URI the client opened — including
