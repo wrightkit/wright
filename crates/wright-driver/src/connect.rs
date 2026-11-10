@@ -248,4 +248,25 @@ mod tests {
             Some("1.0")
         );
     }
+
+    #[test]
+    fn failed_exchange_records_its_error_code() {
+        let trace = Trace::enabled();
+        let started = std::time::Instant::now();
+        ExchangeTrace(trace.clone()).exchanged(&ExchangeRecord {
+            method: "lpp/compile",
+            started,
+            finished: std::time::Instant::now(),
+            request_bytes: 10,
+            response_bytes: 0,
+            error: Some("provider-exited"),
+        });
+        let report = trace.report().expect("enabled trace reports");
+        let span = &report.spans[0];
+        assert_eq!(span.name, "lpp.request");
+        assert!(
+            span.facts
+                .contains(&("error", Fact::Text("provider-exited".into())))
+        );
+    }
 }

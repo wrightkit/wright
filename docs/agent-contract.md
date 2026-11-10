@@ -79,8 +79,8 @@ JSON-RPC methods `compile`, `check`, `analyze`, and `inspect` remain aliases for
 the corresponding operations and return the same `wright-result/v1` envelope
 they returned before this contract was introduced.
 
-One-shot CLI workflows such as `wright check --format json` continue to return
-their `wright-result/v1` envelope. They use the same `CompilerSession`
+One-shot CLI workflows like `wright check --format json` return `wright-result/v1`
+envelopes; [`--trace`](agent-contract-trace.md) adds stderr. They use the same `CompilerSession`
 workflows as the session service. The semantic query commands `wright inspect
 symbols`, `wright inspect refs`, `wright inspect cfg`, `wright inspect
 callgraph`, and `wright inspect cost` likewise run through `ToolService`
@@ -164,13 +164,10 @@ reference, which the Messages API rejects.
 same standalone request schema with its description inside, for harnesses
 that consume plain JSON Schema.
 
-The emitted set comes from the catalog shared with `capabilities` and the MCP
-adapter; a catalog change that breaks a definition fails the tests.
-
-## Execution trace (#1079)
-
-`compile` and `check` write an opt-in trace to stderr; see
-[agent-contract-trace.md](agent-contract-trace.md).
+The emitted set is generated from one catalog shared with `capabilities`
+and the MCP adapter, so the definitions cannot drift from the advertised
+operation set; a catalog change that drops a description, a request schema,
+or introduces a recursive `$ref` fails the tests.
 
 ## Operations
 

@@ -5,10 +5,27 @@
 - Owner: the `wright` CLI renders the trace; `wright-driver::trace` records it.
 
 `wright compile` and `wright check` accept `--trace[=FORMAT]`, where `FORMAT`
-is `text` (the default when the value is omitted) or `json`. The trace goes
-to standard error. It never changes standard output, the exit code, the
+is `text` or `json`. A bare `--trace` means `text`. The value must follow `=`:
+`--trace=json` is valid, while `--trace json` is a usage error (exit 2) because
+`json` is then read as the input path or an unexpected argument. The trace
+goes to standard error. It never changes standard output, the exit code, the
 diagnostics, or any `wright-result/v1` payload. Without the flag nothing is
 recorded and nothing extra is written.
+
+Standard error can carry more than the trace. In the default text result
+format, the human diagnostics are written to standard error before the trace
+lines. To read the trace alone, with every line parsing as JSON, run
+`wright <command> -f json --trace=json`. In that form standard error holds
+only trace lines on success. A usage error (exit 2) writes its message to
+standard error, without trace lines.
+
+If the process panics, the spans are closed on unwind but the trace is not
+rendered. A panicking run writes no trace.
+
+Facts that name a path replace the user's home directory prefix with `~`, so
+`providerPath` becomes `~/Library/...`. Other absolute paths are written as
+they are and may still appear, for example a provider installed outside the
+home directory. Review the output before publishing it.
 
 The JSON form writes newline-delimited objects, one per line, with schema
 `wright-trace/v1`. A reader selects lines by `type`:

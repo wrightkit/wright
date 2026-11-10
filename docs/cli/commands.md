@@ -225,8 +225,9 @@ or exit codes; see [lint configuration and findings](lint.md) and
 `wright compile` and `wright check` accept `--trace[=text|json]` (#1079):
 the execution trace of the run, with each phase's duration and key facts,
 written to standard error. `text` prints an indented tree, and `json` prints
-one object per line. Bare `--trace` means `text`. Standard output, exit
-codes, and diagnostics are unchanged. The JSON shape is documented in the
+one object per line. Bare `--trace` means `text`; the value must follow `=`,
+so `--trace json` is a usage error. Standard output, exit codes, and
+diagnostics are unchanged. The JSON shape is documented in the
 [agent contract](../agent-contract-trace.md).
 
 Every workflow command accepts the opt-in gating option `--fail-on

@@ -182,3 +182,133 @@ fn text_trace_renders_an_indented_tree_on_stderr() {
         "{stderr}"
     );
 }
+
+const SPAN_KEYS: &[&str] = &[
+    "durationNs",
+    "facts",
+    "id",
+    "name",
+    "parent",
+    "startNs",
+    "status",
+    "type",
+];
+const ENVIRONMENT_KEYS: &[&str] = &["facts", "schema", "type"];
+const ENVIRONMENT_FACT_KEYS: &[&str] = &[
+    "allocator",
+    "arch",
+    "inputKind",
+    "lppVersion",
+    "locale",
+    "os",
+    "outputBytes",
+    "providerId",
+    "providerPath",
+    "providerVersion",
+    "sourceFiles",
+    "wrightVersion",
+];
+
+fn sorted_keys(value: &Value) -> Vec<&str> {
+    let mut keys: Vec<&str> = value
+        .as_object()
+        .expect("a JSON object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    keys
+}
+
+#[test]
+fn json_trace_lines_have_exactly_the_documented_keys() {
+    let output = wright(
+        &[
+            "check",
+            "-",
+            "--kind",
+            "workshop",
+            "-f",
+            "json",
+            "--trace=json",
+        ],
+        SOURCE,
+    );
+    let lines = trace_lines(&output);
+    let environment = &lines[0];
+    assert_eq!(sorted_keys(environment), ENVIRONMENT_KEYS);
+    for key in sorted_keys(&environment["facts"]) {
+        assert!(
+            ENVIRONMENT_FACT_KEYS.contains(&key),
+            "undocumented fact {key}"
+        );
+    }
+    for span in spans(&lines) {
+        assert_eq!(sorted_keys(span), SPAN_KEYS);
+    }
+}
+
+#[test]
+fn trace_on_stderr_keeps_the_diagnostics() {
+    let output = wright(
+        &[
+            "check",
+            "-",
+            "--kind",
+            "workshop",
+            "--trace=json",
+            "--renderer",
+            "plain",
+            "--color",
+            "never",
+        ],
+        SOURCE,
+    );
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.lines().any(|line| line.starts_with("diagnostic:")),
+        "diagnostics missing from stderr: {stderr}"
+    );
+    assert!(stderr.lines().any(|line| line.starts_with('{')), "{stderr}");
+}
+
+#[test]
+fn trace_off_stderr_has_no_trace_lines_and_is_a_prefix_of_trace_on() {
+    for format in [None, Some("json")] {
+        let mut base = vec![
+            "check",
+            "-",
+            "--kind",
+            "workshop",
+            "--renderer",
+            "plain",
+            "--color",
+            "never",
+        ];
+        if let Some(format) = format {
+            base.extend(["-f", format]);
+        }
+        let off = wright(&base, SOURCE);
+        let off_stderr = String::from_utf8(off.stderr).unwrap();
+        assert!(
+            !off_stderr.lines().any(|line| line.starts_with('{')),
+            "{off_stderr}"
+        );
+        assert!(!off_stderr.contains("trace ("), "{off_stderr}");
+
+        let mut traced_args = base.clone();
+        traced_args.push("--trace=json");
+        let on = wright(&traced_args, SOURCE);
+        let on_stderr = String::from_utf8(on.stderr).unwrap();
+        assert!(on_stderr.starts_with(&off_stderr), "format {format:?}");
+    }
+}
+
+#[test]
+fn space_separated_trace_value_is_a_usage_error() {
+    let output = wright(
+        &["check", "-", "--kind", "workshop", "--trace", "json"],
+        SOURCE,
+    );
+    assert_eq!(output.status.code(), Some(2));
+}
