@@ -172,10 +172,17 @@ impl JsonRpcClient {
 
         match rx.recv_timeout(self.timeout) {
             Ok(res) => res,
-            Err(mpsc::RecvTimeoutError::Timeout) => Err(ProviderError::Timeout {
-                method: method.to_string(),
-                duration: self.timeout,
-            }),
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                // A provider that missed the deadline may not read stdin any
+                // more, so a later write could block forever. The client is
+                // dead from here on; the owner of the process kills it.
+                let error = ProviderError::Timeout {
+                    method: method.to_string(),
+                    duration: self.timeout,
+                };
+                terminate_shared(&self.shared, false, error.clone());
+                Err(error)
+            }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 let shared = self.shared.lock().expect("lock poisoned");
                 if let Some(error) = shared.dead_error() {

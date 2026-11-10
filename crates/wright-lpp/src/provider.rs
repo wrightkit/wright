@@ -366,25 +366,22 @@ impl StdioLanguageProvider {
     }
 
     fn enrich_transport_error(&mut self, error: &mut ProviderError, method: &str) {
+        if matches!(error, ProviderError::Timeout { .. }) {
+            // The client refuses every later request; kill the process too.
+            self.child.kill();
+            return;
+        }
         if !matches!(error.code(), "provider-io" | "provider-exited") {
             return;
         }
-        let deadline = std::time::Instant::now() + Duration::from_millis(500);
-        loop {
-            if let Some(status) = self.child.try_status() {
-                self.last_exit_status = Some(status);
-                *error = ProviderError::Exited {
-                    status: Some(status),
-                    message: format!(
-                        "the LPP provider process exited with status {status} while handling '{method}'"
-                    ),
-                };
-                return;
-            }
-            if std::time::Instant::now() >= deadline {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(10));
+        if let Some(status) = self.child.wait_status(Duration::from_millis(500)) {
+            self.last_exit_status = Some(status);
+            *error = ProviderError::Exited {
+                status: Some(status),
+                message: format!(
+                    "the LPP provider process exited with status {status} while handling '{method}'"
+                ),
+            };
         }
     }
 

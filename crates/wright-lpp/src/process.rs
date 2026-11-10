@@ -46,6 +46,20 @@ impl ChildProcess {
         self.child.try_wait().ok().flatten().map(exit_code)
     }
 
+    /// Poll for the provider's exit code for up to `within`.
+    pub fn wait_status(&mut self, within: Duration) -> Option<i32> {
+        let deadline = std::time::Instant::now() + within;
+        loop {
+            if let Some(status) = self.try_status() {
+                return Some(status);
+            }
+            if std::time::Instant::now() >= deadline {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     /// Kill the provider immediately.
     pub fn kill(&mut self) {
         let _ = self.child.kill();
