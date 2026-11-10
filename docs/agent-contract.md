@@ -164,10 +164,13 @@ reference, which the Messages API rejects.
 same standalone request schema with its description inside, for harnesses
 that consume plain JSON Schema.
 
-The emitted set is generated from one catalog shared with `capabilities`
-and the MCP adapter, so the definitions cannot drift from the advertised
-operation set; a catalog change that drops a description, a request schema,
-or introduces a recursive `$ref` fails the tests.
+The emitted set comes from the catalog shared with `capabilities` and the MCP
+adapter; a catalog change that breaks a definition fails the tests.
+
+## Execution trace (#1079)
+
+`compile` and `check` write an opt-in trace to stderr; see
+[agent-contract-trace.md](agent-contract-trace.md).
 
 ## Operations
 

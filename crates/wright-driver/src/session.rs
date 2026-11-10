@@ -6,6 +6,7 @@ mod pipeline;
 mod provider;
 mod registry;
 mod semantic;
+mod workshop;
 
 #[cfg(not(target_arch = "wasm32"))]
 use diagnostics::provider_error_diagnostic;
@@ -33,6 +34,7 @@ use crate::result::{
     CheckResult, CompileResult, CompiledOutput, ConvertResult, ConvertTarget, Envelope,
 };
 use crate::source_provider::{SourceBackend, SourceProvider, SourceProviderError};
+use crate::trace::Trace;
 
 /// A successfully loaded program with its input and origin metadata.
 #[derive(Clone)]
@@ -120,6 +122,7 @@ pub struct CompilerSession {
     diagnostics: Vec<Diagnostic>,
     progress_observer: Option<Arc<dyn ProgressObserver>>,
     source_provider: Option<provider::ProviderSlot>,
+    trace: Trace,
 }
 
 struct SessionSemantic {
@@ -130,14 +133,21 @@ struct SessionSemantic {
 impl CompilerSession {
     /// Build a session from a configuration.
     pub fn new(config: SessionConfig) -> Result<CompilerSession, Diagnostic> {
-        let catalog = workshop_rs::catalog::Catalog::builtin_ref().map_err(|error| {
-            Diagnostic::error(
-                "catalog-error",
-                Stage::Internal,
-                format!("cannot load the built-in Workshop catalog: {}", error),
-            )
+        Self::new_traced(config, Trace::disabled())
+    }
+
+    /// Build a session that records its workflow into `trace` (#1079).
+    pub fn new_traced(config: SessionConfig, trace: Trace) -> Result<CompilerSession, Diagnostic> {
+        let catalog = trace.in_span("catalog.load", || {
+            workshop_rs::catalog::Catalog::builtin_ref().map_err(|error| {
+                Diagnostic::error(
+                    "catalog-error",
+                    Stage::Internal,
+                    format!("cannot load the built-in Workshop catalog: {}", error),
+                )
+            })
         })?;
-        let lint_registry = registry::compose(&config)?;
+        let lint_registry = trace.in_span("lint.compose", || registry::compose(&config))?;
         Ok(CompilerSession {
             fixed_config: config.clone(),
             config,
@@ -150,6 +160,7 @@ impl CompilerSession {
             diagnostics: Vec::new(),
             progress_observer: None,
             source_provider: None,
+            trace,
         })
     }
 
@@ -265,8 +276,10 @@ impl CompilerSession {
             .diagnostic());
         }
         self.progress(ProgressEvent::new(ProgressPhase::InputResolution));
-        let mut resolved =
-            hotpath::measure_block!("load::resolve_input", input::resolve(&self.config))?;
+        let mut resolved = self.trace.in_span("input.resolve", || {
+            hotpath::measure_block!("load::resolve_input", input::resolve(&self.config))
+        })?;
+        self.trace.set_fact("inputKind", resolved.kind.as_str());
         if self.config.profile != wright_transform::Profile::Off
             && resolved.kind != SourceKind::Workshop
         {
@@ -335,7 +348,9 @@ impl CompilerSession {
                     program.semantic_issues(self.catalog)
                 })
             });
-        apply_profile(&mut program, self.config.profile)?;
+        self.trace.in_span("transform", || {
+            apply_profile(&mut program, self.config.profile)
+        })?;
         let loaded = Loaded {
             program: Arc::new(program),
             origin: resolved.origin.clone(),
@@ -416,6 +431,7 @@ impl CompilerSession {
             client,
             preferred_version,
             floor,
+            &self.trace,
         )
     }
 
@@ -456,44 +472,6 @@ impl CompilerSession {
     /// `span.path` spellings on finding surfaces are root-relative to it.
     pub fn input_root(&self) -> Option<PathBuf> {
         self.loaded.as_ref().map(|loaded| loaded.input.root.clone())
-    }
-
-    #[allow(unsafe_code)] // hotpath 0.28 emits `#[unsafe(export_name)]` statics
-    fn load_workshop(&mut self, resolved: &ResolvedInput) -> Result<(Program, String), Diagnostic> {
-        let override_locale = self
-            .config
-            .locale
-            .as_deref()
-            .map(workshop_rs::catalog::Locale::new);
-        let locale = hotpath::measure_block!("load::detect_locale", {
-            workshop_rs::detect::resolve_locale(
-                &resolved.text,
-                self.catalog,
-                override_locale.as_ref(),
-            )
-        })
-        .map_err(|error| workshop_diag(error, resolved))?;
-        let program = hotpath::measure_block!("load::parse", {
-            workshop_rs::parser::parse_with_context(
-                &resolved.text,
-                self.catalog,
-                &locale,
-                self.catalog,
-            )
-        })
-        .map_err(|error| workshop_diag(error, resolved))?;
-        self.progress(ProgressEvent::new(ProgressPhase::Validation));
-        let canonical = hotpath::measure_block!("load::canonical", program.canonical())
-            .map_err(|error| workshop_diag(error, resolved))?;
-        hotpath::measure_block!("load::validate", canonical.validate())
-            .map_err(|error| workshop_diag(error, resolved))?;
-        hotpath::measure_block!(
-            "load::validate_canonical",
-            canonical.validate_canonical_ids_tolerating_residuals(self.catalog)
-        )
-        .map_err(|error| workshop_diag(error, resolved))?;
-        drop(canonical);
-        Ok((program, locale.to_string()))
     }
 
     /// Compile without delivering the program: it stays in the in-process
@@ -540,6 +518,7 @@ impl CompilerSession {
             return envelope;
         }
         let written = {
+            let _span = self.trace.span("output.write");
             let this = &*self;
             let CompileWrite {
                 dest, overwrite, ..
@@ -620,11 +599,18 @@ impl CompilerSession {
         self.attach_lint_diagnostics(&loaded);
         let locale = named.unwrap_or_else(|| Self::locale_for(&loaded));
         self.progress(ProgressEvent::new(ProgressPhase::Emission));
-        let text = hotpath::measure_block!("compile::emit", {
-            workshop_rs::emitter::emit(&loaded.program, self.catalog, &locale)
-        })
-        .map_err(|error| workshop_diag(error, &loaded.input))?;
-        let cost = self.attach_target_limits(&loaded);
+        let text = self.trace.in_span("emit", || {
+            hotpath::measure_block!("compile::emit", {
+                workshop_rs::emitter::emit(&loaded.program, self.catalog, &locale)
+            })
+            .map_err(|error| workshop_diag(error, &loaded.input))
+        })?;
+        self.trace.set_fact("outputBytes", text.len());
+        self.trace.set_fact("locale", locale.to_string());
+        let cost = {
+            let _span = self.trace.span("cost");
+            self.attach_target_limits(&loaded)
+        };
         let sha256 = hotpath::measure_block!("compile::sha256", input_identity(&text));
         let compiled = CompiledOutput {
             text,

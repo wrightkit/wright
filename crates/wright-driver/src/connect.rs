@@ -10,10 +10,14 @@
 //! map them through the shared `provider-refusal-<code>` classification
 //! (`crate::source_provider::provider_failure_code`).
 
+use std::sync::Arc;
+
 use crate::config::SessionConfig;
 use crate::input::InputTarget;
 use crate::opy_provider;
+use crate::trace::{Fact, Trace};
 use wright_lpp::LanguageProvider;
+use wright_lpp::client::{ExchangeObserver, ExchangeRecord};
 
 /// The lowest LPP protocol version a connect may negotiate. `Entry`
 /// requests need 1.1 project loading; `Directory` targets need the 1.3
@@ -53,43 +57,91 @@ pub struct ConnectedProvider {
 ///
 /// A `None` floor keeps the base `1.0` contract (the language service's
 /// document-supplied requests).
+///
+/// The connect runs inside a `provider.connect` span; each spawn is a
+/// `provider.spawn` span and each exchange with the provider is an
+/// `lpp.request` span (#1079).
 pub fn connect_provider(
     config: &SessionConfig,
     language_id: &str,
     client: &wright_lpp::ClientInfo,
     preferred_version: &str,
     floor: Option<ConnectFloor>,
+    trace: &Trace,
 ) -> Result<ConnectedProvider, wright_lpp::ProviderError> {
-    let providers = resolved_registry(config, language_id)?;
-    let spawn = || providers.spawn(language_id);
-    let mut provider = spawn()?;
-    let mut initialize = provider.initialize_version(preferred_version, Some(client));
-    if initialize
-        .as_ref()
-        .is_err_and(|error| error.code() == "protocol-version-mismatch")
-    {
-        // LPP §19.2: retry at the highest mutually supported version the
-        // provider advertised, honoring the caller's floor.
-        let supported = initialize
-            .as_ref()
-            .err()
-            .map(|error| error.supported_protocol_versions())
-            .unwrap_or_default();
-        // The old provider never initialized, so `shutdown` would be
-        // rejected; reassigning drops it, and `Drop` kills the process.
-        provider = spawn()?;
-        initialize = match mutual_protocol_version(&supported, floor) {
-            Some(version) => provider.initialize_version(version, Some(client)),
-            None => Err(wright_lpp::ProviderError::ProtocolVersionMismatch {
-                supported,
-                message: format!("no mutually supported LPP protocol version serves {language_id}"),
-            }),
+    trace.in_span("provider.connect", || {
+        let providers = resolved_registry(config, language_id)?;
+        let observer = exchange_observer(trace);
+        let spawn = || {
+            let mut provider = trace.in_span("provider.spawn", || providers.spawn(language_id))?;
+            if let Some(observer) = &observer {
+                provider.set_exchange_observer(Arc::clone(observer));
+            }
+            Ok::<_, wright_lpp::ProviderError>(provider)
         };
-    }
-    initialize.map(|initialize| ConnectedProvider {
-        provider: Box::new(provider),
-        initialize,
+        let mut provider = spawn()?;
+        let mut initialize = provider.initialize_version(preferred_version, Some(client));
+        if initialize
+            .as_ref()
+            .is_err_and(|error| error.code() == "protocol-version-mismatch")
+        {
+            // LPP §19.2: retry at the highest mutually supported version the
+            // provider advertised, honoring the caller's floor.
+            let supported = initialize
+                .as_ref()
+                .err()
+                .map(|error| error.supported_protocol_versions())
+                .unwrap_or_default();
+            // The old provider never initialized, so `shutdown` would be
+            // rejected; reassigning drops it, and `Drop` kills the process.
+            provider = spawn()?;
+            initialize = match mutual_protocol_version(&supported, floor) {
+                Some(version) => provider.initialize_version(version, Some(client)),
+                None => Err(wright_lpp::ProviderError::ProtocolVersionMismatch {
+                    supported,
+                    message: format!(
+                        "no mutually supported LPP protocol version serves {language_id}"
+                    ),
+                }),
+            };
+        }
+        let initialize = initialize?;
+        if let Some(path) = providers.command(language_id) {
+            trace.set_fact("providerPath", path.display().to_string());
+        }
+        trace.set_fact("providerId", language_id);
+        trace.set_fact("providerVersion", initialize.server_info.version.clone());
+        trace.set_fact("lppVersion", initialize.protocol_version.clone());
+        Ok(ConnectedProvider {
+            provider: Box::new(provider),
+            initialize,
+        })
     })
+}
+
+/// The transport observer that turns each LPP exchange into an
+/// `lpp.request` span, or `None` when the trace is disabled.
+fn exchange_observer(trace: &Trace) -> Option<Arc<dyn ExchangeObserver>> {
+    trace
+        .is_enabled()
+        .then(|| Arc::new(ExchangeTrace(trace.clone())) as Arc<dyn ExchangeObserver>)
+}
+
+struct ExchangeTrace(Trace);
+
+impl ExchangeObserver for ExchangeTrace {
+    fn exchanged(&self, record: &ExchangeRecord<'_>) {
+        let mut facts = vec![
+            ("method", Fact::from(record.method)),
+            ("requestBytes", Fact::from(record.request_bytes)),
+            ("responseBytes", Fact::from(record.response_bytes)),
+        ];
+        if let Some(error) = record.error {
+            facts.push(("error", Fact::from(error)));
+        }
+        self.0
+            .record("lpp.request", record.started, record.finished, facts);
+    }
 }
 
 /// The registry to spawn from: the session's configured providers, with

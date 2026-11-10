@@ -16,7 +16,10 @@ use crate::result::{Envelope, LintResult};
 impl CompilerSession {
     pub(super) fn attach_lint_diagnostics(&mut self, loaded: &Loaded) {
         self.progress(ProgressEvent::new(ProgressPhase::Linting));
-        let findings = self.lint_registry.run(&loaded.program, &self.config.lint);
+        let findings = {
+            let _span = self.trace.span("lint");
+            self.lint_registry.run(&loaded.program, &self.config.lint)
+        };
         for finding in findings {
             let mut diagnostic = crate::Diagnostic::carried_error(
                 &finding.code,

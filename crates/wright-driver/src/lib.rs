@@ -28,6 +28,7 @@ pub mod source_provider;
 pub(crate) mod statement_edit;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod store;
+pub mod trace;
 pub mod workshop_compat;
 
 pub use config::{
@@ -60,6 +61,7 @@ pub use source_provider::{
     SourceBackend, SourceCompilation, SourceLanguage, SourceProvenance, SourceProvider,
     SourceProviderError, SourceTarget, SourceTargetKind,
 };
+pub use trace::{Fact, Span, SpanReport, Trace, TraceReport};
 pub use workshop_compat::{
     WorkshopSemanticComparison, WorkshopSemanticSide, compare_workshop_texts,
 };

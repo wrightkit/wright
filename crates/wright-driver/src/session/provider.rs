@@ -104,10 +104,13 @@ impl CompilerSession {
                 .diagnostic());
             }
             self.source_provider = Some(ProviderSlot {
-                provider: Box::new(crate::source_provider::LppSourceProvider::new(
-                    connected.provider,
-                    self.config.locale.clone(),
-                )),
+                provider: Box::new(
+                    crate::source_provider::LppSourceProvider::new(
+                        connected.provider,
+                        self.config.locale.clone(),
+                    )
+                    .traced(self.trace.clone()),
+                ),
                 spawned: true,
             });
         }
@@ -128,6 +131,18 @@ impl CompilerSession {
                 ),
             ));
         }
+        let operation_span = self.trace.span(match operation {
+            ProviderOperation::Check => "provider.check",
+            ProviderOperation::Compile => "provider.compile",
+        });
+        operation_span.fact(
+            "target",
+            if target.is_directory() {
+                "directory"
+            } else {
+                "file"
+            },
+        );
         let outcome = match operation {
             // The OPY provider contract makes `compile` diagnostics a
             // superset of `check` diagnostics — compile runs the same
@@ -148,6 +163,17 @@ impl CompilerSession {
             },
             ProviderOperation::Compile => provider.compile(&target),
         };
+        let refused = match &outcome {
+            Ok(compilation) => compilation
+                .diagnostics
+                .iter()
+                .any(|d| d.severity == Severity::Error),
+            Err(_) => true,
+        };
+        if refused {
+            operation_span.fail();
+        }
+        drop(operation_span);
         let compilation = match outcome {
             Ok(compilation) => compilation,
             Err(error) => {
@@ -225,13 +251,17 @@ impl CompilerSession {
             ));
         };
         self.progress(ProgressEvent::new(ProgressPhase::Parsing));
-        let mut program = workshop_rs::parser::parse_with_context(
-            &workshop_text,
-            self.catalog,
-            &locale,
-            self.catalog,
-        )
-        .map_err(|error| workshop_diag_for_provider_artifact(error, resolved, &[]))?;
+        let mut program = self
+            .trace
+            .in_span("parse", || {
+                workshop_rs::parser::parse_with_context(
+                    &workshop_text,
+                    self.catalog,
+                    &locale,
+                    self.catalog,
+                )
+            })
+            .map_err(|error| workshop_diag_for_provider_artifact(error, resolved, &[]))?;
         let mut provenance = Provenance::Unmapped;
         let mut source_files = vec![resolved.display.clone()];
         if let Some(map) = &source_map {
@@ -240,10 +270,13 @@ impl CompilerSession {
                     provenance = Provenance::Mapped;
                     source_files = map.files().iter().map(|f| provider_uri_path(f)).collect();
                     let mut unreadable = Vec::new();
+                    let read_span = self.trace.span("source.read");
+                    let mut read_bytes = 0_usize;
                     for (index, member) in source_files.iter().enumerate() {
                         let member_path = resolved.root.join(member);
                         match std::fs::read_to_string(&member_path) {
                             Ok(text) => {
+                                read_bytes += text.len();
                                 program.set_file_source(
                                     workshop_rs::source::FileId::from_index(index),
                                     text,
@@ -256,6 +289,9 @@ impl CompilerSession {
                             )),
                         }
                     }
+                    read_span.fact("files", source_files.len());
+                    read_span.fact("bytes", read_bytes);
+                    drop(read_span);
                     if !unreadable.is_empty() {
                         self.diagnostics.push(Diagnostic::warning(
                             "source-map-member-unreadable",
@@ -279,17 +315,20 @@ impl CompilerSession {
             }
         }
         self.progress(ProgressEvent::new(ProgressPhase::Validation));
-        program.validate().map_err(|error| {
-            workshop_diag_for_provider_artifact(
-                error,
-                resolved,
-                if provenance == Provenance::Mapped {
-                    &source_files
-                } else {
-                    &[]
-                },
-            )
+        self.trace.in_span("validate", || {
+            program.validate().map_err(|error| {
+                workshop_diag_for_provider_artifact(
+                    error,
+                    resolved,
+                    if provenance == Provenance::Mapped {
+                        &source_files
+                    } else {
+                        &[]
+                    },
+                )
+            })
         })?;
+        self.trace.set_fact("sourceFiles", source_files.len());
         resolved.origin.locale = Some(locale.to_string());
         let loaded = Loaded {
             program: Arc::new(program),
