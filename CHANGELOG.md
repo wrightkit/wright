@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.42.0](https://github.com/wrightkit/wright/compare/v0.41.8...v0.42.0) (2026-11-10)
+
+
+### Features
+
+* add --trace to record the compile execution chain with timings ([#1082](https://github.com/wrightkit/wright/issues/1082)) ([ddf991f](https://github.com/wrightkit/wright/commit/ddf991f49709ff060f952b2e5fefdebec563eb2e)), closes [#1079](https://github.com/wrightkit/wright/issues/1079)
+
 ## [0.41.8](https://github.com/wrightkit/wright/compare/v0.41.7...v0.41.8) (2026-11-10)
 
 
