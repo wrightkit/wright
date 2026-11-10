@@ -595,3 +595,80 @@ for line in sys.stdin:
     );
     cleanup(dir);
 }
+
+/// A provider death error drops the session's provider; the next load
+/// reaches a new one (#1058, the #1057 policy applied to the driver
+/// session).
+#[cfg(unix)]
+#[test]
+fn a_load_after_a_provider_timeout_reaches_a_new_provider() {
+    use std::os::unix::fs::PermissionsExt;
+
+    const PROVIDER: &str = r#"#!/usr/bin/env python3
+import json, sys, os, pathlib
+here = pathlib.Path(__file__).resolve().parent
+with open(here / "starts", "a") as f:
+    f.write("start\n")
+artifact = (here / "artifact.ws").read_text()
+def reply(id, result):
+    print(json.dumps({"jsonrpc": "2.0", "id": id, "result": result}), flush=True)
+for line in sys.stdin:
+    request = json.loads(line)
+    id, method = request["id"], request["method"]
+    if method == "lpp/initialize":
+        reply(id, {"protocolVersion": request["params"]["protocolVersion"], "serverInfo": {"name": "fake", "version": "0"},
+                   "languages": [{"id": "opy", "extensions": ["opy"]}],
+                   "capabilities": {"check": True, "compile": True, "projectLoading": True}})
+    elif method == "lpp/compile":
+        reply(id, {"diagnostics": [], "artifact": {"format": "workshop-rs/text-v1", "content": artifact}})
+    else:
+        reply(id, {})
+"#;
+
+    let (dir, entry) = temp_entry();
+    let script = dir.join("fake-provider");
+    std::fs::write(&script, PROVIDER).expect("provider script");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    std::fs::write(
+        dir.join("artifact.ws"),
+        workshop_fixture("synthetic/basic-rule"),
+    )
+    .expect("artifact");
+    let timeout = wright_lpp::ProviderError::Timeout {
+        method: "lpp/compile".to_string(),
+        duration: std::time::Duration::from_millis(1),
+    };
+    let timed_out = wright_driver::source_provider::LppSourceProvider::new(
+        Box::new(FailingLppProvider {
+            failure: timeout.clone(),
+            capabilities_failure: Some(timeout),
+        }),
+        None,
+    );
+    let mut session = CompilerSession::with_source_provider(
+        SessionConfig {
+            input: InputSpec::Path(entry),
+            kind: SourceKind::Opy,
+            opy_provider: wright_driver::OpyProviderConfig::with_executable(script),
+            ..SessionConfig::default()
+        },
+        Box::new(timed_out),
+    )
+    .expect("session");
+
+    let first = session.compile();
+    assert!(!first.ok);
+    assert_eq!(first.diagnostics[0].code, "provider-timeout");
+    assert!(!dir.join("starts").exists());
+
+    let second = session.compile();
+    assert!(second.ok, "{:?}", second.diagnostics);
+    assert_eq!(
+        std::fs::read_to_string(dir.join("starts"))
+            .expect("starts")
+            .lines()
+            .count(),
+        1
+    );
+    cleanup(dir);
+}

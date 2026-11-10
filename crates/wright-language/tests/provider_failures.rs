@@ -417,6 +417,12 @@ for line in sys.stdin:
     print(json.dumps({"jsonrpc": "2.0", "id": id, "result": result}), flush=True)
 "#;
 
+/// The timeout also covers `lpp/initialize`, which waits for interpreter
+/// start-up; the stalled request itself never answers, so only a bound far
+/// above start-up time keeps these tests independent of machine load.
+#[cfg(unix)]
+const STALL_TIMEOUT: Duration = Duration::from_secs(5);
+
 #[cfg(unix)]
 fn lifecycle_script(tag: &str) -> (PathBuf, PathBuf) {
     use std::os::unix::fs::PermissionsExt;
@@ -498,7 +504,7 @@ fn a_timeout_kills_the_provider_and_the_next_request_does_not_block() {
 
     let (dir, script) = lifecycle_script("timeout-kill");
     let mut provider =
-        StdioLanguageProvider::spawn(&script, &["stall-once".to_string()], Duration::from_secs(1))
+        StdioLanguageProvider::spawn(&script, &["stall-once".to_string()], STALL_TIMEOUT)
             .expect("provider spawns");
     provider.initialize(None).expect("initialize");
 
@@ -539,11 +545,8 @@ fn a_timeout_kills_the_provider_and_the_next_request_does_not_block() {
 #[cfg(unix)]
 #[test]
 fn the_request_after_a_timeout_reaches_a_new_provider() {
-    let (mut service, dir, uri) = lifecycle_service(
-        "timeout-respawn",
-        "stall-once",
-        Some(Duration::from_secs(1)),
-    );
+    let (mut service, dir, uri) =
+        lifecycle_service("timeout-respawn", "stall-once", Some(STALL_TIMEOUT));
 
     let first = service.diagnostics(&uri);
     assert_eq!(first.len(), 1, "{first:?}");

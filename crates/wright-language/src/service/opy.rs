@@ -34,12 +34,7 @@ impl LanguageService {
     /// (which kills its process) and the state returns to `Pending`, so the
     /// next request reconnects. Other failures keep the provider (#1057).
     pub(super) fn retire_dead_provider(&mut self, error: &wright_lpp::ProviderError) {
-        use wright_lpp::ProviderError;
-        if matches!(
-            error,
-            ProviderError::Exited { .. } | ProviderError::Io { .. } | ProviderError::Timeout { .. }
-        ) && matches!(self.opy, OpyProviderState::Ready(_))
-        {
+        if error.is_death() && matches!(self.opy, OpyProviderState::Ready(_)) {
             self.opy = OpyProviderState::Pending;
         }
     }

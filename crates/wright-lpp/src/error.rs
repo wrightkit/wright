@@ -185,6 +185,15 @@ impl LocalProviderErrorKind {
 }
 
 impl ProviderError {
+    /// The provider process is gone or unusable: a holder drops it and
+    /// reconnects on the next request (#1057, #1058).
+    pub fn is_death(&self) -> bool {
+        matches!(
+            self.code(),
+            "provider-exited" | "provider-io" | "provider-timeout"
+        )
+    }
+
     pub fn code(&self) -> &'static str {
         match self {
             Self::NotConfigured { .. } => "provider-not-configured",

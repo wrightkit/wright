@@ -103,7 +103,7 @@ impl CompilerSession {
                 ),
             ));
         }
-        let compilation = match operation {
+        let outcome = match operation {
             // The OPY provider contract makes `compile` diagnostics a
             // superset of `check` diagnostics — compile runs the same
             // source pipeline check runs, then the integration stage — so
@@ -112,18 +112,31 @@ impl CompilerSession {
             // declines compile (an unnegotiated capability) falls back to
             // its own check answer.
             ProviderOperation::Check => match provider.compile(&target) {
-                Ok(compilation) => compilation,
+                Ok(compilation) => Ok(compilation),
                 Err(error)
                     if matches!(error, SourceProviderError::Unsupported { .. })
                         || error.code() == "capability-unavailable" =>
                 {
-                    provider
-                        .check(&target)
-                        .map_err(|error| error.diagnostic())?
+                    provider.check(&target)
                 }
-                Err(error) => return Err(error.diagnostic()),
+                Err(error) => Err(error),
             },
-            ProviderOperation::Compile => provider.compile(&target).map_err(|e| e.diagnostic())?,
+            ProviderOperation::Compile => provider.compile(&target),
+        };
+        let compilation = match outcome {
+            Ok(compilation) => compilation,
+            Err(error) => {
+                // A dead provider is dropped, which kills its process, so the
+                // next load respawns it (#1057 policy, #1058). Other
+                // failures keep it.
+                if matches!(
+                    error.code(),
+                    "provider-exited" | "provider-io" | "provider-timeout"
+                ) {
+                    self.source_provider = None;
+                }
+                return Err(error.diagnostic());
+            }
         };
         // The provider's declared compile inputs ride the resolved input
         // into `Loaded`, where the freshness check hashes exactly that
