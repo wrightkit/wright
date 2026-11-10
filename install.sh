@@ -6,19 +6,31 @@
 #
 # Environment overrides (test/advanced hooks, not the primary interface):
 #   WRIGHT_INSTALL_BASE_URL  base URL of the R2-backed release distribution
+#   WRIGHT_INSTALL_FALLBACK_BASE_URL
+#                            GitHub Releases download base used when the R2
+#                            copy is missing; defaults to wrightkit/wright
+#                            only with the default WRIGHT_INSTALL_BASE_URL
 #   WRIGHT_INSTALL_OS        override OS detection (linux | darwin)
 #   WRIGHT_INSTALL_ARCH      override CPU detection (x86_64 | aarch64)
 
 set -euo pipefail
 
-WRIGHT_INSTALL_BASE_URL="${WRIGHT_INSTALL_BASE_URL:-https://install.wrightkit.dev/wright}"
+DEFAULT_INSTALL_BASE_URL="https://install.wrightkit.dev/wright"
+WRIGHT_INSTALL_BASE_URL="${WRIGHT_INSTALL_BASE_URL:-$DEFAULT_INSTALL_BASE_URL}"
+if [[ -z "${WRIGHT_INSTALL_FALLBACK_BASE_URL:-}" ]]; then
+  if [[ "$WRIGHT_INSTALL_BASE_URL" == "$DEFAULT_INSTALL_BASE_URL" ]]; then
+    WRIGHT_INSTALL_FALLBACK_BASE_URL="https://github.com/wrightkit/wright/releases/download"
+  else
+    WRIGHT_INSTALL_FALLBACK_BASE_URL=""
+  fi
+fi
 
 VERSION=""
 INSTALL_DIR=""
 TMP_DIR=""
 
 usage() {
-  sed -n '2,11p' "$0" | sed 's/^# \?//'
+  sed -n '2,15p' "$0" | sed 's/^# \?//'
   echo
   echo "Options:"
   echo "  --version <version>  Install an exact Wright version (e.g. 0.1.0);"
@@ -121,12 +133,21 @@ if [[ -z "$INSTALL_DIR" ]]; then
   INSTALL_DIR="$HOME/.local/bin"
 fi
 
-echo "==> downloading $ARCHIVE_URL"
 TMP_DIR="$(mktemp -d)"
-curl -fsSL -o "$TMP_DIR/$ARCHIVE" "$ARCHIVE_URL" \
-  || fail "failed to download $ARCHIVE_URL (does release v$VERSION exist?)"
-curl -fsSL -o "$TMP_DIR/$ARCHIVE.sha256" "$CHECKSUM_URL" \
-  || fail "failed to download checksum $CHECKSUM_URL"
+download_release() {
+  curl -fsSL -o "$TMP_DIR/$ARCHIVE" "$1/$ARCHIVE" \
+    && curl -fsSL -o "$TMP_DIR/$ARCHIVE.sha256" "$1/$ARCHIVE.sha256"
+}
+echo "==> downloading $ARCHIVE_URL"
+if ! download_release "${ARCHIVE_URL%/*}"; then
+  [[ -n "$WRIGHT_INSTALL_FALLBACK_BASE_URL" ]] \
+    || fail "failed to download $ARCHIVE_URL (does release v$VERSION exist?)"
+  ARCHIVE_URL="$WRIGHT_INSTALL_FALLBACK_BASE_URL/v$VERSION/$ARCHIVE"
+  CHECKSUM_URL="$ARCHIVE_URL.sha256"
+  echo "==> not on the install host; downloading $ARCHIVE_URL"
+  download_release "${ARCHIVE_URL%/*}" \
+    || fail "failed to download $ARCHIVE_URL (does release v$VERSION exist?)"
+fi
 
 echo "==> verifying SHA-256 checksum"
 EXPECTED_HASH="$(awk 'NR == 1 { print $1 }' "$TMP_DIR/$ARCHIVE.sha256")"

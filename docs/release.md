@@ -220,6 +220,21 @@ https://releases.wrightkit.dev/wright/nightly/version
 https://releases.wrightkit.dev/wright/nightly/<commit>/wright-<version>-<target-triple>.<ext>
 ```
 
+### R2 retention
+
+R2 keeps the newest 3 stable versions and the newest 5 nightly commits.
+`scripts/prune-r2.py` deletes older prefixes after the channel pointer
+advances. Stable ordering is semver; nightly ordering is upload time.
+
+A pruned stable version remains in its GitHub Release. `install.sh`,
+`install.ps1`, and `wright update` first try the R2 route. When it fails, they
+download the archive and checksum from
+`https://github.com/wrightkit/wright/releases/download/v<version>/` instead.
+They fall back only with the default install base URL, or when
+`WRIGHT_INSTALL_FALLBACK_BASE_URL` is set. Direct requests to a pruned R2 URL
+return 404. Nightly objects have no GitHub copy and are not recoverable after
+pruning.
+
 ### Manual GitHub Release fallback
 
 The download URL is deterministic:

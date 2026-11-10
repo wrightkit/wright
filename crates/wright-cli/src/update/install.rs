@@ -11,15 +11,18 @@ pub(super) fn install_version(
     install_dir: &Path,
 ) -> Result<(), UpdateError> {
     let archive_name = platform.archive_name(version);
-    let archive_url = format!(
-        "{}/releases/{version}/{archive_name}",
-        base_url.trim_end_matches('/')
-    );
-    let checksum_url = format!("{archive_url}.sha256");
-
-    println!("==> downloading {archive_url}");
-    let archive = fetch(client, &archive_url)?;
-    let checksum = fetch_text(client, &checksum_url)?;
+    let primary = format!("{}/releases/{version}", base_url.trim_end_matches('/'));
+    let (archive, checksum) = match download_release(client, &primary, &archive_name) {
+        Ok(files) => files,
+        Err(error) => {
+            let Some(fallback) = fallback_base_url(base_url) else {
+                return Err(error);
+            };
+            let fallback = format!("{}/v{version}", fallback.trim_end_matches('/'));
+            println!("==> not on the install host; trying {fallback}");
+            download_release(client, &fallback, &archive_name)?
+        }
+    };
     println!("==> verifying SHA-256 checksum");
     verify_checksum(&archive, &checksum, &archive_name)?;
 
@@ -40,6 +43,30 @@ pub(super) fn install_version(
     );
     let _ = crate::completion::refresh_installed_completions();
     Ok(())
+}
+
+const DEFAULT_FALLBACK_BASE_URL: &str = "https://github.com/wrightkit/wright/releases/download";
+
+/// GitHub Releases hold stable versions that R2 retention pruned. Only the
+/// default base falls back there, so a custom mirror never reaches GitHub.
+fn fallback_base_url(base_url: &str) -> Option<String> {
+    match std::env::var("WRIGHT_INSTALL_FALLBACK_BASE_URL") {
+        Ok(url) if !url.is_empty() => Some(url),
+        _ => (base_url.trim_end_matches('/') == super::DEFAULT_BASE_URL)
+            .then(|| DEFAULT_FALLBACK_BASE_URL.to_string()),
+    }
+}
+
+fn download_release(
+    client: &reqwest::blocking::Client,
+    release_url: &str,
+    archive_name: &str,
+) -> Result<(Vec<u8>, String), UpdateError> {
+    let archive_url = format!("{release_url}/{archive_name}");
+    println!("==> downloading {archive_url}");
+    let archive = fetch(client, &archive_url)?;
+    let checksum = fetch_text(client, &format!("{archive_url}.sha256"))?;
+    Ok((archive, checksum))
 }
 
 /// Swap the matched pair lsp-first: `wright-lsp` may be held open by an editor

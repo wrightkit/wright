@@ -579,6 +579,9 @@ jobs:
       - name: Test install.sh (native smoke)
         if: matrix.channel == 'install.sh'
         run: python scripts/test-distribution-install-sh.py
+      - name: Test R2 retention pruning
+        if: matrix.channel == 'install.sh'
+        run: python scripts/test-prune-r2.py
       - name: Test install.ps1 (channel)
         if: matrix.channel == 'install.ps1'
         shell: pwsh

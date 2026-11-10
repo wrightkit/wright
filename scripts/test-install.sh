@@ -256,6 +256,29 @@ else
   report "install.sh runs completion installation" fail
 fi
 
+PRUNED_VERSION="8.8.8"
+VERSION="$PRUNED_VERSION" make_archive "$WORK/pruned" "x86_64-unknown-linux-gnu"
+mkdir -p "$WORK/mock/github"
+mv "$WORK/pruned/releases/$PRUNED_VERSION" "$WORK/mock/github/v$PRUNED_VERSION"
+
+if WRIGHT_INSTALL_OS=linux WRIGHT_INSTALL_ARCH=x86_64 \
+   WRIGHT_INSTALL_FALLBACK_BASE_URL="$BASE_URL/github" \
+   run_install --dir "$WORK/d11" --version "$PRUNED_VERSION" >"$INSTALL_OUTPUT" 2>&1 &&
+   test -x "$WORK/d11/wright" && grep -Fq "not on the install host" "$INSTALL_OUTPUT"; then
+  report "version missing from R2 installs from the GitHub fallback" ok
+else
+  report "version missing from R2 installs from the GitHub fallback" fail
+fi
+
+if WRIGHT_INSTALL_OS=linux WRIGHT_INSTALL_ARCH=x86_64 \
+   run_install --dir "$WORK/d12" --version "$PRUNED_VERSION" >"$INSTALL_OUTPUT" 2>&1; then
+  report "custom base URL does not fall back to GitHub" fail
+else
+  grep -Fq "does release" "$INSTALL_OUTPUT" \
+    && report "custom base URL does not fall back to GitHub" ok \
+    || report "custom base URL does not fall back to GitHub" fail
+fi
+
 echo
 echo "installer tests: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]

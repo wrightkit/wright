@@ -726,6 +726,10 @@ jobs:
         if: needs.release-identity.outputs.channel == 'nightly'
         run: ./scripts/publish-r2.sh pointer
 
+      - name: Prune old nightly objects
+        if: needs.release-identity.outputs.channel == 'nightly'
+        run: python3 scripts/prune-r2.py --channel nightly --keep 5
+
   advance-latest:
     name: Advance wright/latest/version
     needs:
@@ -757,3 +761,6 @@ jobs:
 
       - name: Advance stable version pointer
         run: ./scripts/publish-r2.sh pointer
+
+      - name: Prune old stable objects
+        run: python3 scripts/prune-r2.py --channel stable --keep 3

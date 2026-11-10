@@ -55,6 +55,10 @@ Environment overrides (test/advanced hooks):
 * `WRIGHT_INSTALL_BASE_URL`: base URL of the R2-backed Wright release
   distribution (the `latest/version` and `releases/<version>/` routes live
   under it, matching `install.sh` and `install.ps1`)
+* `WRIGHT_INSTALL_FALLBACK_BASE_URL`: GitHub Releases download base
+  (`<base>/v<version>/<archive>`) tried when the R2 copy is missing. It
+  defaults to `https://github.com/wrightkit/wright/releases/download` only
+  while `WRIGHT_INSTALL_BASE_URL` is the default
 * `WRIGHT_INSTALL_OS` / `WRIGHT_INSTALL_ARCH`: override self-update platform
   detection (matching `install.sh`)
 * `WRIGHT_PROVIDER_DATA_DIR`: provider store root
