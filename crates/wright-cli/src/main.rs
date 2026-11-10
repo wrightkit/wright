@@ -14,6 +14,7 @@ mod present;
 mod serve;
 mod session;
 mod tooldefs;
+mod trace;
 mod update;
 mod usage_hint;
 
@@ -189,13 +190,17 @@ fn run_workflow(command: Command) -> ExitCode {
                 );
                 return ExitCode::from(exit::USAGE);
             }
-            run_configured(
+            let trace = trace::start(args.trace.trace);
+            let code = run_traced(
+                &trace,
                 "check",
                 config,
                 present::Presentation::from_common(&args.common).with_all(args.all),
                 None,
                 wright_driver::CompilerSession::check,
-            )
+            );
+            trace::print(&trace, args.trace.trace);
+            code
         }
         Command::Analyze(args) => {
             let mut config = config_from_common(&args.common);
@@ -371,12 +376,41 @@ pub(crate) fn run_configured<
     subject: Option<&str>,
     run: impl FnOnce(&mut wright_driver::CompilerSession) -> wright_driver::Envelope<T>,
 ) -> ExitCode {
-    let mut session = match wright_driver::CompilerSession::new(config) {
+    run_traced(
+        &wright_driver::Trace::disabled(),
+        name,
+        config,
+        presentation,
+        subject,
+        run,
+    )
+}
+
+/// Run a workflow under `trace`. The root span covers the session's whole
+/// life, including the provider shutdown on drop, so the caller renders the
+/// trace only after this returns.
+pub(crate) fn run_traced<
+    T: serde::Serialize
+        + present::ResultPresentation
+        + plain::PlainReport
+        + present::terminal::TerminalReport,
+>(
+    trace: &wright_driver::Trace,
+    name: &'static str,
+    config: SessionConfig,
+    presentation: present::Presentation,
+    subject: Option<&str>,
+    run: impl FnOnce(&mut wright_driver::CompilerSession) -> wright_driver::Envelope<T>,
+) -> ExitCode {
+    let root = trace.span(name);
+    let mut session = match wright_driver::CompilerSession::new_traced(config, trace.clone()) {
         Ok(session) => session,
         Err(diagnostic) => return session::refuse(presentation, name, &diagnostic),
     };
 
-    ExitCode::from(run_command(&mut session, run, presentation, subject))
+    let code = run_command(&mut session, run, presentation, subject);
+    root.fact("exitCode", u64::from(code));
+    ExitCode::from(code)
 }
 
 fn run_lookup(args: &cli::LookupArgs) -> ExitCode {

@@ -39,6 +39,8 @@ Issue contract.
 - [Embedding/tool API](embedding.md): programmatic session/query/edit services.
 - [Agent contract](agent-contract.md): versioned session requests, results, and
   transport mappings for coding agents and embedding consumers.
+- [Execution trace](agent-contract-trace.md): the `wright-trace/v1` stderr trace
+  of `compile` and `check` (#1079).
 - Agent benchmark: owned by the private `wrightkit/benchmark-suite`
   ([ADR-0026](adr/0026-agent-benchmark-ownership.md)); it measures a pinned
   Wright release through the released binary and `wright-agent/v1`.

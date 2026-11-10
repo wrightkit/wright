@@ -28,6 +28,9 @@ infer them from process state alone.
 * JSON mode: exactly one envelope goes to stdout; stderr stays empty on
   success. Usage errors are the only case that writes to stderr without an
   envelope (exit 2).
+* `--trace[=json]` on `compile` and `check` is the one opt-in that writes to
+  stderr on success: the execution trace (`wright-trace/v1`, one object per
+  line). Stdout is unchanged. See the [agent contract](../agent-contract-trace.md).
 * `wright compile` writes the program to a file (ADR-0025) and never to the
   result: text and JSON carry the verdict, diagnostics, and
   `result.output.{written_to, sha256, locale, input_identity}`, with no

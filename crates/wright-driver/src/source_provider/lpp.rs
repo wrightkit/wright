@@ -9,6 +9,7 @@ use workshop_rs::MappedText;
 use workshop_rs::program::{MAPPED_TEXT_V1, TEXT_V1};
 
 use crate::diag::{Diagnostic, Origin, Severity, SourceSpan, Stage};
+use crate::trace::Trace;
 
 use super::columns;
 use super::{
@@ -23,6 +24,7 @@ pub struct LppSourceProvider {
     /// when the session negotiated `compileInputs` and the compile
     /// answered with the list, `None` otherwise.
     compile_inputs: Option<Vec<PathBuf>>,
+    trace: Trace,
 }
 
 impl LppSourceProvider {
@@ -31,7 +33,15 @@ impl LppSourceProvider {
             provider,
             locale,
             compile_inputs: None,
+            trace: Trace::disabled(),
         }
+    }
+
+    /// Record the provider's artifact decode and shutdown into `trace`
+    /// (#1079).
+    pub fn traced(mut self, trace: Trace) -> Self {
+        self.trace = trace;
+        self
     }
 
     fn entry(
@@ -71,7 +81,9 @@ impl LppSourceProvider {
 
 impl Drop for LppSourceProvider {
     fn drop(&mut self) {
-        let _ = self.provider.shutdown();
+        let _ = self
+            .trace
+            .in_span("provider.shutdown", || self.provider.shutdown());
     }
 }
 
@@ -136,16 +148,18 @@ impl SourceProvider for LppSourceProvider {
         let (workshop_text, provenance) = match res.artifact {
             Some(a) if a.format == TEXT_V1 => (Some(a.content), SourceProvenance::Unmapped),
             Some(a) if negotiates_artifacts && a.format == MAPPED_TEXT_V1 => {
-                let mapped = MappedText::from_json(&a.content).map_err(|error| {
-                    SourceProviderError::Failed {
-                        code: "provider-artifact-format".to_string(),
-                        stage: Stage::Internal,
-                        class: crate::diag::ExitClass::Internal,
-                        message: format!(
-                            "the source provider returned an invalid '{MAPPED_TEXT_V1}' artifact: {}",
-                            error
-                        ),
-                    }
+                let mapped = self.trace.in_span("artifact.decode", || {
+                    MappedText::from_json(&a.content).map_err(|error| {
+                        SourceProviderError::Failed {
+                            code: "provider-artifact-format".to_string(),
+                            stage: Stage::Internal,
+                            class: crate::diag::ExitClass::Internal,
+                            message: format!(
+                                "the source provider returned an invalid '{MAPPED_TEXT_V1}' artifact: {}",
+                                error
+                            ),
+                        }
+                    })
                 })?;
                 (Some(mapped.text), SourceProvenance::Mapped(mapped.map))
             }

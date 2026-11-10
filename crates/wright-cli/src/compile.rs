@@ -5,7 +5,7 @@ use wright_driver::result::exit;
 use wright_driver::{CompileWrite, OutputDest, Overwrite};
 
 use crate::cli::{self, OutputFormatArg};
-use crate::{config_from_common, present, run_configured};
+use crate::{config_from_common, present, run_traced};
 
 pub(crate) fn run(args: &cli::CompileArgs) -> ExitCode {
     let to_stdout = args.output.as_deref().is_some_and(|p| p.as_os_str() == "-");
@@ -42,7 +42,9 @@ pub(crate) fn run(args: &cli::CompileArgs) -> ExitCode {
         save_baseline: args.save_baseline.clone(),
         max_total: None,
     };
-    run_configured(
+    let trace = crate::trace::start(args.trace.trace);
+    let code = run_traced(
+        &trace,
         "compile",
         compile_config,
         present::Presentation::from_common(&args.common),
@@ -88,7 +90,9 @@ pub(crate) fn run(args: &cli::CompileArgs) -> ExitCode {
             }
             envelope
         },
-    )
+    );
+    crate::trace::print(&trace, args.trace.trace);
+    code
 }
 
 fn confirm_overwrite(

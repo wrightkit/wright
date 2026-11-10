@@ -3,7 +3,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{Map, Value, json};
 
@@ -15,6 +15,32 @@ use crate::error::{LppError, LppErrorKind, ProviderError};
 /// line — and the bound sits at twice that floor, the same bound
 /// `wright-lsp` applies to a frame body.
 pub const MAX_PROVIDER_LINE_BYTES: usize = 32 * 1024 * 1024;
+
+/// One request/response exchange as a transport observer sees it. Byte
+/// counts exclude the line terminator; `error` is the failure code, when
+/// the exchange failed.
+pub struct ExchangeRecord<'a> {
+    pub method: &'a str,
+    pub started: Instant,
+    pub finished: Instant,
+    pub request_bytes: usize,
+    pub response_bytes: usize,
+    pub error: Option<&'static str>,
+}
+
+/// Receives every exchange a client completes. Observation never changes
+/// the wire traffic or the outcome the caller sees.
+pub trait ExchangeObserver: Send + Sync {
+    fn exchanged(&self, record: &ExchangeRecord<'_>);
+}
+
+type Reply = Result<(Value, usize), ProviderError>;
+
+#[derive(Default)]
+struct Wire {
+    request_bytes: usize,
+    response_bytes: usize,
+}
 
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
@@ -38,7 +64,7 @@ pub enum ClientPhase {
 
 #[derive(Default)]
 struct Shared {
-    pending: HashMap<i64, Sender<Result<Value, ProviderError>>>,
+    pending: HashMap<i64, Sender<Reply>>,
     violation: Option<ProviderError>,
     exited: Option<ProviderError>,
 }
@@ -56,6 +82,7 @@ pub struct JsonRpcClient {
     next_id: i64,
     phase: ClientPhase,
     timeout: Duration,
+    observer: Option<Arc<dyn ExchangeObserver>>,
 }
 
 impl JsonRpcClient {
@@ -77,7 +104,13 @@ impl JsonRpcClient {
             next_id: 0,
             phase: ClientPhase::Fresh,
             timeout: config.request_timeout,
+            observer: None,
         }
+    }
+
+    /// Report every later exchange to `observer`.
+    pub fn set_observer(&mut self, observer: Arc<dyn ExchangeObserver>) {
+        self.observer = Some(observer);
     }
 
     pub fn phase(&self) -> ClientPhase {
@@ -137,6 +170,29 @@ impl JsonRpcClient {
     }
 
     fn send(&mut self, method: &str, params: Value) -> Result<Value, ProviderError> {
+        let Some(observer) = self.observer.clone() else {
+            return self.exchange(method, params, &mut Wire::default());
+        };
+        let started = Instant::now();
+        let mut wire = Wire::default();
+        let result = self.exchange(method, params, &mut wire);
+        observer.exchanged(&ExchangeRecord {
+            method,
+            started,
+            finished: Instant::now(),
+            request_bytes: wire.request_bytes,
+            response_bytes: wire.response_bytes,
+            error: result.as_ref().err().map(ProviderError::code),
+        });
+        result
+    }
+
+    fn exchange(
+        &mut self,
+        method: &str,
+        params: Value,
+        wire: &mut Wire,
+    ) -> Result<Value, ProviderError> {
         {
             let shared = self.shared.lock().expect("lock poisoned");
             if let Some(error) = shared.dead_error() {
@@ -157,6 +213,7 @@ impl JsonRpcClient {
 
         let line =
             json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }).to_string();
+        wire.request_bytes = line.len();
         let writer = self.writer.as_mut().ok_or_else(|| ProviderError::Io {
             message: format!("cannot send '{method}': the provider stdin is closed"),
         })?;
@@ -171,7 +228,11 @@ impl JsonRpcClient {
         }
 
         match rx.recv_timeout(self.timeout) {
-            Ok(res) => res,
+            Ok(Ok((value, bytes))) => {
+                wire.response_bytes = bytes;
+                Ok(value)
+            }
+            Ok(Err(error)) => Err(error),
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 // A provider that missed the deadline may not read stdin any
                 // more, so a later write could block forever. The client is
@@ -298,7 +359,7 @@ fn dispatch_line(shared: &Arc<Mutex<Shared>>, line: &str) -> bool {
         }
     };
 
-    let _ = sender.send(response_outcome(object));
+    let _ = sender.send(response_outcome(object).map(|value| (value, line.len())));
     true
 }
 

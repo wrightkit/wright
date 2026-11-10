@@ -69,6 +69,7 @@ WORKFLOW OPTIONS:
     --renderer <MODE>    Presentation: auto|terminal|plain|github-actions
     --color <POLICY>     ANSI color: auto|always|never
     --fail-on <LEVEL>    Fail (exit 1) when a diagnostic or finding reaches LEVEL: error|warning|info
+    --trace[=<FORMAT>]   Write the execution trace to stderr: text|json (compile, check)
 
 LINT OPTIONS:
     --lint-config <PATH>       Read project lint configuration YAML
@@ -138,6 +139,8 @@ pub(crate) struct CompileArgs {
     pub(crate) common: CommonArgs,
     #[command(flatten)]
     pub(crate) policy: crate::serve::LintPolicyArgs,
+    #[command(flatten)]
+    pub(crate) trace: TraceArgs,
     /// Write the program to PATH instead of `<input stem>.ow`; `-` prints the
     /// program to stdout and nothing else.
     #[arg(short = 'o', long, value_name = "PATH")]
@@ -194,6 +197,25 @@ pub(crate) struct ReportArgs {
     pub(crate) select: SelectArgs,
     #[command(flatten)]
     pub(crate) policy: crate::serve::LintPolicyArgs,
+    #[command(flatten)]
+    pub(crate) trace: TraceArgs,
+}
+
+/// The execution trace option (#1079). The trace goes to stderr and never
+/// changes stdout or the exit code.
+#[derive(Debug, Args, Clone, Copy, Default)]
+pub(crate) struct TraceArgs {
+    /// Write the execution trace to stderr: `text` (indented span tree) or
+    /// `json` (one object per line). Bare `--trace` means `text`.
+    #[arg(
+        long,
+        value_enum,
+        value_name = "FORMAT",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "text"
+    )]
+    pub(crate) trace: Option<OutputFormatArg>,
 }
 
 /// Arguments of `analyze`: shared workflow options, finding selection, and

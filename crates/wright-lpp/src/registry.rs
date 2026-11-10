@@ -85,6 +85,13 @@ impl ProviderRegistry {
         self.providers.contains_key(language_id)
     }
 
+    /// The executable registered for `language_id`, when one is.
+    pub fn command(&self, language_id: &str) -> Option<&std::path::Path> {
+        self.providers
+            .get(language_id)
+            .map(|config| config.command.as_path())
+    }
+
     /// Spawn a fresh provider session for `language_id`.
     ///
     /// Refuses explicitly when no provider is configured for the id

@@ -222,6 +222,15 @@ share the finding-selection options `--severity`, `--rule-id`, `--file`, and
 or exit codes; see [lint configuration and findings](lint.md) and
 [presentation](presentation.md).
 
+`wright compile` and `wright check` accept `--trace[=text|json]` (#1079):
+the execution trace of the run, with each phase's duration and key facts,
+written to standard error. `text` prints an indented tree, and `json` prints
+one object per line. Bare `--trace` means `text`; the value must follow `=`.
+The space form `--trace json` does not select a format: with no input it reads
+an input named `json` (exit 1), and with an input it is a usage error (exit 2). Standard output, exit codes, and
+diagnostics are unchanged. The JSON shape is documented in the
+[agent contract](../agent-contract-trace.md).
+
 Every workflow command accepts the opt-in gating option `--fail-on
 <error|warning|info>` (ADR-0030 decision 13): when the complete result's
 highest diagnostic or finding severity reaches the threshold — judged like
