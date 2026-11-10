@@ -2697,6 +2697,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "tar",
+ "tempfile",
  "url",
  "workshop-rs",
  "wright-analyzer",

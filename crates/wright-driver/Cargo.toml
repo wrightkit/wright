@@ -38,3 +38,6 @@ hotpath-alloc = [
     "wright-analyzer/hotpath-alloc",
     "wright-transform/hotpath-alloc",
 ]
+
+[dev-dependencies]
+tempfile = "3"
