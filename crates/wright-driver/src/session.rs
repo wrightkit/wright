@@ -1,3 +1,4 @@
+mod cost;
 mod diagnostics;
 mod edit;
 mod lint;
@@ -20,7 +21,7 @@ use crate::cache;
 use crate::config::{InputSpec, SessionConfig, SourceKind};
 use crate::diag::{
     Diagnostic, Origin, Position, Severity, SourceSpan, Stage, Status, class_for_stage,
-    source_provider_unavailable, source_span, workshop_diag,
+    source_provider_unavailable, workshop_diag,
 };
 use crate::input::{self, ResolvedInput};
 use crate::input_identity;
@@ -457,50 +458,6 @@ impl CompilerSession {
         self.loaded.as_ref().map(|loaded| loaded.input.root.clone())
     }
 
-    pub(crate) fn cost_snapshot(&self, loaded: &Loaded) -> Option<cache::CostSnapshot> {
-        let report = loaded.program.element_count(self.catalog).ok()?;
-        Some(cache::CostSnapshot {
-            total: report.total,
-            budget: WORKSHOP_CLIENT_ELEMENT_LIMIT,
-            rules: report
-                .rules
-                .iter()
-                .enumerate()
-                .map(|(index, node)| (loaded.program.rules[index].name.clone(), node.count))
-                .collect(),
-        })
-    }
-
-    pub(crate) fn cost_run(&self, loaded: &Loaded) -> cache::CostRun {
-        let run = &self.config.run;
-        cache::CostRun {
-            no_cache: run.no_cache,
-            root: loaded.input.root.clone(),
-            input_path: loaded.input.path.clone(),
-            kind: loaded.input.kind.as_str().to_string(),
-            locale: Self::locale_for(loaded).to_string(),
-            profile: self.config.profile.as_str().to_string(),
-            baseline: run.baseline.clone(),
-            save_baseline: run.save_baseline.clone(),
-        }
-    }
-
-    pub(crate) fn run_cost_comparison(&self) -> Option<cache::Comparison> {
-        let loaded = self.loaded.as_ref()?;
-        let run = self.cost_run(loaded);
-        let environment = cache::CacheEnvironment::from_env();
-        if run.baseline.is_some() && !cache::baseline_exists_in(&run, environment) {
-            return None;
-        }
-        let snapshot = self.cost_snapshot(loaded)?;
-        cache::compare_and_record_in(&run, &snapshot, environment)
-    }
-
-    pub(crate) fn baseline_error(&self) -> Option<String> {
-        let run = self.cost_run(self.loaded.as_ref()?);
-        cache::baseline_error(&run, cache::CacheEnvironment::from_env())
-    }
-
     #[allow(unsafe_code)] // hotpath 0.28 emits `#[unsafe(export_name)]` statics
     fn load_workshop(&mut self, resolved: &ResolvedInput) -> Result<(Program, String), Diagnostic> {
         let override_locale = self
@@ -554,7 +511,7 @@ impl CompilerSession {
     /// Compile to the destination and locale in `write`, refusing output on failure.
     pub fn compile_to(&mut self, write: CompileWrite<'_>) -> Envelope<CompileResult> {
         let mut result = CompileResult::default();
-        let (output, entry) = match self.compile_output(write.to.as_deref()) {
+        let (output, entry, cost) = match self.compile_output(write.to.as_deref()) {
             Ok(compiled) => compiled,
             Err(diagnostic) => {
                 self.diagnostics.push(diagnostic);
@@ -622,7 +579,7 @@ impl CompilerSession {
                     written_to,
                     ..output
                 });
-                comparison = self.run_cost_comparison();
+                comparison = self.run_cost_comparison(cost);
             }
             Err(diagnostic) => self.diagnostics.push(diagnostic),
         }
@@ -635,7 +592,7 @@ impl CompilerSession {
     fn compile_output(
         &mut self,
         to: Option<&str>,
-    ) -> Result<(CompiledOutput, Option<PathBuf>), Diagnostic> {
+    ) -> Result<(CompiledOutput, Option<PathBuf>, Option<cache::CostSnapshot>), Diagnostic> {
         let named = match to {
             Some(name) => {
                 let locale = workshop_rs::catalog::Locale::new(name);
@@ -667,7 +624,7 @@ impl CompilerSession {
             workshop_rs::emitter::emit(&loaded.program, self.catalog, &locale)
         })
         .map_err(|error| workshop_diag(error, &loaded.input))?;
-        self.attach_target_limits(&loaded);
+        let cost = self.attach_target_limits(&loaded);
         let sha256 = hotpath::measure_block!("compile::sha256", input_identity(&text));
         let compiled = CompiledOutput {
             text,
@@ -676,7 +633,7 @@ impl CompilerSession {
             written_to: String::new(),
             input_identity: loaded.input.identity.clone(),
         };
-        Ok((compiled, loaded.input.path.clone()))
+        Ok((compiled, loaded.input.path.clone(), cost))
     }
 
     #[hotpath::measure]
@@ -820,62 +777,6 @@ impl CompilerSession {
             config,
             Arc::clone(&self.lint_registry),
         )
-    }
-
-    #[allow(unsafe_code)] // hotpath 0.28 emits `#[unsafe(export_name)]` statics
-    fn attach_target_limits(&mut self, loaded: &Loaded) {
-        let report = match hotpath::measure_block!("compile::element_count", {
-            loaded.program.element_count(self.catalog)
-        }) {
-            Ok(report) => report,
-            Err(error) => {
-                self.diagnostics.push(Diagnostic {
-                    code: "element-count-unavailable".to_string(),
-                    stage: Stage::Emission,
-                    severity: Severity::Info,
-                    class: class_for_stage(Stage::Emission),
-                    message: format!(
-                        "the canonical element count is unavailable ({}); the {WORKSHOP_CLIENT_ELEMENT_LIMIT}-element client import limit was not evaluated",
-                        error
-                    ),
-                    status: None,
-                    span: None,
-                    source: Some(loaded_origin(loaded)),
-                    fields: Default::default(),
-                });
-                return;
-            }
-        };
-        if report.total <= WORKSHOP_CLIENT_ELEMENT_LIMIT {
-            return;
-        }
-        let total = report.total;
-        let mut diagnostic = Diagnostic {
-            code: "target-element-limit".to_string(),
-            stage: Stage::Emission,
-            severity: Severity::Warning,
-            class: class_for_stage(Stage::Emission),
-            message: format!(
-                "generated Workshop program uses {total} elements, over the {WORKSHOP_CLIENT_ELEMENT_LIMIT}-element client import limit; the artifact was still emitted but is expected to fail Overwatch client import"
-            ),
-            status: None,
-            span: None,
-            source: Some(loaded_origin(loaded)),
-            fields: Default::default(),
-        };
-        if let Some(top) = report.rules.iter().max_by_key(|rule| rule.count) {
-            diagnostic.message.push_str(&format!(
-                "; largest contributor: rule \"{}\" ({} elements)",
-                top.name, top.count
-            ));
-            diagnostic.span = top.span.map(|span| {
-                source_span(
-                    span,
-                    semantic::span_path(Some(span.file.index() as u64), loaded),
-                )
-            });
-        }
-        self.diagnostics.push(diagnostic);
     }
 
     fn attach_workshop_completeness(&mut self, loaded: &Loaded) {

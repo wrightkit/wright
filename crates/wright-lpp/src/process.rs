@@ -57,6 +57,10 @@ impl ChildProcess {
     /// it. Returns the observed exit code.
     pub fn terminate(&mut self) -> Option<i32> {
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        // A provider that has just seen end-of-file exits within a
+        // millisecond or two, so poll with a growing delay instead of a
+        // fixed 10 ms step that dominates the wait.
+        let mut delay = Duration::from_micros(250);
         loop {
             if let Some(status) = self.try_status() {
                 return Some(status);
@@ -64,7 +68,8 @@ impl ChildProcess {
             if std::time::Instant::now() >= deadline {
                 break;
             }
-            std::thread::sleep(Duration::from_millis(10));
+            std::thread::sleep(delay);
+            delay = (delay * 2).min(Duration::from_millis(10));
         }
         self.kill();
         self.child.wait().ok().map(exit_code)
