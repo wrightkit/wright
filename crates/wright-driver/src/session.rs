@@ -483,16 +483,16 @@ impl CompilerSession {
         })
         .map_err(|error| workshop_diag(error, resolved))?;
         self.progress(ProgressEvent::new(ProgressPhase::Validation));
-        hotpath::measure_block!("load::validate", program.validate())
+        let canonical = hotpath::measure_block!("load::canonical", program.canonical())
+            .map_err(|error| workshop_diag(error, resolved))?;
+        hotpath::measure_block!("load::validate", canonical.validate())
             .map_err(|error| workshop_diag(error, resolved))?;
         hotpath::measure_block!(
             "load::validate_canonical",
-            workshop_rs::validate::validate_canonical_ids_tolerating_residuals(
-                &program,
-                self.catalog
-            )
+            canonical.validate_canonical_ids_tolerating_residuals(self.catalog)
         )
         .map_err(|error| workshop_diag(error, resolved))?;
+        drop(canonical);
         Ok((program, locale.to_string()))
     }
 
