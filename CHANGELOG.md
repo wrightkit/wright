@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.41.7](https://github.com/wrightkit/wright/compare/v0.41.6...v0.41.7) (2026-11-10)
+
+
+### Performance Improvements
+
+* bump workshop-rs to 1.28.4 and build its canonical form once on load ([#1071](https://github.com/wrightkit/wright/issues/1071)) ([f8d8043](https://github.com/wrightkit/wright/commit/f8d8043f125fb10c1eb37628034726a29d3e63e5)), closes [#1070](https://github.com/wrightkit/wright/issues/1070)
+* count elements once and back off the provider exit poll ([#1067](https://github.com/wrightkit/wright/issues/1067)) ([c956bb6](https://github.com/wrightkit/wright/commit/c956bb6832a97b6c27038c0631514c744a11dce8)), closes [#1066](https://github.com/wrightkit/wright/issues/1066)
+
 ## [0.41.6](https://github.com/wrightkit/wright/compare/v0.41.5...v0.41.6) (2026-11-09)
 
 
