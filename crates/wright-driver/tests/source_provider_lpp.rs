@@ -596,15 +596,10 @@ for line in sys.stdin:
     cleanup(dir);
 }
 
-/// A provider death error drops the session's provider; the next load
-/// reaches a new one (#1058, the #1057 policy applied to the driver
-/// session).
+/// Records one line per spawn in `starts`; exits on the first `lpp/compile`
+/// (marker file `died`).
 #[cfg(unix)]
-#[test]
-fn a_load_after_a_provider_timeout_reaches_a_new_provider() {
-    use std::os::unix::fs::PermissionsExt;
-
-    const PROVIDER: &str = r#"#!/usr/bin/env python3
+const DEATH_PROVIDER: &str = r#"#!/usr/bin/env python3
 import json, sys, os, pathlib
 here = pathlib.Path(__file__).resolve().parent
 with open(here / "starts", "a") as f:
@@ -620,55 +615,92 @@ for line in sys.stdin:
                    "languages": [{"id": "opy", "extensions": ["opy"]}],
                    "capabilities": {"check": True, "compile": True, "projectLoading": True}})
     elif method == "lpp/compile":
+        if not (here / "died").exists():
+            (here / "died").write_text("")
+            os._exit(3)
         reply(id, {"diagnostics": [], "artifact": {"format": "workshop-rs/text-v1", "content": artifact}})
     else:
         reply(id, {})
 "#;
 
+#[cfg(unix)]
+fn death_session(
+    injected: Option<wright_driver::source_provider::LppSourceProvider>,
+) -> (CompilerSession, PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+
     let (dir, entry) = temp_entry();
     let script = dir.join("fake-provider");
-    std::fs::write(&script, PROVIDER).expect("provider script");
+    std::fs::write(&script, DEATH_PROVIDER).expect("provider script");
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
     std::fs::write(
         dir.join("artifact.ws"),
         workshop_fixture("synthetic/basic-rule"),
     )
     .expect("artifact");
+    let config = SessionConfig {
+        input: InputSpec::Path(entry),
+        kind: SourceKind::Opy,
+        source_backend: SourceBackend::Provider,
+        opy_provider: wright_driver::OpyProviderConfig::with_executable(script),
+        ..SessionConfig::default()
+    };
+    let session = match injected {
+        Some(provider) => CompilerSession::with_source_provider(config, Box::new(provider)),
+        None => CompilerSession::new(config),
+    }
+    .expect("session");
+    (session, dir)
+}
+
+#[cfg(unix)]
+fn spawn_count(dir: &std::path::Path) -> usize {
+    std::fs::read_to_string(dir.join("starts"))
+        .map(|log| log.lines().count())
+        .unwrap_or(0)
+}
+
+/// A spawned provider that dies is dropped; the next load reaches a new
+/// one (#1058, the #1057 policy applied to the driver session).
+#[cfg(unix)]
+#[test]
+fn a_load_after_a_spawned_provider_dies_reaches_a_new_provider() {
+    let (mut session, dir) = death_session(None);
+
+    let first = session.compile();
+    assert!(!first.ok);
+    assert_eq!(first.diagnostics[0].code, "provider-exited");
+    assert_eq!(spawn_count(&dir), 1);
+
+    let second = session.compile();
+    assert!(second.ok, "{:?}", second.diagnostics);
+    assert_eq!(spawn_count(&dir), 2);
+    cleanup(dir);
+}
+
+/// An injected provider cannot be recreated, so a death error keeps it:
+/// the session never spawns a replacement (`docs/embedding.md`).
+#[cfg(unix)]
+#[test]
+fn an_injected_provider_is_kept_after_a_death_error() {
     let timeout = wright_lpp::ProviderError::Timeout {
         method: "lpp/compile".to_string(),
         duration: std::time::Duration::from_millis(1),
     };
-    let timed_out = wright_driver::source_provider::LppSourceProvider::new(
+    let injected = wright_driver::source_provider::LppSourceProvider::new(
         Box::new(FailingLppProvider {
             failure: timeout.clone(),
             capabilities_failure: Some(timeout),
         }),
         None,
     );
-    let mut session = CompilerSession::with_source_provider(
-        SessionConfig {
-            input: InputSpec::Path(entry),
-            kind: SourceKind::Opy,
-            opy_provider: wright_driver::OpyProviderConfig::with_executable(script),
-            ..SessionConfig::default()
-        },
-        Box::new(timed_out),
-    )
-    .expect("session");
+    let (mut session, dir) = death_session(Some(injected));
 
-    let first = session.compile();
-    assert!(!first.ok);
-    assert_eq!(first.diagnostics[0].code, "provider-timeout");
-    assert!(!dir.join("starts").exists());
-
-    let second = session.compile();
-    assert!(second.ok, "{:?}", second.diagnostics);
-    assert_eq!(
-        std::fs::read_to_string(dir.join("starts"))
-            .expect("starts")
-            .lines()
-            .count(),
-        1
-    );
+    for _ in 0..2 {
+        let result = session.compile();
+        assert!(!result.ok);
+        assert_eq!(result.diagnostics[0].code, "provider-timeout");
+    }
+    assert_eq!(spawn_count(&dir), 0);
     cleanup(dir);
 }

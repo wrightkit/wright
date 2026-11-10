@@ -64,7 +64,9 @@ pub fn protocol_version_at_least(version: &str, minimum: &str) -> bool {
 pub const LPP_CLIENT_NAME: &str = "wright";
 
 pub use client::{ClientConfig, ClientPhase, JsonRpcClient, MAX_PROVIDER_LINE_BYTES};
-pub use error::{LocalProviderErrorKind, LppError, LppErrorKind, ProviderError};
+pub use error::{
+    LocalProviderErrorKind, LppError, LppErrorKind, PROVIDER_DEATH_CODES, ProviderError,
+};
 pub use process::ChildProcess;
 pub use provider::{LanguageProvider, NegotiatedCapabilities, StdioLanguageProvider};
 pub use registry::{ProviderConfig, ProviderRegistry, RegistryError};
