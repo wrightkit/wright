@@ -79,8 +79,8 @@ JSON-RPC methods `compile`, `check`, `analyze`, and `inspect` remain aliases for
 the corresponding operations and return the same `wright-result/v1` envelope
 they returned before this contract was introduced.
 
-One-shot CLI workflows like `wright check --format json` return `wright-result/v1`
-envelopes; [`--trace`](agent-contract-trace.md) adds stderr. They use the same `CompilerSession`
+One-shot CLI workflows such as `wright check --format json` continue to return
+their `wright-result/v1` envelope. They use the same `CompilerSession`
 workflows as the session service. The semantic query commands `wright inspect
 symbols`, `wright inspect refs`, `wright inspect cfg`, `wright inspect
 callgraph`, and `wright inspect cost` likewise run through `ToolService`

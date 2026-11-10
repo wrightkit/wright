@@ -5,9 +5,13 @@
 - Owner: the `wright` CLI renders the trace; `wright-driver::trace` records it.
 
 `wright compile` and `wright check` accept `--trace[=FORMAT]`, where `FORMAT`
-is `text` or `json`. A bare `--trace` means `text`. The value must follow `=`:
-`--trace=json` is valid, while `--trace json` is a usage error (exit 2) because
-`json` is then read as the input path or an unexpected argument. The trace
+is `text` or `json`. A bare `--trace` means `text`. The value must follow `=`,
+so `--trace=json` is the only form that selects `json`. The space form is not a
+format: `json` is read as the input path. With no input argument, `wright check
+--trace json` checks the input `json` in the current directory and fails with
+`input-io` (exit 1), and the trace of that failed run is written. With an input
+argument, `wright check --trace json <input>` fails with an unexpected-argument
+usage error (exit 2). The trace
 goes to standard error. It never changes standard output, the exit code, the
 diagnostics, or any `wright-result/v1` payload. Without the flag nothing is
 recorded and nothing extra is written.

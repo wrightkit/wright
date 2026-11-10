@@ -46,7 +46,14 @@ fn home_dir() -> Option<String> {
     std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .ok()
-        .filter(|home| !home.is_empty())
+        .and_then(|home| normalize_home(&home))
+}
+
+/// The home directory without trailing separators, so `/Users/al/` and
+/// `/Users/al` redact the same prefix. A root or empty value redacts nothing.
+fn normalize_home(raw: &str) -> Option<String> {
+    let trimmed = raw.trim_end_matches(['/', '\\']);
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
 fn write_text(report: &TraceReport, home: Option<&str>, out: &mut impl Write) -> io::Result<()> {
@@ -187,6 +194,28 @@ mod tests {
     }
 
     #[test]
+    fn trailing_separators_on_home_do_not_defeat_redaction() {
+        for raw in ["/Users/alice/", "/Users/alice", "/Users/alice//"] {
+            let home = normalize_home(raw);
+            assert_eq!(home.as_deref(), Some("/Users/alice"), "{raw}");
+            assert_eq!(
+                redact_home("/Users/alice/Library/opy-provider", home.as_deref()),
+                "~/Library/opy-provider"
+            );
+            assert_eq!(
+                redact_home("/Users/alice2/Library/opy-provider", home.as_deref()),
+                "/Users/alice2/Library/opy-provider"
+            );
+        }
+        assert_eq!(normalize_home("/"), None);
+        assert_eq!(normalize_home(""), None);
+        assert_eq!(
+            normalize_home("C:\\Users\\alice\\").as_deref(),
+            Some("C:\\Users\\alice")
+        );
+    }
+
+    #[test]
     fn rendered_trace_never_names_the_home_directory() {
         let report = TraceReport {
             environment: vec![(
@@ -203,7 +232,8 @@ mod tests {
                 facts: vec![("path", Fact::Text("/Users/alice/work/main.opy".into()))],
             }],
         };
-        let home = Some("/Users/alice");
+        let home = normalize_home("/Users/alice/");
+        let home = home.as_deref();
         let mut text = Vec::new();
         write_text(&report, home, &mut text).unwrap();
         let mut json_lines = Vec::new();
