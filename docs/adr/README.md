@@ -57,5 +57,4 @@ its audit date.
 * [ADR-0035: One meaning per selector spelling](0035-cli-selector-vocabulary.md)
 * [ADR-0036: `wright ui` dependency policy](0036-ui-dependency-policy.md)
 * [ADR-0037: The structured editor moves to an experimental web application over a WebAssembly Wright core](0037-web-editor-experiment.md)
-* [ADR-0038: Bounded R2 retention with GitHub redirect for pruned stable versions](0038-r2-retention-and-github-redirect.md) _(supersedes the Worker rejection in ADR-0014)_
 * [Post-ADR-0010 decision inventory](post-0010-inventory.md)

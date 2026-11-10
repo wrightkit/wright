@@ -582,14 +582,6 @@ jobs:
       - name: Test R2 retention pruning
         if: matrix.channel == 'install.sh'
         run: python scripts/test-prune-r2.py
-      - name: Set up Node for the R2 redirect Worker test
-        if: matrix.channel == 'install.sh'
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-      - name: Test R2 redirect Worker
-        if: matrix.channel == 'install.sh'
-        run: node --test scripts/test-r2-redirect-worker.ts
       - name: Test install.ps1 (channel)
         if: matrix.channel == 'install.ps1'
         shell: pwsh

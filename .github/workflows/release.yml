@@ -762,7 +762,5 @@ jobs:
       - name: Advance stable version pointer
         run: ./scripts/publish-r2.sh pointer
 
-      # Pruned stable objects stay reachable only through the redirect Worker.
       - name: Prune old stable objects
-        if: vars.R2_REDIRECT_WORKER_DEPLOYED == 'true'
         run: python3 scripts/prune-r2.py --channel stable --keep 3

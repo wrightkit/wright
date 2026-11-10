@@ -31,8 +31,8 @@ try {
         Fail "installer must download through a native PowerShell mechanism"
     }
     $DownloadCount = [regex]::Matches($InstallerText, '(?m)^\s*Get-RemoteFile\s+\$').Count
-    if ($DownloadCount -ne 3) {
-        Fail "installer must route latest, archive, and checksum requests through one download path"
+    if ($DownloadCount -ne 5) {
+        Fail "installer must route latest, archive, checksum, and fallback requests through one download path"
     }
 
     $VersionedRelease = Join-Path $Work "wright\releases\$Version"
@@ -88,6 +88,21 @@ http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), http.server.Sim
         Fail "unknown exact version left a partial installation"
     }
     Write-Host "PASS: exact version selection"
+
+    $GithubRelease = Join-Path $Work "github\v$Version"
+    New-Item -ItemType Directory -Path $GithubRelease -Force | Out-Null
+    Copy-Item -LiteralPath $Archive, "${Archive}.sha256" -Destination $GithubRelease
+    $FallbackDir = Join-Path $Work "fallback"
+    $env:WRIGHT_INSTALL_FALLBACK_BASE_URL = "http://127.0.0.1:$Port/github"
+    try {
+        & $Installer -Version $Version -InstallDir $FallbackDir -BaseUrl "http://127.0.0.1:$Port/empty"
+    } finally {
+        Remove-Item Env:WRIGHT_INSTALL_FALLBACK_BASE_URL
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $FallbackDir "wright.exe"))) {
+        Fail "a version missing from the install host was not installed from the fallback"
+    }
+    Write-Host "PASS: version missing from R2 installs from the GitHub fallback"
 
     $UnreachableDir = Join-Path $Work "unreachable"
     try {

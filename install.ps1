@@ -100,7 +100,11 @@ if ($OsArchitecture -ne "AMD64") {
     Fail "unsupported CPU architecture; install.ps1 supports Windows x86_64 only"
 }
 
-$BaseUrl = Resolve-Setting $BaseUrl "WRIGHT_INSTALL_BASE_URL" "https://install.wrightkit.dev/wright"
+$DefaultBaseUrl = "https://install.wrightkit.dev/wright"
+$BaseUrl = Resolve-Setting $BaseUrl "WRIGHT_INSTALL_BASE_URL" $DefaultBaseUrl
+# Pruned stable versions exist only in GitHub Releases; fall back there only for the default base.
+$DefaultFallbackBaseUrl = if ($BaseUrl.TrimEnd("/") -eq $DefaultBaseUrl) { "https://github.com/wrightkit/wright/releases/download" } else { "" }
+$FallbackBaseUrl = Resolve-Setting "" "WRIGHT_INSTALL_FALLBACK_BASE_URL" $DefaultFallbackBaseUrl
 $Version = Get-Version $Version $BaseUrl
 $DefaultInstallDir = -not $InstallDir
 if ($DefaultInstallDir) {
@@ -125,7 +129,19 @@ try {
         Get-RemoteFile $ArchiveUrl $ArchivePath
         Get-RemoteFile $ChecksumUrl $ChecksumPath
     } catch {
-        Fail "failed to download the release archive or checksum for v$Version from ${BaseUrl}: $($_.Exception.Message)"
+        $PrimaryError = $_.Exception.Message
+        if (-not $FallbackBaseUrl) {
+            Fail "failed to download the release archive or checksum for v$Version from ${BaseUrl}: $PrimaryError"
+        }
+        $ArchiveUrl = "$($FallbackBaseUrl.TrimEnd('/'))/v$Version/$ArchiveName"
+        $ChecksumUrl = "${ArchiveUrl}.sha256"
+        Write-Host "==> not on the install host; downloading $ArchiveUrl"
+        try {
+            Get-RemoteFile $ArchiveUrl $ArchivePath
+            Get-RemoteFile $ChecksumUrl $ChecksumPath
+        } catch {
+            Fail "failed to download the release archive or checksum for v$Version from ${BaseUrl} ($PrimaryError) or from ${FallbackBaseUrl}: $($_.Exception.Message)"
+        }
     }
 
     Write-Host "==> verifying SHA-256 checksum"

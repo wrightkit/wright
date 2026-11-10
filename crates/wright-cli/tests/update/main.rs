@@ -140,6 +140,43 @@ fn pinned_self_update_uses_only_the_versioned_release_routes() {
 }
 
 #[test]
+fn pinned_version_missing_from_r2_installs_from_the_github_fallback() {
+    let github_layout: HashMap<String, Vec<u8>> = release(RELEASE)
+        .files
+        .into_iter()
+        .filter_map(|(path, bytes)| {
+            let moved = path.replacen(
+                &format!("/releases/{RELEASE}/"),
+                &format!("/v{RELEASE}/"),
+                1,
+            );
+            (moved != path).then_some((moved, bytes))
+        })
+        .collect();
+    let server = MockServer::new(github_layout);
+    let dir = install_dir("update-fallback");
+    let mut env = server.env();
+    env.push(("WRIGHT_INSTALL_FALLBACK_BASE_URL", server.base_url()));
+    let output = run_update(&dir, &["update", "self", "--version", RELEASE], &env);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let name = format!("wright-{RELEASE}-{TRIPLE}.tar.gz");
+    assert_eq!(
+        server.requests(),
+        vec![
+            format!("/releases/{RELEASE}/{name}"),
+            format!("/v{RELEASE}/{name}"),
+            format!("/v{RELEASE}/{name}.sha256"),
+        ]
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn malformed_latest_version_pointer_is_rejected() {
     let mut files = HashMap::new();
     files.insert(

@@ -220,21 +220,20 @@ https://releases.wrightkit.dev/wright/nightly/version
 https://releases.wrightkit.dev/wright/nightly/<commit>/wright-<version>-<target-triple>.<ext>
 ```
 
-### R2 retention and redirect
+### R2 retention
 
-R2 keeps the newest 3 stable versions and the newest 5 nightly commits
-([ADR-0038](adr/0038-r2-retention-and-github-redirect.md)).
+R2 keeps the newest 3 stable versions and the newest 5 nightly commits.
 `scripts/prune-r2.py` deletes older prefixes after the channel pointer
-advances. Stable pruning runs only when the repository variable
-`R2_REDIRECT_WORKER_DEPLOYED` is `true`.
+advances. Stable ordering is semver; nightly ordering is upload time.
 
-The Worker in `scripts/r2-redirect-worker.ts` (config in
-`dist/r2-redirect/wrangler.toml`) serves both bucket hostnames. A pruned stable
-archive or checksum redirects (302) to the same file in the GitHub Release.
-Deploy order: remove the bucket's direct custom domains for `releases` and
-`install`, run `wrangler deploy` in `dist/r2-redirect/`, verify one pruned
-version redirects, then set `R2_REDIRECT_WORKER_DEPLOYED=true`. Nightly objects
-have no GitHub copy and return 404 after pruning.
+A pruned stable version remains in its GitHub Release. `install.sh`,
+`install.ps1`, and `wright update` first try the R2 route. When it fails, they
+download the archive and checksum from
+`https://github.com/wrightkit/wright/releases/download/v<version>/` instead.
+They fall back only with the default install base URL, or when
+`WRIGHT_INSTALL_FALLBACK_BASE_URL` is set. Direct requests to a pruned R2 URL
+return 404. Nightly objects have no GitHub copy and are not recoverable after
+pruning.
 
 ### Manual GitHub Release fallback
 
