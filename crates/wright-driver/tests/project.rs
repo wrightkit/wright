@@ -12,16 +12,8 @@ fn result_of(service: &mut ToolService<'_>, request: ToolRequest) -> Value {
 }
 
 fn project_of(text: &str) -> Value {
-    let dir = std::env::temp_dir().join(format!(
-        "wright-driver-project-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    let input: PathBuf = dir.join("program.ws");
+    let dir = tempfile::tempdir().unwrap();
+    let input: PathBuf = dir.path().join("program.ws");
     std::fs::write(&input, text).unwrap();
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(input),
