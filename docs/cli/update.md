@@ -31,6 +31,12 @@ workflow, so it is text-only and produces no `wright-result/v1` envelope.
   come from the provider release channel and are checksum-verified; a bare
   update keeps an installation that is already at or newer than the
   resolved release, and an explicit `--version` is the only downgrade path.
+  After a successful install or version change, Wright prints
+  `==> warming up opy provider` and runs a bounded initialize/shutdown
+  handshake. Warm-up cannot fail or roll back the update; a provider that
+  cannot start produces a warning. Availability checks and updates that
+  keep the active version do not run it. Automatic installation on first
+  use does not add a separate warm-up.
 
 Supported self-update platforms mirror the installers: Linux x86_64, macOS
 (x86_64/arm64), and Windows x86_64, mapped to the release target matrix in

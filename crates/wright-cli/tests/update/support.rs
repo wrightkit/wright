@@ -98,7 +98,51 @@ pub(crate) fn seed_provider(dir: &Path, version: &str) {
 }
 
 pub(crate) fn provider_body(version: &str) -> Vec<u8> {
-    format!("#!/bin/sh\necho \"fake opy-provider {version}\"\n").into_bytes()
+    format!(
+        r#"#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+import sys
+import time
+
+root = Path(os.environ["WRIGHT_PROVIDER_DATA_DIR"])
+with (root / "warmup.log").open("a") as log:
+    active = (root / "providers" / "opy" / "active").read_text().strip()
+    log.write("active=" + active + "\n")
+    log.flush()
+    mode = os.environ.get("WRIGHT_TEST_PROVIDER_WARMUP")
+    if mode == "exit":
+        sys.exit(23)
+    if mode == "timeout":
+        time.sleep(60)
+    for line in sys.stdin:
+        request = json.loads(line)
+        method = request["method"]
+        log.write(method + "\n")
+        log.flush()
+        if mode == "malformed":
+            print("invalid JSON", flush=True)
+            continue
+        if mode == "shutdown-timeout" and method == "lpp/shutdown":
+            time.sleep(60)
+        if method == "lpp/initialize":
+            result = {{
+                "protocolVersion": request["params"]["protocolVersion"],
+                "serverInfo": {{"name": "fake opy-provider", "version": "{version}"}},
+                "languages": [{{"id": "opy", "extensions": ["opy"]}}],
+                "capabilities": {{}}
+            }}
+        else:
+            result = None
+        print(json.dumps({{"jsonrpc": "2.0", "id": request["id"], "result": result}}), flush=True)
+"#
+    )
+    .into_bytes()
+}
+
+pub(crate) fn warmup_log(dir: &Path) -> PathBuf {
+    dir.join("provider-data").join("warmup.log")
 }
 
 pub(crate) fn provider_release(version: &str, files: &mut HashMap<String, Vec<u8>>) {
