@@ -1,11 +1,19 @@
+use std::cell::OnceCell;
+use std::collections::HashMap;
+
 use workshop_rs::catalog::{Catalog, Kind, Locale};
 use workshop_rs::source::Span;
 use workshop_rs::{Action as PublicAction, Program as PublicProgram, Value as PublicValue};
 
 use crate::analysis::{EvidenceClass, Severity};
 use crate::canonical::{
-    Finding, dead_actions, matching_end, value_identity_map, visit_action_roots,
+    Finding, ValueId, dead_actions, matching_end, value_identity_map, visit_action_roots,
 };
+
+/// The program's value-identity map, built on the first value match and
+/// shared by every rule run over one program: building it walks the whole
+/// program, so per-rule construction made a lint run O(rules × program).
+pub(crate) type ValueIds = OnceCell<HashMap<usize, ValueId>>;
 
 mod error;
 mod pattern;
@@ -164,14 +172,15 @@ impl DeclarativeRule {
         min_matches: Option<usize>,
         max_matches: Option<usize>,
     ) -> Vec<Finding> {
-        self.run_canonical(program, rule, min_matches, max_matches)
+        self.run_canonical(program, rule, &ValueIds::new(), min_matches, max_matches)
     }
 
-    /// Run a declarative matcher over the canonical public Workshop program.
-    pub fn run_canonical(
+    /// [`Self::run`] with the program's shared [`ValueIds`].
+    pub(crate) fn run_canonical(
         &self,
         program: &PublicProgram,
         rule: usize,
+        value_ids: &ValueIds,
         min_matches: Option<usize>,
         max_matches: Option<usize>,
     ) -> Vec<Finding> {
@@ -187,7 +196,6 @@ impl DeclarativeRule {
             return Vec::new();
         }
         let dead = dead_actions(&rule_data.actions);
-        let value_ids = (!self.values.is_empty()).then(|| value_identity_map(program));
         let scopes = public_scopes(program, rule, rule_data, &self.scopes, &dead);
         let mut findings = Vec::new();
         for scope in scopes {
@@ -245,9 +253,10 @@ impl DeclarativeRule {
                     &mut path,
                     &mut |path, node| {
                         let span = root.span_of(program, rule, path, anchor);
-                        let value_id = value_ids.as_ref().and_then(|ids| {
-                            ids.get(&(node as *const PublicValue as usize)).copied()
-                        });
+                        let value_id = value_ids
+                            .get_or_init(|| value_identity_map(program))
+                            .get(&(node as *const PublicValue as usize))
+                            .copied();
                         let owner_action = match root {
                             ValueRoot::Condition { .. } => None,
                             ValueRoot::Argument { action, .. } => Some(*action),

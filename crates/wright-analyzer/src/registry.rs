@@ -477,6 +477,7 @@ impl LintRegistry {
         config: &LintConfig,
     ) -> Vec<Finding> {
         let mut findings = Vec::new();
+        let value_ids = crate::declarative::ValueIds::new();
         for rule in 0..program.rules.len() {
             for entry in &self.entries {
                 let RegistryEntry::Declarative {
@@ -491,6 +492,7 @@ impl LintRegistry {
                 let mut rule_findings = declarative.run_canonical(
                     program,
                     rule,
+                    &value_ids,
                     config.options(declarative.id()).min_matches,
                     config.options(declarative.id()).max_matches,
                 );
