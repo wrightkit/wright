@@ -1,0 +1,25 @@
+id: min-wait-loop
+metadata:
+  summary: loop body waits at the workshop minimum rate
+  rationale: Avoid sustained maximum-frequency loop execution.
+  documentation: >-
+    A loop whose body contains a `wait` call at the minimum Workshop duration
+    (~0.016 s) runs at maximum server frequency. Sustained high-frequency loops
+    can degrade server performance for all players.
+  known-limits: >-
+    Wait durations that are not statically known (computed at runtime) are
+    treated as not-minimum and do not trigger this rule.
+  tags: [performance, stability]
+  evidence: static-indicator
+matcher:
+  scope: [while, for-global-variable, for-player-variable]
+  actions:
+    - kind: call
+      name: Wait
+      args:
+        - comparison:
+            operator: "<="
+            value:
+              number: 0.016
+      count:
+        min: 1

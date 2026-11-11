@@ -9,8 +9,8 @@ use crate::service::{ErrorInfo, Response};
 /// a `kind` filter against this domain (#531).
 pub const BLOCK_KINDS: &[&str] = &["entry", "exit", "block", "if", "while", "for"];
 
-pub(super) fn is_wait(action: &Action, minimum: bool) -> bool {
-    matches!(action, Action::Call { name, args } if name == "wait" && (!minimum || matches!(args.first(), Some(workshop_rs::Value::Number(value)) if *value <= 0.016)))
+pub(super) fn is_wait(action: &Action) -> bool {
+    matches!(action, Action::Call { name, .. } if name == "wait")
 }
 
 pub(crate) fn matching_end(actions: &[Action], start: usize) -> Option<usize> {
@@ -184,7 +184,7 @@ impl CanonicalCfgBuilder<'_> {
                 action => {
                     let block = &mut self.blocks[current];
                     block.actions.push(index);
-                    if is_wait(action, false) {
+                    if is_wait(action) {
                         block.waits = true;
                     }
                     if let Some(subroutine) = action_subroutine(self.program, action) {

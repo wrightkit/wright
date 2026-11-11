@@ -1,0 +1,21 @@
+id: expensive-loop-check
+metadata:
+  summary: geometry predicate evaluated inside a loop body
+  rationale: Surface expensive per-iteration geometry work.
+  documentation: >-
+    A geometry predicate (`distance` or `isInLoS`) is called inside a loop
+    body. These predicates may be expensive per evaluation and can accumulate
+    significant cost at loop frequency.
+  known-limits: >-
+    The expensive-call list is a fixed heuristic. It may miss unusual
+    predicates or over-flag predicates that have been made cheap by a Workshop
+    update.
+  tags: [performance]
+  evidence: heuristic
+  severity: info
+matcher:
+  scope: [while, for-global-variable, for-player-variable]
+  report: each-match
+  values:
+    - call:
+        names: [distance, isInLoS]

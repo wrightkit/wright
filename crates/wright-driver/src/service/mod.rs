@@ -803,7 +803,7 @@ impl<'a> ToolService<'a> {
 
     fn project(&self) -> serde_json::Value {
         let loaded = &self.snapshot().loaded;
-        let findings = wright_analyzer::canonical::analyze(
+        let findings = wright_analyzer::registry::LintRegistry::default().run(
             &loaded.program,
             &wright_analyzer::registry::LintConfig::default(),
         );

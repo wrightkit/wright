@@ -127,9 +127,14 @@ so there is no second lock file and installing a package never activates
 it. A listed package missing from the local store is fetched by its SHA,
 including in CI; an unfetchable SHA fails with an explicit diagnostic and
 produces no lint findings. Rule ID collisions between packages are errors.
-The first-party package repository is the only source allowed bare rule
-IDs, and listing it with a SHA replaces the embedded default rules it
-covers instead of colliding. The first-party package may also declare
+The first-party package repository (`wrightkit/lint-rules`) is the only
+source allowed bare rule IDs. A revision of it, recorded by full commit SHA,
+is embedded in the binary and loads after the native rules as the default
+first-party package (#1081); the build fetches nothing. Listing the
+first-party package with a SHA replaces the whole embedded package with the
+pinned revision instead of colliding, so the project gets exactly that
+revision's rules. The embedded copy and its update procedure are defined in
+[`docs/cli/lint.md`](../cli/lint.md#embedded-first-party-rules). The first-party package may also declare
 `evidence` and `severity` in rule metadata (#616 addendum, #970): the
 former sets the finding's evidence class, the latter the rule's default
 severity. Both fields are rejected with a `lint-rule-error` diagnostic in

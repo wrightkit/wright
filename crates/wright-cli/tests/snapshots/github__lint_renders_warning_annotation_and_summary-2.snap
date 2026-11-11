@@ -6,14 +6,14 @@ expression: "std::fs::read_to_string(&summary).unwrap()"
 
 1 warning(s)
 
-- `min-wait-loop` `flow.ws:11:9` — loop body waits at the workshop minimum rate; the loop runs at maximum frequency
+- `min-wait-loop` `flow.ws:11:9` — loop body waits at the workshop minimum rate (matched 1 node)
 
 <details><summary>Full report</summary>
 
 ```text
 WARN lint root=.
 summary: findings=1 errors=0 warnings=1 notes=0 affected=1
-finding: warning min-wait-loop at=flow.ws:11:9 evidence=static-indicator message="loop body waits at the workshop minimum rate; the loop runs at maximum frequency"
+finding: warning min-wait-loop at=flow.ws:11:9 evidence=static-indicator message="loop body waits at the workshop minimum rate (matched 1 node)"
 next: wright lint --fix
 next: wright analyze
 next: wright inspect cost

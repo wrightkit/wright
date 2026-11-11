@@ -30,6 +30,7 @@ jobs:
       rust_core: ${{ steps.filter.outputs.rust_core }}
       dist: ${{ steps.filter.outputs.dist }}
       agent_guide: ${{ steps.filter.outputs.agent_guide }}
+      lint_rules: ${{ steps.filter.outputs.lint_rules }}
       workflows: ${{ steps.filter.outputs.workflows }}
     steps:
       - name: Checkout
@@ -58,6 +59,7 @@ jobs:
               - '.cargo/**'
               - 'src/**'
               - 'crates/**'
+              - 'lint-rules/**'
               - 'tests/fixtures/**'
               - 'scripts/**'
               - 'benchmarks/**'
@@ -68,6 +70,11 @@ jobs:
               - 'agent-guide/**'
               - 'crates/wright-cli/src/agent.rs'
               - 'scripts/sync-agent-guide.py'
+              - '.github/workflows/**'
+            lint_rules:
+              - 'lint-rules/**'
+              - 'crates/wright-analyzer/src/first_party.rs'
+              - 'scripts/sync-lint-rules.py'
               - '.github/workflows/**'
             dist:
               - 'dist/**'
@@ -80,6 +87,7 @@ jobs:
               - '.cargo/**'
               - 'src/**'
               - 'crates/**'
+              - 'lint-rules/**'
               - 'tests/fixtures/**'
               - 'scripts/**'
               - '.github/workflows/**'
@@ -102,6 +110,26 @@ jobs:
 
       - name: Verify the vendored guide matches its pin
         run: python3 scripts/sync-agent-guide.py --skills-dir skills-src --check
+
+  lint-rules:
+    name: Lint rules sync
+    needs: paths
+    if: needs.paths.outputs.lint_rules == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Checkout lint-rules
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: wrightkit/lint-rules
+          fetch-depth: 0
+          path: lint-rules-src
+
+      - name: Verify the embedded rules match their pin
+        run: python3 scripts/sync-lint-rules.py --lint-rules-dir lint-rules-src --check
 
   rust-quality:
     name: Rust (stable)
@@ -659,6 +687,7 @@ jobs:
       - dist-cli-build
       - dist-validation
       - agent-guide
+      - lint-rules
       - wasm-core
     runs-on: ubuntu-latest
     timeout-minutes: 5

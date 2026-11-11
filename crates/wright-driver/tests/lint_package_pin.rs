@@ -425,7 +425,7 @@ fn a_bare_id_community_package_is_refused() {
 }
 
 #[test]
-fn the_first_party_pin_replaces_the_builtin_without_colliding() {
+fn the_first_party_pin_replaces_the_embedded_package_without_colliding() {
     let dir = TestDir::new("first-party");
     let archive = package_tarball(FIRST_PARTY_RULE);
     let server = TestServer::serve(move |request| {
@@ -444,16 +444,22 @@ fn the_first_party_pin_replaces_the_builtin_without_colliding() {
         ToolResponse::Ok { result } => result,
         ToolResponse::Error { error } => panic!("lintRules failed: {error:?}"),
     };
-    let entry = full["rules"]
-        .as_array()
-        .unwrap()
+    let rules = full["rules"].as_array().unwrap();
+    let entry = rules
         .iter()
         .find(|rule| rule["id"] == "min-wait-loop")
         .expect("min-wait-loop is still registered");
     assert_eq!(
-        entry["kind"], "declarative",
-        "the package rule replaced the built-in entry: {entry}"
+        (&entry["kind"], &entry["summary"]),
+        (&"declarative".into(), &"loop contains a wait".into()),
+        "the pinned revision's rule replaced the embedded one: {entry}"
     );
+    for embedded_only in ["expensive-loop-check", "nested-binder-lambda"] {
+        assert!(
+            rules.iter().all(|rule| rule["id"] != embedded_only),
+            "the pinned revision replaces the whole embedded package: {embedded_only}"
+        );
+    }
     let findings = lint_findings(&mut service);
     let hits: Vec<_> = findings
         .iter()

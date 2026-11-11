@@ -15,11 +15,9 @@ const DEFAULT_CODELOAD_BASE: &str = "https://codeload.github.com";
 const STORE_DIR_ENV: &str = "WRIGHT_LINT_PACKAGE_DIR";
 
 /// The first-party lint rule package repository (`owner/repo`), matched
-/// case-insensitively — the only package source allowed bare rule IDs; a
-/// project entry for it replaces the embedded default rules it covers
-/// instead of colliding (issue #843). The repository name is provisional:
-/// choosing and creating the first-party package repository is an owner
-/// action tracked by wrightkit/wright#845.
+/// case-insensitively — the only package source allowed bare rule IDs. A
+/// revision of it is embedded as the default rule set (#1081); a project
+/// entry for it replaces that embedded package instead of colliding.
 pub const FIRST_PARTY_PACKAGE: &str = "wrightkit/lint-rules";
 
 /// One store entry directory discovered under `<root>/<owner>/<repo>/<sha>/`.
@@ -558,6 +556,7 @@ pub(crate) fn activate_pinned(
         })?;
         let rules_dir = installed.rules_dir();
         let loaded = if source.is_first_party() {
+            registry.remove_embedded_first_party();
             registry.load_first_party_path(&rules_dir)
         } else {
             registry.load_path(&rules_dir)

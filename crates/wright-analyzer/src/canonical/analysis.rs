@@ -15,8 +15,7 @@ use super::traversal::{
 };
 use crate::analysis::{Boundedness, EvidenceClass, Severity};
 use crate::registry::{
-    DUPLICATE_CONDITION, EXPENSIVE_LOOP_CHECK, LintConfig, MIN_WAIT_LOOP, NESTED_BINDER_LAMBDA,
-    ONGOING_CONDITION_HOT_PATH, REPEATED_VALUE, WHILE_WITHOUT_WAIT,
+    DUPLICATE_CONDITION, LintConfig, ONGOING_CONDITION_HOT_PATH, REPEATED_VALUE, WHILE_WITHOUT_WAIT,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,51 +102,9 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
                 continue;
             };
             let body = &rule.actions[start..end];
-            if config.is_enabled(MIN_WAIT_LOOP.id)
-                && live_actions(body).any(|(_, action)| is_wait(action, true))
-            {
-                findings.push(Finding { code: MIN_WAIT_LOOP.id.into(), severity: MIN_WAIT_LOOP.default_severity, message: "loop body waits at the workshop minimum rate; the loop runs at maximum frequency".into(), span: program.action_span(rule_id, action_id), rule: rule_id, action: Some(action_id), value: None, evidence: MIN_WAIT_LOOP.evidence, boundedness: None, fix: None, repeated: None });
-            }
-            if config.is_enabled(EXPENSIVE_LOOP_CHECK.id) {
-                for (offset, body_action) in live_actions(body) {
-                    let body_action_id = start + offset;
-                    let mut expensive = Vec::new();
-                    visit_action_roots(body_action, &mut |argument, value| {
-                        for (path, value) in collect_expensive_values(value) {
-                            expensive.push((argument, path, value));
-                        }
-                    });
-                    for (argument, path, value) in expensive {
-                        debug_assert!(
-                            matches!(value, Value::Call { .. }),
-                            "only expensive calls are collected"
-                        );
-                        findings.push(Finding {
-                            code: EXPENSIVE_LOOP_CHECK.id.into(),
-                            severity: EXPENSIVE_LOOP_CHECK.default_severity,
-                            message: "geometry predicate evaluated inside a loop body may be expensive per iteration"
-                                .into(),
-                            span: argument_value_or_ancestor_span(
-                                program,
-                                rule_id,
-                                body_action_id,
-                                argument,
-                                &path,
-                            ),
-                            rule: rule_id,
-                            action: Some(action_id),
-                            value: value_ids.get(&(value as *const Value as usize)).copied(),
-                            evidence: EXPENSIVE_LOOP_CHECK.evidence,
-                            boundedness: None,
-                            fix: None,
-                        repeated: None,
-                        });
-                    }
-                }
-            }
             if let Action::While { condition } = action
                 && config.is_enabled(WHILE_WITHOUT_WAIT.id)
-                && !live_actions(body).any(|(_, action)| is_wait(action, false))
+                && !live_actions(body).any(|(_, action)| is_wait(action))
             {
                 let boundedness = while_boundedness(condition, body, &dead[start..end]);
                 let severity = match boundedness {
@@ -191,11 +148,6 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
         }
         if config.is_enabled(DUPLICATE_CONDITION.id) {
             findings.extend(duplicate_condition_findings(
-                program, rule_id, rule, &dead, &value_ids,
-            ));
-        }
-        if config.is_enabled(NESTED_BINDER_LAMBDA.id) {
-            findings.extend(nested_binder_findings(
                 program, rule_id, rule, &dead, &value_ids,
             ));
         }
@@ -272,6 +224,7 @@ fn values_equal(left: &Value, right: &Value) -> bool {
         _ => false,
     }
 }
+
 fn condition_value_or_ancestor_span(
     program: &Program,
     rule: RuleId,
@@ -281,20 +234,6 @@ fn condition_value_or_ancestor_span(
     (0..=path.len())
         .rev()
         .find_map(|len| program.condition_value_span(rule, condition, &path[..len]))
-        .or_else(|| program.rule_span(rule))
-}
-
-fn argument_value_or_ancestor_span(
-    program: &Program,
-    rule: RuleId,
-    action: usize,
-    argument: usize,
-    path: &[usize],
-) -> Option<Span> {
-    (0..=path.len())
-        .rev()
-        .find_map(|len| program.action_argument_value_span(rule, action, argument, &path[..len]))
-        .or_else(|| program.action_span(rule, action))
         .or_else(|| program.rule_span(rule))
 }
 
@@ -370,114 +309,6 @@ fn collect_expensive_values(value: &Value) -> Vec<(Vec<usize>, &Value)> {
         0
     });
     out
-}
-
-const ELEMENT_BINDER_VALUES: &[&str] = &[
-    "filteredArray",
-    "isTrueForAll",
-    "isTrueForAny",
-    "mappedArray",
-    "sortedArray",
-];
-
-/// `nested-binder-lambda` (#713): report each binder call that occurs
-/// inside an enclosing binder's per-element argument — any argument after
-/// the array source at index 0. The inner call rebinds `Current Array
-/// Element`/`Current Array Index` inside its own per-element argument,
-/// shadowing the enclosing element, and the shape is the one structural
-/// signature measured so far that separates client-rejected Workshop
-/// builds from accepted ones: the `OWBastion/Bastion#391`-era build and the
-/// import-limits verbatim reproducer carry it (1 and 16 occurrences), the
-/// measured accepted builds carry none (`workshop-rs`
-/// `docs/import-limits.md`). Correlation, not a confirmed client limit —
-/// the finding's evidence class says so.
-fn nested_binder_findings(
-    program: &Program,
-    rule_id: RuleId,
-    rule: &Rule,
-    dead: &[bool],
-    value_ids: &HashMap<usize, ValueId>,
-) -> Vec<Finding> {
-    let mut hits = Vec::new();
-    let mut raw = Vec::new();
-    for (condition, cond) in rule.conditions.iter().enumerate() {
-        if cond.disabled {
-            continue;
-        }
-        collect_nested_binders(&cond.value, None, &mut Vec::new(), &mut raw);
-        for (path, inner, value, outer) in raw.drain(..) {
-            let span = condition_value_or_ancestor_span(program, rule_id, condition, &path);
-            hits.push((span, None, inner, value, outer));
-        }
-    }
-    for (action_id, action) in rule.actions.iter().enumerate() {
-        if dead[action_id] {
-            continue;
-        }
-        visit_action_roots(action, &mut |argument, root| {
-            collect_nested_binders(root, None, &mut Vec::new(), &mut raw);
-            for (path, inner, value, outer) in raw.drain(..) {
-                hits.push((
-                    argument_value_or_ancestor_span(program, rule_id, action_id, argument, &path),
-                    Some(action_id),
-                    inner,
-                    value,
-                    outer,
-                ));
-            }
-        });
-    }
-    hits.into_iter()
-        .map(|(span, action, inner, value, outer)| Finding {
-            code: NESTED_BINDER_LAMBDA.id.into(),
-            severity: NESTED_BINDER_LAMBDA.default_severity,
-            message: format!(
-                "`{inner}` nested in `{outer}`'s per-element argument binds \
-                 `Current Array Element` to the inner array, shadowing the \
-                 outer element; nested-binder shapes appear in Workshop \
-                 builds the game client rejected on import"
-            ),
-            span,
-            rule: rule_id,
-            action,
-            value: value_ids.get(&(value as *const Value as usize)).copied(),
-            evidence: NESTED_BINDER_LAMBDA.evidence,
-            boundedness: None,
-            fix: None,
-            repeated: None,
-        })
-        .collect()
-}
-
-fn collect_nested_binders<'a>(
-    value: &'a Value,
-    enclosing: Option<&'a str>,
-    path: &mut Vec<usize>,
-    out: &mut Vec<(Vec<usize>, &'a str, &'a Value, &'a str)>,
-) {
-    let binder = match value {
-        Value::Call { name, .. } if ELEMENT_BINDER_VALUES.contains(&name.as_str()) => {
-            if let Some(outer) = enclosing {
-                out.push((path.clone(), name.as_str(), value, outer));
-            }
-            Some(name.as_str())
-        }
-        _ => None,
-    };
-    for (index, child) in value_children(value).into_iter().enumerate() {
-        path.push(index);
-        collect_nested_binders(
-            child,
-            if index >= 1 {
-                binder.or(enclosing)
-            } else {
-                enclosing
-            },
-            path,
-            out,
-        );
-        path.pop();
-    }
 }
 
 fn duplicate_condition_findings(

@@ -75,3 +75,25 @@ fn project_without_a_settings_block_reports_null() {
     );
     assert_eq!(project["settings"], Value::Null, "{project}");
 }
+
+#[test]
+fn project_counts_findings_of_the_embedded_first_party_rules() {
+    // `min-wait-loop` is an embedded first-party rule (#1081), not a native one.
+    let project = project_of(
+        r#"rule("probe")
+{
+    event
+    {
+        Ongoing - Global;
+    }
+    actions
+    {
+        While(True);
+            Wait(0.016, Ignore Condition);
+        End;
+    }
+}
+"#,
+    );
+    assert_eq!(project["findings"], 1, "{project}");
+}

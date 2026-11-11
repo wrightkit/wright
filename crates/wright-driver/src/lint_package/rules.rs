@@ -141,7 +141,10 @@ pub(super) fn validate_package(
     first_party: bool,
 ) -> Result<Vec<String>, LintPackageError> {
     let files = rule_files(rules_dir)?;
+    // Without the embedded package, the declarative rules left are exactly
+    // this package's, and a first-party package's bare IDs do not collide.
     let mut registry = LintRegistry::default();
+    registry.remove_embedded_first_party();
     for file in &files {
         let input = std::fs::read_to_string(file).map_err(|e| {
             LintPackageError::invalid(file, format!("cannot read the rule file: {e}"))

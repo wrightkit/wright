@@ -8,7 +8,7 @@ exit: 1
   1 warning
 
 Lint findings (evidence: static-indicator)
-  warning[min-wait-loop]: loop body waits at the workshop minimum rate; the loop runs at maximum frequency
+  warning[min-wait-loop]: loop body waits at the workshop minimum rate (matched 1 node)
     --> flow.ws:11:9
     | 11 |         While(Compare(Global.index, <, 3));
     |    |         ^

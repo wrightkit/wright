@@ -2,7 +2,7 @@ use serde_json::Value;
 use workshop_rs::catalog::Locale;
 use workshop_rs::{MappedText, Program, SourceMap, parser};
 use wright_analyzer::canonical::{Finding, analyze};
-use wright_analyzer::registry::LintConfig;
+use wright_analyzer::registry::{LintConfig, LintRegistry};
 
 fn parse(source: &str) -> Program {
     let catalog = workshop_rs::catalog::Catalog::builtin_ref().unwrap();
@@ -95,7 +95,7 @@ rule ("hot loop") {
 #[test]
 fn loop_body_finding_falls_back_to_the_argument_span() {
     let program = shallowly_mapped(HOT_LOOP);
-    let findings = analyze(&program, &LintConfig::default());
+    let findings = LintRegistry::default().run(&program, &LintConfig::default());
     let [finding] = coded(&findings, "expensive-loop-check")[..] else {
         panic!("one expensive-loop-check finding: {findings:?}")
     };
