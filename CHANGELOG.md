@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.43.1](https://github.com/wrightkit/wright/compare/v0.43.0...v0.43.1) (2026-11-11)
+
+
+### Performance Improvements
+
+* **driver:** overlap source reads and provider exit ([#1090](https://github.com/wrightkit/wright/issues/1090)) ([6ca34c8](https://github.com/wrightkit/wright/commit/6ca34c860b3998f81381c12f2b44d288dd6de5eb)), closes [#1086](https://github.com/wrightkit/wright/issues/1086)
+* warm up the OPY provider after updates ([#1089](https://github.com/wrightkit/wright/issues/1089)) ([91d05ee](https://github.com/wrightkit/wright/commit/91d05ee43401b17534b6fd55f2bbe689e8089a70)), closes [#1087](https://github.com/wrightkit/wright/issues/1087)
+
 ## [0.43.0](https://github.com/wrightkit/wright/compare/v0.42.0...v0.43.0) (2026-11-11)
 
 
