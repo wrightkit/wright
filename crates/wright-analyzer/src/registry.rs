@@ -71,14 +71,19 @@ pub struct LintRun {
 
 enum RegistryEntry {
     Native(RuleMeta),
-    Declarative(Box<DeclarativeRule>),
+    /// A declarative rule; `embedded` marks a rule of the embedded
+    /// first-party package, which a pinned first-party package replaces.
+    Declarative {
+        rule: Box<DeclarativeRule>,
+        embedded: bool,
+    },
 }
 
 impl RegistryEntry {
     fn id(&self) -> &str {
         match self {
             Self::Native(meta) => meta.id,
-            Self::Declarative(rule) => rule.id(),
+            Self::Declarative { rule, .. } => rule.id(),
         }
     }
 }
@@ -87,24 +92,6 @@ impl RegistryEntry {
 pub struct LintRegistry {
     entries: Vec<RegistryEntry>,
 }
-
-pub(crate) const MIN_WAIT_LOOP: RuleMeta = RuleMeta {
-    id: "min-wait-loop",
-    default_severity: Severity::Warning,
-    evidence: EvidenceClass::StaticIndicator,
-    summary: "loop body waits at the workshop minimum rate",
-    rationale: "Avoid sustained maximum-frequency loop execution.",
-    documentation: concat!(
-        "A loop whose body contains a `wait` call at the minimum Workshop ",
-        "duration (~0.016 s) runs at maximum server frequency. Sustained ",
-        "high-frequency loops can degrade server performance for all players.",
-    ),
-    known_limits: concat!(
-        "Wait durations that are not statically known (computed at runtime) ",
-        "are treated as not-minimum and do not trigger this rule.",
-    ),
-    tags: &["performance", "stability"],
-};
 
 pub(crate) const DUPLICATE_CONDITION: RuleMeta = RuleMeta {
     id: "duplicate-condition",
@@ -128,25 +115,6 @@ pub(crate) const DUPLICATE_CONDITION: RuleMeta = RuleMeta {
         "are still reported.",
     ),
     tags: &["correctness"],
-};
-
-pub(crate) const EXPENSIVE_LOOP_CHECK: RuleMeta = RuleMeta {
-    id: "expensive-loop-check",
-    default_severity: Severity::Info,
-    evidence: EvidenceClass::Heuristic,
-    summary: "geometry predicate evaluated inside a loop body",
-    rationale: "Surface expensive per-iteration geometry work.",
-    documentation: concat!(
-        "A geometry predicate (`distance`, `raycast`, or `isInLoS`) is called ",
-        "inside a loop body. These predicates may be expensive per evaluation ",
-        "and can accumulate significant cost at loop frequency.",
-    ),
-    known_limits: concat!(
-        "The expensive-call list is a fixed heuristic. It may miss unusual ",
-        "predicates or over-flag predicates that have been made cheap by a ",
-        "Workshop update.",
-    ),
-    tags: &["performance"],
 };
 
 pub(crate) const ONGOING_CONDITION_HOT_PATH: RuleMeta = RuleMeta {
@@ -254,55 +222,35 @@ pub(crate) const WHILE_WITHOUT_WAIT: RuleMeta = RuleMeta {
     tags: &["performance", "stability"],
 };
 
-pub(crate) const NESTED_BINDER_LAMBDA: RuleMeta = RuleMeta {
-    id: "nested-binder-lambda",
-    default_severity: Severity::Warning,
-    evidence: EvidenceClass::StaticIndicator,
-    summary: "element-binding array call nested inside another binder's per-element argument",
-    rationale: "Surface a Workshop shape observed only in client-rejected builds.",
-    documentation: concat!(
-        "The element-binding values — `filteredArray`, `sortedArray`, ",
-        "`mappedArray`, `isTrueForAll`, `isTrueForAny` — evaluate every ",
-        "argument after the first once per array element, binding ",
-        "`Current Array Element`/`Current Array Index` to that element. ",
-        "A binder inside that per-element argument creates a nested ",
-        "binding scope: inside the inner call's own per-element ",
-        "argument the element values denote the inner array and the ",
-        "outer element is shadowed. The shape compiles and is ",
-        "semantically defined, but it is the one structural signature ",
-        "measured so far that separates client-rejected Workshop builds ",
-        "from accepted ones: the `OWBastion/Bastion#391`-era build and ",
-        "the workshop-rs import-limits verbatim reproducer carry it, ",
-        "and no measured accepted build does (`workshop-rs` ",
-        "`docs/import-limits.md`; wright issue #713). Whether the ",
-        "client enforces a structural limit on the shape is unconfirmed; ",
-        "the finding is an indicator, not an established import boundary.",
-    ),
-    known_limits: concat!(
-        "The trigger is structurally exact but its impact is indicative: ",
-        "nested binders are valid Workshop and may be intentional — an ",
-        "inner aggregation over an unrelated array reads correctly. A ",
-        "binder in the array-source argument (index 0), e.g. ",
-        "`Filtered Array(Sorted Array(x, r), c)`, creates no nested ",
-        "scope and is not reported. The rule names a suspect shape, not ",
-        "a measured client boundary: no confirmed import depth or ",
-        "nesting limit exists yet in workshop-rs.",
-    ),
-    tags: &["correctness", "stability"],
-};
-
+/// The native rules followed by the embedded first-party package
+/// (`crate::first_party`, #1081).
 impl Default for LintRegistry {
     fn default() -> Self {
-        let entries = vec![
-            RegistryEntry::Native(MIN_WAIT_LOOP),
-            RegistryEntry::Native(DUPLICATE_CONDITION),
-            RegistryEntry::Native(EXPENSIVE_LOOP_CHECK),
-            RegistryEntry::Native(ONGOING_CONDITION_HOT_PATH),
-            RegistryEntry::Native(REPEATED_VALUE),
-            RegistryEntry::Native(WHILE_WITHOUT_WAIT),
-            RegistryEntry::Native(NESTED_BINDER_LAMBDA),
-        ];
-        Self { entries }
+        let mut registry = Self {
+            entries: vec![
+                RegistryEntry::Native(DUPLICATE_CONDITION),
+                RegistryEntry::Native(ONGOING_CONDITION_HOT_PATH),
+                RegistryEntry::Native(REPEATED_VALUE),
+                RegistryEntry::Native(WHILE_WITHOUT_WAIT),
+            ],
+        };
+        let catalog = Catalog::builtin_ref().expect("the builtin Workshop catalog loads");
+        for (file, input) in crate::first_party::RULES {
+            let rule = RuleDefinition::from_yaml_str(input)
+                .and_then(|definition| {
+                    DeclarativeRule::from_definition_with_identity(
+                        definition,
+                        catalog,
+                        RuleIdentity::FirstParty,
+                    )
+                })
+                .unwrap_or_else(|error| panic!("embedded first-party rule {file}: {error}"));
+            registry.entries.push(RegistryEntry::Declarative {
+                rule: Box::new(rule),
+                embedded: true,
+            });
+        }
+        registry
     }
 }
 
@@ -339,6 +287,13 @@ impl LintRegistry {
     /// [`RuleIdentity`] for the accepted IDs and native replacement.
     pub fn load_first_party_path(&mut self, path: &Path) -> Result<(), RuleRegistryError> {
         self.load_path_as(path, RuleIdentity::FirstParty)
+    }
+
+    /// Drop the embedded first-party package so a pinned revision of the
+    /// package can take its place instead of colliding with it (SPEC-309).
+    pub fn remove_embedded_first_party(&mut self) {
+        self.entries
+            .retain(|entry| !matches!(entry, RegistryEntry::Declarative { embedded: true, .. }));
     }
 
     fn load_path_as(
@@ -393,13 +348,18 @@ impl LintRegistry {
             if identity == RuleIdentity::FirstParty
                 && matches!(self.entries[position], RegistryEntry::Native(_))
             {
-                self.entries[position] = RegistryEntry::Declarative(Box::new(rule));
+                self.entries[position] = RegistryEntry::Declarative {
+                    rule: Box::new(rule),
+                    embedded: false,
+                };
                 return Ok(());
             }
             return Err(RuleRegistryError::DuplicateId(id));
         }
-        self.entries
-            .push(RegistryEntry::Declarative(Box::new(rule)));
+        self.entries.push(RegistryEntry::Declarative {
+            rule: Box::new(rule),
+            embedded: false,
+        });
         Ok(())
     }
 
@@ -432,7 +392,7 @@ impl LintRegistry {
                     tags: meta.tags.iter().map(|tag| (*tag).to_string()).collect(),
                     kind: "native",
                 },
-                RegistryEntry::Declarative(rule) => {
+                RegistryEntry::Declarative { rule, .. } => {
                     let metadata = rule.metadata();
                     RuleDescriptor {
                         id: rule.id().to_string(),
@@ -519,7 +479,10 @@ impl LintRegistry {
         let mut findings = Vec::new();
         for rule in 0..program.rules.len() {
             for entry in &self.entries {
-                let RegistryEntry::Declarative(declarative) = entry else {
+                let RegistryEntry::Declarative {
+                    rule: declarative, ..
+                } = entry
+                else {
                     continue;
                 };
                 if !config.is_enabled(declarative.id()) {

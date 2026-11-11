@@ -928,22 +928,22 @@ fn binder_nested_in_binder_lambda_reports_the_inner_call() {
     for finding in &nested {
         assert_eq!(finding["severity"], "warning");
         assert_eq!(finding["evidence"], "static-indicator");
+        let message = finding["message"].as_str().unwrap();
+        assert!(
+            message.starts_with("element-binding array call"),
+            "{message}"
+        );
     }
-    let message = nested[0]["message"].as_str().unwrap();
-    assert!(
-        message.contains("isTrueForAll") && message.contains("filteredArray"),
-        "the finding names the inner and enclosing binders: {message}"
-    );
     assert_eq!(nested[0]["action"], 0);
     let covered = span_text(NESTED_BINDERS, &nested[0]["span"]);
     assert!(
         covered.contains("Is True For All"),
         "the span locates the inner call: {covered}"
     );
-    let message = nested[1]["message"].as_str().unwrap();
+    let covered = span_text(NESTED_BINDERS, &nested[1]["span"]);
     assert!(
-        message.contains("filteredArray"),
-        "a binder inside the lambda of a non-condition argument also reports: {message}"
+        covered.starts_with("Filtered Array"),
+        "a binder inside the lambda of a non-condition argument also reports: {covered}"
     );
     assert_eq!(nested[1]["action"], 1);
 }

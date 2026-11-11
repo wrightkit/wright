@@ -132,6 +132,11 @@ indicator). No new `heuristic`-class rules are added in this set.
   Acceptance: `LintRegistry::default().rules()` returns the five IDs in the
   canonical order; existing-rule findings on existing fixtures are unchanged;
   severity overrides fire on the new rules at both CLI and API layers.
+  Since #1081, `min-wait-loop` and `expensive-loop-check` are declarative rules
+  of the embedded first-party package (`wrightkit/lint-rules`). The registry
+  order is the native rules in the order above, then the embedded package in
+  lexical file order; IDs, default severities, evidence classes, and span sets
+  are unchanged.
 
 - **REQ-004** [positive/negative fixtures]: Each new rule gains positive and
   negative fixtures under `crates/wright-analyzer/tests/fixtures/` following

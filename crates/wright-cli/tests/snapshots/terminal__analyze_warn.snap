@@ -25,7 +25,7 @@ Complexity
 
 Performance and stability risks (evidence: static-indicator)
   heuristic/static indicators — not measured runtime cost or behavior
-    warning[min-wait-loop]: loop body waits at the workshop minimum rate; the loop runs at maximum frequency
+    warning[min-wait-loop]: loop body waits at the workshop minimum rate (matched 1 node)
       --> flow.ws:11:9
 
 State and coupling

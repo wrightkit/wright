@@ -23,14 +23,21 @@ diagnostic and no lint findings. Packages live in a Wright-owned store
 (`WRIGHT_LINT_PACKAGE_DIR`, defaulting to the platform data directory);
 `GITHUB_TOKEN` is optional and raises GitHub API limits.
 
+The registry holds the native rules `duplicate-condition`,
+`ongoing-condition-hot-path`, `repeated-value`, and `while-without-wait`,
+followed by the first-party package `wrightkit/lint-rules`, which ships
+`expensive-loop-check`, `min-wait-loop`, and `nested-binder-lambda` as
+declarative rules (#1081). A revision of the first-party package is embedded
+in the binary, so these rules work offline with no `packages` entry; see
+[embedded first-party rules](#embedded-first-party-rules).
+
 The following lint-policy flags configure the registry and are repeatable:
 
 * `--lint-config <PATH>`: read project lint configuration YAML.
 * `--rule-file <PATH>`: load a local YAML rule file or directory.
-* `--disable-rule <ID>`: disable a rule by stable ID (`min-wait-loop`,
-  `duplicate-condition`, `expensive-loop-check`, `repeated-value`,
-  `ongoing-condition-hot-path`, `while-without-wait`,
-  `nested-binder-lambda`).
+* `--disable-rule <ID>`: disable a rule by stable ID (`duplicate-condition`,
+  `ongoing-condition-hot-path`, `repeated-value`, `while-without-wait`,
+  `expensive-loop-check`, `min-wait-loop`, `nested-binder-lambda`).
 * `--rule-severity <ID>:<off|warn|error>`: override a rule's project policy.
 
 `compile` and `check` accept these four flags too; their enabled lint findings
@@ -129,12 +136,12 @@ documentation, known limits, evidence class, tags) is served once by the
     "input_identity": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
     "program": { "origin": { "kind": "workshop", "locale": "en-us" }, "rules": 2, "findings": 1 },
     "rules": [
-      { "id": "min-wait-loop", "effectiveSeverity": "warning" },
       { "id": "duplicate-condition", "effectiveSeverity": "warning" },
-      { "id": "expensive-loop-check", "effectiveSeverity": "info" },
       { "id": "ongoing-condition-hot-path", "effectiveSeverity": "info" },
       { "id": "repeated-value", "effectiveSeverity": "warning" },
       { "id": "while-without-wait", "effectiveSeverity": "warning" },
+      { "id": "expensive-loop-check", "effectiveSeverity": "info" },
+      { "id": "min-wait-loop", "effectiveSeverity": "warning" },
       { "id": "nested-binder-lambda", "effectiveSeverity": "warning" }
     ],
     "config": { "rules": { "min-wait-loop": { "enabled": true, "severity": "warning" } } },
@@ -143,7 +150,7 @@ documentation, known limits, evidence class, tags) is served once by the
         "code": "min-wait-loop",
         "severity": "warning",
         "evidence": "static-indicator",
-        "message": "loop body waits at the workshop minimum rate; ...",
+        "message": "loop body waits at the workshop minimum rate (matched 1 node)",
         "span": { "file": 0, "path": "program.txt", "start": { "line": 28, "col": 9 }, "end": { "line": 31, "col": 13 } }
       }
     ],
@@ -226,7 +233,8 @@ emit `error`.
 | --- | --- | --- | --- |
 | *(none)* | — | — | — |
 
-All seven built-in native rules ship `warning` or `info` defaults:
+All seven default rules — the four native rules and the three rules of the
+embedded first-party package — ship `warning` or `info` defaults:
 `min-wait-loop` (`static-indicator`), `duplicate-condition` (`exact`),
 `repeated-value` (`exact`), `while-without-wait` (`static-indicator`),
 `nested-binder-lambda` (`static-indicator`) → `warning`;
@@ -245,8 +253,8 @@ The boundaries that keep this true are enforced, not advisory:
 * A first-party (`wrightkit/lint-rules`) declarative rule may declare
   `severity: error` only together with
   `evidence: runtime-validated`; any other combination is a load-time
-  `lint-rule-error`, never a silent downgrade. The first-party package
-  currently ships no rules.
+  `lint-rule-error`, never a silent downgrade. The embedded revision
+  declares no `severity: error` rule.
 * `severity: error` in a project lint config or
   `--rule-severity <ID>:error` is explicit project policy, not a rule
   default, and the verdict contract intentionally honors it.
@@ -256,6 +264,45 @@ The `workshop.unknown-action`, `workshop.unknown-value`, and
 envelope *diagnostics* owned by `workshop-rs` catalog resolution — exact
 facts that appear in `diagnostics`, never in lint `findings`, and outside
 this audit's rule scope.
+
+## Embedded first-party rules
+
+`lint-rules/rules/` in this repository is a verbatim copy of `rules/` from
+[`wrightkit/lint-rules`](https://github.com/wrightkit/lint-rules) at the full
+commit SHA recorded in `lint-rules/UPSTREAM.md`. The build embeds the copy;
+it does not fetch anything. The embedded rules load after the native rules
+as first-party rules, so they keep their bare IDs and may declare `evidence`
+and `severity`. Their findings report `kind: declarative` in `lintRules` and
+the message `<summary> (matched N nodes)`.
+
+The embedded SHA is the lock for the official package in each Wright
+release; there is no separate lock file. Users get a newer official package
+through `wright update self`, and there is no separate update command for
+it. A project that lists `wrightkit/lint-rules` with a SHA under `packages`
+uses that revision instead: the pinned package replaces the whole embedded
+package, so the project gets exactly the pinned revision's rules and no
+duplicate-ID error.
+
+To move the embedded SHA:
+
+1. Merge the rule change in `wrightkit/lint-rules` first.
+2. Run `python3 scripts/sync-lint-rules.py --lint-rules-dir <clone> --ref <commit>`
+   in this repository. It replaces the copy and the recorded SHA together.
+3. Add or remove `RULES` entries in `crates/wright-analyzer/src/first_party.rs`
+   when the set of rule files changes.
+4. Open one PR that changes the SHA and the copy together. Any maintainer or
+   agent may open it, also automatically after a `wrightkit/lint-rules`
+   merge. Use the `deps:` Conventional Commit type, as for other shipped
+   owner pins, so the bump is listed under Dependencies in the release notes.
+
+The bump merges only when CI passes. The `Lint rules sync` job runs
+`scripts/sync-lint-rules.py --check` and fails when the copy differs from
+`rules/` at the recorded SHA, or when a rule file is not embedded. The
+analyzer parity tests (`crates/wright-analyzer/tests/first_party_rules.rs`) fail
+when an embedded rule's span set changes on the lint fixtures or the
+`workshop-rs` bastion reproducer; a bump that changes them on purpose updates
+the expected sets in the same PR and explains the change. Never edit the
+copy by hand.
 
 ## Validated automated fixes (#556)
 

@@ -1,6 +1,3 @@
-use std::collections::BTreeSet;
-use std::path::Path;
-
 use workshop_rs::catalog::{Catalog, Locale};
 use workshop_rs::{Action, Event, Program, Rule, Value, parser};
 use wright_analyzer::analysis::{EvidenceClass, Severity};
@@ -276,7 +273,7 @@ fn first_party_rule_loading_replaces_the_matching_native_id() {
     registry
         .load_first_party_yaml_str(
             r#"
-id: min-wait-loop
+id: while-without-wait
 metadata:
   summary: summary
   rationale: rationale
@@ -294,7 +291,7 @@ matcher:
     let descriptors = registry.descriptors(&LintConfig::default());
     let entries: Vec<_> = descriptors
         .iter()
-        .filter(|d| d.id == "min-wait-loop")
+        .filter(|d| d.id == "while-without-wait")
         .collect();
     assert_eq!(entries.len(), 1, "the ID has one owner: {entries:?}");
     assert_eq!(entries[0].kind, "declarative");
@@ -311,7 +308,7 @@ matcher:
     let findings = registry.run(&program, &LintConfig::default());
     let hits: Vec<_> = findings
         .iter()
-        .filter(|finding| finding.code == "min-wait-loop")
+        .filter(|finding| finding.code == "while-without-wait")
         .collect();
     assert_eq!(hits.len(), 1, "the ID reports once: {findings:?}");
     assert_eq!(hits[0].evidence, EvidenceClass::Exact);
@@ -319,9 +316,9 @@ matcher:
 
     assert!(matches!(
         registry.load_first_party_yaml_str(
-            "id: min-wait-loop\nmetadata:\n  summary: s\n  rationale: r\n  documentation: d\n  known-limits: k\n  tags: []\nmatcher: {}\n"
+            "id: while-without-wait\nmetadata:\n  summary: s\n  rationale: r\n  documentation: d\n  known-limits: k\n  tags: []\nmatcher: {}\n"
         ),
-        Err(RuleRegistryError::DuplicateId(id)) if id == "min-wait-loop"
+        Err(RuleRegistryError::DuplicateId(id)) if id == "while-without-wait"
     ));
 
     registry
@@ -610,140 +607,6 @@ fn first_party_metadata_sets_evidence_and_severity_external_rules_reject_it() {
             catalog,
         );
         assert!(result.is_err(), "rule-file metadata {field} rejected");
-    }
-}
-
-const BINDER_RULE_YAML: &str = "id: wright/nested-binder-lambda\nmetadata:\n  summary: element-binding array call nested inside another binder's per-element argument\n  rationale: r\n  documentation: d\n  known-limits: k\n  tags: []\n  evidence: static-indicator\nmatcher:\n  scope: rule\n  report: each-match\n  values:\n    - call:\n        names: [filteredArray, isTrueForAll, isTrueForAny, mappedArray, sortedArray]\n      within:\n        call:\n          names: [filteredArray, isTrueForAll, isTrueForAny, mappedArray, sortedArray]\n        in-args:\n          from: 1\n";
-
-const EXPENSIVE_RULE_YAML: &str = "id: wright/expensive-loop-check\nmetadata:\n  summary: geometry predicate evaluated inside a loop body\n  rationale: r\n  documentation: d\n  known-limits: k\n  tags: []\n  evidence: heuristic\n  severity: info\nmatcher:\n  scope: [while, for-global-variable, for-player-variable]\n  report: each-match\n  values:\n    - call:\n        names: [distance, isInLoS]\n";
-
-const MIN_WAIT_RULE_YAML: &str = "id: wright/min-wait-loop\nmetadata:\n  summary: loop body waits at the workshop minimum rate\n  rationale: r\n  documentation: d\n  known-limits: k\n  tags: []\n  evidence: static-indicator\nmatcher:\n  scope: [while, for-global-variable, for-player-variable]\n  actions:\n    - kind: call\n      name: Wait\n      args:\n        - comparison:\n            operator: \"<=\"\n            value:\n              number: 0.016\n      count:\n        min: 1\n";
-
-fn declarative_equivalents() -> LintRegistry {
-    let mut registry = LintRegistry::default();
-    for yaml in [BINDER_RULE_YAML, EXPENSIVE_RULE_YAML, MIN_WAIT_RULE_YAML] {
-        registry.load_first_party_yaml_str(yaml).unwrap();
-    }
-    registry
-}
-
-fn spans_by_code(
-    findings: &[wright_analyzer::canonical::Finding],
-    native: &str,
-    declarative: &str,
-) -> (BTreeSet<String>, BTreeSet<String>) {
-    // `action` is part of the machine-readable payload (`wright inspect
-    // cost`), so parity covers the addressed node as well as the span.
-    let key = |finding: &wright_analyzer::canonical::Finding| {
-        let span = finding
-            .span
-            .map(|span| format!("{:?}-{:?}", span.start, span.end))
-            .unwrap_or_else(|| "none".to_string());
-        format!("{span}@{:?}", finding.action)
-    };
-    (
-        findings
-            .iter()
-            .filter(|finding| finding.code == native)
-            .map(&key)
-            .collect(),
-        findings
-            .iter()
-            .filter(|finding| finding.code == declarative)
-            .map(&key)
-            .collect(),
-    )
-}
-
-#[test]
-fn declarative_rules_report_the_native_span_set_on_the_bastion_reproducer() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/fixtures/workshop/real-world/reproducer-bastion-prophet.ws");
-    let program = parse_workshop(&std::fs::read_to_string(&path).unwrap());
-    let native = LintRegistry::default().run(&program, &LintConfig::default());
-    let migrated = declarative_equivalents().run(&program, &LintConfig::default());
-    let all = native_and_migrated(&native, &migrated);
-    for (native_id, migrated_id) in [
-        ("nested-binder-lambda", "wright/nested-binder-lambda"),
-        ("expensive-loop-check", "wright/expensive-loop-check"),
-        ("min-wait-loop", "wright/min-wait-loop"),
-    ] {
-        let (native_spans, migrated_spans) = spans_by_code(&all, native_id, migrated_id);
-        assert_eq!(
-            native_spans, migrated_spans,
-            "{native_id} span parity on the reproducer: {native_spans:?} vs {migrated_spans:?}"
-        );
-    }
-    let (binder_native, binder_migrated) =
-        spans_by_code(&all, "nested-binder-lambda", "wright/nested-binder-lambda");
-    // The native rule is the reference (#970 criterion 6); it reports 16 on
-    // the current reproducer (the issue body's "13" predates the final
-    // fixture — workshop-rs `docs/import-limits.md` records 16).
-    assert_eq!(binder_native.len(), 16, "native reference count");
-    assert_eq!(binder_migrated.len(), 16);
-}
-
-fn native_and_migrated(
-    native: &[wright_analyzer::canonical::Finding],
-    migrated: &[wright_analyzer::canonical::Finding],
-) -> Vec<wright_analyzer::canonical::Finding> {
-    native.iter().chain(migrated.iter()).cloned().collect()
-}
-
-#[test]
-fn declarative_rules_report_the_native_span_set_on_lint_fixtures() {
-    let source = r#"
-variables {
-    global:
-        0: index
-        1: pool
-        2: flag
-}
-rule ("parity") {
-    event {
-        Ongoing - Global;
-    }
-    conditions {
-        Count Of(Filtered Array(All Players(Team 1), Is True For Any(Array(Is Alive(Current Array Element)), Current Array Element))) > 0;
-    }
-    actions {
-        Set Global Variable(pool, Filtered Array(All Players(Team 1), Is True For All(Array(Is Alive(Current Array Element)), Current Array Element)));
-        Set Global Variable(flag, Filtered Array(All Players(Team 1), Compare(Filtered Array(All Players(Team 2), Is Alive(Current Array Element)), !=, Empty Array)));
-        While(Compare(Global.index, <, 3));
-            Set Global Variable(index, Distance Between(Position Of(Event Player), Vector(0, 0, 0)));
-            If(Compare(Global.index, ==, 1));
-                Set Global Variable(flag, Ray Cast Hit Position(Eye Position(Event Player), Direction Of(Angles(Global.index)), All Players(All Teams), Event Player, False));
-            End;
-            Wait(0.016, Ignore Condition);
-        End;
-        For Global Variable(index, 0, 3, 1);
-            Wait(0.016, Ignore Condition);
-        End;
-        For Player Variable(Event Player, index, 0, 3, 1);
-            Set Global Variable(index, Add(Is In Line of Sight(Eye Position(Event Player), Eye Position(Event Player), All Players(All Teams)), 1));
-            Wait(0.5, Ignore Condition);
-        End;
-    }
-}
-"#;
-    let program = parse_workshop(source);
-    let native = LintRegistry::default().run(&program, &LintConfig::default());
-    let migrated = declarative_equivalents().run(&program, &LintConfig::default());
-    let all = native_and_migrated(&native, &migrated);
-    for (native_id, migrated_id) in [
-        ("nested-binder-lambda", "wright/nested-binder-lambda"),
-        ("expensive-loop-check", "wright/expensive-loop-check"),
-        ("min-wait-loop", "wright/min-wait-loop"),
-    ] {
-        let (native_spans, migrated_spans) = spans_by_code(&all, native_id, migrated_id);
-        assert_eq!(
-            native_spans, migrated_spans,
-            "{native_id} span parity: {native_spans:?} vs {migrated_spans:?}"
-        );
-        assert!(
-            !native_spans.is_empty(),
-            "the fixture exercises {native_id}"
-        );
     }
 }
 
