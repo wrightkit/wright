@@ -4,12 +4,12 @@ mod edit;
 mod lint;
 mod pipeline;
 mod provider;
+mod provider_lifecycle;
+mod provider_sources;
 mod registry;
 mod semantic;
 mod workshop;
 
-#[cfg(not(target_arch = "wasm32"))]
-use diagnostics::provider_error_diagnostic;
 pub(crate) use semantic::*;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -122,6 +122,7 @@ pub struct CompilerSession {
     diagnostics: Vec<Diagnostic>,
     progress_observer: Option<Arc<dyn ProgressObserver>>,
     source_provider: Option<provider::ProviderSlot>,
+    single_run: bool,
     trace: Trace,
 }
 
@@ -160,6 +161,7 @@ impl CompilerSession {
             diagnostics: Vec::new(),
             progress_observer: None,
             source_provider: None,
+            single_run: false,
             trace,
         })
     }
@@ -369,105 +371,6 @@ impl CompilerSession {
         &self.diagnostics
     }
 
-    /// Spawn the LPP provider client configured for `language_id` (#142).
-    ///
-    /// Providers are discovered by opaque language id through the session's
-    /// provider registry; no source-language branch lives here. When no
-    /// provider is configured for the id the failure is an explicit
-    /// structured `wright_lpp::ProviderError` — there is no silent fallback
-    /// to in-process compiler semantics. A session whose configuration
-    /// changed after construction refuses through the LPP refusal channel
-    /// with `refusalCode` `session-config-changed` (#511).
-    ///
-    /// Callers that intend to initialize the session should prefer
-    /// [`Self::connect_provider`], the shared connect path that also
-    /// negotiates the protocol version (#1004); this spawn-only seam
-    /// remains for hosts that initialize the returned provider themselves.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn language_provider(
-        &self,
-        id: &str,
-    ) -> Result<Box<dyn wright_lpp::LanguageProvider>, wright_lpp::ProviderError> {
-        if let Err(diagnostic) = self.verify_fixed_config() {
-            return Err(wright_lpp::ProviderError::lpp(
-                wright_lpp::LppErrorKind::Refusal,
-                serde_json::json!({ "refusalCode": diagnostic.code }),
-                diagnostic.message,
-            ));
-        }
-        crate::connect::resolved_registry(&self.config, id)?
-            .spawn(id)
-            .map(|b| Box::new(b) as Box<dyn wright_lpp::LanguageProvider>)
-    }
-
-    /// The shared LPP connect path (#1004): resolve `language_id`, spawn
-    /// the provider, initialize at `preferred_version`, and retry once at
-    /// the highest mutually supported version above `floor` on
-    /// `protocol-version-mismatch` (LPP §19.2). The session-config refusal
-    /// channel (`session-config-changed`, #511) precedes any spawn.
-    ///
-    /// Every Wright provider client — the source-provider session load,
-    /// provider mutation flows, lookup, and the language service —
-    /// connects through this function, so lookup, negotiation, and
-    /// failure classification cannot drift apart.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn connect_provider(
-        &self,
-        language_id: &str,
-        client: &wright_lpp::ClientInfo,
-        preferred_version: &str,
-        floor: Option<crate::connect::ConnectFloor>,
-    ) -> Result<crate::connect::ConnectedProvider, wright_lpp::ProviderError> {
-        if let Err(diagnostic) = self.verify_fixed_config() {
-            return Err(wright_lpp::ProviderError::lpp(
-                wright_lpp::LppErrorKind::Refusal,
-                serde_json::json!({ "refusalCode": diagnostic.code }),
-                diagnostic.message,
-            ));
-        }
-        crate::connect::connect_provider(
-            &self.config,
-            language_id,
-            client,
-            preferred_version,
-            floor,
-            &self.trace,
-        )
-    }
-
-    /// Run a provider-driven mutation flow (#139) over a fresh provider
-    /// session: connect by opaque language id through the shared connect
-    /// path (#1004), run the flow, and terminate gracefully.
-    ///
-    /// Any failure before the flow — an unconfigured language id, a spawn
-    /// failure, a failed handshake — is the same structured
-    /// [`crate::provider_edit::ProviderMutation`] refusal surface the flow
-    /// itself uses, so callers handle one refusal contract. The provider
-    /// process never outlives the request: graceful shutdown when possible,
-    /// and the provider's drop guard terminates it otherwise.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn run_provider_flow(
-        &self,
-        language_id: &str,
-        client: &wright_lpp::ClientInfo,
-        flow: impl FnOnce(
-            &mut dyn wright_lpp::LanguageProvider,
-        ) -> crate::provider_edit::ProviderMutation,
-    ) -> crate::provider_edit::ProviderMutation {
-        let mut provider = match self.connect_provider(
-            language_id,
-            client,
-            wright_lpp::LPP_PROTOCOL_VERSION,
-            None,
-        ) {
-            Ok(connected) => connected.provider,
-            Err(error) => return crate::provider_edit::provider_failure(&error),
-        };
-        let mutation = flow(provider.as_mut());
-        let _ = provider.shutdown();
-        mutation
-    }
-
     /// The include root the last load resolved against, if any. Reported
     /// `span.path` spellings on finding surfaces are root-relative to it.
     pub fn input_root(&self) -> Option<PathBuf> {
@@ -673,48 +576,6 @@ impl CompilerSession {
                 }
             },
         )
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    fn convert_opy(&mut self, _loaded: &Loaded) -> Result<String, ()> {
-        self.diagnostics.push(source_provider_unavailable());
-        Err(())
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    fn convert_opy(&mut self, loaded: &Loaded) -> Result<String, ()> {
-        let locale = Self::locale_for(loaded);
-        let artifact =
-            workshop_rs::emitter::emit(&loaded.program, self.catalog, &locale).map_err(|e| {
-                self.diagnostics.push(Diagnostic::error(
-                    "workshop-emission",
-                    Stage::Emission,
-                    e.to_string(),
-                ));
-            })?;
-        let mut provider = self
-            .connect_provider(
-                opy_provider::OPY_LANGUAGE_ID,
-                &lpp_client_info(),
-                wright_lpp::LPP_PROTOCOL_VERSION,
-                None,
-            )
-            .map_err(|e| {
-                self.diagnostics
-                    .push(provider_error_diagnostic(e, "initialize"));
-            })?
-            .provider;
-        let result = provider
-            .reconstruct(&wright_lpp::WorkshopArtifact {
-                format: "workshop-rs/text-v1".to_string(),
-                content: artifact,
-            })
-            .map_err(|e| {
-                self.diagnostics
-                    .push(provider_error_diagnostic(e, "reconstruct"));
-            })?;
-        let _ = provider.shutdown();
-        Ok(result.source)
     }
 
     pub(crate) fn locale_for(loaded: &Loaded) -> workshop_rs::catalog::Locale {

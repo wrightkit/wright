@@ -376,14 +376,11 @@ pub(crate) fn run_configured<
     subject: Option<&str>,
     run: impl FnOnce(&mut wright_driver::CompilerSession) -> wright_driver::Envelope<T>,
 ) -> ExitCode {
-    run_traced(
-        &wright_driver::Trace::disabled(),
-        name,
-        config,
-        presentation,
-        subject,
-        run,
-    )
+    let mut session = match wright_driver::CompilerSession::new(config) {
+        Ok(session) => session,
+        Err(diagnostic) => return session::refuse(presentation, name, &diagnostic),
+    };
+    ExitCode::from(run_command(&mut session, run, presentation, subject))
 }
 
 /// Run a workflow under `trace`. The root span covers the session's whole
@@ -403,12 +400,12 @@ pub(crate) fn run_traced<
     run: impl FnOnce(&mut wright_driver::CompilerSession) -> wright_driver::Envelope<T>,
 ) -> ExitCode {
     let root = trace.span(name);
-    let mut session = match wright_driver::CompilerSession::new_traced(config, trace.clone()) {
+    let session = match wright_driver::CompilerSession::new_traced(config, trace.clone()) {
         Ok(session) => session,
         Err(diagnostic) => return session::refuse(presentation, name, &diagnostic),
     };
 
-    let code = run_command(&mut session, run, presentation, subject);
+    let code = session.run_once(|session| run_command(session, run, presentation, subject));
     root.fact("exitCode", u64::from(code));
     ExitCode::from(code)
 }

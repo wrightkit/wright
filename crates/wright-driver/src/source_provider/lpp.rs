@@ -25,6 +25,7 @@ pub struct LppSourceProvider {
     /// answered with the list, `None` otherwise.
     compile_inputs: Option<Vec<PathBuf>>,
     trace: Trace,
+    shutdown_error: Option<wright_lpp::ProviderError>,
 }
 
 impl LppSourceProvider {
@@ -34,6 +35,7 @@ impl LppSourceProvider {
             locale,
             compile_inputs: None,
             trace: Trace::disabled(),
+            shutdown_error: None,
         }
     }
 
@@ -83,7 +85,10 @@ impl Drop for LppSourceProvider {
     fn drop(&mut self) {
         let _ = self
             .trace
-            .in_span("provider.shutdown", || self.provider.shutdown());
+            .in_span("provider.shutdown", || match self.shutdown_error.take() {
+                Some(error) => Err(error),
+                None => self.provider.shutdown(),
+            });
     }
 }
 
@@ -194,6 +199,15 @@ impl SourceProvider for LppSourceProvider {
             diagnostics: provider_diagnostics(res.diagnostics, self.locale.as_deref()),
             source_identity: res.source_identity,
         })
+    }
+
+    fn begin_shutdown(&mut self) {
+        self.shutdown_error = self
+            .trace
+            .in_span("provider.shutdown.request", || {
+                self.provider.begin_shutdown()
+            })
+            .err();
     }
 
     fn compile_inputs(&self) -> Option<Vec<PathBuf>> {

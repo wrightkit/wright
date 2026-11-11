@@ -271,6 +271,13 @@ pub trait LanguageProvider {
         capability_unavailable("lookup", "lpp/lookup")
     }
 
+    /// Send `lpp/shutdown` and close the provider's stdin without waiting for
+    /// process exit, so the exit overlaps the caller's remaining work. A
+    /// later [`shutdown`](Self::shutdown) then only waits (bounded) for exit.
+    fn begin_shutdown(&mut self) -> Result<(), ProviderError> {
+        Ok(())
+    }
+
     /// Graceful termination: send `lpp/shutdown`, close the provider's
     /// stdin, and wait (bounded) for the provider to exit.
     fn shutdown(&mut self) -> Result<(), ProviderError>;
@@ -282,6 +289,7 @@ pub trait LanguageProvider {
 /// A `LanguageProvider` over a spawned stdio provider process.
 pub struct StdioLanguageProvider {
     child: ChildProcess,
+    shutdown_requested: bool,
     client: JsonRpcClient,
     negotiated: Option<NegotiatedCapabilities>,
     last_exit_status: Option<i32>,
@@ -304,6 +312,7 @@ impl StdioLanguageProvider {
         );
         Ok(StdioLanguageProvider {
             child,
+            shutdown_requested: false,
             client,
             negotiated: None,
             last_exit_status: None,
@@ -389,6 +398,15 @@ impl StdioLanguageProvider {
                 ),
             };
         }
+    }
+
+    fn shutdown_request(&mut self) -> Result<(), ProviderError> {
+        if let Err(mut error) = self.client.shutdown() {
+            self.enrich_transport_error(&mut error, "lpp/shutdown");
+            return Err(error);
+        }
+        self.client.close_stdin();
+        Ok(())
     }
 
     fn require_capability(&self, capability: Capability) -> Result<(), ProviderError> {
@@ -638,12 +656,16 @@ impl LanguageProvider for StdioLanguageProvider {
         )
     }
 
+    fn begin_shutdown(&mut self) -> Result<(), ProviderError> {
+        self.shutdown_request()?;
+        self.shutdown_requested = true;
+        Ok(())
+    }
+
     fn shutdown(&mut self) -> Result<(), ProviderError> {
-        if let Err(mut error) = self.client.shutdown() {
-            self.enrich_transport_error(&mut error, "lpp/shutdown");
-            return Err(error);
+        if !std::mem::take(&mut self.shutdown_requested) {
+            self.shutdown_request()?;
         }
-        self.client.close_stdin();
         self.last_exit_status = self.child.terminate();
         Ok(())
     }
