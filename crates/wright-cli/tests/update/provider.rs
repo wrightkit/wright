@@ -4,6 +4,8 @@ mod support;
 
 use support::*;
 
+// The fake provider is a script, which Windows cannot run as `opy-provider.exe`.
+#[cfg(unix)]
 #[test]
 fn update_installs_a_named_provider_into_an_empty_store() {
     if provider_target().is_none() {
@@ -62,6 +64,8 @@ fn update_installs_a_named_provider_into_an_empty_store() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// The fake provider is a script, which Windows cannot run as `opy-provider.exe`.
+#[cfg(unix)]
 #[test]
 fn update_upgrades_the_installed_provider_alongside_self() {
     if provider_target().is_none() {
@@ -314,6 +318,8 @@ fn failed_provider_checksum_does_not_warm_up_or_change_the_install() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// The fake provider is a script, which Windows cannot run as `opy-provider.exe`.
+#[cfg(unix)]
 #[test]
 fn a_provider_exiting_during_warmup_warns_and_leaves_the_install_active() {
     if provider_target().is_none() {
@@ -363,6 +369,8 @@ fn a_provider_exiting_during_warmup_warns_and_leaves_the_install_active() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// The fake provider is a script, which Windows cannot run as `opy-provider.exe`.
+#[cfg(unix)]
 #[test]
 fn failed_or_slow_handshakes_leave_the_install_active_without_a_warning() {
     if provider_target().is_none() {
