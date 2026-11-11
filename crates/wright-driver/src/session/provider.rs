@@ -193,6 +193,9 @@ impl CompilerSession {
         // — a provider without the `compileInputs` capability, or a
         // check-only answer — keeps the wider fingerprint.
         resolved.compile_inputs = provider.compile_inputs();
+        if self.single_run {
+            provider.begin_shutdown();
+        }
         if (operation == ProviderOperation::Compile || compilation.workshop_text.is_some())
             && resolved.target == InputTarget::Directory
         {
@@ -250,48 +253,49 @@ impl CompilerSession {
                 "the source provider returned no canonical Workshop output",
             ));
         };
+        let mapped_files: Vec<_> = source_map
+            .as_ref()
+            .map(|map| map.files().iter().map(|f| provider_uri_path(f)).collect())
+            .unwrap_or_default();
         self.progress(ProgressEvent::new(ProgressPhase::Parsing));
-        let mut program = self
-            .trace
-            .in_span("parse", || {
-                workshop_rs::parser::parse_with_context(
-                    &workshop_text,
-                    self.catalog,
-                    &locale,
-                    self.catalog,
-                )
-            })
-            .map_err(|error| workshop_diag_for_provider_artifact(error, resolved, &[]))?;
+        let (parsed, sources) = super::provider_sources::parse_with_sources(
+            &mapped_files,
+            &resolved.root,
+            &self.trace,
+            || {
+                self.trace.in_span("parse", || {
+                    workshop_rs::parser::parse_with_context(
+                        &workshop_text,
+                        self.catalog,
+                        &locale,
+                        self.catalog,
+                    )
+                })
+            },
+        );
+        let mut program =
+            parsed.map_err(|error| workshop_diag_for_provider_artifact(error, resolved, &[]))?;
         let mut provenance = Provenance::Unmapped;
         let mut source_files = vec![resolved.display.clone()];
         if let Some(map) = &source_map {
             match map.apply(&mut program) {
                 Ok(()) => {
                     provenance = Provenance::Mapped;
-                    source_files = map.files().iter().map(|f| provider_uri_path(f)).collect();
+                    source_files = mapped_files;
                     let mut unreadable = Vec::new();
-                    let read_span = self.trace.span("source.read");
-                    let mut read_bytes = 0_usize;
-                    for (index, member) in source_files.iter().enumerate() {
-                        let member_path = resolved.root.join(member);
-                        match std::fs::read_to_string(&member_path) {
+                    let apply_span = self.trace.span("source.apply");
+                    for (index, (member, source)) in source_files.iter().zip(sources).enumerate() {
+                        match source {
                             Ok(text) => {
-                                read_bytes += text.len();
                                 program.set_file_source(
                                     workshop_rs::source::FileId::from_index(index),
                                     text,
                                 );
                             }
-                            Err(error) => unreadable.push(format!(
-                                "{} ({})",
-                                member,
-                                error
-                            )),
+                            Err(error) => unreadable.push(format!("{} ({})", member, error)),
                         }
                     }
-                    read_span.fact("files", source_files.len());
-                    read_span.fact("bytes", read_bytes);
-                    drop(read_span);
+                    drop(apply_span);
                     if !unreadable.is_empty() {
                         self.diagnostics.push(Diagnostic::warning(
                             "source-map-member-unreadable",

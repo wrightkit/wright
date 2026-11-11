@@ -121,6 +121,15 @@ impl Trace {
     /// Open a span under the innermost open span. It ends when the guard
     /// drops, so an early return still records it.
     pub fn span(&self, name: &'static str) -> Span {
+        self.start_span(name, true)
+    }
+
+    /// Open a parallel span under the current parent without nesting later spans.
+    pub(crate) fn parallel_span(&self, name: &'static str) -> Span {
+        self.start_span(name, false)
+    }
+
+    fn start_span(&self, name: &'static str, enter: bool) -> Span {
         let Some(recorder) = &self.recorder else {
             return Span { slot: None };
         };
@@ -134,7 +143,9 @@ impl Trace {
             started: Some(started),
             ..SpanData::default()
         });
-        state.open.push(id);
+        if enter {
+            state.open.push(id);
+        }
         drop(state);
         Span {
             slot: Some((Arc::clone(recorder), id)),

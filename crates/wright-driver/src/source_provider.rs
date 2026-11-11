@@ -185,6 +185,9 @@ pub trait SourceProvider {
     }
     fn compile(&mut self, target: &SourceTarget) -> Result<SourceCompilation, SourceProviderError>;
 
+    /// Begin releasing a provider that will receive no further requests.
+    fn begin_shutdown(&mut self) {}
+
     /// The filesystem inputs the provider declared complete for its most
     /// recent entry-based compile (LPP `compileInputs`, #1005): `Some`
     /// when the provider advertises compile-input completeness and the

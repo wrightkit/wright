@@ -54,10 +54,23 @@ The JSON form writes newline-delimited objects, one per line, with schema
     `error` when the exchange failed. The root carries `exitCode`.
 
 The root span is named after the command (`compile` or `check`). Its direct
-children are the top-level phases, so their durations account for the
-root's duration minus unrecorded gaps. Project loading is part of the
-`provider.compile` span: the provider loads the project during its compile
-request, and Wright does not time inside the provider.
+children are the top-level phases. Parallel phases such as `source.read` and
+`parse` are siblings and may overlap, so summing their durations overcounts
+the root's elapsed time. Project loading is part of the `provider.compile`
+span: the provider loads the project during its compile request, and Wright
+does not time inside the provider.
+
+`source.read` measures the concurrent source-map member reads, including
+worker startup, and carries `files` and successfully read `bytes`.
+`source.apply` measures retaining the read text in the mapped program after
+parse. Only the part of the read span extending past parse, its launch cost,
+and the apply span add to the critical path.
+`provider.shutdown.request` sends `lpp/shutdown` and closes stdin after the
+last source-provider call. The provider's bounded exit wait then runs in the
+background; `provider.shutdown` measures the remaining join at session drop.
+The exit worker retains the five-second wait limit before killing the process.
+To measure the shutdown work still on the critical path, include both the
+request span and the final join span.
 
 The text form writes an indented tree: a `trace (wright-trace/v1)` header,
 the environment facts, then each span with its start offset, duration,
