@@ -66,8 +66,8 @@ impl Fake {
             },
         );
         let provider = StdioLanguageProvider {
-            child: Some(dummy_child()),
-            exiting: None,
+            child: dummy_child(),
+            shutdown_requested: false,
             client,
             negotiated: None,
             last_exit_status: None,
@@ -168,14 +168,13 @@ fn split_shutdown_preserves_exit_status_and_sends_one_request() {
     provider.begin_shutdown().expect("begin shutdown");
     assert_eq!(provider.exit_status(), None);
     assert_eq!(provider.client.phase(), ClientPhase::ShutDown);
-    assert!(provider.child.is_none());
-    assert!(!provider.exiting.as_ref().unwrap().is_finished());
-    std::thread::sleep(Duration::from_secs(6));
+    let started = std::time::Instant::now();
+    provider.shutdown().expect("finish shutdown");
+    let waited = started.elapsed();
     assert!(
-        provider.exiting.as_ref().unwrap().is_finished(),
-        "the five-second kill bound runs before the caller joins"
+        (Duration::from_secs(5)..Duration::from_secs(10)).contains(&waited),
+        "a provider that ignores end-of-file is killed after five seconds: {waited:?}"
     );
-    provider.shutdown().expect("join shutdown");
     assert!(provider.exit_status().is_some());
     assert_ne!(provider.exit_status(), Some(0));
     let error = provider.shutdown().expect_err("shutdown twice");
@@ -190,18 +189,18 @@ fn split_shutdown_reaps_a_nonzero_graceful_exit() {
         FakeStep::Respond(ok_response(init_result_json())),
         FakeStep::Respond(ok_response(Value::Null)),
     ]);
-    provider.child.as_mut().unwrap().kill();
+    provider.child.kill();
     let mut child = ChildProcess::spawn(
         Path::new("/bin/sh"),
         &["-c".to_string(), "read line; exit 7".to_string()],
     )
     .unwrap();
     let mut release = child.take_stdin();
-    provider.child = Some(child);
+    provider.child = child;
     provider.initialize(None).expect("initialize");
     provider.begin_shutdown().expect("begin shutdown");
     release.write_all(b"exit\n").expect("release provider exit");
-    provider.shutdown().expect("join shutdown");
+    provider.shutdown().expect("finish shutdown");
     assert_eq!(provider.exit_status(), Some(7));
     fake.assert_only_requests(2);
 }
@@ -217,8 +216,7 @@ fn split_shutdown_keeps_protocol_failures() {
         .begin_shutdown()
         .expect_err("non-null shutdown response");
     assert_eq!(error.code(), "provider-malformed");
-    assert!(provider.exiting.is_none());
-    assert!(provider.child.is_some());
+    assert!(!provider.shutdown_requested);
     fake.assert_only_requests(2);
 }
 

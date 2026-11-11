@@ -1,7 +1,7 @@
 use std::io;
 use std::path::Path;
 
-use crate::trace::{Span, Trace};
+use crate::trace::Trace;
 
 pub(super) fn parse_with_sources<T>(
     files: &[String],
@@ -14,52 +14,66 @@ pub(super) fn parse_with_sources<T>(
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let span = trace.parallel_span("source.read");
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        // The span ends when its last holder, a reader or this thread, lets
+        // go, so it times the reads rather than the overlapping parse.
+        let finish = |span: Arc<crate::trace::Span>, bytes: &AtomicUsize| {
+            if let Some(span) = Arc::into_inner(span) {
+                span.fact("bytes", bytes.load(Ordering::Relaxed));
+            }
+        };
+        let span = Arc::new(trace.parallel_span("source.read"));
+        span.fact("files", files.len());
+        let bytes = AtomicUsize::new(0);
         std::thread::scope(|scope| {
-            let reads = scope.spawn(|| read_sources(files, root, span));
+            let readers: Vec<_> = files
+                .chunks(files.len().div_ceil(8))
+                .map(|members| {
+                    let span = Arc::clone(&span);
+                    let bytes = &bytes;
+                    scope.spawn(move || {
+                        let sources = read(root, members);
+                        bytes.fetch_add(read_bytes(&sources), Ordering::Relaxed);
+                        finish(span, bytes);
+                        sources
+                    })
+                })
+                .collect();
+            finish(span, &bytes);
             let parsed = parse();
-            (parsed, reads.join().expect("source reader panicked"))
+            let sources = readers
+                .into_iter()
+                .flat_map(|reader| reader.join().expect("source reader panicked"))
+                .collect();
+            (parsed, sources)
         })
     }
     #[cfg(target_arch = "wasm32")]
     {
         let parsed = parse();
-        (parsed, read_sources(files, root, trace.span("source.read")))
+        let span = trace.parallel_span("source.read");
+        let sources = read(root, files);
+        span.fact("files", files.len());
+        span.fact("bytes", read_bytes(&sources));
+        (parsed, sources)
     }
 }
 
-fn read_sources(files: &[String], root: &Path, span: Span) -> Vec<io::Result<String>> {
-    let read = |members: &[String]| {
-        members
-            .iter()
-            .map(|member| std::fs::read_to_string(root.join(member)))
-            .collect::<Vec<_>>()
-    };
-    #[cfg(not(target_arch = "wasm32"))]
-    let sources = {
-        std::thread::scope(|scope| {
-            let readers: Vec<_> = files
-                .chunks(files.len().div_ceil(8))
-                .map(|members| scope.spawn(move || read(members)))
-                .collect();
-            readers
-                .into_iter()
-                .flat_map(|reader| reader.join().expect("source reader panicked"))
-                .collect::<Vec<_>>()
-        })
-    };
-    #[cfg(target_arch = "wasm32")]
-    let sources = read(files);
-    span.fact("files", files.len());
-    span.fact(
-        "bytes",
-        sources
-            .iter()
-            .filter_map(|s| s.as_ref().ok())
-            .map(String::len)
-            .sum::<usize>(),
-    );
+fn read(root: &Path, members: &[String]) -> Vec<io::Result<String>> {
+    members
+        .iter()
+        .map(|member| std::fs::read_to_string(root.join(member)))
+        .collect()
+}
+
+fn read_bytes(sources: &[io::Result<String>]) -> usize {
     sources
+        .iter()
+        .filter_map(|s| s.as_ref().ok())
+        .map(String::len)
+        .sum()
 }
 
 #[cfg(test)]
@@ -169,6 +183,7 @@ mod tests {
         let root = trace.span("compile");
         let (parsed, sources) = parse_with_sources(&files, dir.path(), &trace, || {
             let _parse = trace.span("parse");
+            std::thread::sleep(std::time::Duration::from_millis(200));
             "parsed"
         });
         assert_eq!(parsed, "parsed");
@@ -195,6 +210,10 @@ mod tests {
         let parse = report.spans.iter().find(|s| s.name == "parse").unwrap();
         assert_eq!(reads.parent, Some(0));
         assert_eq!(parse.parent, Some(0));
+        assert!(
+            reads.duration_ns < parse.duration_ns,
+            "source.read times the reads, not the overlapping parse"
+        );
         assert!(reads.facts.contains(&("files", files.len().into())));
         let bytes: usize = sources
             .iter()

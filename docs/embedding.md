@@ -69,8 +69,8 @@ let compile = session.compile();  // typed Envelope<CompileResult>
 Consumers running a single workflow may consume the session with
 `session.run_once(|session| session.compile())`. After that workflow's
 provider-backed load, Wright begins graceful provider shutdown and overlaps
-process exit with the remaining work; dropping the consumed session joins the
-bounded exit wait. Reusable sessions keep their provider until the session is
+process exit with the remaining work; dropping the consumed session waits, at
+most five seconds, for the provider to exit. Reusable sessions keep their provider until the session is
 dropped, including across disk-refresh loads.
 
 Consumers that need truthful workflow progress may attach a

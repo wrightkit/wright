@@ -1,7 +1,6 @@
 use std::io::BufWriter;
 use std::path::Path;
 use std::sync::Arc;
-use std::thread::JoinHandle;
 use std::time::Duration;
 
 use serde::de::DeserializeOwned;
@@ -272,7 +271,9 @@ pub trait LanguageProvider {
         capability_unavailable("lookup", "lpp/lookup")
     }
 
-    /// Begin graceful shutdown without waiting for process exit, when supported.
+    /// Send `lpp/shutdown` and close the provider's stdin without waiting for
+    /// process exit, so the exit overlaps the caller's remaining work. A
+    /// later [`shutdown`](Self::shutdown) then only waits (bounded) for exit.
     fn begin_shutdown(&mut self) -> Result<(), ProviderError> {
         Ok(())
     }
@@ -287,8 +288,8 @@ pub trait LanguageProvider {
 
 /// A `LanguageProvider` over a spawned stdio provider process.
 pub struct StdioLanguageProvider {
-    child: Option<ChildProcess>,
-    exiting: Option<JoinHandle<Option<i32>>>,
+    child: ChildProcess,
+    shutdown_requested: bool,
     client: JsonRpcClient,
     negotiated: Option<NegotiatedCapabilities>,
     last_exit_status: Option<i32>,
@@ -310,8 +311,8 @@ impl StdioLanguageProvider {
             ClientConfig { request_timeout },
         );
         Ok(StdioLanguageProvider {
-            child: Some(child),
-            exiting: None,
+            child,
+            shutdown_requested: false,
             client,
             negotiated: None,
             last_exit_status: None,
@@ -380,18 +381,15 @@ impl StdioLanguageProvider {
     }
 
     fn enrich_transport_error(&mut self, error: &mut ProviderError, method: &str) {
-        let Some(child) = self.child.as_mut() else {
-            return;
-        };
         if matches!(error, ProviderError::Timeout { .. }) {
             // The client refuses every later request; kill the process too.
-            child.kill();
+            self.child.kill();
             return;
         }
         if !matches!(error.code(), "provider-io" | "provider-exited") {
             return;
         }
-        if let Some(status) = child.wait_status(Duration::from_millis(500)) {
+        if let Some(status) = self.child.wait_status(Duration::from_millis(500)) {
             self.last_exit_status = Some(status);
             *error = ProviderError::Exited {
                 status: Some(status),
@@ -409,12 +407,6 @@ impl StdioLanguageProvider {
         }
         self.client.close_stdin();
         Ok(())
-    }
-
-    fn wait_for_exit(&mut self) {
-        if let Some(exiting) = self.exiting.take() {
-            self.last_exit_status = exiting.join().expect("provider exit thread panicked");
-        }
     }
 
     fn require_capability(&self, capability: Capability) -> Result<(), ProviderError> {
@@ -442,10 +434,7 @@ impl Drop for StdioLanguageProvider {
     fn drop(&mut self) {
         // The client (stdin) drops after this, but the provider must not be
         // left running: LPP allows the client to terminate at any time.
-        if let Some(child) = &mut self.child {
-            child.kill();
-        }
-        self.wait_for_exit();
+        self.child.kill();
     }
 }
 
@@ -669,22 +658,15 @@ impl LanguageProvider for StdioLanguageProvider {
 
     fn begin_shutdown(&mut self) -> Result<(), ProviderError> {
         self.shutdown_request()?;
-        let mut child = self.child.take().expect("provider process is running");
-        self.exiting = Some(std::thread::spawn(move || child.terminate()));
+        self.shutdown_requested = true;
         Ok(())
     }
 
     fn shutdown(&mut self) -> Result<(), ProviderError> {
-        if self.exiting.is_some() {
-            self.wait_for_exit();
-        } else {
+        if !std::mem::take(&mut self.shutdown_requested) {
             self.shutdown_request()?;
-            self.last_exit_status = self
-                .child
-                .as_mut()
-                .expect("provider process is running")
-                .terminate();
         }
+        self.last_exit_status = self.child.terminate();
         Ok(())
     }
 

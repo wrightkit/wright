@@ -66,11 +66,11 @@ worker startup, and carries `files` and successfully read `bytes`.
 parse. Only the part of the read span extending past parse, its launch cost,
 and the apply span add to the critical path.
 `provider.shutdown.request` sends `lpp/shutdown` and closes stdin after the
-last source-provider call. The provider's bounded exit wait then runs in the
-background; `provider.shutdown` measures the remaining join at session drop.
-The exit worker retains the five-second wait limit before killing the process.
-To measure the shutdown work still on the critical path, include both the
-request span and the final join span.
+last source-provider call, so the provider exits while Wright finishes the
+workflow. `provider.shutdown` measures the remaining exit wait at session
+drop, which keeps the five-second limit before killing the process. To
+measure the shutdown work still on the critical path, include both the
+request span and the final exit-wait span.
 
 The text form writes an indented tree: a `trace (wright-trace/v1)` header,
 the environment facts, then each span with its start offset, duration,
