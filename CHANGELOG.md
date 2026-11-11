@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.0](https://github.com/wrightkit/wright/compare/v0.42.0...v0.43.0) (2026-11-11)
+
+
+### Features
+
+* **lint:** embed the first-party lint package and retire three native rules ([#1084](https://github.com/wrightkit/wright/issues/1084)) ([25917be](https://github.com/wrightkit/wright/commit/25917be9d5c931a093e6f56bad44fafbc78984a7))
+
 ## [0.42.0](https://github.com/wrightkit/wright/compare/v0.41.8...v0.42.0) (2026-11-10)
 
 
