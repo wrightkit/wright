@@ -59,6 +59,19 @@ pub struct ResolvedOpyProvider {
     pub version: Option<String>,
 }
 
+impl ResolvedOpyProvider {
+    /// Run an installed provider's bounded initialize/shutdown warm-up.
+    pub fn warm_up(&self) -> Result<(), wright_lpp::ProviderError> {
+        use wright_lpp::{LanguageProvider, StdioLanguageProvider};
+
+        let mut provider =
+            StdioLanguageProvider::spawn(&self.executable, &[], std::time::Duration::from_secs(5))?;
+        provider.initialize(None)?;
+        let _ = provider.shutdown();
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct OpyProviderResolver {
     store_dir: PathBuf,
