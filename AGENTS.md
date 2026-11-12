@@ -13,20 +13,11 @@ Wright is not the durable owner of those language implementations.
 
 ## Repository ownership
 
-- `workshop-rs`: standalone raw Workshop implementation and canonical Workshop
-  semantics, parser, WIR, catalog, settings/localization, validation, emission,
-  and Workshop-owned gameplay/query data.
-- `opy-rs`: standalone OverPy implementation, covering syntax, preprocessing,
-  macros, semantics, diagnostics/provenance, compiler behavior, standalone
-  tooling, and Workshop-to-OPY reconstruction.
-- `deltin-rs`: standalone DEL/OSTW implementation, covering source/project models,
-  semantics/types, runtime lowering, diagnostics/provenance, standalone tooling,
-  and Workshop-to-DEL reconstruction.
-- `language-provider-protocol`: versioned LPP process and data contract.
-- `wright`: unified CLI/service orchestration, cross-language diagnostics,
-  lint/static analysis, semantic queries, source-edit transaction safety,
-  refactoring, agent/embedding APIs, CI presentation, editor-neutral language
-  services, LSP, and integration adapters.
+`wright` owns unified CLI/service orchestration, cross-language diagnostics,
+lint/static analysis, semantic queries, source-edit transaction safety,
+refactoring, agent/embedding APIs, CI presentation, editor-neutral language
+services, LSP, and integration adapters. What the other repositories own is in
+[`docs/architecture/ownership.md`](docs/architecture/ownership.md#repository-ownership).
 
 Wright may integrate through narrow Rust adapters and/or LPP depending on the
 product boundary. The adapters translate owner contracts; they do not define
@@ -45,10 +36,7 @@ For substantive implementation work, resolve the relevant current contract from
   inspect, edit, agent, CI, LSP, and conversion UX boundaries.
 
 ADRs under `docs/adr/` record point-in-time decisions and rationale; an accepted
-ADR is not proof that current code still implements that decision. If the Issue,
-current architecture contract, owning implementation, and Wright code/tests
-disagree materially, stop and surface the mismatch rather than selecting a design
-by implementation convenience.
+ADR is not proof that current code still implements that decision.
 
 ## Dependency direction
 
@@ -114,15 +102,10 @@ clear.
 - Never silently fall back to upstream OverPy/OSTW runtimes for a declared
   first-party workflow.
 - Never duplicate canonical Workshop data or semantics in Wright.
-- Never invent Wright-only OPY/DEL syntax.
-- Source-language compilation converges structurally on the established
-  upstream compiler output, compared as `workshop-rs`-parsed canonical programs
-  and owned by the language repositories (goal principle 7); formatting and
-  upstream internals are not criteria.
 - Source-oriented validated edits are preferred over full-file regeneration.
 
 Current support claims must be grounded in the owning repositories and executable
-executable owner/integration tests, not in historical Wright monolith behavior.
+owner/integration tests, not in historical Wright monolith behavior.
 
 ## Validation
 
@@ -168,8 +151,6 @@ support claims require real-project validation in addition to focused tests.
   review is required for them. Do not change a gate definition in the same PR as
   the code it judges unless the owner reviews that change.
 - Do not use repository changes or commits for GitHub metadata-only operations.
-- Do not publish, rewrite history, delete data, or modify unrelated remote state
-  unless explicitly authorized.
 - Never commit credentials, private runtime data, or unreviewed third-party
   material.
 
