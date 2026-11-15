@@ -1,5 +1,5 @@
 //! Terminal rendering of the run-cache or baseline comparison: one
-//! `Element cost` section with the total movement and the changed rules.
+//! `Cost change` section with the total movement and the changed rules.
 
 use serde_json::Value;
 
@@ -10,7 +10,7 @@ pub(super) fn render(ctx: &RenderContext<'_>, comparison: Option<&Value>) {
     let Some(comparison) = comparison.filter(|c| c.is_object()) else {
         return;
     };
-    heading(ctx, "Element cost");
+    heading(ctx, "Cost change");
     for row in comparison_rows(ctx, comparison) {
         println!("{row}");
     }
@@ -23,8 +23,9 @@ fn comparison_rows(ctx: &RenderContext<'_>, comparison: &Value) -> Vec<String> {
     let delta = comparison["totalDelta"].as_i64().unwrap_or(0);
     let previous = comparison["previousTotal"].as_i64().unwrap_or(0);
     let reference = comparison["reference"].as_str().unwrap_or("previous");
+    let sign = if delta > 0 { "+" } else { "" };
     let mut rows = vec![format!(
-        "{indent}{delta:+} vs {reference} run · {} total {}",
+        "{indent}{sign}{delta} vs {reference} run · {} total {}",
         previous + delta,
         dim(&format!("(was {previous})"), color)
     )];
@@ -110,19 +111,25 @@ mod tests {
     }
 
     #[test]
-    fn comparison_caps_changes_and_follows_the_compact_layout() {
+    fn comparison_caps_changes_and_signs_a_decrease() {
         let changed: Vec<Value> = (0..7)
             .map(|i| json!({"name": format!("r{i}"), "before": 1, "after": 0, "delta": -1}))
             .collect();
         let value = json!({
-            "reference": "baseline",
+            "reference": "main",
             "previousTotal": 10,
             "totalDelta": -7,
             "changed": changed,
         });
         let rows = rows(80, &value);
-        assert_eq!(rows[0], "  -7 vs baseline run · 3 total (was 10)");
+        assert_eq!(rows[0], "  -7 vs main run · 3 total (was 10)");
         assert_eq!(rows.len(), 7);
         assert_eq!(rows[6], "  ... 2 more changed rules");
+    }
+
+    #[test]
+    fn comparison_prints_an_unchanged_total_without_a_sign() {
+        let value = json!({"reference": "previous", "previousTotal": 3, "totalDelta": 0});
+        assert_eq!(rows(100, &value), ["  0 vs previous run · 3 total (was 3)"]);
     }
 }
