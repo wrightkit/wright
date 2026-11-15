@@ -229,6 +229,10 @@ item), items indent under their section, and locations, source frames,
 and secondary notes indent under their item. Counts are plain plurals —
 `1 error, 2 warnings` — never `(s)` suffixes, and a failed computation
 reports unavailable with its reason rather than a fabricated value.
+A run-cache or baseline comparison is an `Element cost` section on the
+terminal renderer: the first item gives the signed total delta against the
+reference, the current total, and the reference total dimmed, followed by
+at most five changed, added, or removed rules, with the remainder counted.
 The layout caps at 100 columns regardless of terminal width; below 90
 columns it switches to the compact layout where children of a section
 item align at the item's column instead of indenting deeper, and
