@@ -18,6 +18,8 @@ use super::{
     summary_status, symbol_kind_heading, tree_rule, uniform_evidence,
 };
 
+mod comparison;
+
 fn tag_word<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) -> String {
     if envelope.gated {
         return "FAIL".into();
@@ -161,7 +163,7 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation + TerminalReport>(
     diagnostics(ctx, envelope, to_stdout);
     if envelope.ok || envelope.gated || lint_finding_failure(envelope) {
         envelope.result.body(ctx);
-        comparison(ctx, envelope.comparison.as_ref());
+        comparison::render(ctx, envelope.comparison.as_ref());
     } else if envelope.diagnostics.is_empty() {
         dprint(&format!("{}: failed", envelope.command), to_stdout);
     }
@@ -390,48 +392,6 @@ pub(crate) fn next(ctx: &RenderContext<'_>, value: &Value) {
         if let Some(command) = item.as_str().or_else(|| item["command"].as_str()) {
             line(ctx, 1, command);
         }
-    }
-}
-
-fn comparison(ctx: &RenderContext<'_>, comparison: Option<&Value>) {
-    let Some(comparison) = comparison.filter(|c| c.is_object()) else {
-        return;
-    };
-    let delta = comparison["totalDelta"].as_i64().unwrap_or(0);
-    let sign = if delta > 0 { "+" } else { "" };
-    let reference = comparison["reference"].as_str().unwrap_or("previous");
-    println!(
-        "\nElement cost: {sign}{delta} vs {reference} run ({} total)",
-        comparison["previousTotal"].as_u64().unwrap_or(0)
-    );
-    let mut lines = Vec::new();
-    for change in comparison["changed"].as_array().into_iter().flatten() {
-        let name = change["name"].as_str().unwrap_or("?");
-        let d = change["delta"].as_i64().unwrap_or(0);
-        let s = if d > 0 { "+" } else { "" };
-        lines.push(format!(
-            "  {name}: {} -> {} ({s}{d})",
-            change["before"], change["after"]
-        ));
-    }
-    for name in comparison["added"].as_array().into_iter().flatten() {
-        lines.push(format!("  {}: added", name.as_str().unwrap_or("?")));
-    }
-    for name in comparison["removed"].as_array().into_iter().flatten() {
-        lines.push(format!("  {}: removed", name.as_str().unwrap_or("?")));
-    }
-    for line in lines.iter().take(5) {
-        println!("{line}");
-    }
-    if lines.len() > 5 {
-        line(
-            ctx,
-            1,
-            &format!(
-                "... {}",
-                plural(lines.len() - 5, "more changed rule", "more changed rules")
-            ),
-        );
     }
 }
 
