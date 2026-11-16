@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.2](https://github.com/wrightkit/wright/compare/v0.43.1...v0.43.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* **cli:** render the terminal comparison as an Element cost section ([#1093](https://github.com/wrightkit/wright/issues/1093)) ([8e82c74](https://github.com/wrightkit/wright/commit/8e82c746a8511c2e643553dcacde4b22cc4ca880))
+
 ## [0.43.1](https://github.com/wrightkit/wright/compare/v0.43.0...v0.43.1) (2026-11-11)
 
 
