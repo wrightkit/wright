@@ -239,6 +239,7 @@ impl CompilerSession {
         loaded
     }
 
+    #[allow(unsafe_code)] // hotpath 0.28 emits `#[unsafe(export_name)]` statics
     fn load_unawaited(
         &mut self,
         provider_operation: ProviderOperation,
