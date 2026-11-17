@@ -981,6 +981,10 @@ export interface Reference {
   owningRule: {
     [k: string]: unknown
   } | null
+  /**
+   * The source text at `span`, read from the loaded inputs, joined onto one line (#1099). Longer than 140 characters, it is a 140-character window centered on the first occurrence of the symbol's name inside the span, or starting at the span start when the name does not occur; a clipped end carries `…`. Absent when the reference has no source span.
+   */
+  excerpt?: string
   [k: string]: unknown
 }
 export interface ReferencesSelectionResult {

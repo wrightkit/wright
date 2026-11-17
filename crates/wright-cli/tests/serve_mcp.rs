@@ -610,3 +610,19 @@ fn mcp_transport_bootstraps_over_a_broken_project_and_recovers() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn mcp_references_carry_the_excerpt_of_each_span() {
+    let input = corpus_workshop("synthetic/control-flow");
+    let responses = run_lines(
+        "mcp",
+        &input,
+        &[mcp_call(1, "wright_references", json!({"symbol": "index"})).as_str()],
+    );
+    let payload = mcp_payload(&responses[0]);
+    let references = payload["references"].as_array().expect("reference list");
+    assert!(!references.is_empty());
+    for reference in references {
+        assert_eq!(reference["excerpt"], "index", "{reference}");
+    }
+}

@@ -121,3 +121,26 @@ fn refs_json_spans_are_never_null() {
     }
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
+#[test]
+fn refs_text_and_json_carry_the_same_excerpt() {
+    let path = temp_file("ticks.ws", TICKS);
+    let path = path.to_str().unwrap();
+    let text = run(&["inspect", "refs", "score", path]);
+    let json = run(&["inspect", "refs", "score", path, "-f", "json"]);
+    assert!(text.status.success(), "{}", command_result(&text));
+    let envelope: serde_json::Value = serde_json::from_slice(&json.stdout).expect("JSON envelope");
+    let references = envelope["result"]["references"].as_array().unwrap();
+    let stdout = String::from_utf8_lossy(&text.stdout);
+    let lines: Vec<&str> = stdout
+        .lines()
+        .filter(|line| line.starts_with("ref: "))
+        .collect();
+    assert_eq!(lines.len(), references.len(), "{stdout}");
+    for (line, reference) in lines.iter().zip(references) {
+        let excerpt = reference["excerpt"].as_str().expect("excerpt");
+        assert_eq!(excerpt, "score", "{reference}");
+        assert!(line.ends_with(" excerpt=score"), "{line}");
+    }
+    let _ = std::fs::remove_dir_all(std::path::Path::new(path).parent().unwrap());
+}

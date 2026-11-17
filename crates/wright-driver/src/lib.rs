@@ -7,6 +7,7 @@ pub mod connect;
 pub mod diag;
 pub mod edit;
 pub mod essential;
+pub(crate) mod excerpt;
 pub mod fix;
 pub mod input;
 #[cfg(not(target_arch = "wasm32"))]
