@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.45.0](https://github.com/wrightkit/wright/compare/v0.44.0...v0.45.0) (2026-11-17)
+
+
+### Features
+
+* **agent:** check each Claude Code edit through an opt-in hook ([#1107](https://github.com/wrightkit/wright/issues/1107)) ([9e583d3](https://github.com/wrightkit/wright/commit/9e583d31669f230574610095eb54ac130cb176a4)), closes [#1098](https://github.com/wrightkit/wright/issues/1098)
+
+
+### Bug Fixes
+
+* **agent:** register an MCP server that loads the installed project ([#1104](https://github.com/wrightkit/wright/issues/1104)) ([3f87768](https://github.com/wrightkit/wright/commit/3f87768f705f4be91c9574469a35d89148d92a0a)), closes [#1100](https://github.com/wrightkit/wright/issues/1100)
+
 ## [0.44.0](https://github.com/wrightkit/wright/compare/v0.43.2...v0.44.0) (2026-11-17)
 
 
