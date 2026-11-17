@@ -234,7 +234,8 @@
         "rule": { "type": ["integer", "null"], "minimum": 0 },
         "action": { "type": ["integer", "null"], "minimum": 0 },
         "value": { "type": ["integer", "null"], "minimum": 0 },
-        "owningRule": { "type": ["object", "null"], "description": "The owning rule's identity — `{id, name, address, span}` like a `rules` list entry — so a consumer renders a rule location without a second lookup (#792); null when the reference has no owning rule. `address` is the canonical rule address (ADR-0035)." }
+        "owningRule": { "type": ["object", "null"], "description": "The owning rule's identity — `{id, name, address, span}` like a `rules` list entry — so a consumer renders a rule location without a second lookup (#792); null when the reference has no owning rule. `address` is the canonical rule address (ADR-0035)." },
+        "excerpt": { "type": "string", "description": "The source text at `span`, read from the loaded inputs, joined onto one line (#1099). Longer than 140 characters, it is a 140-character window centered on the first occurrence of the symbol's name inside the span, or starting at the span start when the name does not occur; a clipped end carries `…`. Absent when the reference has no source span." }
       },
       "additionalProperties": true
     },
