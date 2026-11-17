@@ -235,13 +235,16 @@ same `-- INPUT [OPTIONS]` form as `--mcp`, with the same anchoring to
 wright agent install --hook claude -- src/main.opy --kind opy --locale zh-CN
 ```
 
-Install runs the stored check once. A usage, unsupported-input, or environment
-failure (exit 2, 3, or 4) refuses the install and writes nothing; `--force`
-registers the entry anyway. A project that already has errors installs, because
-the hook reports them. Re-running reports up to date; a different Wright hook
-entry is refused unless `--force` replaces it. Other hook entries and settings
-are preserved, and the file is handled like the `--mcp` config. To remove the
-hook, delete its entry.
+Install loads the program once with the stored input and options, as `--mcp`
+does, using the same code. When the program cannot be loaded, install names
+the load diagnostic and the `--` form, writes nothing, and exits 1; `--force`
+skips only the load, never option validation. With `--mcp` and `--hook` together,
+every registration is validated before any file is written, so a refusal
+writes nothing. Re-running reports up to date; a different Wright hook is
+refused unless `--force` replaces it. `--force` replaces only the Wright hook
+object: other hooks, including ones in the same group, and other settings are
+preserved. The file is handled like the `--mcp` config. To remove the hook,
+delete its entry.
 
 The entry runs `wright agent hook post-edit -- INPUT [OPTIONS]`, which reads
 Claude Code's hook JSON from stdin and takes `tool_input.file_path`:

@@ -263,30 +263,38 @@ fn report_hook(status: &hook::HookStatus) {
 pub(crate) fn run(args: &AgentArgs) -> Result<u8, AgentError> {
     match &args.subcommand {
         Some(AgentSubcommand::Install(install_args)) => {
-            let server = install_args
-                .mcp
-                .map(|target| {
-                    mcp::install(
-                        Path::new("."),
-                        target,
-                        &install_args.serve,
-                        install_args.force,
-                        install_args.dry_run,
-                    )
-                })
-                .transpose()?;
-            let hook = install_args
-                .hook
-                .map(|target| {
-                    hook::install(
-                        Path::new("."),
-                        target,
-                        &install_args.serve,
-                        install_args.force,
-                        install_args.dry_run,
-                    )
-                })
-                .transpose()?;
+            let register = |dry_run: bool| -> Result<_, AgentError> {
+                let server = install_args
+                    .mcp
+                    .map(|target| {
+                        mcp::install(
+                            Path::new("."),
+                            target,
+                            &install_args.serve,
+                            install_args.force,
+                            dry_run,
+                        )
+                    })
+                    .transpose()?;
+                let hook = install_args
+                    .hook
+                    .map(|target| {
+                        hook::install(
+                            Path::new("."),
+                            target,
+                            &install_args.serve,
+                            install_args.force,
+                            dry_run,
+                        )
+                    })
+                    .transpose()?;
+                Ok((server, hook))
+            };
+            if !install_args.dry_run {
+                // Validate every registration before writing any of them.
+                register(true)?;
+            }
+            let (server, hook) = register(install_args.dry_run)?;
             if !install_args.no_guide {
                 report_guide(&install(install_args)?);
             }

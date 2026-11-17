@@ -158,15 +158,115 @@ fn install_writes_one_entry_idempotently_and_preserves_other_hooks() {
 }
 
 #[test]
-fn install_refuses_a_check_that_cannot_run() {
+fn install_refuses_a_program_that_does_not_load_unless_forced() {
     let project = project();
-    let refused = install(&project, &["--", "session.ws", "--kind", "ostw"]);
-    assert_eq!(refused.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("--force"));
+    let missing = install(&project, &["--", "nope.ws", "--kind", "workshop"]);
+    assert_eq!(missing.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&missing.stderr);
+    assert!(
+        stderr.contains("input-io") && stderr.contains("-- "),
+        "{stderr}"
+    );
+    assert!(!project.join(".claude").exists());
+    let ostw = install(&project, &["--", "session.ws", "--kind", "ostw"]);
+    assert_eq!(ostw.status.code(), Some(1));
     assert!(!project.join(".claude").exists());
     let usage = install(&project, &["--", "session.ws", "--kind", "nope"]);
     assert_eq!(usage.status.code(), Some(2));
+    let forced_usage = install(&project, &["--force", "--", "session.ws", "--kind", "nope"]);
+    assert_eq!(forced_usage.status.code(), Some(2));
     assert!(!project.join(".claude").exists());
+    let forced = install(
+        &project,
+        &["--force", "--", "nope.ws", "--kind", "workshop"],
+    );
+    assert!(forced.status.success());
+    assert!(project.join(".claude/settings.local.json").is_file());
+    let _ = std::fs::remove_dir_all(&project);
+}
+
+#[test]
+fn force_replaces_only_the_wright_hook_object() {
+    let project = project();
+    let given = ["--", "session.ws", "--kind", "workshop"];
+    assert!(install(&project, &given).status.success());
+    let mut config = settings(&project);
+    let group = &mut config["hooks"]["PostToolUse"][0]["hooks"];
+    group
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"type": "command", "command": "my-formatter"}));
+    std::fs::write(
+        project.join(".claude/settings.local.json"),
+        config.to_string(),
+    )
+    .unwrap();
+    let again = install(&project, &given);
+    assert!(String::from_utf8_lossy(&again.stdout).contains("up to date"));
+    let forced = install(
+        &project,
+        &[
+            "--force",
+            "--",
+            "session.ws",
+            "--kind",
+            "workshop",
+            "--locale",
+            "en-US",
+        ],
+    );
+    assert!(forced.status.success());
+    let text = settings(&project).to_string();
+    assert!(text.contains("my-formatter"), "{text}");
+    assert_eq!(text.matches("wright agent hook post-edit").count(), 1);
+    assert!(text.contains("--locale en-US"));
+    let _ = std::fs::remove_dir_all(&project);
+}
+
+#[test]
+fn a_refused_hook_leaves_the_mcp_entry_unwritten() {
+    let project = project();
+    let output = Command::new(wright())
+        .args([
+            "agent",
+            "install",
+            "--no-guide",
+            "--mcp",
+            "claude",
+            "--hook",
+            "claude",
+        ])
+        .args(["--", "session.ws", "--kind", "workshop"])
+        .current_dir(&project)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    std::fs::remove_file(project.join(".mcp.json")).unwrap();
+    let foreign = serde_json::json!({"hooks": {"PostToolUse": [{"hooks": [
+        {"type": "command", "command": "wright agent hook post-edit -- other.ws"}
+    ]}]}});
+    std::fs::write(
+        project.join(".claude/settings.local.json"),
+        foreign.to_string(),
+    )
+    .unwrap();
+    let refused = Command::new(wright())
+        .args([
+            "agent",
+            "install",
+            "--no-guide",
+            "--mcp",
+            "claude",
+            "--hook",
+            "claude",
+        ])
+        .args(["--", "session.ws", "--kind", "workshop"])
+        .current_dir(&project)
+        .output()
+        .unwrap();
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(!project.join(".mcp.json").exists());
+    assert_eq!(settings(&project), foreign);
     let _ = std::fs::remove_dir_all(&project);
 }
 

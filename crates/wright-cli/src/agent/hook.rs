@@ -6,7 +6,7 @@ use wright_driver::result::exit;
 
 use super::AgentError;
 use super::config_file::{ensure_not_linked, read_config, write_config};
-use super::stored::{Stored, session_config};
+use super::stored::{Stored, load_failure, session_config};
 use crate::cli::HookTarget;
 use crate::present::RenderContext;
 
@@ -44,45 +44,22 @@ fn shell_word(token: &str) -> String {
     format!("'{}'", token.replace('\'', r"'\''"))
 }
 
-fn generated_entry(stored: &Stored) -> Value {
+fn generated_hook(stored: &Stored) -> Value {
     let command = std::iter::once(COMMAND.to_string())
         .chain(stored.tokens.iter().map(|token| shell_word(token)))
         .collect::<Vec<_>>()
         .join(" ");
-    json!({
-        "matcher": MATCHER,
-        "hooks": [{"type": "command", "command": command, "timeout": TIMEOUT_SECONDS}],
-    })
+    json!({"type": "command", "command": command, "timeout": TIMEOUT_SECONDS})
 }
 
-fn runs_wright_hook(group: &Value) -> bool {
-    group
-        .get("hooks")
-        .and_then(Value::as_array)
-        .is_some_and(|hooks| {
-            hooks.iter().any(|hook| {
-                hook.get("command")
-                    .and_then(Value::as_str)
-                    .is_some_and(|command| command.starts_with(COMMAND))
-            })
-        })
+fn is_wright_hook(hook: &Value) -> bool {
+    hook.get("command")
+        .and_then(Value::as_str)
+        .is_some_and(|command| command.starts_with(COMMAND))
 }
 
-/// Runs the stored check once. A usage, unsupported-input, or environment
-/// failure means the hook could never report; `None` means it can.
-fn check_failure(config: wright_driver::SessionConfig) -> Option<String> {
-    let refused = |code: u8| matches!(code, exit::USAGE | exit::UNSUPPORTED | exit::INTERNAL);
-    let mut session = match wright_driver::CompilerSession::new(config) {
-        Ok(session) => session,
-        Err(diagnostic) => return Some(diagnostic.message),
-    };
-    let envelope = session.check();
-    refused(envelope.exit).then(|| {
-        envelope
-            .diagnostics
-            .first()
-            .map_or_else(|| "the check failed".into(), |d| d.message.clone())
-    })
+fn hooks_of(group: &mut Value) -> Option<&mut Vec<Value>> {
+    group.get_mut("hooks")?.as_array_mut()
 }
 
 pub(crate) fn install(
@@ -94,9 +71,9 @@ pub(crate) fn install(
 ) -> Result<HookStatus, AgentError> {
     let stored = Stored::new(INPUT, root, check);
     let config = stored.session_config()?;
-    if !force && let Some(failure) = check_failure(config) {
+    if !force && let Some(failure) = load_failure(config) {
         return Err(AgentError::Rejected(format!(
-            "the stored check would not run ({failure}); pass its input and options after `--`, for example `wright agent install --hook claude -- src/main.opy --kind opy`, or pass --force to register it anyway"
+            "the Wright edit hook would not load the project ({failure}); pass its input and options after `--`, for example `wright agent install --hook claude -- src/main.opy --kind opy`, or pass --force to register it anyway"
         )));
     }
     let path = root.join(FILE);
@@ -119,11 +96,21 @@ pub(crate) fn install(
         .or_insert_with(|| json!([]))
         .as_array_mut()
         .ok_or_else(wrong_shape)?;
-    let entry = generated_entry(&stored);
-    let ours: Vec<usize> = (0..groups.len())
-        .filter(|&index| runs_wright_hook(&groups[index]))
-        .collect();
-    if ours.len() == 1 && groups[ours[0]] == entry {
+    let hook = generated_hook(&stored);
+    let mut ours = Vec::new();
+    for (group_index, group) in groups.iter_mut().enumerate() {
+        let matcher_matches = group.get("matcher") == Some(&json!(MATCHER));
+        for (hook_index, existing) in hooks_of(group).into_iter().flatten().enumerate() {
+            if is_wright_hook(existing) {
+                ours.push((
+                    group_index,
+                    hook_index,
+                    matcher_matches && *existing == hook,
+                ));
+            }
+        }
+    }
+    if let [(_, _, true)] = ours[..] {
         return Ok(HookStatus::UpToDate(path));
     }
     if !ours.is_empty() && !force {
@@ -133,13 +120,23 @@ pub(crate) fn install(
         )));
     }
     let replaced = !ours.is_empty();
-    let first = ours.first().copied().unwrap_or(groups.len());
-    let mut index = 0;
-    groups.retain(|_| {
-        index += 1;
-        !ours.contains(&(index - 1))
-    });
-    groups.insert(first.min(groups.len()), entry);
+    let first = ours.first().map_or(groups.len(), |(group, _, _)| *group);
+    let emptied: Vec<bool> = groups
+        .iter_mut()
+        .map(|group| {
+            hooks_of(group).is_some_and(|hooks| {
+                let before = hooks.len();
+                hooks.retain(|existing| !is_wright_hook(existing));
+                before > 0 && hooks.is_empty()
+            })
+        })
+        .collect();
+    let mut emptied = emptied.into_iter();
+    groups.retain(|_| !emptied.next().unwrap_or(false));
+    groups.insert(
+        first.min(groups.len()),
+        json!({"matcher": MATCHER, "hooks": [hook]}),
+    );
     if dry_run {
         return Ok(HookStatus::DryRun(path));
     }
