@@ -12,8 +12,18 @@ pub struct ChildProcess {
 impl ChildProcess {
     /// Spawn `command` with `args`, stdin/stdout piped and stderr inherited.
     pub fn spawn(command: &Path, args: &[String]) -> Result<ChildProcess, ProviderError> {
+        Self::spawn_with_env(command, args, &[])
+    }
+
+    /// Spawn with additional environment variables scoped to this child.
+    pub fn spawn_with_env(
+        command: &Path,
+        args: &[String],
+        env: &[(std::ffi::OsString, std::ffi::OsString)],
+    ) -> Result<ChildProcess, ProviderError> {
         let child = Command::new(command)
             .args(args)
+            .envs(env.iter().map(|(key, value)| (key, value)))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

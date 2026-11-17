@@ -29,6 +29,7 @@ workshop-rs.workspace = true
 flate2.workspace = true
 tar.workspace = true
 reqwest.workspace = true
+tempfile = "3"
 wright-lpp = { path = "../wright-lpp" }
 
 [features]

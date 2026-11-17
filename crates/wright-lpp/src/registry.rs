@@ -98,12 +98,26 @@ impl ProviderRegistry {
     /// (`ProviderError::NotConfigured`); there is no fallback to in-process
     /// semantics.
     pub fn spawn(&self, language_id: &str) -> Result<StdioLanguageProvider, ProviderError> {
+        self.spawn_with_env(language_id, &[])
+    }
+
+    /// Spawn a provider with additional child-local environment variables.
+    pub fn spawn_with_env(
+        &self,
+        language_id: &str,
+        env: &[(std::ffi::OsString, std::ffi::OsString)],
+    ) -> Result<StdioLanguageProvider, ProviderError> {
         let config =
             self.providers
                 .get(language_id)
                 .ok_or_else(|| ProviderError::NotConfigured {
                     language_id: language_id.to_string(),
                 })?;
-        StdioLanguageProvider::spawn(&config.command, &config.args, config.request_timeout)
+        StdioLanguageProvider::spawn_with_env(
+            &config.command,
+            &config.args,
+            config.request_timeout,
+            env,
+        )
     }
 }
