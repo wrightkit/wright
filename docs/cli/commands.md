@@ -185,6 +185,24 @@ project root and writes only project-local config:
 | `cursor` | `.cursor/mcp.json` | `mcpServers` | `${workspaceFolder}` |
 | `vscode` | `.vscode/mcp.json` | `servers` | `${workspaceFolder}` |
 
+The entry's input defaults to the project directory. A project that needs
+another input, an input kind, or a locale states them after `--`, as the input
+followed by the `serve` loading options (`--kind`, `--locale`, `--profile`, and
+the lint options):
+
+```sh
+wright agent install --mcp claude -- src/main.opy --kind opy --locale zh-CN
+```
+
+Wright stores them in the entry's `args`, with a relative input anchored to the
+harness variable (`${CLAUDE_PROJECT_DIR:-.}/src/main.opy`). The same
+`INPUT [OPTIONS]` form is the one the hook installer stores (#1098). Install
+first loads the program once with the input and options it will store, the load
+`serve` performs at startup. When that load fails, for example because the
+directory holds both OPY and Workshop sources, install names the load
+diagnostic and the `--` form, writes nothing, and exits 1; `--force` registers
+the entry anyway. Options `serve` would reject are a usage error.
+
 Any other target is a usage error; Wright does not guess harness formats. The
 harness owns starting the stdio process; Wright adds no daemon or registry.
 Claude Code sets `CLAUDE_PROJECT_DIR` only in the server's own environment, so
@@ -192,8 +210,9 @@ its `${...}` expansion in `args` falls back to `.` (the server's working
 directory, the project root in a normal session).
 
 Re-running reports up to date when the `wright` entry is exactly the one Wright
-generates. Any other `wright` entry, including one that already runs `wright
-serve --transport mcp` with extra fields or a different input, is refused
+generates, stored input and options included. Any other `wright` entry,
+including one that already runs `wright serve --transport mcp` with extra
+fields, a different input, or different options, is refused
 untouched unless `--force` replaces it (user-added fields such as `env` are
 lost). A Wright MCP entry under a different key is refused as a duplicate.
 Other servers and settings are preserved (JSON key order may be normalized). A

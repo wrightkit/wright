@@ -239,16 +239,23 @@ fn report_mcp(status: &mcp::McpStatus) {
 pub(crate) fn run(args: &AgentArgs) -> Result<u8, AgentError> {
     match &args.subcommand {
         Some(AgentSubcommand::Install(install_args)) => {
+            let server = install_args
+                .mcp
+                .map(|target| {
+                    mcp::install(
+                        Path::new("."),
+                        target,
+                        &install_args.serve,
+                        install_args.force,
+                        install_args.dry_run,
+                    )
+                })
+                .transpose()?;
             if !install_args.no_guide {
                 report_guide(&install(install_args)?);
             }
-            if let Some(target) = install_args.mcp {
-                report_mcp(&mcp::install(
-                    Path::new("."),
-                    target,
-                    install_args.force,
-                    install_args.dry_run,
-                )?);
+            if let Some(status) = &server {
+                report_mcp(status);
             }
             Ok(exit::SUCCESS)
         }
@@ -280,6 +287,7 @@ mod tests {
             dry_run,
             mcp: None,
             no_guide: false,
+            serve: Vec::new(),
         }
     }
 

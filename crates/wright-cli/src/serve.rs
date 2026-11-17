@@ -95,37 +95,49 @@ pub(crate) struct ServeArgs {
     input: Option<std::path::PathBuf>,
 }
 
+impl ServeArgs {
+    /// The session configuration `serve` starts with, or the usage error
+    /// that stops it.
+    pub(crate) fn session_config(self) -> Result<SessionConfig, String> {
+        if self
+            .input
+            .as_deref()
+            .is_some_and(|input| input == std::path::Path::new("-"))
+        {
+            return Err(
+                "serve reserves stdin for requests; pass a source file or project directory".into(),
+            );
+        }
+        if self.profile != wright_driver::Profile::Off
+            && matches!(self.kind, SourceKind::Opy | SourceKind::Ostw)
+        {
+            return Err(
+                "--profile applies to Workshop input only; remove it or pass --kind workshop"
+                    .into(),
+            );
+        }
+        let mut config = SessionConfig {
+            kind: self.kind,
+            source_backend: SourceBackend::Auto,
+            locale: self.locale,
+            profile: self.profile,
+            input: InputSpec::Path(self.input.unwrap_or_else(|| ".".into())),
+            ..SessionConfig::default()
+        };
+        self.policy.apply_to(&mut config)?;
+        Ok(config)
+    }
+}
+
 pub(crate) fn run(args: ServeArgs) -> ExitCode {
-    if args
-        .input
-        .as_deref()
-        .is_some_and(|input| input == std::path::Path::new("-"))
-    {
-        eprintln!(
-            "wright: serve reserves stdin for requests; pass a source file or project directory"
-        );
-        return ExitCode::from(2);
-    }
-    let mut config = SessionConfig {
-        kind: args.kind,
-        source_backend: SourceBackend::Auto,
-        locale: args.locale,
-        profile: args.profile,
-        input: InputSpec::Path(args.input.unwrap_or_else(|| ".".into())),
-        ..SessionConfig::default()
+    let transport = args.transport;
+    let config = match args.session_config() {
+        Ok(config) => config,
+        Err(message) => {
+            eprintln!("wright: {message}");
+            return ExitCode::from(2);
+        }
     };
-    if args.profile != wright_driver::Profile::Off
-        && matches!(args.kind, SourceKind::Opy | SourceKind::Ostw)
-    {
-        eprintln!(
-            "wright: --profile applies to Workshop input only; remove it or pass --kind workshop"
-        );
-        return ExitCode::from(2);
-    }
-    if let Err(message) = args.policy.apply_to(&mut config) {
-        eprintln!("wright: {message}");
-        return ExitCode::from(2);
-    }
     let mut session = match wright_driver::CompilerSession::new(config) {
         Ok(session) => session,
         Err(diagnostic) => {
@@ -141,7 +153,7 @@ pub(crate) fn run(args: ServeArgs) -> ExitCode {
         }
     };
 
-    match args.transport {
+    match transport {
         TransportArg::Stdio => serve_stdio(&mut service),
         TransportArg::Jsonrpc => serve_jsonrpc(&mut service),
         TransportArg::Mcp => crate::mcp::serve_mcp(&mut service),

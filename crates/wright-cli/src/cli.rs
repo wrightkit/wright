@@ -472,6 +472,13 @@ pub(crate) struct AgentInstallArgs {
     /// Skip the agent guide and only register the MCP server.
     #[arg(long, requires = "mcp")]
     pub(crate) no_guide: bool,
+
+    /// With `--mcp`, after `--`: the server's input, then its loading options
+    /// (`--kind`, `--locale`, `--profile`, lint options), stored in the
+    /// registered entry. A relative input resolves against the harness's
+    /// project directory. Default input: the project directory.
+    #[arg(last = true, requires = "mcp", value_name = "INPUT [OPTIONS]")]
+    pub(crate) serve: Vec<String>,
 }
 
 #[derive(Debug, Args, Clone)]
