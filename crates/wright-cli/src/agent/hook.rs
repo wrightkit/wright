@@ -18,7 +18,10 @@ const TIMEOUT_SECONDS: u64 = 60;
 /// `PostToolUse` command group in a JSON file.
 struct Spec {
     file: &'static str,
-    /// The harness's project directory, as a shell expression.
+    /// The shell expression for the harness's project directory.
+    variable: &'static str,
+    /// The text stored tokens are anchored to: the expression, then any
+    /// literal path below it.
     input: String,
     matcher: &'static str,
     /// The command's prefix up to the input and options.
@@ -30,6 +33,7 @@ fn spec(target: HookTarget, root: &Path) -> Result<Spec, AgentError> {
         // https://code.claude.com/docs/en/hooks
         HookTarget::Claude => Spec {
             file: ".claude/settings.local.json",
+            variable: "${CLAUDE_PROJECT_DIR:-.}",
             input: "${CLAUDE_PROJECT_DIR:-.}".into(),
             matcher: "Edit|Write",
             command: "wright agent hook post-edit --",
@@ -43,6 +47,7 @@ fn spec(target: HookTarget, root: &Path) -> Result<Spec, AgentError> {
         // project's path below it.
         HookTarget::Codex => Spec {
             file: ".codex/hooks.json",
+            variable: GIT_TOPLEVEL,
             input: git_anchor(root)?,
             matcher: "apply_patch",
             command: "wright agent hook post-edit --harness codex --",
@@ -88,21 +93,23 @@ fn git_anchor(root: &Path) -> Result<String, AgentError> {
 }
 
 /// A shell word for the entry's command line. A token that starts with the
-/// project directory variable keeps the variable expandable.
-fn shell_word(input: &str, token: &str) -> String {
+/// project directory keeps `variable` expandable; every other character of
+/// the word stays literal.
+fn shell_word(variable: &str, input: &str, token: &str) -> String {
     let safe = |c: char| c.is_ascii_alphanumeric() || "-_./=:,@%+".contains(c);
     if !token.is_empty() && token.chars().all(safe) {
         return token.to_string();
     }
     if let Some(rest) = token.strip_prefix(input) {
+        let below = input.strip_prefix(variable).unwrap_or_default();
         let mut quoted = String::new();
-        for c in rest.chars() {
+        for c in below.chars().chain(rest.chars()) {
             if "\\\"$`".contains(c) {
                 quoted.push('\\');
             }
             quoted.push(c);
         }
-        return format!("\"{input}{quoted}\"");
+        return format!("\"{variable}{quoted}\"");
     }
     format!("'{}'", token.replace('\'', r"'\''"))
 }
@@ -113,7 +120,7 @@ fn generated_hook(spec: &Spec, stored: &Stored) -> Value {
             stored
                 .tokens
                 .iter()
-                .map(|token| shell_word(&spec.input, token)),
+                .map(|token| shell_word(spec.variable, &spec.input, token)),
         )
         .collect::<Vec<_>>()
         .join(" ");

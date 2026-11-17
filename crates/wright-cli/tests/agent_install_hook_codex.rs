@@ -292,6 +292,24 @@ fn a_project_below_the_git_root_stores_its_path_and_checks_the_real_program() {
 }
 
 #[test]
+fn a_project_directory_with_shell_characters_is_stored_literally() {
+    let root = project();
+    let sub = root.join("a b").join("c$d\"e");
+    std::fs::create_dir_all(&sub).unwrap();
+    std::fs::rename(root.join("session.ws"), sub.join("session.ws")).unwrap();
+    assert!(install(&sub, &GIVEN).status.success());
+    break_program(&sub);
+    let broken = run_hook(
+        &sub,
+        &patch_event(&sub, "*** Update File: session.ws\n@@\n-x\n+y"),
+    );
+    let text = context(&broken);
+    assert!(text.contains("unknown-rule-section"), "{text}");
+    assert!(!text.contains("input-io"), "{text}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn post_edit_without_a_readable_path_checks_the_whole_program() {
     let project = project();
     assert!(install(&project, &GIVEN).status.success());
