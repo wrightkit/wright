@@ -431,15 +431,22 @@ pub(crate) struct AgentHookArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum AgentHookEvent {
-    /// Check the program after an `Edit` or `Write` tool call. Reads Claude
-    /// Code's `PostToolUse` JSON from stdin. Exits 2 with the program's
-    /// errors on stderr, 0 with no output when there are none or the file is not in
-    /// the program, and 1 when Wright itself fails.
+    /// Check the program after an edit tool call. Reads the harness's
+    /// `PostToolUse` JSON from stdin. Claude Code: exits 2 with the program's
+    /// errors on stderr. Codex: exits 0 with the errors as `additionalContext`
+    /// JSON on stdout. Both: exit 0 with no output when there are no errors or
+    /// the edited file is not in the program, and exit 1 when Wright itself
+    /// fails.
     PostEdit(AgentHookCheckArgs),
 }
 
 #[derive(Debug, Args)]
 pub(crate) struct AgentHookCheckArgs {
+    /// The harness that runs the hook, as stored by `wright agent install
+    /// --hook`.
+    #[arg(long, value_enum, default_value_t = HookTarget::Claude)]
+    pub(crate) harness: HookTarget,
+
     /// After `--`: the check input, then its loading options, as stored by
     /// `wright agent install --hook`.
     #[arg(last = true, value_name = "INPUT [OPTIONS]")]
@@ -476,6 +483,8 @@ pub(crate) enum McpTarget {
 pub(crate) enum HookTarget {
     /// Claude Code: `.claude/settings.local.json`.
     Claude,
+    /// Codex CLI: `.codex/hooks.json`, loaded for trusted projects only.
+    Codex,
 }
 
 #[derive(Debug, Args)]
@@ -502,8 +511,9 @@ pub(crate) struct AgentInstallArgs {
     #[arg(long, value_enum, value_name = "TARGET")]
     pub(crate) mcp: Option<McpTarget>,
 
-    /// Also register a hook that checks the program after each `Edit` or
-    /// `Write` of the agent, in this harness's project-local settings (#1098).
+    /// Also register a hook that checks the program after each edit of the
+    /// agent (`Edit`/`Write` in Claude Code, `apply_patch` in Codex), in this
+    /// harness's project-local settings (#1098, #1109).
     #[arg(long, value_enum, value_name = "TARGET")]
     pub(crate) hook: Option<HookTarget>,
 

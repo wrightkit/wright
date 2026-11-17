@@ -307,7 +307,7 @@ pub(crate) fn run(args: &AgentArgs) -> Result<u8, AgentError> {
             Ok(exit::SUCCESS)
         }
         Some(AgentSubcommand::Hook(hook_args)) => match &hook_args.event {
-            AgentHookEvent::PostEdit(check) => Ok(hook::post_edit(&check.check)),
+            AgentHookEvent::PostEdit(check) => Ok(hook::post_edit(check.harness, &check.check)),
         },
         Some(AgentSubcommand::Tools(tools_args)) => {
             let document = match tools_args.format {

@@ -222,9 +222,10 @@ refused; writes replace the file atomically.
 To remove the server, delete the `wright` entry from the config file (and the
 guide directory if installed); to update, re-run with `--force`.
 
-### Edit hook (`--hook`, #1098)
+### Edit hook (`--hook`, #1098, #1109)
 
-`wright agent install --hook claude` adds one `PostToolUse` entry with the
+`--hook` takes `claude` or `codex`. The install rules below are the same for
+both; the differences are in [Codex](#codex-hook). `wright agent install --hook claude` adds one `PostToolUse` entry with the
 matcher `Edit|Write` to `.claude/settings.local.json`, so Claude Code checks the
 program after each edit the agent makes. Nothing is written until the user runs
 the command, and the shared `.claude/settings.json` is not touched. It takes the
@@ -258,7 +259,39 @@ Claude Code's hook JSON from stdin and takes `tool_input.file_path`:
 Exit 2 is the only code Claude Code shows to the model; exit 1 shows the failure
 to the user. Only errors are reported: warnings, notes, and lint findings are
 not. When the program does not load, its files are unknown, so the load failure
-is reported for any edited file. Edits made through `Bash` are not seen.
+is reported for any edited file. When the payload names no file, the check runs
+without the file filter; a clean program still adds nothing. Edits made through
+`Bash` are not seen.
+
+#### Codex hook
+
+`wright agent install --hook codex` writes the same `PostToolUse` group to
+`.codex/hooks.json`, with the matcher `apply_patch`, the tool Codex edits files
+with. Codex loads project hooks only for a trusted project, and runs a hook only
+after it is trusted (`/hooks` in the CLI). Codex sets no project directory
+variable, so the stored input anchors to `$(git rev-parse --show-toplevel)`; the
+project must be a git repository.
+
+```sh
+wright agent install --hook codex -- src/main.opy --kind opy --locale zh-CN
+```
+
+The entry runs `wright agent hook post-edit --harness codex -- INPUT [OPTIONS]`.
+The payload has no path field: the patch is in `tool_input.command`, and the
+files are the `*** Add File:`, `Update File:`, `Delete File:`, and `Move to:`
+headers, resolved against the payload's `cwd`. The check reports when any of
+them is in the program.
+
+| Situation | Exit | Output |
+| --- | --- | --- |
+| The check reports errors in a program that contains an edited file | 0 | JSON on stdout: `hookSpecificOutput.additionalContext` holds the errors, which Codex adds as developer context |
+| No errors, or no edited file is in the program | 0 | None |
+| Wright itself fails, or the hook input is not JSON | 1 | The failure on stderr |
+
+Sources: the [Codex hooks reference](https://developers.openai.com/codex/hooks)
+and a payload captured from `codex exec` 0.169.0. A live `codex exec` session on
+an OPY project showed the model receiving the `unknown-member` diagnostic after
+an edit that broke the program.
 
 ## `wright agent tools`: client tool definitions (#535)
 
