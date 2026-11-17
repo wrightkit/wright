@@ -19,18 +19,18 @@ const TIMEOUT_SECONDS: u64 = 60;
 struct Spec {
     file: &'static str,
     /// The harness's project directory, as a shell expression.
-    input: &'static str,
+    input: String,
     matcher: &'static str,
     /// The command's prefix up to the input and options.
     command: &'static str,
 }
 
-fn spec(target: HookTarget) -> Spec {
-    match target {
+fn spec(target: HookTarget, root: &Path) -> Result<Spec, AgentError> {
+    Ok(match target {
         // https://code.claude.com/docs/en/hooks
         HookTarget::Claude => Spec {
             file: ".claude/settings.local.json",
-            input: "${CLAUDE_PROJECT_DIR:-.}",
+            input: "${CLAUDE_PROJECT_DIR:-.}".into(),
             matcher: "Edit|Write",
             command: "wright agent hook post-edit --",
         },
@@ -39,14 +39,15 @@ fn spec(target: HookTarget) -> Spec {
         // `.codex/hooks.json` and load only for a trusted project. Edits go
         // through `apply_patch`. A command runs in the session's working
         // directory and no project variable is set, so the input anchors to
-        // the repository root, as the page's own example does.
+        // the repository root, as the page's own example does, plus the
+        // project's path below it.
         HookTarget::Codex => Spec {
             file: ".codex/hooks.json",
-            input: "$(git rev-parse --show-toplevel)",
+            input: git_anchor(root)?,
             matcher: "apply_patch",
             command: "wright agent hook post-edit --harness codex --",
         },
-    }
+    })
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -55,6 +56,35 @@ pub(crate) enum HookStatus {
     Replaced(PathBuf),
     UpToDate(PathBuf),
     DryRun(PathBuf),
+}
+
+const GIT_TOPLEVEL: &str = "$(git rev-parse --show-toplevel)";
+
+/// The Codex anchor: the git toplevel, then the project root's path below it.
+fn git_anchor(root: &Path) -> Result<String, AgentError> {
+    let refused = || {
+        AgentError::Rejected(
+            "Codex sets no project directory variable, so the hook needs a git repository to find the project; run `git init` or use a project inside one".into(),
+        )
+    };
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(root)
+        .output()
+        .map_err(|_| refused())?;
+    if !output.status.success() {
+        return Err(refused());
+    }
+    let top = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    let below = std::fs::canonicalize(root)
+        .ok()
+        .zip(std::fs::canonicalize(top).ok())
+        .and_then(|(root, top)| root.strip_prefix(top).ok().map(Path::to_path_buf))
+        .ok_or_else(refused)?;
+    Ok(match below.to_string_lossy() {
+        below if below.is_empty() => GIT_TOPLEVEL.to_string(),
+        below => format!("{GIT_TOPLEVEL}/{below}"),
+    })
 }
 
 /// A shell word for the entry's command line. A token that starts with the
@@ -83,7 +113,7 @@ fn generated_hook(spec: &Spec, stored: &Stored) -> Value {
             stored
                 .tokens
                 .iter()
-                .map(|token| shell_word(spec.input, token)),
+                .map(|token| shell_word(&spec.input, token)),
         )
         .collect::<Vec<_>>()
         .join(" ");
@@ -107,8 +137,8 @@ pub(crate) fn install(
     force: bool,
     dry_run: bool,
 ) -> Result<HookStatus, AgentError> {
-    let spec = spec(target);
-    let stored = Stored::new(spec.input, root, check);
+    let spec = spec(target, root)?;
+    let stored = Stored::new(&spec.input, root, check);
     let config = stored.session_config()?;
     if !force && let Some(failure) = load_failure(config) {
         return Err(AgentError::Rejected(format!(

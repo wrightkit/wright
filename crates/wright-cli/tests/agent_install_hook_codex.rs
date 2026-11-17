@@ -37,6 +37,12 @@ fn project() -> PathBuf {
     dir
 }
 
+/// Leaves the project outside any repository; the system temp directory is
+/// not inside one.
+fn remove_git(project: &Path) {
+    std::fs::remove_dir_all(project.join(".git")).unwrap();
+}
+
 fn install(project: &Path, args: &[&str]) -> Output {
     Command::new(wright())
         .args(["agent", "install", "--hook", "codex", "--no-guide"])
@@ -233,6 +239,56 @@ fn post_edit_ignores_files_outside_a_program_that_has_errors() {
     assert_eq!(outside.status.code(), Some(0));
     assert!(outside.stdout.is_empty() && outside.stderr.is_empty());
     let _ = std::fs::remove_dir_all(&project);
+}
+
+#[test]
+fn install_outside_a_git_repository_refuses_and_writes_nothing() {
+    let project = project();
+    remove_git(&project);
+    for extra in [&[][..], &["--force"][..]] {
+        let output = install(&project, &[extra, &GIVEN].concat());
+        assert_eq!(output.status.code(), Some(1));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("git repository"), "{stderr}");
+        assert!(!project.join(".codex").exists());
+    }
+    let _ = std::fs::remove_dir_all(&project);
+}
+
+#[test]
+fn a_project_below_the_git_root_stores_its_path_and_checks_the_real_program() {
+    let root = project();
+    let sub = root.join("sub");
+    std::fs::create_dir_all(&sub).unwrap();
+    std::fs::rename(root.join("session.ws"), sub.join("session.ws")).unwrap();
+    std::fs::write(sub.join("lint.toml"), "").unwrap();
+    let output = install(
+        &sub,
+        &[&GIVEN[..], &["--lint-config", "lint.toml"]].concat(),
+    );
+    assert!(output.status.success(), "{output:?}");
+    let command = config(&sub)["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        command.contains("--lint-config \"$(git rev-parse --show-toplevel)/sub/lint.toml\"")
+            && command.ends_with(" \"$(git rev-parse --show-toplevel)/sub/session.ws\""),
+        "{command}"
+    );
+
+    let event = patch_event(&sub, "*** Update File: session.ws\n@@\n-x\n+y");
+    let clean = run_hook(&sub, &event);
+    assert!(
+        clean.stdout.is_empty() && clean.stderr.is_empty(),
+        "{clean:?}"
+    );
+    break_program(&sub);
+    let broken = run_hook(&sub, &event);
+    let text = context(&broken);
+    assert!(text.contains("unknown-rule-section"), "{text}");
+    assert!(!text.contains("input-io"), "{text}");
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]

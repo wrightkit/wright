@@ -225,7 +225,9 @@ guide directory if installed); to update, re-run with `--force`.
 ### Edit hook (`--hook`, #1098, #1109)
 
 `--hook` takes `claude` or `codex`. The install rules below are the same for
-both; the differences are in [Codex](#codex-hook). `wright agent install --hook claude` adds one `PostToolUse` entry with the
+both; the differences are in [Codex](#codex-hook).
+
+`wright agent install --hook claude` adds one `PostToolUse` entry with the
 matcher `Edit|Write` to `.claude/settings.local.json`, so Claude Code checks the
 program after each edit the agent makes. Nothing is written until the user runs
 the command, and the shared `.claude/settings.json` is not touched. It takes the
@@ -269,8 +271,14 @@ without the file filter; a clean program still adds nothing. Edits made through
 `.codex/hooks.json`, with the matcher `apply_patch`, the tool Codex edits files
 with. Codex loads project hooks only for a trusted project, and runs a hook only
 after it is trusted (`/hooks` in the CLI). Codex sets no project directory
-variable, so the stored input anchors to `$(git rev-parse --show-toplevel)`; the
-project must be a git repository.
+variable, so the stored input anchors to `$(git rev-parse --show-toplevel)`.
+That shell expression is stored for the input and for the anchored
+`--lint-config` and `--rule-file` paths. When the project root is below the
+toplevel, its path relative to the toplevel follows the expression, for example
+`$(git rev-parse --show-toplevel)/sub/src/main.opy`. Install resolves the
+toplevel and compares canonical paths. When the project is not in a git
+repository, install names the cause, writes nothing, and exits 1; `--force` does
+not change this.
 
 ```sh
 wright agent install --hook codex -- src/main.opy --kind opy --locale zh-CN
