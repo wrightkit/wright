@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.46.0](https://github.com/wrightkit/wright/compare/v0.45.0...v0.46.0) (2026-11-17)
+
+
+### Features
+
+* **agent:** check each Codex edit through an opt-in hook ([#1112](https://github.com/wrightkit/wright/issues/1112)) ([2c7e7a6](https://github.com/wrightkit/wright/commit/2c7e7a665717c717c00b0d3c1499688c94e70896)), closes [#1109](https://github.com/wrightkit/wright/issues/1109)
+* **inspect:** show a source excerpt with each refs reference ([#1111](https://github.com/wrightkit/wright/issues/1111)) ([07c0148](https://github.com/wrightkit/wright/commit/07c0148fc0ad5429e462fc8ea175e90cde940704)), closes [#1099](https://github.com/wrightkit/wright/issues/1099)
+
 ## [0.45.0](https://github.com/wrightkit/wright/compare/v0.44.0...v0.45.0) (2026-11-17)
 
 
