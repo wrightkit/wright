@@ -4,6 +4,7 @@ use serde_json::{Map, Value, json};
 
 use super::AgentError;
 use crate::cli::McpTarget;
+use crate::serve::ServeArgs;
 
 const SERVER_NAME: &str = "wright";
 const COMMAND: &str = "wright";
@@ -25,6 +26,13 @@ struct Layout {
 }
 
 impl McpTarget {
+    fn name(self) -> String {
+        clap::ValueEnum::to_possible_value(&self)
+            .expect("every target has a name")
+            .get_name()
+            .to_string()
+    }
+
     fn layout(self) -> Layout {
         match self {
             McpTarget::Claude => Layout {
@@ -49,16 +57,69 @@ impl McpTarget {
     }
 }
 
-fn generated_entry(layout: &Layout) -> Value {
+/// The stored server arguments, in the form `INPUT [serve options]` the user
+/// gives after `--`. The input is optional and defaults to the project
+/// directory; a relative input resolves against the harness's project
+/// directory variable.
+struct Stored {
+    args: Vec<String>,
+    probe: Vec<String>,
+    input: PathBuf,
+}
+
+fn stored(layout: &Layout, serve: &[String]) -> Stored {
+    let (input, options) = match serve.split_first() {
+        Some((first, rest)) if !first.starts_with('-') => (first.as_str(), rest),
+        _ => (".", serve),
+    };
+    let anchored = match input.trim_start_matches("./") {
+        _ if Path::new(input).is_absolute() => input.to_string(),
+        "" | "." => layout.input.to_string(),
+        relative => format!("{}/{relative}", layout.input),
+    };
+    let mut args: Vec<String> = SERVE_ARGS.map(String::from).into();
+    args.extend(options.iter().cloned());
+    let mut probe = vec!["--transport".into(), "mcp".into()];
+    probe.extend(options.iter().cloned());
+    probe.push(input.into());
+    args.push(anchored);
+    Stored {
+        args,
+        probe,
+        input: input.into(),
+    }
+}
+
+#[derive(clap::Parser)]
+#[command(no_binary_name = true)]
+struct StoredServe {
+    #[command(flatten)]
+    serve: ServeArgs,
+}
+
+/// Loads the program the way `serve` does at startup, with the options the
+/// entry will store. `Ok(None)` means the program loads.
+fn load_failure(root: &Path, stored: &Stored) -> Result<Option<String>, AgentError> {
+    let parsed = <StoredServe as clap::Parser>::try_parse_from(&stored.probe)
+        .map_err(|error| AgentError::Usage(error.to_string()))?;
+    let mut config = parsed.serve.session_config().map_err(AgentError::Usage)?;
+    config.input = wright_driver::config::InputSpec::Path(root.join(&stored.input));
+    let failure = |diagnostic: wright_driver::Diagnostic| {
+        format!("{}: {}", diagnostic.code, diagnostic.message)
+    };
+    let loaded = wright_driver::CompilerSession::new(config)
+        .map_err(failure)
+        .and_then(|mut session| session.load().map(drop).map_err(failure));
+    Ok(loaded.err())
+}
+
+fn generated_entry(layout: &Layout, stored: &Stored) -> Value {
     let mut entry = Map::new();
     if layout.typed {
         entry.insert("type".into(), json!("stdio"));
     }
     entry.insert("command".into(), json!(COMMAND));
-    entry.insert(
-        "args".into(),
-        json!([SERVE_ARGS[0], SERVE_ARGS[1], SERVE_ARGS[2], layout.input]),
-    );
+    entry.insert("args".into(), json!(stored.args));
     Value::Object(entry)
 }
 
@@ -141,10 +202,18 @@ fn write_config(path: &Path, config: &Value) -> Result<(), AgentError> {
 pub(crate) fn install(
     root: &Path,
     target: McpTarget,
+    serve: &[String],
     force: bool,
     dry_run: bool,
 ) -> Result<McpStatus, AgentError> {
     let layout = target.layout();
+    let stored = stored(&layout, serve);
+    if !force && let Some(failure) = load_failure(root, &stored)? {
+        return Err(AgentError::Rejected(format!(
+            "the Wright MCP server would not load the project ({failure}); pass its input and options after `--`, for example `wright agent install --mcp {} -- src/main.opy --kind opy`, or pass --force to register it anyway",
+            target.name()
+        )));
+    }
     let path = root.join(layout.file);
     ensure_not_linked(root, &path)?;
     let mut config = read_config(&path)?.unwrap_or_else(|| json!({}));
@@ -172,7 +241,7 @@ pub(crate) fn install(
             path.display()
         )));
     }
-    let entry = generated_entry(&layout);
+    let entry = generated_entry(&layout, &stored);
     let existing = servers.get(SERVER_NAME);
     if existing == Some(&entry) {
         return Ok(McpStatus::UpToDate(path));
@@ -205,6 +274,11 @@ mod tests {
             std::env::temp_dir().join(format!("wright-mcp-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("session.ws"),
+            include_str!("../../../../tests/fixtures/workshop/synthetic/basic-rule.ws"),
+        )
+        .unwrap();
         dir
     }
 
@@ -240,7 +314,7 @@ mod tests {
             let root = scratch(&format!("fmt-{key}-{typed}-{}", input.len()));
             let path = root.join(file);
             assert_eq!(
-                install(&root, target, false, false),
+                install(&root, target, &[], false, false),
                 Ok(McpStatus::Created(path.clone()))
             );
             let entry = read(&root, file)[key][SERVER_NAME].clone();
@@ -248,7 +322,7 @@ mod tests {
             assert_eq!(entry["args"], json!(["serve", "--transport", "mcp", input]));
             assert_eq!(entry.get("type").is_some(), typed);
             assert_eq!(
-                install(&root, target, false, false),
+                install(&root, target, &[], false, false),
                 Ok(McpStatus::UpToDate(path))
             );
             assert_eq!(read(&root, file)[key].as_object().unwrap().len(), 1);
@@ -264,7 +338,7 @@ mod tests {
             "extra": [1, 2],
         });
         std::fs::write(root.join(".mcp.json"), original.to_string()).unwrap();
-        assert!(install(&root, McpTarget::Claude, false, false).is_ok());
+        assert!(install(&root, McpTarget::Claude, &[], false, false).is_ok());
         let installed = read(&root, ".mcp.json");
         assert_eq!(
             installed["mcpServers"]["other"],
@@ -285,21 +359,21 @@ mod tests {
         }}});
         std::fs::write(&path, custom.to_string()).unwrap();
         assert!(matches!(
-            install(&root, McpTarget::Claude, false, false),
+            install(&root, McpTarget::Claude, &[], false, false),
             Err(AgentError::Rejected(_))
         ));
         assert_eq!(read(&root, ".mcp.json"), custom);
         assert!(matches!(
-            install(&root, McpTarget::Claude, false, true),
+            install(&root, McpTarget::Claude, &[], false, true),
             Err(AgentError::Rejected(_))
         ));
         assert_eq!(
-            install(&root, McpTarget::Claude, true, true),
+            install(&root, McpTarget::Claude, &[], true, true),
             Ok(McpStatus::DryRun(path.clone()))
         );
         assert_eq!(read(&root, ".mcp.json"), custom);
         assert_eq!(
-            install(&root, McpTarget::Claude, true, false),
+            install(&root, McpTarget::Claude, &[], true, false),
             Ok(McpStatus::Replaced(path))
         );
         assert!(
@@ -316,7 +390,7 @@ mod tests {
         let other = json!({"mcpServers": {"my-wright": {"command": "wright", "args": ["serve", "--transport", "mcp"]}}});
         std::fs::write(root.join(".mcp.json"), other.to_string()).unwrap();
         assert!(matches!(
-            install(&root, McpTarget::Claude, true, false),
+            install(&root, McpTarget::Claude, &[], true, false),
             Err(AgentError::Rejected(_))
         ));
         assert_eq!(read(&root, ".mcp.json"), other);
@@ -328,12 +402,12 @@ mod tests {
         let root = scratch("bad");
         std::fs::write(root.join(".mcp.json"), "{ // comment\n}").unwrap();
         assert!(matches!(
-            install(&root, McpTarget::Claude, true, false),
+            install(&root, McpTarget::Claude, &[], true, false),
             Err(AgentError::Rejected(_))
         ));
         let clean = scratch("dry");
         assert!(matches!(
-            install(&clean, McpTarget::Cursor, false, true),
+            install(&clean, McpTarget::Cursor, &[], false, true),
             Ok(McpStatus::DryRun(_))
         ));
         assert!(!clean.join(".cursor").exists());
@@ -349,7 +423,7 @@ mod tests {
         std::fs::write(outside.join("real.json"), "{}").unwrap();
         std::os::unix::fs::symlink(outside.join("real.json"), root.join(".mcp.json")).unwrap();
         assert!(matches!(
-            install(&root, McpTarget::Claude, true, false),
+            install(&root, McpTarget::Claude, &[], true, false),
             Err(AgentError::Rejected(_))
         ));
         assert_eq!(
@@ -358,15 +432,112 @@ mod tests {
         );
         std::os::unix::fs::symlink(&outside, root.join(".cursor")).unwrap();
         assert!(matches!(
-            install(&root, McpTarget::Cursor, false, false),
+            install(&root, McpTarget::Cursor, &[], false, false),
             Err(AgentError::Rejected(_))
         ));
         assert!(!outside.join("mcp.json").exists());
         let ok = scratch("links-ok");
-        assert!(install(&ok, McpTarget::Claude, false, false).is_ok());
-        assert_eq!(std::fs::read_dir(&ok).unwrap().count(), 1);
+        assert!(install(&ok, McpTarget::Claude, &[], false, false).is_ok());
+        assert_eq!(std::fs::read_dir(&ok).unwrap().count(), 2);
         for dir in [&root, &outside, &ok] {
             let _ = std::fs::remove_dir_all(dir);
         }
+    }
+
+    fn opts(args: &[&str]) -> Vec<String> {
+        args.iter().map(|arg| arg.to_string()).collect()
+    }
+
+    #[test]
+    fn stores_the_input_and_options_and_treats_them_as_part_of_the_entry() {
+        let root = scratch("options");
+        let path = root.join(".mcp.json");
+        let given = opts(&["session.ws", "--kind", "workshop", "--locale", "en-US"]);
+        assert_eq!(
+            install(&root, McpTarget::Claude, &given, false, true),
+            Ok(McpStatus::DryRun(path.clone()))
+        );
+        assert!(!path.exists());
+        assert_eq!(
+            install(&root, McpTarget::Claude, &given, false, false),
+            Ok(McpStatus::Created(path.clone()))
+        );
+        assert_eq!(
+            read(&root, ".mcp.json")["mcpServers"]["wright"]["args"],
+            json!([
+                "serve",
+                "--transport",
+                "mcp",
+                "--kind",
+                "workshop",
+                "--locale",
+                "en-US",
+                "${CLAUDE_PROJECT_DIR:-.}/session.ws"
+            ])
+        );
+        assert_eq!(
+            install(&root, McpTarget::Claude, &given, false, false),
+            Ok(McpStatus::UpToDate(path.clone()))
+        );
+        let other = opts(&["session.ws", "--kind", "workshop"]);
+        assert!(matches!(
+            install(&root, McpTarget::Claude, &other, false, false),
+            Err(AgentError::Rejected(_))
+        ));
+        assert_eq!(
+            install(&root, McpTarget::Claude, &other, true, false),
+            Ok(McpStatus::Replaced(path))
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn refuses_a_project_that_does_not_load_unless_forced() {
+        let root = scratch("unloadable");
+        std::fs::write(root.join("main.opy"), "").unwrap();
+        let path = root.join(".mcp.json");
+        let Err(AgentError::Rejected(message)) =
+            install(&root, McpTarget::Claude, &[], false, false)
+        else {
+            panic!("an ambiguous project must be refused");
+        };
+        assert!(message.contains("input-kind-ambiguous"), "{message}");
+        assert!(message.contains("-- src/main.opy"), "{message}");
+        assert!(!path.exists());
+        assert_eq!(
+            install(
+                &root,
+                McpTarget::Claude,
+                &opts(&["session.ws"]),
+                false,
+                true
+            ),
+            Ok(McpStatus::DryRun(path.clone()))
+        );
+        assert_eq!(
+            install(&root, McpTarget::Claude, &[], true, false),
+            Ok(McpStatus::Created(path))
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rejects_options_serve_would_not_accept() {
+        let root = scratch("bad-options");
+        for bad in [
+            &["--kind", "nope"][..],
+            &["--transport", "stdio"],
+            &["a", "b"],
+        ] {
+            assert!(
+                matches!(
+                    install(&root, McpTarget::Claude, &opts(bad), false, false),
+                    Err(AgentError::Usage(_))
+                ),
+                "{bad:?}"
+            );
+        }
+        assert!(!root.join(".mcp.json").exists());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
