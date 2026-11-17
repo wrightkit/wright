@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.44.0](https://github.com/wrightkit/wright/compare/v0.43.2...v0.44.0) (2026-11-17)
+
+
+### Features
+
+* **trace:** attach provider phase timings to LPP requests ([#1101](https://github.com/wrightkit/wright/issues/1101)) ([bf596a4](https://github.com/wrightkit/wright/commit/bf596a4af6ffaef29aa315b4211a0320fffd1e94)), closes [#1088](https://github.com/wrightkit/wright/issues/1088)
+
 ## [0.43.2](https://github.com/wrightkit/wright/compare/v0.43.1...v0.43.2) (2026-11-16)
 
 
