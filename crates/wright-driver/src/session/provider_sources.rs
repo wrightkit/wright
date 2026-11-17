@@ -214,12 +214,12 @@ mod tests {
             reads.duration_ns < parse.duration_ns,
             "source.read times the reads, not the overlapping parse"
         );
-        assert!(reads.facts.contains(&("files", files.len().into())));
+        assert!(reads.facts.contains(&("files".into(), files.len().into())));
         let bytes: usize = sources
             .iter()
             .filter_map(|s| s.as_ref().ok())
             .map(String::len)
             .sum();
-        assert!(reads.facts.contains(&("bytes", bytes.into())));
+        assert!(reads.facts.contains(&("bytes".into(), bytes.into())));
     }
 }
