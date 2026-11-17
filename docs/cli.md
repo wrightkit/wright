@@ -64,8 +64,9 @@ See the [versioned Wright Agent Contract](agent-contract.md).
 See [architecture, commands, and conversion](cli/commands.md): `agent`
 installs the canonical Wright agent guide into a project's agent skills
 directory, and `--mcp <target>` registers Wright's MCP server in a harness's
-project-local config; `--hook claude` adds a Claude Code `PostToolUse` hook that
-runs `wright agent hook post-edit` after each `Edit` or `Write`; `-- INPUT
+project-local config; `--hook claude|codex` adds a `PostToolUse` hook that
+runs `wright agent hook post-edit` after each edit (`Edit` or `Write` in Claude
+Code, `apply_patch` in Codex); `-- INPUT
 [OPTIONS]` stores the server's or check's input and loading options.
 
 ## Determinism

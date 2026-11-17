@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use clap::ValueEnum;
 use serde_json::{Value, json};
 use wright_driver::result::exit;
 
@@ -10,11 +11,49 @@ use super::stored::{Stored, load_failure, session_config};
 use crate::cli::HookTarget;
 use crate::present::RenderContext;
 
-const FILE: &str = ".claude/settings.local.json";
-const INPUT: &str = "${CLAUDE_PROJECT_DIR:-.}";
-const COMMAND: &str = "wright agent hook post-edit --";
-const MATCHER: &str = "Edit|Write";
+const COMMAND: &str = "wright agent hook post-edit ";
 const TIMEOUT_SECONDS: u64 = 60;
+
+/// What differs between harnesses at install time. Both register a
+/// `PostToolUse` command group in a JSON file.
+struct Spec {
+    file: &'static str,
+    /// The shell expression for the harness's project directory.
+    variable: &'static str,
+    /// The text stored tokens are anchored to: the expression, then any
+    /// literal path below it.
+    input: String,
+    matcher: &'static str,
+    /// The command's prefix up to the input and options.
+    command: &'static str,
+}
+
+fn spec(target: HookTarget, root: &Path) -> Result<Spec, AgentError> {
+    Ok(match target {
+        // https://code.claude.com/docs/en/hooks
+        HookTarget::Claude => Spec {
+            file: ".claude/settings.local.json",
+            variable: "${CLAUDE_PROJECT_DIR:-.}",
+            input: "${CLAUDE_PROJECT_DIR:-.}".into(),
+            matcher: "Edit|Write",
+            command: "wright agent hook post-edit --",
+        },
+        // https://developers.openai.com/codex/hooks (redirects to
+        // learn.chatgpt.com/docs/hooks): project hooks live in
+        // `.codex/hooks.json` and load only for a trusted project. Edits go
+        // through `apply_patch`. A command runs in the session's working
+        // directory and no project variable is set, so the input anchors to
+        // the repository root, as the page's own example does, plus the
+        // project's path below it.
+        HookTarget::Codex => Spec {
+            file: ".codex/hooks.json",
+            variable: GIT_TOPLEVEL,
+            input: git_anchor(root)?,
+            matcher: "apply_patch",
+            command: "wright agent hook post-edit --harness codex --",
+        },
+    })
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum HookStatus {
@@ -24,29 +63,65 @@ pub(crate) enum HookStatus {
     DryRun(PathBuf),
 }
 
+const GIT_TOPLEVEL: &str = "$(git rev-parse --show-toplevel)";
+
+/// The Codex anchor: the git toplevel, then the project root's path below it.
+fn git_anchor(root: &Path) -> Result<String, AgentError> {
+    let refused = || {
+        AgentError::Rejected(
+            "Codex sets no project directory variable, so the hook needs a git repository to find the project; run `git init` or use a project inside one".into(),
+        )
+    };
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(root)
+        .output()
+        .map_err(|_| refused())?;
+    if !output.status.success() {
+        return Err(refused());
+    }
+    let top = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    let below = std::fs::canonicalize(root)
+        .ok()
+        .zip(std::fs::canonicalize(top).ok())
+        .and_then(|(root, top)| root.strip_prefix(top).ok().map(Path::to_path_buf))
+        .ok_or_else(refused)?;
+    Ok(match below.to_string_lossy() {
+        below if below.is_empty() => GIT_TOPLEVEL.to_string(),
+        below => format!("{GIT_TOPLEVEL}/{below}"),
+    })
+}
+
 /// A shell word for the entry's command line. A token that starts with the
-/// project directory variable keeps the variable expandable.
-fn shell_word(token: &str) -> String {
+/// project directory keeps `variable` expandable; every other character of
+/// the word stays literal.
+fn shell_word(variable: &str, input: &str, token: &str) -> String {
     let safe = |c: char| c.is_ascii_alphanumeric() || "-_./=:,@%+".contains(c);
     if !token.is_empty() && token.chars().all(safe) {
         return token.to_string();
     }
-    if let Some(rest) = token.strip_prefix(INPUT) {
+    if let Some(rest) = token.strip_prefix(input) {
+        let below = input.strip_prefix(variable).unwrap_or_default();
         let mut quoted = String::new();
-        for c in rest.chars() {
+        for c in below.chars().chain(rest.chars()) {
             if "\\\"$`".contains(c) {
                 quoted.push('\\');
             }
             quoted.push(c);
         }
-        return format!("\"{INPUT}{quoted}\"");
+        return format!("\"{variable}{quoted}\"");
     }
     format!("'{}'", token.replace('\'', r"'\''"))
 }
 
-fn generated_hook(stored: &Stored) -> Value {
-    let command = std::iter::once(COMMAND.to_string())
-        .chain(stored.tokens.iter().map(|token| shell_word(token)))
+fn generated_hook(spec: &Spec, stored: &Stored) -> Value {
+    let command = std::iter::once(spec.command.to_string())
+        .chain(
+            stored
+                .tokens
+                .iter()
+                .map(|token| shell_word(spec.variable, &spec.input, token)),
+        )
         .collect::<Vec<_>>()
         .join(" ");
     json!({"type": "command", "command": command, "timeout": TIMEOUT_SECONDS})
@@ -64,19 +139,21 @@ fn hooks_of(group: &mut Value) -> Option<&mut Vec<Value>> {
 
 pub(crate) fn install(
     root: &Path,
-    _target: HookTarget,
+    target: HookTarget,
     check: &[String],
     force: bool,
     dry_run: bool,
 ) -> Result<HookStatus, AgentError> {
-    let stored = Stored::new(INPUT, root, check);
+    let spec = spec(target, root)?;
+    let stored = Stored::new(&spec.input, root, check);
     let config = stored.session_config()?;
     if !force && let Some(failure) = load_failure(config) {
         return Err(AgentError::Rejected(format!(
-            "the Wright edit hook would not load the project ({failure}); pass its input and options after `--`, for example `wright agent install --hook claude -- src/main.opy --kind opy`, or pass --force to register it anyway"
+            "the Wright edit hook would not load the project ({failure}); pass its input and options after `--`, for example `wright agent install --hook {} -- src/main.opy --kind opy`, or pass --force to register it anyway",
+            target.to_possible_value().expect("not skipped").get_name()
         )));
     }
-    let path = root.join(FILE);
+    let path = root.join(spec.file);
     ensure_not_linked(root, &path)?;
     let mut settings = read_config(&path)?.unwrap_or_else(|| json!({}));
     let wrong_shape = || {
@@ -96,10 +173,10 @@ pub(crate) fn install(
         .or_insert_with(|| json!([]))
         .as_array_mut()
         .ok_or_else(wrong_shape)?;
-    let hook = generated_hook(&stored);
+    let hook = generated_hook(&spec, &stored);
     let mut ours = Vec::new();
     for (group_index, group) in groups.iter_mut().enumerate() {
-        let matcher_matches = group.get("matcher") == Some(&json!(MATCHER));
+        let matcher_matches = group.get("matcher") == Some(&json!(spec.matcher));
         for (hook_index, existing) in hooks_of(group).into_iter().flatten().enumerate() {
             if is_wright_hook(existing) {
                 ours.push((
@@ -135,7 +212,7 @@ pub(crate) fn install(
     groups.retain(|_| !emptied.next().unwrap_or(false));
     groups.insert(
         first.min(groups.len()),
-        json!({"matcher": MATCHER, "hooks": [hook]}),
+        json!({"matcher": spec.matcher, "hooks": [hook]}),
     );
     if dry_run {
         return Ok(HookStatus::DryRun(path));
@@ -148,17 +225,49 @@ pub(crate) fn install(
     })
 }
 
-/// `PostToolUse` cannot undo the edit, and exit 2 is the only code that shows
-/// stderr to the model. Every failure of Wright itself therefore exits 1.
+/// `PostToolUse` cannot undo the edit. Wright's own failures exit 1 on
+/// stderr: for Claude Code exit 2 is the only code whose stderr reaches the
+/// model, so exit 1 keeps a failure of Wright from being taken for a finding.
 fn failed(message: &str) -> u8 {
     eprintln!("wright: {message}");
     exit::SOURCE_ERROR
 }
 
-/// Checks the program after an edit. Exit 2 with the program's errors on
-/// stderr; exit 0 with no output when there are none or the file is not in
-/// the program.
-pub(crate) fn post_edit(check: &[String]) -> u8 {
+/// The files an edit touched, as far as the harness's payload says.
+fn edited_files(harness: HookTarget, event: &Value) -> Vec<String> {
+    match harness {
+        HookTarget::Claude => event["tool_input"]["file_path"]
+            .as_str()
+            .map(String::from)
+            .into_iter()
+            .collect(),
+        // Captured from `codex exec` 0.169.0: `tool_name` is `apply_patch`,
+        // `tool_input.command` is the patch text, `cwd` is the session
+        // directory. The patch headers name each file, absolute or relative
+        // to `cwd`.
+        HookTarget::Codex => {
+            let cwd = Path::new(event["cwd"].as_str().unwrap_or("."));
+            event["tool_input"]["command"]
+                .as_str()
+                .into_iter()
+                .flat_map(str::lines)
+                .filter_map(|line| {
+                    ["Add File: ", "Update File: ", "Delete File: ", "Move to: "]
+                        .iter()
+                        .find_map(|header| line.strip_prefix("*** ")?.strip_prefix(header))
+                })
+                .map(|file| cwd.join(file.trim()).to_string_lossy().into_owned())
+                .collect()
+        }
+    }
+}
+
+/// Checks the program after an edit and answers in the harness's feedback
+/// form: Claude Code gets exit 2 with the program's errors on stderr; Codex
+/// gets exit 0 with `additionalContext` on stdout. Nothing is said when there
+/// are no errors or no edited file is in the program. When the payload names
+/// no file, the membership filter does not apply.
+pub(crate) fn post_edit(harness: HookTarget, check: &[String]) -> u8 {
     let input = match std::io::read_to_string(std::io::stdin()) {
         Ok(input) => input,
         Err(error) => return failed(&format!("could not read the hook input: {error}")),
@@ -166,9 +275,7 @@ pub(crate) fn post_edit(check: &[String]) -> u8 {
     let Ok(event) = serde_json::from_str::<Value>(&input) else {
         return failed("the hook input is not JSON");
     };
-    let Some(file) = event["tool_input"]["file_path"].as_str() else {
-        return exit::SUCCESS;
-    };
+    let files = edited_files(harness, &event);
     let mut config = match session_config(check) {
         Ok(config) => config,
         Err(error) => return failed(error.message()),
@@ -196,22 +303,38 @@ pub(crate) fn post_edit(check: &[String]) -> u8 {
             subject: None,
         };
         let (out, err) = crate::plain::render_lines(&envelope, &ctx);
-        for line in out.iter().chain(&err) {
-            eprintln!("{line}");
-        }
+        out.into_iter().chain(err).collect::<Vec<_>>().join("\n")
     };
     match envelope.exit {
-        exit::USAGE | exit::UNSUPPORTED | exit::INTERNAL => {
-            report();
-            exit::SOURCE_ERROR
-        }
+        exit::USAGE | exit::UNSUPPORTED | exit::INTERNAL => failed(&report()),
         _ if envelope.diagnostics.is_empty() => exit::SUCCESS,
         // When the program did not load, its membership is unknown and the
         // load failure is the likely effect of the edit.
-        _ if session.program_contains(file) == Some(false) => exit::SUCCESS,
-        _ => {
-            report();
-            exit::USAGE
+        _ if !files.is_empty()
+            && files
+                .iter()
+                .all(|file| session.program_contains(file) == Some(false)) =>
+        {
+            exit::SUCCESS
         }
+        _ => match harness {
+            HookTarget::Claude => {
+                eprintln!("{}", report());
+                exit::USAGE
+            }
+            HookTarget::Codex => {
+                // https://developers.openai.com/codex/hooks: PostToolUse
+                // `hookSpecificOutput.additionalContext` is added as developer
+                // context; the answer is verified by the live run in #1109.
+                println!(
+                    "{}",
+                    json!({"hookSpecificOutput": {
+                        "hookEventName": "PostToolUse",
+                        "additionalContext": report(),
+                    }})
+                );
+                exit::SUCCESS
+            }
+        },
     }
 }
