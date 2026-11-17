@@ -10,14 +10,14 @@
 //! map them through the shared `provider-refusal-<code>` classification
 //! (`crate::source_provider::provider_failure_code`).
 
-use std::sync::Arc;
-
 use crate::config::SessionConfig;
 use crate::input::InputTarget;
 use crate::opy_provider;
-use crate::trace::{Fact, Trace};
+use crate::trace::Trace;
 use wright_lpp::LanguageProvider;
-use wright_lpp::client::{ExchangeObserver, ExchangeRecord};
+
+mod phase_trace;
+use phase_trace::ExchangeTrace;
 
 /// The lowest LPP protocol version a connect may negotiate. `Entry`
 /// requests need 1.1 project loading; `Directory` targets need the 1.3
@@ -71,11 +71,14 @@ pub fn connect_provider(
 ) -> Result<ConnectedProvider, wright_lpp::ProviderError> {
     trace.in_span("provider.connect", || {
         let providers = resolved_registry(config, language_id)?;
-        let observer = exchange_observer(trace);
         let spawn = || {
-            let mut provider = trace.in_span("provider.spawn", || providers.spawn(language_id))?;
-            if let Some(observer) = &observer {
-                provider.set_exchange_observer(Arc::clone(observer));
+            let observer = ExchangeTrace::new(trace);
+            let mut provider = trace.in_span("provider.spawn", || match &observer {
+                Some(observer) => providers.spawn_with_env(language_id, &observer.environment()),
+                None => providers.spawn(language_id),
+            })?;
+            if let Some(observer) = observer {
+                provider.set_exchange_observer(observer);
             }
             Ok::<_, wright_lpp::ProviderError>(provider)
         };
@@ -117,31 +120,6 @@ pub fn connect_provider(
             initialize,
         })
     })
-}
-
-/// The transport observer that turns each LPP exchange into an
-/// `lpp.request` span, or `None` when the trace is disabled.
-fn exchange_observer(trace: &Trace) -> Option<Arc<dyn ExchangeObserver>> {
-    trace
-        .is_enabled()
-        .then(|| Arc::new(ExchangeTrace(trace.clone())) as Arc<dyn ExchangeObserver>)
-}
-
-struct ExchangeTrace(Trace);
-
-impl ExchangeObserver for ExchangeTrace {
-    fn exchanged(&self, record: &ExchangeRecord<'_>) {
-        let mut facts = vec![
-            ("method", Fact::from(record.method)),
-            ("requestBytes", Fact::from(record.request_bytes)),
-            ("responseBytes", Fact::from(record.response_bytes)),
-        ];
-        if let Some(error) = record.error {
-            facts.push(("error", Fact::from(error)));
-        }
-        self.0
-            .record("lpp.request", record.started, record.finished, facts);
-    }
 }
 
 /// The registry to spawn from: the session's configured providers, with
@@ -251,22 +229,27 @@ mod tests {
 
     #[test]
     fn failed_exchange_records_its_error_code() {
+        use crate::trace::Fact;
+        use wright_lpp::client::{ExchangeObserver, ExchangeRecord};
+
         let trace = Trace::enabled();
         let started = std::time::Instant::now();
-        ExchangeTrace(trace.clone()).exchanged(&ExchangeRecord {
-            method: "lpp/compile",
-            started,
-            finished: std::time::Instant::now(),
-            request_bytes: 10,
-            response_bytes: 0,
-            error: Some("provider-exited"),
-        });
+        ExchangeTrace::new(&trace)
+            .unwrap()
+            .exchanged(&ExchangeRecord {
+                method: "lpp/compile",
+                started,
+                finished: std::time::Instant::now(),
+                request_bytes: 10,
+                response_bytes: 0,
+                error: Some("provider-exited"),
+            });
         let report = trace.report().expect("enabled trace reports");
         let span = &report.spans[0];
         assert_eq!(span.name, "lpp.request");
         assert!(
             span.facts
-                .contains(&("error", Fact::Text("provider-exited".into())))
+                .contains(&("error".into(), Fact::Text("provider-exited".into())))
         );
     }
 }

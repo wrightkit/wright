@@ -3,11 +3,13 @@
 //! no recorder, so every span is a no-op and never reads the clock. The
 //! CLI owns rendering; this module only records.
 
+use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 /// A key fact attached to a span or to the trace environment.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(untagged)]
 pub enum Fact {
     Count(u64),
     Text(String),
@@ -43,11 +45,11 @@ impl From<String> for Fact {
 pub struct SpanReport {
     pub id: usize,
     pub parent: Option<usize>,
-    pub name: &'static str,
+    pub name: Cow<'static, str>,
     pub start_ns: u64,
     pub duration_ns: u64,
     pub failed: bool,
-    pub facts: Vec<(&'static str, Fact)>,
+    pub facts: Vec<(Cow<'static, str>, Fact)>,
 }
 
 /// A snapshot of one trace: the environment facts and every span in start
@@ -60,12 +62,12 @@ pub struct TraceReport {
 
 #[derive(Default)]
 struct SpanData {
-    name: &'static str,
+    name: Cow<'static, str>,
     parent: Option<usize>,
     started: Option<Instant>,
     finished: Option<Instant>,
     failed: bool,
-    facts: Vec<(&'static str, Fact)>,
+    facts: Vec<(Cow<'static, str>, Fact)>,
 }
 
 #[derive(Default)]
@@ -138,7 +140,7 @@ impl Trace {
         let id = state.spans.len();
         let parent = state.open.last().copied();
         state.spans.push(SpanData {
-            name,
+            name: name.into(),
             parent,
             started: Some(started),
             ..SpanData::default()
@@ -176,20 +178,48 @@ impl Trace {
         started: Instant,
         finished: Instant,
         facts: Vec<(&'static str, Fact)>,
-    ) {
-        let Some(recorder) = &self.recorder else {
-            return;
-        };
+    ) -> Option<usize> {
+        let recorder = self.recorder.as_ref()?;
         let mut state = recorder.lock();
         let parent = state.open.last().copied();
+        let id = state.spans.len();
         state.spans.push(SpanData {
-            name,
+            name: name.into(),
             parent,
             started: Some(started),
             finished: Some(finished),
             failed: false,
-            facts,
+            facts: facts
+                .into_iter()
+                .map(|(key, value)| (key.into(), value))
+                .collect(),
         });
+        Some(id)
+    }
+
+    pub(crate) fn record_child(
+        &self,
+        parent: usize,
+        name: String,
+        started: Instant,
+        finished: Instant,
+        facts: Vec<(String, Fact)>,
+    ) -> Option<usize> {
+        let recorder = self.recorder.as_ref()?;
+        let mut state = recorder.lock();
+        let id = state.spans.len();
+        state.spans.push(SpanData {
+            name: name.into(),
+            parent: Some(parent),
+            started: Some(started),
+            finished: Some(finished),
+            failed: false,
+            facts: facts
+                .into_iter()
+                .map(|(key, value)| (key.into(), value))
+                .collect(),
+        });
+        Some(id)
     }
 
     /// Set an environment fact. A later value for the same key replaces
@@ -221,7 +251,7 @@ impl Trace {
                 SpanReport {
                     id,
                     parent: span.parent,
-                    name: span.name,
+                    name: span.name.clone(),
                     start_ns: recorder.offset_ns(started),
                     duration_ns: u64::try_from(
                         finished.saturating_duration_since(started).as_nanos(),
@@ -252,7 +282,7 @@ impl Span {
             return;
         };
         let value = value.into();
-        recorder.lock().spans[*id].facts.push((key, value));
+        recorder.lock().spans[*id].facts.push((key.into(), value));
     }
 
     /// Mark this span as failed.
@@ -306,14 +336,18 @@ mod tests {
             drop(sibling);
         }
         let report = trace.report().expect("enabled trace reports");
-        let names: Vec<_> = report.spans.iter().map(|s| (s.name, s.parent)).collect();
+        let names: Vec<_> = report
+            .spans
+            .iter()
+            .map(|s| (s.name.as_ref(), s.parent))
+            .collect();
         assert_eq!(
             names,
             vec![("root", None), ("child", Some(0)), ("sibling", Some(0))]
         );
         assert!(report.spans[1].failed);
         assert!(!report.spans[0].failed);
-        assert_eq!(report.spans[0].facts, vec![("exit", Fact::Count(1))]);
+        assert_eq!(report.spans[0].facts, vec![("exit".into(), Fact::Count(1))]);
         assert!(report.spans[0].duration_ns >= report.spans[1].duration_ns);
     }
 

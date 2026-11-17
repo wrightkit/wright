@@ -302,7 +302,17 @@ impl StdioLanguageProvider {
         args: &[String],
         request_timeout: Duration,
     ) -> Result<StdioLanguageProvider, ProviderError> {
-        let mut child = ChildProcess::spawn(command, args)?;
+        Self::spawn_with_env(command, args, request_timeout, &[])
+    }
+
+    /// Spawn with additional environment variables scoped to this provider.
+    pub fn spawn_with_env(
+        command: &Path,
+        args: &[String],
+        request_timeout: Duration,
+        env: &[(std::ffi::OsString, std::ffi::OsString)],
+    ) -> Result<StdioLanguageProvider, ProviderError> {
+        let mut child = ChildProcess::spawn_with_env(command, args, env)?;
         let stdin = child.take_stdin();
         let stdout = child.take_stdout();
         let client = JsonRpcClient::new(

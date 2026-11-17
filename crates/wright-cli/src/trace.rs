@@ -225,11 +225,14 @@ mod tests {
             spans: vec![SpanReport {
                 id: 0,
                 parent: None,
-                name: "compile",
+                name: "compile".into(),
                 start_ns: 0,
                 duration_ns: 1,
                 failed: false,
-                facts: vec![("path", Fact::Text("/Users/alice/work/main.opy".into()))],
+                facts: vec![(
+                    "path".into(),
+                    Fact::Text("/Users/alice/work/main.opy".into()),
+                )],
             }],
         };
         let home = normalize_home("/Users/alice/");
