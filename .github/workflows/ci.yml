@@ -516,10 +516,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - macos-15
-          - windows-latest
+        # macOS runners are often never assigned, so pull requests skip them.
+        # Pushes to main keep the macOS leg and the release gate stays complete.
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest","windows-latest"]' || '["ubuntu-latest","macos-15","windows-latest"]') }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -555,19 +554,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            channel: install.sh
-          - os: macos-15
-            channel: install.sh
-          - os: macos-15
-            channel: Homebrew
-          - os: windows-latest
-            channel: install.ps1
-          - os: windows-latest
-            channel: Scoop
-          - os: windows-latest
-            channel: WinGet
+        # Same macOS rule as dist-cli-build.
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"os":"ubuntu-latest","channel":"install.sh"},{"os":"windows-latest","channel":"install.ps1"},{"os":"windows-latest","channel":"Scoop"},{"os":"windows-latest","channel":"WinGet"}]' || '[{"os":"ubuntu-latest","channel":"install.sh"},{"os":"macos-15","channel":"install.sh"},{"os":"macos-15","channel":"Homebrew"},{"os":"windows-latest","channel":"install.ps1"},{"os":"windows-latest","channel":"Scoop"},{"os":"windows-latest","channel":"WinGet"}]') }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
