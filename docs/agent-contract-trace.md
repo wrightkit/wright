@@ -57,8 +57,22 @@ The root span is named after the command (`compile` or `check`). Its direct
 children are the top-level phases. Parallel phases such as `source.read` and
 `parse` are siblings and may overlap, so summing their durations overcounts
 the root's elapsed time. Project loading is part of the `provider.compile`
-span: the provider loads the project during its compile request, and Wright
-does not time inside the provider.
+span: the provider loads the project during its compile request.
+
+With tracing enabled, Wright gives each provider process a private temporary
+file through `WRIGHT_PROVIDER_TRACE_FILE`. After each request, it imports new
+`wright-provider-trace/v1` records under the matching `lpp.request` span. The
+provider's top-level `provider.*` spans become children of that request;
+nested spans retain their parent relationships. Their `startNs` offsets are
+added to the request's start offset, and durations and facts are preserved.
+For example, `provider.compile` may contain `provider.frontend`,
+`provider.backend`, and their more detailed phases. Phase availability and
+names come from the provider's trace contract.
+
+The file is removed when the provider session ends. Providers that emit no
+trace data remain supported. Missing or unreadable files and malformed records
+are ignored without changing the workflow result or its other trace spans.
+Without `--trace`, the provider command and environment are unchanged.
 
 `source.read` measures the concurrent source-map member reads, including
 worker startup, and carries `files` and successfully read `bytes`.
