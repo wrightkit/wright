@@ -64,30 +64,50 @@ impl McpTarget {
 struct Stored {
     args: Vec<String>,
     probe: Vec<String>,
-    input: PathBuf,
 }
 
-fn stored(layout: &Layout, serve: &[String]) -> Stored {
+/// A relative path anchored to `base`; absolute paths stay as given.
+fn anchor(base: &str, path: &str) -> String {
+    match path.trim_start_matches("./") {
+        _ if Path::new(path).is_absolute() => path.to_string(),
+        "" | "." => base.to_string(),
+        relative => format!("{base}/{relative}"),
+    }
+}
+
+/// Anchors the input and the path-valued options (`--lint-config`,
+/// `--rule-file`) to `base`, so the server finds them from any working
+/// directory.
+fn anchored_tokens(base: &str, serve: &[String]) -> Vec<String> {
+    const PATH_OPTIONS: [&str; 2] = ["--lint-config", "--rule-file"];
     let (input, options) = match serve.split_first() {
         Some((first, rest)) if !first.starts_with('-') => (first.as_str(), rest),
         _ => (".", serve),
     };
-    let anchored = match input.trim_start_matches("./") {
-        _ if Path::new(input).is_absolute() => input.to_string(),
-        "" | "." => layout.input.to_string(),
-        relative => format!("{}/{relative}", layout.input),
-    };
-    let mut args: Vec<String> = SERVE_ARGS.map(String::from).into();
-    args.extend(options.iter().cloned());
-    let mut probe = vec!["--transport".into(), "mcp".into()];
-    probe.extend(options.iter().cloned());
-    probe.push(input.into());
-    args.push(anchored);
-    Stored {
-        args,
-        probe,
-        input: input.into(),
+    let mut tokens = Vec::with_capacity(options.len() + 1);
+    let mut path_next = false;
+    for option in options {
+        tokens.push(if std::mem::take(&mut path_next) {
+            anchor(base, option)
+        } else if let Some((name, value)) = option.split_once('=')
+            && PATH_OPTIONS.contains(&name)
+        {
+            format!("{name}={}", anchor(base, value))
+        } else {
+            path_next = PATH_OPTIONS.contains(&option.as_str());
+            option.clone()
+        });
     }
+    tokens.push(anchor(base, input));
+    tokens
+}
+
+fn stored(layout: &Layout, root: &Path, serve: &[String]) -> Stored {
+    let mut args: Vec<String> = SERVE_ARGS.map(String::from).into();
+    args.extend(anchored_tokens(layout.input, serve));
+    let mut probe = vec!["--transport".to_string(), "mcp".into()];
+    probe.extend(anchored_tokens(&root.to_string_lossy(), serve));
+    Stored { args, probe }
 }
 
 #[derive(clap::Parser)]
@@ -97,20 +117,23 @@ struct StoredServe {
     serve: ServeArgs,
 }
 
-/// Loads the program the way `serve` does at startup, with the options the
-/// entry will store. `Ok(None)` means the program loads.
-fn load_failure(root: &Path, stored: &Stored) -> Result<Option<String>, AgentError> {
+/// The session configuration `serve` would start with for the stored
+/// arguments, or the usage error that would stop it.
+fn session_config(stored: &Stored) -> Result<wright_driver::SessionConfig, AgentError> {
     let parsed = <StoredServe as clap::Parser>::try_parse_from(&stored.probe)
         .map_err(|error| AgentError::Usage(error.to_string()))?;
-    let mut config = parsed.serve.session_config().map_err(AgentError::Usage)?;
-    config.input = wright_driver::config::InputSpec::Path(root.join(&stored.input));
+    parsed.serve.session_config().map_err(AgentError::Usage)
+}
+
+/// Loads the program the way `serve` does at startup. `None` means it loads.
+fn load_failure(config: wright_driver::SessionConfig) -> Option<String> {
     let failure = |diagnostic: wright_driver::Diagnostic| {
         format!("{}: {}", diagnostic.code, diagnostic.message)
     };
-    let loaded = wright_driver::CompilerSession::new(config)
+    wright_driver::CompilerSession::new(config)
         .map_err(failure)
-        .and_then(|mut session| session.load().map(drop).map_err(failure));
-    Ok(loaded.err())
+        .and_then(|mut session| session.load().map(drop).map_err(failure))
+        .err()
 }
 
 fn generated_entry(layout: &Layout, stored: &Stored) -> Value {
@@ -207,8 +230,9 @@ pub(crate) fn install(
     dry_run: bool,
 ) -> Result<McpStatus, AgentError> {
     let layout = target.layout();
-    let stored = stored(&layout, serve);
-    if !force && let Some(failure) = load_failure(root, &stored)? {
+    let stored = stored(&layout, root, serve);
+    let config = session_config(&stored)?;
+    if !force && let Some(failure) = load_failure(config) {
         return Err(AgentError::Rejected(format!(
             "the Wright MCP server would not load the project ({failure}); pass its input and options after `--`, for example `wright agent install --mcp {} -- src/main.opy --kind opy`, or pass --force to register it anyway",
             target.name()
@@ -538,6 +562,71 @@ mod tests {
             );
         }
         assert!(!root.join(".mcp.json").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn force_skips_only_the_load_never_option_validation() {
+        let root = scratch("force-options");
+        std::fs::write(root.join("main.opy"), "").unwrap();
+        for bad in [
+            &["session.ws", "--kind", "nope"][..],
+            &["session.ws", "--transport", "stdio"],
+        ] {
+            assert!(
+                matches!(
+                    install(&root, McpTarget::Claude, &opts(bad), true, false),
+                    Err(AgentError::Usage(_))
+                ),
+                "{bad:?}"
+            );
+        }
+        assert!(!root.join(".mcp.json").exists());
+        assert!(install(&root, McpTarget::Claude, &[], true, false).is_ok());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn anchors_relative_option_paths_like_the_input() {
+        let given = opts(&[
+            "src/main.opy",
+            "--lint-config",
+            "lint.yml",
+            "--rule-file=rules/a.yml",
+            "--rule-file",
+            "/abs/b.yml",
+            "--locale",
+            "lint.yml",
+        ]);
+        assert_eq!(
+            anchored_tokens("${V}", &given),
+            opts(&[
+                "--lint-config",
+                "${V}/lint.yml",
+                "--rule-file=${V}/rules/a.yml",
+                "--rule-file",
+                "/abs/b.yml",
+                "--locale",
+                "lint.yml",
+                "${V}/src/main.opy",
+            ])
+        );
+        let root = scratch("anchor");
+        std::fs::create_dir(root.join("rules")).unwrap();
+        assert!(
+            install(
+                &root,
+                McpTarget::Claude,
+                &opts(&["session.ws", "--rule-file", "rules"]),
+                false,
+                false
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            read(&root, ".mcp.json")["mcpServers"]["wright"]["args"][4],
+            "${CLAUDE_PROJECT_DIR:-.}/rules"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }
