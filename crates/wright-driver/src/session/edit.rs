@@ -11,6 +11,15 @@ use crate::result::{
 };
 
 impl CompilerSession {
+    /// Whether `file` is a source file of the loaded program, by the same
+    /// file-identity rule as the `file` selector. `None` when nothing
+    /// loaded, so membership is unknown.
+    pub fn program_contains(&self, file: &str) -> Option<bool> {
+        let loaded = self.loaded.as_ref()?;
+        let bases = crate::select::file_bases(&loaded.input);
+        Some(crate::select::file_error(file, &loaded.source_files, &bases).is_none())
+    }
+
     /// Swap the text of a caller-held `InputSpec::Text` input (#959,
     /// ADR-0037 decision 3): the host write path applies a validated
     /// transaction to the in-memory source, and both the live and the

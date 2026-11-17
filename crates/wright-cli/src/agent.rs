@@ -4,9 +4,12 @@ use std::sync::LazyLock;
 use wright_driver::result::exit;
 use wright_driver::sha256_hex;
 
-use crate::cli::{AgentArgs, AgentInstallArgs, AgentSubcommand};
+use crate::cli::{AgentArgs, AgentHookEvent, AgentInstallArgs, AgentSubcommand};
 
+mod config_file;
+mod hook;
 mod mcp;
+mod stored;
 
 const SKILL_NAME: &str = "wright";
 const INSTALLED_BY: &str = "wright agent install";
@@ -236,6 +239,27 @@ fn report_mcp(status: &mcp::McpStatus) {
     }
 }
 
+fn report_hook(status: &hook::HookStatus) {
+    match status {
+        hook::HookStatus::Created(path) => {
+            println!("==> configured the Wright edit hook in {}", path.display());
+            println!("delete its `wright agent hook` entry to remove it");
+        }
+        hook::HookStatus::Replaced(path) => {
+            println!("==> replaced the Wright edit hook in {}", path.display());
+        }
+        hook::HookStatus::UpToDate(path) => {
+            println!(
+                "the Wright edit hook in {} is already up to date",
+                path.display()
+            );
+        }
+        hook::HookStatus::DryRun(path) => {
+            println!("would configure the Wright edit hook in {}", path.display());
+        }
+    }
+}
+
 pub(crate) fn run(args: &AgentArgs) -> Result<u8, AgentError> {
     match &args.subcommand {
         Some(AgentSubcommand::Install(install_args)) => {
@@ -251,14 +275,32 @@ pub(crate) fn run(args: &AgentArgs) -> Result<u8, AgentError> {
                     )
                 })
                 .transpose()?;
+            let hook = install_args
+                .hook
+                .map(|target| {
+                    hook::install(
+                        Path::new("."),
+                        target,
+                        &install_args.serve,
+                        install_args.force,
+                        install_args.dry_run,
+                    )
+                })
+                .transpose()?;
             if !install_args.no_guide {
                 report_guide(&install(install_args)?);
             }
             if let Some(status) = &server {
                 report_mcp(status);
             }
+            if let Some(status) = &hook {
+                report_hook(status);
+            }
             Ok(exit::SUCCESS)
         }
+        Some(AgentSubcommand::Hook(hook_args)) => match &hook_args.event {
+            AgentHookEvent::PostEdit(check) => Ok(hook::post_edit(&check.check)),
+        },
         Some(AgentSubcommand::Tools(tools_args)) => {
             let document = match tools_args.format {
                 crate::cli::ToolsFormat::Messages => crate::agenttools::messages_tools(),
@@ -286,6 +328,7 @@ mod tests {
             force,
             dry_run,
             mcp: None,
+            hook: None,
             no_guide: false,
             serve: Vec::new(),
         }

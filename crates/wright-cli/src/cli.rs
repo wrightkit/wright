@@ -419,6 +419,31 @@ pub(crate) enum AgentSubcommand {
     /// Emit the advertised agent operations as client tool definitions for
     /// code-executing agents, or as plain JSON Schema for other harnesses (#535).
     Tools(AgentToolsArgs),
+    /// Commands a harness runs as hooks.
+    Hook(AgentHookArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AgentHookArgs {
+    #[command(subcommand)]
+    pub(crate) event: AgentHookEvent,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum AgentHookEvent {
+    /// Check the program after an `Edit` or `Write` tool call. Reads Claude
+    /// Code's `PostToolUse` JSON from stdin. Exits 2 with the program's
+    /// errors on stderr, 0 with no output when there are none or the file is not in
+    /// the program, and 1 when Wright itself fails.
+    PostEdit(AgentHookCheckArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AgentHookCheckArgs {
+    /// After `--`: the check input, then its loading options, as stored by
+    /// `wright agent install --hook`.
+    #[arg(last = true, value_name = "INPUT [OPTIONS]")]
+    pub(crate) check: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -447,7 +472,14 @@ pub(crate) enum McpTarget {
     Vscode,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum HookTarget {
+    /// Claude Code: `.claude/settings.local.json`.
+    Claude,
+}
+
 #[derive(Debug, Args)]
+#[command(group = clap::ArgGroup::new("harness").args(["mcp", "hook"]).multiple(true))]
 pub(crate) struct AgentInstallArgs {
     /// Destination skills directory; the guide installs under DIR/wright
     /// (default: .agents/skills in the current project).
@@ -456,7 +488,8 @@ pub(crate) struct AgentInstallArgs {
 
     /// Replace whatever already occupies the guide path when it was not
     /// installed by `wright agent install`, or a `wright` MCP server entry
-    /// that is not the one this command generates.
+    /// that is not the one this command generates, or a Wright hook entry
+    /// that differs from the generated one.
     #[arg(long)]
     pub(crate) force: bool,
 
@@ -469,15 +502,21 @@ pub(crate) struct AgentInstallArgs {
     #[arg(long, value_enum, value_name = "TARGET")]
     pub(crate) mcp: Option<McpTarget>,
 
-    /// Skip the agent guide and only register the MCP server.
-    #[arg(long, requires = "mcp")]
+    /// Also register a hook that checks the program after each `Edit` or
+    /// `Write` of the agent, in this harness's project-local settings (#1098).
+    #[arg(long, value_enum, value_name = "TARGET")]
+    pub(crate) hook: Option<HookTarget>,
+
+    /// Skip the agent guide and only register the MCP server or the hook.
+    #[arg(long, requires = "harness")]
     pub(crate) no_guide: bool,
 
-    /// With `--mcp`, after `--`: the server's input, then its loading options
-    /// (`--kind`, `--locale`, `--profile`, lint options), stored in the
-    /// registered entry. A relative input resolves against the harness's
-    /// project directory. Default input: the project directory.
-    #[arg(last = true, requires = "mcp", value_name = "INPUT [OPTIONS]")]
+    /// With `--mcp` or `--hook`, after `--`: the server's or check's input,
+    /// then its loading options (`--kind`, `--locale`, `--profile`, lint
+    /// options), stored in the registered entry. A relative input resolves
+    /// against the harness's project directory. Default input: the project
+    /// directory.
+    #[arg(last = true, requires = "harness", value_name = "INPUT [OPTIONS]")]
     pub(crate) serve: Vec<String>,
 }
 
