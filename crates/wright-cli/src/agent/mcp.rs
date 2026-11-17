@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value, json};
 
 use super::AgentError;
+use super::config_file::{ensure_not_linked, read_config, write_config};
+use super::stored::{Stored, load_failure};
 use crate::cli::McpTarget;
-use crate::serve::ServeArgs;
 
 const SERVER_NAME: &str = "wright";
 const COMMAND: &str = "wright";
@@ -57,92 +58,17 @@ impl McpTarget {
     }
 }
 
-/// The stored server arguments, in the form `INPUT [serve options]` the user
-/// gives after `--`. The input is optional and defaults to the project
-/// directory; a relative input resolves against the harness's project
-/// directory variable.
-struct Stored {
-    args: Vec<String>,
-    probe: Vec<String>,
-}
-
-/// A relative path anchored to `base`; absolute paths stay as given.
-fn anchor(base: &str, path: &str) -> String {
-    match path.trim_start_matches("./") {
-        _ if Path::new(path).is_absolute() => path.to_string(),
-        "" | "." => base.to_string(),
-        relative => format!("{base}/{relative}"),
-    }
-}
-
-/// Anchors the input and the path-valued options (`--lint-config`,
-/// `--rule-file`) to `base`, so the server finds them from any working
-/// directory.
-fn anchored_tokens(base: &str, serve: &[String]) -> Vec<String> {
-    const PATH_OPTIONS: [&str; 2] = ["--lint-config", "--rule-file"];
-    let (input, options) = match serve.split_first() {
-        Some((first, rest)) if !first.starts_with('-') => (first.as_str(), rest),
-        _ => (".", serve),
-    };
-    let mut tokens = Vec::with_capacity(options.len() + 1);
-    let mut path_next = false;
-    for option in options {
-        tokens.push(if std::mem::take(&mut path_next) {
-            anchor(base, option)
-        } else if let Some((name, value)) = option.split_once('=')
-            && PATH_OPTIONS.contains(&name)
-        {
-            format!("{name}={}", anchor(base, value))
-        } else {
-            path_next = PATH_OPTIONS.contains(&option.as_str());
-            option.clone()
-        });
-    }
-    tokens.push(anchor(base, input));
-    tokens
-}
-
-fn stored(layout: &Layout, root: &Path, serve: &[String]) -> Stored {
-    let mut args: Vec<String> = SERVE_ARGS.map(String::from).into();
-    args.extend(anchored_tokens(layout.input, serve));
-    let mut probe = vec!["--transport".to_string(), "mcp".into()];
-    probe.extend(anchored_tokens(&root.to_string_lossy(), serve));
-    Stored { args, probe }
-}
-
-#[derive(clap::Parser)]
-#[command(no_binary_name = true)]
-struct StoredServe {
-    #[command(flatten)]
-    serve: ServeArgs,
-}
-
-/// The session configuration `serve` would start with for the stored
-/// arguments, or the usage error that would stop it.
-fn session_config(stored: &Stored) -> Result<wright_driver::SessionConfig, AgentError> {
-    let parsed = <StoredServe as clap::Parser>::try_parse_from(&stored.probe)
-        .map_err(|error| AgentError::Usage(error.to_string()))?;
-    parsed.serve.session_config().map_err(AgentError::Usage)
-}
-
-/// Loads the program the way `serve` does at startup. `None` means it loads.
-fn load_failure(config: wright_driver::SessionConfig) -> Option<String> {
-    let failure = |diagnostic: wright_driver::Diagnostic| {
-        format!("{}: {}", diagnostic.code, diagnostic.message)
-    };
-    wright_driver::CompilerSession::new(config)
-        .map_err(failure)
-        .and_then(|mut session| session.load().map(drop).map_err(failure))
-        .err()
-}
-
 fn generated_entry(layout: &Layout, stored: &Stored) -> Value {
     let mut entry = Map::new();
     if layout.typed {
         entry.insert("type".into(), json!("stdio"));
     }
     entry.insert("command".into(), json!(COMMAND));
-    entry.insert("args".into(), json!(stored.args));
+    let args: Vec<&str> = SERVE_ARGS
+        .into_iter()
+        .chain(stored.tokens.iter().map(String::as_str))
+        .collect();
+    entry.insert("args".into(), json!(args));
     Value::Object(entry)
 }
 
@@ -159,69 +85,6 @@ fn runs_wright_mcp(entry: &Value) -> bool {
             })
 }
 
-fn ensure_not_linked(root: &Path, path: &Path) -> Result<(), AgentError> {
-    let mut current = root.to_path_buf();
-    for component in path
-        .strip_prefix(root)
-        .expect("path is under root")
-        .components()
-    {
-        current.push(component);
-        match current.symlink_metadata() {
-            Ok(meta) if meta.file_type().is_symlink() => {
-                return Err(AgentError::Rejected(format!(
-                    "{} is a symbolic link; Wright will not write MCP configuration through it",
-                    current.display()
-                )));
-            }
-            Ok(meta) if current == path && !meta.is_file() => {
-                return Err(AgentError::Rejected(format!(
-                    "{} is not a regular file",
-                    current.display()
-                )));
-            }
-            _ => {}
-        }
-    }
-    Ok(())
-}
-
-fn read_config(path: &Path) -> Result<Option<Value>, AgentError> {
-    match std::fs::read_to_string(path) {
-        Ok(text) => serde_json::from_str(&text).map(Some).map_err(|error| {
-            AgentError::Rejected(format!(
-                "{} is not plain JSON ({error}); fix it or add the `{SERVER_NAME}` server by hand",
-                path.display()
-            ))
-        }),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(AgentError::Failed(format!(
-            "could not read {}: {error}",
-            path.display()
-        ))),
-    }
-}
-
-fn write_config(path: &Path, config: &Value) -> Result<(), AgentError> {
-    let fail = |error: std::io::Error| {
-        AgentError::Failed(format!("could not write {}: {error}", path.display()))
-    };
-    let parent = path.parent().expect("config path has a parent");
-    std::fs::create_dir_all(parent).map_err(fail)?;
-    let temp = parent.join(format!(".wright-mcp-{}.tmp", std::process::id()));
-    let text = serde_json::to_string_pretty(config).expect("config serializes") + "\n";
-    let result = std::fs::write(&temp, text)
-        .and_then(|()| match std::fs::metadata(path) {
-            Ok(meta) => std::fs::set_permissions(&temp, meta.permissions()),
-            Err(_) => Ok(()),
-        })
-        .and_then(|()| std::fs::rename(&temp, path));
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temp);
-    }
-    result.map_err(fail)
-}
-
 pub(crate) fn install(
     root: &Path,
     target: McpTarget,
@@ -230,8 +93,8 @@ pub(crate) fn install(
     dry_run: bool,
 ) -> Result<McpStatus, AgentError> {
     let layout = target.layout();
-    let stored = stored(&layout, root, serve);
-    let config = session_config(&stored)?;
+    let stored = Stored::new(layout.input, root, serve);
+    let config = stored.session_config()?;
     if !force && let Some(failure) = load_failure(config) {
         return Err(AgentError::Rejected(format!(
             "the Wright MCP server would not load the project ({failure}); pass its input and options after `--`, for example `wright agent install --mcp {} -- src/main.opy --kind opy`, or pass --force to register it anyway",
@@ -291,6 +154,7 @@ pub(crate) fn install(
 
 #[cfg(test)]
 mod tests {
+    use super::super::stored::anchored_tokens;
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {

@@ -222,6 +222,44 @@ refused; writes replace the file atomically.
 To remove the server, delete the `wright` entry from the config file (and the
 guide directory if installed); to update, re-run with `--force`.
 
+### Edit hook (`--hook`, #1098)
+
+`wright agent install --hook claude` adds one `PostToolUse` entry with the
+matcher `Edit|Write` to `.claude/settings.local.json`, so Claude Code checks the
+program after each edit the agent makes. Nothing is written until the user runs
+the command, and the shared `.claude/settings.json` is not touched. It takes the
+same `-- INPUT [OPTIONS]` form as `--mcp`, with the same anchoring to
+`${CLAUDE_PROJECT_DIR:-.}`, and the options are stored in the entry's command:
+
+```sh
+wright agent install --hook claude -- src/main.opy --kind opy --locale zh-CN
+```
+
+Install loads the program once with the stored input and options, as `--mcp`
+does, using the same code. When the program cannot be loaded, install names
+the load diagnostic and the `--` form, writes nothing, and exits 1; `--force`
+skips only the load, never option validation. With `--mcp` and `--hook` together,
+every registration is validated before any file is written, so a refusal
+writes nothing. Re-running reports up to date; a different Wright hook is
+refused unless `--force` replaces it. `--force` replaces only the Wright hook
+object: other hooks, including ones in the same group, and other settings are
+preserved. The file is handled like the `--mcp` config. To remove the hook,
+delete its entry.
+
+The entry runs `wright agent hook post-edit -- INPUT [OPTIONS]`, which reads
+Claude Code's hook JSON from stdin and takes `tool_input.file_path`:
+
+| Situation | Exit | Output |
+| --- | --- | --- |
+| The check reports errors in a program that contains the file | 2 | The plain-rendered errors on stderr, bounded like the default `check` report |
+| No errors, or the file is not a source file of the program | 0 | None |
+| Wright itself fails, or the hook input is not JSON | 1 | The failure on stderr |
+
+Exit 2 is the only code Claude Code shows to the model; exit 1 shows the failure
+to the user. Only errors are reported: warnings, notes, and lint findings are
+not. When the program does not load, its files are unknown, so the load failure
+is reported for any edited file. Edits made through `Bash` are not seen.
+
 ## `wright agent tools`: client tool definitions (#535)
 
 `wright agent tools` prints every operation `capabilities` advertises as
