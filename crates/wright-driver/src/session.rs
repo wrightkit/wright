@@ -1,3 +1,4 @@
+mod catalog_load;
 mod cost;
 mod diagnostics;
 mod edit;
@@ -10,6 +11,7 @@ mod registry;
 mod semantic;
 mod workshop;
 
+use catalog_load::{CatalogLoad, load_builtin_catalog};
 pub(crate) use semantic::*;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -111,7 +113,7 @@ pub struct CompilerSession {
     /// constructing a new session.
     pub config: SessionConfig,
     fixed_config: SessionConfig,
-    catalog: &'static workshop_rs::catalog::Catalog,
+    catalog_load: CatalogLoad,
     lint_registry: Arc<LintRegistry>,
     loaded: Option<Loaded>,
     /// A provider compile established the snapshot. `drop_loaded` keeps it:
@@ -139,31 +141,7 @@ impl CompilerSession {
 
     /// Build a session that records its workflow into `trace` (#1079).
     pub fn new_traced(config: SessionConfig, trace: Trace) -> Result<CompilerSession, Diagnostic> {
-        let catalog = trace.in_span("catalog.load", || {
-            workshop_rs::catalog::Catalog::builtin_ref().map_err(|error| {
-                Diagnostic::error(
-                    "catalog-error",
-                    Stage::Internal,
-                    format!("cannot load the built-in Workshop catalog: {}", error),
-                )
-            })
-        })?;
-        let lint_registry = trace.in_span("lint.compose", || registry::compose(&config))?;
-        Ok(CompilerSession {
-            fixed_config: config.clone(),
-            config,
-            catalog,
-            lint_registry: Arc::new(lint_registry),
-            loaded: None,
-            provider_compiled: false,
-            semantic: None,
-            semantic_builds: 0,
-            diagnostics: Vec::new(),
-            progress_observer: None,
-            source_provider: None,
-            single_run: false,
-            trace,
-        })
+        Self::with_catalog_loader(config, trace, load_builtin_catalog)
     }
 
     /// Build a session whose source-language workflow must use `provider`.
@@ -203,10 +181,6 @@ impl CompilerSession {
                 changed.join(", ")
             ),
         ))
-    }
-
-    pub(crate) fn catalog(&self) -> &workshop_rs::catalog::Catalog {
-        self.catalog
     }
 
     fn progress(&self, event: ProgressEvent) {
@@ -255,6 +229,17 @@ impl CompilerSession {
     #[allow(unsafe_code)] // hotpath 0.28 emits `#[unsafe(export_name)]` statics
     #[hotpath::measure]
     fn load_with_operation(
+        &mut self,
+        provider_operation: ProviderOperation,
+    ) -> Result<Loaded, Diagnostic> {
+        let loaded = self.load_unawaited(provider_operation);
+        // A catalog failure outranks the load's own outcome, as it did
+        // when the catalog loaded at construction.
+        self.catalog_load.finish()?;
+        loaded
+    }
+
+    fn load_unawaited(
         &mut self,
         provider_operation: ProviderOperation,
     ) -> Result<Loaded, Diagnostic> {
@@ -347,7 +332,7 @@ impl CompilerSession {
             && self.config.profile != wright_transform::Profile::Off)
             .then(|| {
                 hotpath::measure_block!("load::semantic_issues", {
-                    program.semantic_issues(self.catalog)
+                    program.semantic_issues(self.catalog())
                 })
             });
         self.trace.in_span("transform", || {
@@ -478,14 +463,14 @@ impl CompilerSession {
         let named = match to {
             Some(name) => {
                 let locale = workshop_rs::catalog::Locale::new(name);
-                if !self.catalog.supports(&locale) {
+                if !self.catalog().supports(&locale) {
                     return Err(Diagnostic::usage_error(
                         "invalid-locale",
                         Stage::Discovery,
                         format!(
                             "unknown output locale '{}': declared locales are {}",
                             name,
-                            self.catalog
+                            self.catalog()
                                 .locales()
                                 .iter()
                                 .map(|locale| locale.to_string())
@@ -504,7 +489,7 @@ impl CompilerSession {
         self.progress(ProgressEvent::new(ProgressPhase::Emission));
         let text = self.trace.in_span("emit", || {
             hotpath::measure_block!("compile::emit", {
-                workshop_rs::emitter::emit(&loaded.program, self.catalog, &locale)
+                workshop_rs::emitter::emit(&loaded.program, self.catalog(), &locale)
             })
             .map_err(|error| workshop_diag(error, &loaded.input))
         })?;
@@ -639,7 +624,7 @@ impl CompilerSession {
         let residuals = match &loaded.completeness_issues {
             Some(residuals) => residuals.as_slice(),
             None => {
-                computed = loaded.program.semantic_issues(self.catalog);
+                computed = loaded.program.semantic_issues(self.catalog());
                 &computed
             }
         };

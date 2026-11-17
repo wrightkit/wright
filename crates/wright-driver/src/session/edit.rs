@@ -41,7 +41,7 @@ impl CompilerSession {
         if let Err(diagnostic) = self.verify_fixed_config() {
             return EditValidation::refused(vec![diagnostic]);
         }
-        crate::edit::validate_transaction(&self.config, self.catalog, sources, transaction)
+        crate::edit::validate_transaction(&self.config, self.catalog(), sources, transaction)
     }
 
     pub(crate) fn load_workshop_text(
@@ -304,7 +304,7 @@ impl CompilerSession {
             None => {
                 let validation = crate::edit::validate_transaction(
                     &self.config,
-                    self.catalog,
+                    self.catalog(),
                     sources,
                     &transaction,
                 );

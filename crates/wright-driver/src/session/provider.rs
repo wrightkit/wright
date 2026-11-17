@@ -174,6 +174,9 @@ impl CompilerSession {
             operation_span.fail();
         }
         drop(operation_span);
+        // The catalog loaded while the provider compiled; a load failure
+        // outranks the provider's answer.
+        self.catalog_load.finish()?;
         let compilation = match outcome {
             Ok(compilation) => compilation,
             Err(error) => {
@@ -266,9 +269,9 @@ impl CompilerSession {
                 self.trace.in_span("parse", || {
                     workshop_rs::parser::parse_with_context(
                         &workshop_text,
-                        self.catalog,
+                        self.catalog(),
                         &locale,
-                        self.catalog,
+                        self.catalog(),
                     )
                 })
             },

@@ -56,7 +56,9 @@ The JSON form writes newline-delimited objects, one per line, with schema
 The root span is named after the command (`compile` or `check`). Its direct
 children are the top-level phases. Parallel phases such as `source.read` and
 `parse` are siblings and may overlap, so summing their durations overcounts
-the root's elapsed time. Project loading is part of the `provider.compile`
+the root's elapsed time. For provider-backed input, `catalog.load` also runs
+beside `provider.connect` and `provider.compile` (or `provider.check`), because
+Wright reads the catalog only after the provider answers. Project loading is part of the `provider.compile`
 span: the provider loads the project during its compile request.
 
 With tracing enabled, Wright gives each provider process a private temporary

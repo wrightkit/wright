@@ -196,3 +196,21 @@ fn disabled_trace_preserves_provider_arguments_and_environment() {
     assert_eq!(spawn_log(dir.path()), expected);
     assert!(trace.report().is_none());
 }
+
+#[test]
+fn catalog_load_overlaps_provider_connect() {
+    let dir = tempfile::tempdir().unwrap();
+    let trace = Trace::enabled();
+    let root = trace.span("check");
+    let mut session =
+        CompilerSession::new_traced(config(dir.path(), "no-write"), trace.clone()).unwrap();
+    assert!(session.compile().ok);
+    drop(session);
+    drop(root);
+    let report = trace.report().unwrap();
+    let span = |name: &str| report.spans.iter().find(|s| s.name == name).unwrap();
+    let catalog = span("catalog.load");
+    let connect = span("provider.connect");
+    assert_eq!(catalog.parent, Some(span("check").id));
+    assert!(catalog.start_ns < connect.start_ns + connect.duration_ns);
+}
