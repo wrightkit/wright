@@ -45,8 +45,10 @@ The binaries report the workspace implementation version (one authoritative
 `version = "<release version>"` in `[workspace.package]`; every crate inherits it via
 `version.workspace = true`). A stable release accepts only a stable
 `MAJOR.MINOR.PATCH` version; prerelease and build metadata are rejected. The
-Release PR carries that version in `Cargo.toml`, `Cargo.lock`, `version.txt`, and
-`CHANGELOG.md`. `wright --version` prints the CLI banner, `wright-lsp --version` prints the LSP
+checked-in version in `Cargo.toml`, `Cargo.lock`, and `version.txt` is the
+placeholder `0.1.0`. A release takes its version from the `vX.Y.Z` tag, and every
+job that builds stamps it with `scripts/stamp-version.py` before it builds; the
+stamped files are never committed. `wright --version` prints the CLI banner, `wright-lsp --version` prints the LSP
 banner, and the LSP `initialize` response carries `serverInfo.version`. Every
 `wright-result/v1` envelope carries `wright.version` + `wright.contract`. The
 release archive's `version.json` is the authoritative stamp for a shipped
@@ -62,26 +64,23 @@ Wright has two release channels and one shared native build workflow:
    `wright/nightly/<commit>/` and advances only `wright/nightly/version`.
    Nightlies do not create Git tags, GitHub Releases, or package-manager
    updates.
-2. Stable releases start from a `vX.Y.Z` tag. `release-please` maintains a
-   Release PR that derives the next version from Conventional Commits
-   (`feat` bumps minor; `fix`, `perf`, `deps`, `refactor`, and `revert` bump
-   patch; a breaking change bumps minor while the major version is 0;
-   `chore`, `docs`, `style`, `test`, `build`, and `ci` alone do not release). Merging the Release PR makes
-   `release-please` create the tag and a draft GitHub Release, and the tag
-   push starts `.github/workflows/release.yml`. The workflow refuses to
-   publish unless the `CI result` check-run succeeded on the tagged commit
-   and the tag is not older than the published `wright/latest/version`
-   pointer; stable runs serialize through the `wright-stable` concurrency
-   group so concurrent releases cannot interleave or regress `latest`. The
-   workflow verifies that
-   the tag matches the workspace version, builds and smoke-tests the native
-   matrix from the tagged commit, then publishes and verifies the immutable
-   `wright/releases/<version>/` R2 objects and installer scripts. Only after
-   that staged artifact set is publicly available and checksum-consistent
-   does it make the GitHub Release public with the same verified artifacts
-   and generated package-manager manifests; `wright/latest/version` advances
-   after the canonical release is public, so a failed or partial publication
-   never points at a version lacking one.
+2. Stable releases start from a `vX.Y.Z` tag. The release agent decides when
+   to release and which version to give it (see
+   [Creating a release](#creating-a-release)). No Release PR, version commit,
+   or changelog file exists. The tag push starts `.github/workflows/release.yml`.
+   The workflow refuses to publish unless the tagged commit is part of the
+   default branch, the `CI result` check-run succeeded on it, and the tag is
+   not older than the published `wright/latest/version` pointer; stable runs
+   serialize through the `wright-stable` concurrency group so concurrent
+   releases cannot interleave or regress `latest`. The workflow stamps the tag
+   version, builds and smoke-tests the native matrix from the tagged commit,
+   then publishes and verifies the immutable `wright/releases/<version>/` R2
+   objects and installer scripts. Only after that staged artifact set is
+   publicly available and checksum-consistent does it create the GitHub
+   Release once, with the same verified artifacts and generated
+   package-manager manifests and generated release notes;
+   `wright/latest/version` advances after the canonical release is public, so a
+   failed or partial publication never points at a version lacking one.
 
 No workspace crate is published to crates.io. Every workspace package
 explicitly sets `publish = false`, so Cargo package publication cannot become
@@ -95,12 +94,16 @@ byte-checks rather than republishes them.
 
 ### Creating a release
 
-Merge the open Release PR. `release-please` updates it on every push to `main`;
-its `Cargo.lock` is synchronized by a follow-up commit on the PR branch. The
-Release PR title and changelog show the computed version. To publish again
-after a failed run, dispatch `release.yml` with the existing `vX.Y.Z` tag;
-dispatch never bumps a version. A manually pushed `vX.Y.Z` tag also starts the
-workflow when the tagged commit's workspace version matches it.
+The release agent creates the tag. It releases when the default branch has
+commits since the last tag that change released behavior, the `CI result`
+check-run is green on the commit it tags, and no stable release run is queued
+or in progress. It chooses the next `MAJOR.MINOR.PATCH` from the Conventional
+Commits since the last tag (a breaking change bumps minor while the major
+version is 0; `feat` bumps minor; other released changes bump patch) and
+pushes the annotated `vX.Y.Z` tag to that commit. Releases may be frequent.
+To publish again after a failed run, dispatch `release.yml` with the existing
+`vX.Y.Z` tag; dispatch never creates a version. A run for a tag that already has a
+GitHub Release fails at the Release step and does not change that Release.
 
 The nightly path is triggered by completed `CI`, not by a tag or Release event.
 It verifies that the completed CI commit is still the current default-branch
@@ -347,11 +350,8 @@ publishes the nightly channel), `publish-release`, `advance-latest`,
 
 Configure these optional/required environment secrets:
 
-* `GH_TOKEN` is the authorized release token. `release-please` uses it to
-  maintain the Release PR, push the `Cargo.lock` synchronization commit, and
-  create the release tag; pushes made with the built-in `GITHUB_TOKEN` would
-  not trigger CI on the Release PR or `release.yml` on the tag. The release
-  workflow also uses it to write to `wrightkit/homebrew-tap`.
+* `GH_TOKEN` is the authorized release token. The release workflow uses it to
+  write to `wrightkit/homebrew-tap`.
 * The workflow's built-in `GITHUB_TOKEN` creates the final GitHub Release and
   uploads its verified assets.
 * `CLOUDFLARE_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, and

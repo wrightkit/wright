@@ -20,7 +20,6 @@
 
 # Toolchain, release, and distribution
 /rust-toolchain.toml @Teakowa
-/release-please-config.json @Teakowa
 /dist/ @Teakowa
 /install.sh @Teakowa
 /install.ps1 @Teakowa
