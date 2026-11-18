@@ -562,6 +562,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: release
+    # npm trusted publishing: the workflow authenticates with an OIDC token,
+    # not a stored secret.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Download core package
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -579,8 +584,6 @@ jobs:
         run: (cd package && sha256sum -c wrightkit-core-*.tgz.sha256)
 
       - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish ./package/wrightkit-core-*.tgz
 
   publish-r2:
