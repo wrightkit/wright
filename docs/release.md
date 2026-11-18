@@ -65,12 +65,12 @@ Wright has two release channels and one shared native build workflow:
    `wright/nightly/<commit>/` and advances only `wright/nightly/version`.
    Nightlies do not create Git tags, GitHub Releases, or package-manager
    updates.
-2. Stable releases start from a `vX.Y.Z` tag. The release agent decides when
-   to release and which version to give it (see
+2. Stable releases start from a `vX.Y.Z` tag. Whoever completes a
+   requirement decides whether to release and which version to give it (see
    [Creating a release](#creating-a-release)). No Release PR, version commit,
-   or changelog file exists. The tag push starts `.github/workflows/release.yml`.
-   The workflow refuses to publish unless the tagged commit is part of the
-   default branch, the `CI result` check-run succeeded on it, and the tag is
+   changelog file, or scheduled release job exists. The tag push starts `.github/workflows/release.yml`.
+   The workflow refuses to publish unless the `CI result` check-run succeeded
+   on the tagged commit and the tag is
    not older than the published `wright/latest/version` pointer; stable runs
    serialize through the `wright-stable` concurrency group so concurrent
    releases cannot interleave or regress `latest`. The workflow stamps the tag
@@ -95,18 +95,27 @@ byte-checks rather than republishes them.
 
 ### Creating a release
 
-The release agent creates the tag. It releases when the default branch has
-commits since the last tag that change released behavior, the `CI result`
-check-run is green on the commit it tags, and no stable release run is queued
-or in progress. It chooses the next `MAJOR.MINOR.PATCH` from the Conventional
-Commits since the last tag (a breaking change bumps minor while the major
-version is 0; `feat` bumps minor; `fix`, `perf`, `deps`, `refactor`, and
-`revert` bump patch; `chore`, `docs`, `style`, `test`, `build`, and `ci` alone
-do not release) and
-pushes the annotated `vX.Y.Z` tag to that commit. Releases may be frequent.
-To publish again after a failed run, dispatch `release.yml` with the existing
-`vX.Y.Z` tag; dispatch never creates a version. A run for a tag that already has a
-GitHub Release fails at the Release step and does not change that Release.
+A release is a pushed tag, the same for a maintainer and for an agent:
+
+```sh
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+Whoever completes a requirement decides whether the default branch now holds a
+change worth releasing, and releases it. Release when there are commits since
+the last tag that change released behavior and the `CI result` check-run is
+green on the commit to tag. Do not tag while a stable release run is queued or
+in progress. Choose the next `MAJOR.MINOR.PATCH` from the Conventional Commits
+since the last tag: a breaking change bumps minor while the major version is 0;
+`feat` bumps minor; `fix`, `perf`, `deps`, `refactor`, and `revert` bump patch;
+`chore`, `docs`, `style`, `test`, `build`, and `ci` alone do not release.
+Releases may be frequent. Push the tag with a user or app credential, not the
+workflow `GITHUB_TOKEN`, so the push starts the workflow. To publish again
+after a failed run, dispatch `release.yml` with the existing `vX.Y.Z` tag;
+dispatch never creates a version. If a failed run left a draft GitHub Release,
+delete the draft first; a run for a tag that already has a GitHub Release fails
+at the Release step and does not change that Release.
 
 The nightly path is triggered by completed `CI`, not by a tag or Release event.
 It verifies that the completed CI commit is still the current default-branch

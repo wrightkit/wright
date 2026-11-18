@@ -41,7 +41,7 @@ declared target matrix and that release packaging works on the host.
 
 ## Publication process
 
-When the release agent pushes a `vX.Y.Z` tag,
+When a `vX.Y.Z` tag is pushed,
 `release.yml` builds the native matrix, verifies the checksums, and generates
 the Homebrew, WinGet, and Scoop manifests from
 those exact artifacts. It attaches the generated manifests to the GitHub

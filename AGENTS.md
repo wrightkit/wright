@@ -133,9 +133,11 @@ support claims require real-project validation in addition to focused tests.
 ## Delivery
 
 - Keep commits focused and do not mix unrelated repository changes.
+- After you complete a requirement, decide whether the default branch now holds
+  a change worth releasing; if so, release it as described in
+  [`docs/release.md`](docs/release.md#creating-a-release).
 - PRs that advance shipped owner dependency pins must use the `deps:`
-  Conventional Commit type so the release agent counts the changed product graph as a
-  released change; do not classify those updates as ordinary `chore:` work.
+  Conventional Commit type so the changed product graph counts as a released change; do not classify those updates as ordinary `chore:` work.
 - Review-time verification results, including hashes, residual counts, and
   pass/fail status, must come from the test/CI run under review. Never hand-write
   or manually refresh a committed test-result file; put results in the PR
