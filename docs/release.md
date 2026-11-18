@@ -334,7 +334,7 @@ tarball, and smoke-checks it by installing it in a clean directory,
 type-checking a `request` call against the shipped types, and running it
 in Node. Only stable releases publish: after the canonical GitHub Release
 is public, `publish-npm` uploads the checksum-verified tarball to npm
-with the `NPM_TOKEN` secret.
+through npm trusted publishing (OIDC, no stored token).
 
 Consumers pin the exact release version:
 
@@ -369,8 +369,11 @@ Configure these optional/required environment secrets:
   `releases.wrightkit.dev` and `install.wrightkit.dev` as production custom
   domains before stable publication; the workflow verifies the public routes
   during publication.
-* `NPM_TOKEN` is the organization secret granting the stable `publish-npm`
-  job publish access to `@wrightkit/core` on npm (#960).
+* `@wrightkit/core` on npm has a trusted publisher for the `wrightkit/wright`
+  repository, workflow `release.yml`, and environment `release`. The
+  `publish-npm` job needs `id-token: write` and no npm token. The package must
+  not require a token: npm rejects an automation token for a package that
+  requires two-factor authentication.
 
 ## Supported installation channels
 
