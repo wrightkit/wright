@@ -18,7 +18,7 @@ cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --workspace --all-targets --all-features
 
 echo "==> release build"
-cargo build --locked --release -p wright-cli -p wright-lsp -p wright-bench
+WRIGHT_VERSION="$VERSION" cargo build --locked --release -p wright-cli -p wright-lsp -p wright-bench
 BIN="$ROOT/target/release/wright"
 LSP_BIN="$ROOT/target/release/wright-lsp"
 BENCH_BIN="$ROOT/target/release/wright-bench"

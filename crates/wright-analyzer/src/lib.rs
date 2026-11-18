@@ -1,5 +1,9 @@
-/// The release version: the git tag the build was made from (see `build.rs`).
-pub const VERSION: &str = env!("WRIGHT_VERSION");
+/// The release version. The release workflow sets `WRIGHT_VERSION` to the git
+/// tag; any other build reports the package version.
+pub const VERSION: &str = match option_env!("WRIGHT_VERSION") {
+    Some(version) => version,
+    None => env!("CARGO_PKG_VERSION"),
+};
 
 pub mod analysis;
 pub mod canonical;

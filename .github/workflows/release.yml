@@ -154,8 +154,8 @@ jobs:
           fetch-depth: 0
 
       # The version is the git tag: `X.Y.Z` for a stable release, and
-      # `X.Y.Z-N-gSHA` (the last tag plus commits since) for a nightly. The
-      # binaries embed the same value from `git describe` at build time.
+      # `X.Y.Z-N-gSHA` (the last tag plus commits since) for a nightly. Jobs
+      # that build binaries pass it to the compiler as `WRIGHT_VERSION`.
       - name: Verify release identity
         id: identity
         shell: bash
@@ -207,6 +207,7 @@ jobs:
       RELEASE_VERSION: ${{ needs.release-identity.outputs.version }}
       RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.release-identity.outputs.commit }}
+      WRIGHT_VERSION: ${{ needs.release-identity.outputs.version }}
       TARGET: ${{ matrix.target }}
       EXT: ${{ matrix.ext }}
     steps:
@@ -271,12 +272,12 @@ jobs:
       RELEASE_VERSION: ${{ needs.release-identity.outputs.version }}
       RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.release-identity.outputs.commit }}
+      WRIGHT_VERSION: ${{ needs.release-identity.outputs.version }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.release-identity.outputs.commit }}
-          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -435,12 +436,12 @@ jobs:
     timeout-minutes: 60
     env:
       RELEASE_VERSION: ${{ needs.release-identity.outputs.version }}
+      WRIGHT_VERSION: ${{ needs.release-identity.outputs.version }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.release-identity.outputs.commit }}
-          fetch-depth: 0
       - name: Set up Rust
         uses: wrightkit/.github/.github/actions/setup-rust@main
         with:

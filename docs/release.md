@@ -11,7 +11,7 @@ immutable artifact, and latest-pointer contract is recorded in
 
 ## Local release artifact
 
-`scripts/release.sh [version]` (default: the version from `git describe`) produces
+`scripts/release.sh [version]` (default: the version from `git describe`; it builds with `WRIGHT_VERSION` set to it) produces
 `target/wright-<version>.tar.gz` containing:
 
 * the standalone `wright` and `wright-lsp` release binaries; `wright serve`
@@ -41,13 +41,13 @@ Any gate failure aborts the script before it writes the archive stamp.
 
 ## Version metadata
 
-The release version is the git tag. `crates/wright-analyzer/build.rs` embeds
-`git describe --tags --match 'v[0-9]*'` at build time (`wright_analyzer::VERSION`):
-`X.Y.Z` on a tagged commit, `X.Y.Z-N-gSHA` on later commits, with `-dirty` for a
-modified tree. A build without git history reports the `Cargo.toml` package
-version, which no release process edits. A stable release accepts only a stable
-`MAJOR.MINOR.PATCH` tag; the nightly version is the last tag plus the commits
-since it. `wright --version` prints the CLI banner, `wright-lsp --version` prints the LSP
+The release version is the git tag. The release workflow derives it (`X.Y.Z`
+for a stable tag; `git describe --tags --match 'v[0-9]*'`, the last tag plus the
+commits since it, for a nightly) and passes it to the compiler as the
+`WRIGHT_VERSION` environment variable, which `wright_analyzer::VERSION` embeds.
+A build without `WRIGHT_VERSION`, such as a local build, reports the
+`Cargo.toml` package version, which no release process edits. A stable release
+accepts only a stable `MAJOR.MINOR.PATCH` tag. `wright --version` prints the CLI banner, `wright-lsp --version` prints the LSP
 banner, and the LSP `initialize` response carries `serverInfo.version`. Every
 `wright-result/v1` envelope carries `wright.version` + `wright.contract`. The
 release archive's `version.json` is the authoritative stamp for a shipped
