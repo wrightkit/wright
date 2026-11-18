@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${1:-$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' "$ROOT/Cargo.toml" | head -n1)}"
+VERSION="${1:-$(git -C "$ROOT" describe --tags --match 'v[0-9]*' | sed 's/^v//')}"
 [[ -n "$VERSION" ]] || { echo "release version undetermined: pass it explicitly" >&2; exit 1; }
 STAMP_DIR="$ROOT/target/release-stamp"
 ARTIFACT_DIR="$ROOT/target/release-package"
@@ -18,7 +18,7 @@ cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --workspace --all-targets --all-features
 
 echo "==> release build"
-cargo build --locked --release -p wright-cli -p wright-lsp -p wright-bench
+WRIGHT_VERSION="$VERSION" cargo build --locked --release -p wright-cli -p wright-lsp -p wright-bench
 BIN="$ROOT/target/release/wright"
 LSP_BIN="$ROOT/target/release/wright-lsp"
 BENCH_BIN="$ROOT/target/release/wright-bench"

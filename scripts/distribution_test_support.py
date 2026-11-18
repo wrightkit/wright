@@ -45,6 +45,15 @@ class LoopbackHTTPServer(http.server.ThreadingHTTPServer):
         self.server_port = self.server_address[1]
 
 
+def built_version() -> str:
+    """The version the debug binary reports: the git tag, or the package version."""
+    exe = "wright.exe" if sys.platform == "win32" else "wright"
+    banner = subprocess.run(
+        [str(ROOT / "target" / "debug" / exe), "--version"], capture_output=True, text=True, check=True
+    ).stdout
+    return banner.split()[1]
+
+
 def fail(channel: str, message: str) -> NoReturn:
     raise SystemExit(f"{channel} distribution validation failed: {message}")
 

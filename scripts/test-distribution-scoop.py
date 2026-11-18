@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from distribution_test_support import ROOT, ReleaseFixture, fail, native_smoke, run
+from distribution_test_support import ROOT, ReleaseFixture, built_version, fail, native_smoke, run
 
 
 CHANNEL = "Scoop"
@@ -48,7 +48,7 @@ def initialize_bucket(fixture: ReleaseFixture):
 
 
 def main() -> None:
-    version = (ROOT / "version.txt").read_text().strip()
+    version = built_version()
     with ReleaseFixture(CHANNEL, version, target_info(), "zip", ".exe") as fixture:
         bucket_root = initialize_bucket(fixture)
         bucket_uri = bucket_root.as_uri()

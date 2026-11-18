@@ -465,7 +465,7 @@ impl LanguageService {
                 &language_id,
                 &wright_lpp::ClientInfo {
                     name: "wright-language".to_string(),
-                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    version: wright_analyzer::VERSION.to_string(),
                 },
                 |provider| wright_driver::provider_edit::semantic_rename(provider, &request),
             );

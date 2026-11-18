@@ -5,7 +5,9 @@ use clap::{Args, Subcommand, ValueEnum};
 use wright_driver::result::exit;
 
 const DEFAULT_BASE_URL: &str = "https://releases.wrightkit.dev/wright";
-const USER_AGENT: &str = concat!("wright-update/", env!("CARGO_PKG_VERSION"));
+fn user_agent() -> String {
+    format!("wright-update/{}", wright_driver::result::DRIVER_VERSION)
+}
 const MAX_DOWNLOAD_BYTES: u64 = 128 * 1024 * 1024;
 
 mod install;
@@ -249,7 +251,7 @@ fn self_update(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateEr
         )));
     }
 
-    let current = env!("CARGO_PKG_VERSION").to_string();
+    let current = wright_driver::result::DRIVER_VERSION.to_string();
     let (target_version, client) = match requested {
         Some(v) => (v.to_string(), None),
         None => {
@@ -378,7 +380,7 @@ fn parse_latest_version(body: &str) -> Option<String> {
 }
 
 fn update_client() -> Result<reqwest::blocking::Client, UpdateError> {
-    wright_driver::store::client(USER_AGENT).map_err(|e| {
+    wright_driver::store::client(&user_agent()).map_err(|e| {
         UpdateError::failed(format!(
             "could not initialize HTTPS client for release downloads: {e}"
         ))

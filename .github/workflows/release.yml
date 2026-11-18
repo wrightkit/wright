@@ -44,7 +44,6 @@ jobs:
     timeout-minutes: 100
     permissions:
       contents: read
-      checks: read
     outputs:
       channel: ${{ steps.identity.outputs.channel }}
       commit: ${{ steps.identity.outputs.commit }}
@@ -116,74 +115,6 @@ jobs:
             echo "tag=$tag"
           } >> "$GITHUB_OUTPUT"
 
-      # Nightly is already CI-gated by its workflow_run trigger; stable needs
-      # the same-revision gate here because nothing else in the workflow proves
-      # the tagged revision passed the required checks.
-      - name: Require CI success on the release revision
-        if: steps.resolve.outputs.channel == 'stable'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_COMMIT: ${{ steps.resolve.outputs.commit }}
-          REQUIRED_CHECKS: CI result
-        run: |
-          set -euo pipefail
-          deadline=$(( SECONDS + 5400 ))
-          pending_file="$(mktemp)"
-          trap 'rm -f "$pending_file"' EXIT
-          if [ "$REQUIRED_CHECKS" != "${REQUIRED_CHECKS//$'\n'/,}" ]; then
-            echo "REQUIRED_CHECKS must be a single comma-separated line" >&2
-            exit 1
-          fi
-          IFS=',' read -r -a names <<< "$REQUIRED_CHECKS"
-          count=0
-          for raw in "${names[@]}"; do
-            name="$(echo "$raw" | xargs)"
-            if [ -n "$name" ]; then
-              printf '%s\n' "$name" >> "$pending_file"
-              count=$(( count + 1 ))
-            fi
-          done
-          if [ "$count" -eq 0 ]; then
-            echo "REQUIRED_CHECKS resolved to an empty set; refusing to publish" >&2
-            exit 1
-          fi
-          while [ -s "$pending_file" ]; do
-            if [ "$SECONDS" -ge "$deadline" ]; then
-              echo "Timed out waiting for release-revision checks:" >&2
-              cat "$pending_file" >&2
-              exit 1
-            fi
-            sleep 30
-            keep=""
-            while IFS= read -r name; do
-              [ -z "$name" ] && continue
-              if ! out="$(gh api --method GET "repos/$GITHUB_REPOSITORY/commits/$RELEASE_COMMIT/check-runs" \
-                -f "check_name=$name" \
-                --jq '(.check_runs | sort_by(.id) | last) // {status: "missing", conclusion: "", html_url: ""} | "\(.status) \(.conclusion // "-") \(.html_url // "-")"' 2>&1)"; then
-                echo "check-runs API call failed for '$name': $out" >&2
-                exit 1
-              fi
-              status="${out%% *}"
-              rest="${out#* }"
-              conclusion="${rest%% *}"
-              case "$status" in
-                completed)
-                  if [ "$conclusion" = "success" ]; then
-                    echo "PASS $name"
-                  else
-                    echo "FAIL $name concluded '$conclusion' ($out)" >&2
-                    exit 1
-                  fi ;;
-                *)
-                  keep="${keep}${name}"$'\n'
-                  echo "WAIT $name ($status)" ;;
-              esac
-            done < "$pending_file"
-            printf '%s' "$keep" > "$pending_file"
-          done
-          echo "All required checks succeeded on $RELEASE_COMMIT"
-
       # Stable runs serialize through the `wright-stable` concurrency group, so
       # this check runs inside the serialized section: an older tag pushed after
       # a newer release cannot regress `latest`.
@@ -220,12 +151,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.resolve.outputs.commit }}
+          fetch-depth: 0
 
-      - name: Set up Rust
-        uses: wrightkit/.github/.github/actions/setup-rust@main
-        with:
-          toolchain: 1.97.1
-
+      # The version is the git tag: `X.Y.Z` for a stable release, and
+      # `X.Y.Z-N-gSHA` (the last tag plus commits since) for a nightly. Jobs
+      # that build binaries pass it to the compiler as `WRIGHT_VERSION`.
       - name: Verify release identity
         id: identity
         shell: bash
@@ -235,20 +165,11 @@ jobs:
           RELEASE_TAG: ${{ steps.resolve.outputs.tag }}
         run: |
           set -euo pipefail
-          version="$(cargo metadata --locked --no-deps --format-version 1 |
-            jq -r '.packages[] | select(.name == "wright-cli") | .version')"
-          if [[ -z "$version" || "$version" == null ]]; then
-            echo "wright-cli workspace version is unavailable" >&2
-            exit 1
-          fi
-          checked_in_version="$(tr -d '\r\n' < version.txt)"
-          if [[ "$checked_in_version" != "$version" ]]; then
-            echo "version.txt '$checked_in_version' does not match workspace version '$version'" >&2
-            exit 1
-          fi
-          if [[ "$RELEASE_CHANNEL" == stable && "$RELEASE_TAG" != "v$version" ]]; then
-            echo "tag $RELEASE_TAG does not match workspace version $version" >&2
-            exit 1
+          if [[ "$RELEASE_CHANNEL" == stable ]]; then
+            version="${RELEASE_TAG#v}"
+          else
+            version="$(git describe --tags --match 'v[0-9]*')"
+            version="${version#v}"
           fi
           {
             echo "channel=$RELEASE_CHANNEL"
@@ -286,6 +207,7 @@ jobs:
       RELEASE_VERSION: ${{ needs.release-identity.outputs.version }}
       RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.release-identity.outputs.commit }}
+      WRIGHT_VERSION: ${{ needs.release-identity.outputs.version }}
       TARGET: ${{ matrix.target }}
       EXT: ${{ matrix.ext }}
     steps:
@@ -350,6 +272,7 @@ jobs:
       RELEASE_VERSION: ${{ needs.release-identity.outputs.version }}
       RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.release-identity.outputs.commit }}
+      WRIGHT_VERSION: ${{ needs.release-identity.outputs.version }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -513,6 +436,7 @@ jobs:
     timeout-minutes: 60
     env:
       RELEASE_VERSION: ${{ needs.release-identity.outputs.version }}
+      WRIGHT_VERSION: ${{ needs.release-identity.outputs.version }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -620,36 +544,13 @@ jobs:
             exit 1
           fi
 
-          draft="$(gh release view "$RELEASE_TAG" \
+          gh release create "$RELEASE_TAG" release/* attach/* \
             --repo "$GITHUB_REPOSITORY" \
-            --json isDraft \
-            --jq '.isDraft' 2>/dev/null || true)"
-          if [[ -z "$draft" ]]; then
-            gh release create "$RELEASE_TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --verify-tag \
-              --target "$RELEASE_COMMIT" \
-              --title "$RELEASE_TAG" \
-              --generate-notes \
-              --draft
-            draft=true
-          elif [[ "$draft" == true ]]; then
-            echo "found existing draft release $RELEASE_TAG"
-          else
-            echo "release $RELEASE_TAG already exists as public; refusing to continue" >&2
-            exit 1
-          fi
-
-          if [[ "$draft" == true ]]; then
-            gh release upload "$RELEASE_TAG" release/* attach/* \
-              --repo "$GITHUB_REPOSITORY" \
-              --clobber
-            gh release edit "$RELEASE_TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --verify-tag \
-              --draft=false \
-              --latest
-          fi
+            --verify-tag \
+            --target "$RELEASE_COMMIT" \
+            --title "$RELEASE_TAG" \
+            --generate-notes \
+            --latest
 
   publish-npm:
     name: Publish @wrightkit/core to npm

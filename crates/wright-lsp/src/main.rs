@@ -30,7 +30,7 @@ fn main() {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--version" | "-V" => {
-                println!("wright-lsp {}", env!("CARGO_PKG_VERSION"));
+                println!("wright-lsp {}", wright_language::VERSION);
                 return;
             }
             "--opy-provider" => {
@@ -451,7 +451,7 @@ fn initialize_result(
         },
         server_info: Some(ServerInfo {
             name: "wright-lsp".into(),
-            version: Some(env!("CARGO_PKG_VERSION").into()),
+            version: Some(wright_language::VERSION.into()),
         }),
     }
 }

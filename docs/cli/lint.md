@@ -293,7 +293,7 @@ To move the embedded SHA:
 4. Open one PR that changes the SHA and the copy together. Any maintainer or
    agent may open it, also automatically after a `wrightkit/lint-rules`
    merge. Use the `deps:` Conventional Commit type, as for other shipped
-   owner pins, so the bump is listed under Dependencies in the release notes.
+   owner pins, so the bump counts as a released change.
 
 The bump merges only when CI passes. The `Lint rules sync` job runs
 `scripts/sync-lint-rules.py --check` and fails when the copy differs from

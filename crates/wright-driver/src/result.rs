@@ -8,7 +8,7 @@ pub struct VersionInfo {
 }
 
 pub const RESULT_CONTRACT: &str = "wright-result/v1";
-pub const DRIVER_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const DRIVER_VERSION: &str = wright_analyzer::VERSION;
 
 pub mod exit {
     pub const SUCCESS: u8 = 0;
