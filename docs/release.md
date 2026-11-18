@@ -11,7 +11,8 @@ immutable artifact, and latest-pointer contract is recorded in
 
 ## Local release artifact
 
-`scripts/release.sh [version]` (default: the workspace version) produces
+`scripts/release.sh [version]` (default: the checked-in placeholder version,
+which the binaries report) produces
 `target/wright-<version>.tar.gz` containing:
 
 * the standalone `wright` and `wright-lsp` release binaries; `wright serve`
@@ -37,7 +38,7 @@ channels.
    retained Wright test inputs with `PATH=/usr/bin:/bin` (Node and OverPy
    absent), and `wright-lsp --version` reports the release version.
 
-Any gate failure aborts the release before the version is stamped.
+Any gate failure aborts the script before it writes the archive stamp.
 
 ## Version metadata
 
@@ -99,7 +100,9 @@ commits since the last tag that change released behavior, the `CI result`
 check-run is green on the commit it tags, and no stable release run is queued
 or in progress. It chooses the next `MAJOR.MINOR.PATCH` from the Conventional
 Commits since the last tag (a breaking change bumps minor while the major
-version is 0; `feat` bumps minor; other released changes bump patch) and
+version is 0; `feat` bumps minor; `fix`, `perf`, `deps`, `refactor`, and
+`revert` bump patch; `chore`, `docs`, `style`, `test`, `build`, and `ci` alone
+do not release) and
 pushes the annotated `vX.Y.Z` tag to that commit. Releases may be frequent.
 To publish again after a failed run, dispatch `release.yml` with the existing
 `vX.Y.Z` tag; dispatch never creates a version. A run for a tag that already has a

@@ -296,7 +296,7 @@ jobs:
           python-version: "3.12"
 
       - name: Stamp release version
-        run: python3 scripts/stamp-version.py "$RELEASE_VERSION"
+        run: python scripts/stamp-version.py "$RELEASE_VERSION"
 
       - name: Set up Rust
         uses: wrightkit/.github/.github/actions/setup-rust@main
@@ -623,8 +623,15 @@ jobs:
             exit 1
           fi
 
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "release $RELEASE_TAG already exists; refusing to continue" >&2
+          # `gh release create` uploads into a draft and publishes last, so a
+          # draft left by an interrupted run holds no public state: replace it.
+          # A public Release is never touched.
+          draft="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+          if [[ "$draft" == true ]]; then
+            gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --yes
+          elif [[ -n "$draft" ]]; then
+            echo "release $RELEASE_TAG already exists as public; refusing to continue" >&2
             exit 1
           fi
           gh release create "$RELEASE_TAG" release/* attach/* \

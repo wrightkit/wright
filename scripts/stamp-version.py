@@ -36,7 +36,7 @@ def main() -> None:
     stamped = replace_once(
         section.group(0), r'^version = ".*"$', f'version = "{version}"', "Cargo.toml"
     )
-    manifest.write_text(text.replace(section.group(0), stamped, 1))
+    manifest.write_text(text.replace(section.group(0), stamped, 1), newline="\n")
 
     # A workspace package is a lockfile entry without `source`.
     lock = ROOT / "Cargo.lock"
@@ -45,9 +45,9 @@ def main() -> None:
         lambda m: f'{m.group(1)}version = "{version}"\n',
         lock.read_text(),
     )
-    lock.write_text(stamped_lock)
+    lock.write_text(stamped_lock, newline="\n")
 
-    (ROOT / "version.txt").write_text(f"{version}\n")
+    (ROOT / "version.txt").write_text(f"{version}\n", newline="\n")
 
 
 if __name__ == "__main__":
