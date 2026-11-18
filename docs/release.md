@@ -95,7 +95,7 @@ byte-checks rather than republishes them.
 A release is a pushed tag, the same for a maintainer and for an agent:
 
 ```sh
-git tag vX.Y.Z
+git tag -a vX.Y.Z -m vX.Y.Z
 git push origin vX.Y.Z
 ```
 
