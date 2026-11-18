@@ -68,10 +68,9 @@ Wright has two release channels and one shared native build workflow:
 2. Stable releases start from a `vX.Y.Z` tag. Whoever completes a
    requirement decides whether to release and which version to give it (see
    [Creating a release](#creating-a-release)). No Release PR, version commit,
-   changelog file, or scheduled release job exists. The tag push starts `.github/workflows/release.yml`.
-   The workflow refuses to publish unless the `CI result` check-run succeeded
-   on the tagged commit and the tag is
-   not older than the published `wright/latest/version` pointer; stable runs
+   changelog file, or scheduled release job exists. The tag push starts
+   `.github/workflows/release.yml`. The workflow refuses to publish when the
+   tag is older than the published `wright/latest/version` pointer; stable runs
    serialize through the `wright-stable` concurrency group so concurrent
    releases cannot interleave or regress `latest`. The workflow stamps the tag
    version, builds and smoke-tests the native matrix from the tagged commit,

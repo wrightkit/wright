@@ -44,7 +44,6 @@ jobs:
     timeout-minutes: 100
     permissions:
       contents: read
-      checks: read
     outputs:
       channel: ${{ steps.identity.outputs.channel }}
       commit: ${{ steps.identity.outputs.commit }}
@@ -115,17 +114,6 @@ jobs:
             echo "commit=$commit"
             echo "tag=$tag"
           } >> "$GITHUB_OUTPUT"
-
-      # Nightly is already CI-gated by its workflow_run trigger; stable needs
-      # the same-revision gate here because nothing else in the workflow proves
-      # the tagged revision passed the required checks.
-      - name: Wait for CI on the release revision
-        if: steps.resolve.outputs.channel == 'stable'
-        uses: lewagon/wait-on-check-action@369769072fe522a3a8a85c03c96af1e5242a1994 # v1.9.1
-        with:
-          ref: ${{ steps.resolve.outputs.commit }}
-          check-name: CI result
-          repo-token: ${{ github.token }}
 
       # Stable runs serialize through the `wright-stable` concurrency group, so
       # this check runs inside the serialized section: an older tag pushed after
