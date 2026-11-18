@@ -32,7 +32,7 @@ use wright_driver::source_provider::SourceBackend;
 use crate::cli::{Cli, Command, CommonArgs, ConvertTargetArg, OutputFormatArg};
 
 pub const CLI_NAME: &str = "wright";
-pub const CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const CLI_VERSION: &str = wright_driver::result::DRIVER_VERSION;
 
 fn version_banner() -> String {
     format!(

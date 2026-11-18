@@ -30,7 +30,7 @@ mod state;
 
 /// The tool-service name and version.
 pub const SERVICE_NAME: &str = "wright-tool-service";
-pub const SERVICE_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const SERVICE_VERSION: &str = wright_analyzer::VERSION;
 pub const AGENT_CONTRACT: &str = "wright-agent/v1";
 
 const DEFAULT_CONTENT_RULES: usize = 20;

@@ -151,10 +151,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.resolve.outputs.commit }}
+          fetch-depth: 0
 
-      # The checked-in version is a placeholder. A stable release takes its
-      # version from the tag; every job that builds stamps it with
-      # `scripts/stamp-version.py`. Nightlies keep the placeholder.
+      # The version is the git tag: `X.Y.Z` for a stable release, and
+      # `X.Y.Z-N-gSHA` (the last tag plus commits since) for a nightly. The
+      # binaries embed the same value from `git describe` at build time.
       - name: Verify release identity
         id: identity
         shell: bash
@@ -167,7 +168,8 @@ jobs:
           if [[ "$RELEASE_CHANNEL" == stable ]]; then
             version="${RELEASE_TAG#v}"
           else
-            version="$(tr -d '\r\n' < version.txt)"
+            version="$(git describe --tags --match 'v[0-9]*')"
+            version="${version#v}"
           fi
           {
             echo "channel=$RELEASE_CHANNEL"
@@ -218,9 +220,6 @@ jobs:
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
-
-      - name: Stamp release version
-        run: python scripts/stamp-version.py "$RELEASE_VERSION"
 
       - name: Set up Rust
         uses: wrightkit/.github/.github/actions/setup-rust@main
@@ -277,9 +276,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.release-identity.outputs.commit }}
-
-      - name: Stamp release version
-        run: python3 scripts/stamp-version.py "$RELEASE_VERSION"
+          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -443,8 +440,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.release-identity.outputs.commit }}
-      - name: Stamp release version
-        run: python3 scripts/stamp-version.py "$RELEASE_VERSION"
+          fetch-depth: 0
       - name: Set up Rust
         uses: wrightkit/.github/.github/actions/setup-rust@main
         with:

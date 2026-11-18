@@ -20,7 +20,7 @@ pub(crate) fn start(format: Option<OutputFormatArg>) -> Trace {
         Some(_) => Trace::enabled(),
         None => Trace::disabled(),
     };
-    trace.set_fact("wrightVersion", env!("CARGO_PKG_VERSION"));
+    trace.set_fact("wrightVersion", wright_driver::result::DRIVER_VERSION);
     trace.set_fact("os", std::env::consts::OS);
     trace.set_fact("arch", std::env::consts::ARCH);
     trace.set_fact("allocator", "mimalloc");

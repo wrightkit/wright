@@ -598,9 +598,6 @@ jobs:
       - name: Test R2 retention pruning
         if: matrix.channel == 'install.sh'
         run: python scripts/test-prune-r2.py
-      - name: Test release version stamping
-        if: matrix.channel == 'install.sh'
-        run: python scripts/test-stamp-version.py
       - name: Test install.ps1 (channel)
         if: matrix.channel == 'install.ps1'
         shell: pwsh

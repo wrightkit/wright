@@ -1674,7 +1674,7 @@ fn version_reports_the_implementation_version() {
     assert!(output.status.success());
     let banner = String::from_utf8_lossy(&output.stdout);
     assert!(banner.starts_with("wright "), "{banner}");
-    assert!(banner.contains(env!("CARGO_PKG_VERSION")), "{banner}");
+    assert!(banner.contains(wright_analyzer::VERSION), "{banner}");
 }
 
 #[test]

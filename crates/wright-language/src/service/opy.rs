@@ -47,7 +47,7 @@ impl LanguageService {
     fn connect_opy_provider(&mut self) -> Result<Box<dyn LanguageProvider>, (String, String)> {
         let client = wright_lpp::ClientInfo {
             name: wright_lpp::LPP_CLIENT_NAME.to_string(),
-            version: env!("CARGO_PKG_VERSION").to_string(),
+            version: wright_analyzer::VERSION.to_string(),
         };
         self.session()
             .map_err(|d| (d.code.clone(), d.message.clone()))?

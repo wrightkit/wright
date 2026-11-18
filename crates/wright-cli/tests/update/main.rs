@@ -256,7 +256,7 @@ fn update_refreshes_existing_completions() {
 
 #[test]
 fn update_already_at_latest_reports_up_to_date() {
-    let current = env!("CARGO_PKG_VERSION");
+    let current = wright_analyzer::VERSION;
     let server = MockServer::new(release(current).files);
     let dir = install_dir("update-current");
     let before = read(&dir.join("wright"));

@@ -37,7 +37,7 @@ fn check_json_matches_schema_and_snapshot() {
     let value = validate_output(&schema, &output.stdout);
     assert_eq!(
         value["wright"]["version"],
-        serde_json::Value::String(env!("CARGO_PKG_VERSION").to_string())
+        serde_json::Value::String(wright_analyzer::VERSION.to_string())
     );
     assert_eq!(value["wright"]["contract"], "wright-result/v1");
     let mut snapshot_value = value;

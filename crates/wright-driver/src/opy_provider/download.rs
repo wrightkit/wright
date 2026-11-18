@@ -5,11 +5,13 @@ use flate2::read::GzDecoder;
 use super::{MAX_DOWNLOAD_BYTES, OpyProviderError, is_executable, provider_binary};
 
 pub(super) fn provider_client() -> Result<reqwest::blocking::Client, OpyProviderError> {
-    crate::store::client(concat!("wright-opy-provider/", env!("CARGO_PKG_VERSION"))).map_err(|e| {
-        OpyProviderError::offline(format!(
-            "cannot initialize HTTPS client for OPY provider release source: {e}"
-        ))
-    })
+    crate::store::client(&format!("wright-opy-provider/{}", wright_analyzer::VERSION)).map_err(
+        |e| {
+            OpyProviderError::offline(format!(
+                "cannot initialize HTTPS client for OPY provider release source: {e}"
+            ))
+        },
+    )
 }
 
 pub(super) fn fetch_text(

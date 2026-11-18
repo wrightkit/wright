@@ -6,7 +6,7 @@ import os
 import platform
 from pathlib import Path
 
-from distribution_test_support import ROOT, ReleaseFixture, fail, native_smoke, run
+from distribution_test_support import ROOT, ReleaseFixture, built_version, fail, native_smoke, run
 
 
 CHANNEL = "install.sh"
@@ -25,7 +25,7 @@ def target_info() -> str:
 
 
 def main() -> None:
-    version = (ROOT / "version.txt").read_text().strip()
+    version = built_version()
     with ReleaseFixture(CHANNEL, version, target_info(), "tar.gz", "") as fixture:
         install_dir = fixture.work / "install"
         home = fixture.work / "home"

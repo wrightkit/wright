@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${1:-$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' "$ROOT/Cargo.toml" | head -n1)}"
+VERSION="${1:-$(git -C "$ROOT" describe --tags --match 'v[0-9]*' | sed 's/^v//')}"
 [[ -n "$VERSION" ]] || { echo "release version undetermined: pass it explicitly" >&2; exit 1; }
 STAMP_DIR="$ROOT/target/release-stamp"
 ARTIFACT_DIR="$ROOT/target/release-package"

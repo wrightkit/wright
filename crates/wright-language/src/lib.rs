@@ -8,6 +8,7 @@ pub use service::{
     HoverInfo, LanguageService, OpyProviderSupport, RenameOutcome, SourceDiagnostic,
     SourceLocation, SourceSymbol, SourceTextEdit,
 };
+pub use wright_analyzer::VERSION;
 pub use wright_driver::{OpyProviderConfig, SessionConfig};
 /// The diagnostic-severity vocabulary `SourceDiagnostic` carries — the
 /// provider contract's enum, re-exported so consumers need no direct

@@ -182,7 +182,7 @@ fn run() -> Result<bool, String> {
 
     let report = Report {
         contract: BENCH_CONTRACT,
-        version: env!("CARGO_PKG_VERSION"),
+        version: wright_driver::result::DRIVER_VERSION,
         profile: Profile::Compat.as_str(),
         iterations,
         thresholds: config["thresholds"].clone(),

@@ -256,7 +256,7 @@ impl<'a> SemanticService<'a> {
     }
     fn dispatch(&self, request: &Request) -> Response {
         match request {
-            Request::Version => Response::Ok { result: json!({"name": "wright-tool", "version": env!("CARGO_PKG_VERSION"), "capabilities": ["program", "rules", "symbols", "references", "usage", "cfg", "findings", "persistentObjects", "lintRules"]}) },
+            Request::Version => Response::Ok { result: json!({"name": "wright-tool", "version": crate::VERSION, "capabilities": ["program", "rules", "symbols", "references", "usage", "cfg", "findings", "persistentObjects", "lintRules"]}) },
             Request::Program => Response::Ok { result: json!({"origin": self.origin, "globalVariables": self.program.global_variables.len(), "playerVariables": self.program.player_variables.len(), "subroutines": self.program.subroutines.len(), "rules": self.program.rules.len(), "findings": self.findings.len()}) },
             Request::ListRules => Response::Ok { result: json!(self.program.rules.iter().enumerate().map(|(id, rule)| json!({"id": id, "name": rule.name, "address": self.index.canonical_rule_address(id), "event": event_name(&rule.event), "span": span_json(self.program.rule_span(id))})).collect::<Vec<_>>()) },
             Request::GetRule { rule } => self.rule(*rule as usize),

@@ -87,7 +87,11 @@ pub(super) fn search_page(body: &[u8]) -> Result<SearchPage, LintPackageError> {
 }
 
 pub(super) fn package_client() -> Result<reqwest::blocking::Client, LintPackageError> {
-    crate::store::client(concat!("wright-lint-packages/", env!("CARGO_PKG_VERSION"))).map_err(|e| {
+    crate::store::client(&format!(
+        "wright-lint-packages/{}",
+        wright_analyzer::VERSION
+    ))
+    .map_err(|e| {
         LintPackageError::offline(format!(
             "cannot initialize HTTPS client for lint package fetch: {e}"
         ))

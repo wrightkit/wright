@@ -1,7 +1,7 @@
 # Wright release process and distribution contract
 
 Status: accepted baseline (release automation and distribution contract)
-Scope: release artifact packaging, validation gates, version stamping, and
+Scope: release artifact packaging, validation gates, versioning, and
 public distribution
 
 Decision history: provider distribution and local activation are recorded in
@@ -11,8 +11,7 @@ immutable artifact, and latest-pointer contract is recorded in
 
 ## Local release artifact
 
-`scripts/release.sh [version]` (default: the checked-in placeholder version,
-which the binaries report) produces
+`scripts/release.sh [version]` (default: the version from `git describe`) produces
 `target/wright-<version>.tar.gz` containing:
 
 * the standalone `wright` and `wright-lsp` release binaries; `wright serve`
@@ -42,14 +41,13 @@ Any gate failure aborts the script before it writes the archive stamp.
 
 ## Version metadata
 
-The binaries report the workspace implementation version (one authoritative
-`version = "<release version>"` in `[workspace.package]`; every crate inherits it via
-`version.workspace = true`). A stable release accepts only a stable
-`MAJOR.MINOR.PATCH` version; prerelease and build metadata are rejected. The
-checked-in version in `Cargo.toml`, `Cargo.lock`, and `version.txt` is the
-placeholder `0.1.0`. A release takes its version from the `vX.Y.Z` tag, and every
-job that builds stamps it with `scripts/stamp-version.py` before it builds; the
-stamped files are never committed. `wright --version` prints the CLI banner, `wright-lsp --version` prints the LSP
+The release version is the git tag. `crates/wright-analyzer/build.rs` embeds
+`git describe --tags --match 'v[0-9]*'` at build time (`wright_analyzer::VERSION`):
+`X.Y.Z` on a tagged commit, `X.Y.Z-N-gSHA` on later commits, with `-dirty` for a
+modified tree. A build without git history reports the `Cargo.toml` package
+version, which no release process edits. A stable release accepts only a stable
+`MAJOR.MINOR.PATCH` tag; the nightly version is the last tag plus the commits
+since it. `wright --version` prints the CLI banner, `wright-lsp --version` prints the LSP
 banner, and the LSP `initialize` response carries `serverInfo.version`. Every
 `wright-result/v1` envelope carries `wright.version` + `wright.contract`. The
 release archive's `version.json` is the authoritative stamp for a shipped
@@ -72,8 +70,8 @@ Wright has two release channels and one shared native build workflow:
    `.github/workflows/release.yml`. The workflow refuses to publish when the
    tag is older than the published `wright/latest/version` pointer; stable runs
    serialize through the `wright-stable` concurrency group so concurrent
-   releases cannot interleave or regress `latest`. The workflow stamps the tag
-   version, builds and smoke-tests the native matrix from the tagged commit,
+   releases cannot interleave or regress `latest`. The workflow builds and
+   smoke-tests the native matrix from the tagged commit,
    then publishes and verifies the immutable `wright/releases/<version>/` R2
    objects and installer scripts. Only after that staged artifact set is
    publicly available and checksum-consistent does it create the GitHub

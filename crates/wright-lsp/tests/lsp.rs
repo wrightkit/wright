@@ -168,7 +168,7 @@ fn lsp_binary_reports_the_implementation_version_non_interactively() {
     assert!(output.status.success());
     let banner = String::from_utf8_lossy(&output.stdout);
     assert!(banner.trim().starts_with("wright-lsp "));
-    assert!(banner.contains(env!("CARGO_PKG_VERSION")));
+    assert!(banner.contains(wright_language::VERSION));
 }
 
 #[test]
