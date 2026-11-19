@@ -407,7 +407,6 @@ fn scope_list_matches_each_listed_scope() {
         [Some(0), Some(3), Some(6)],
         "one finding per listed loop kind, none for `if`: {findings:?}"
     );
-    // Two scopes mixed in one list.
     let yaml = format!(
         "id: community/mixed\n{METADATA}matcher:\n  scope: [if, while]\n  actions:\n    - kind: call\n"
     );
