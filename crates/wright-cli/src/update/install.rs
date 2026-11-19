@@ -41,7 +41,19 @@ pub(super) fn install_version(
         "==> done: wright and wright-lsp {version} installed in {}",
         install_dir.display()
     );
-    let _ = crate::completion::refresh_installed_completions();
+    // The running process is the old version; the installed binary writes
+    // completions for the new one.
+    let refreshed = Process::new(install_dir.join(platform.exe("wright")))
+        .args(["completion", "refresh"])
+        .output();
+    match refreshed {
+        Ok(output) if output.status.success() => {
+            print!("{}", String::from_utf8_lossy(&output.stdout));
+        }
+        _ => eprintln!(
+            "warning: could not refresh shell completions; run `wright completion install --force` for your shell"
+        ),
+    }
     Ok(())
 }
 

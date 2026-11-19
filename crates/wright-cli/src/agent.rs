@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 use wright_driver::result::exit;
 use wright_driver::sha256_hex;
 
-use crate::cli::{AgentArgs, AgentHookEvent, AgentInstallArgs, AgentSubcommand};
+use crate::cli::{AgentArgs, AgentHookEvent, AgentInstallArgs, AgentSubcommand, HookTarget};
 
 mod config_file;
 mod hook;
@@ -239,11 +239,10 @@ fn report_mcp(status: &mcp::McpStatus) {
     }
 }
 
-fn report_hook(status: &hook::HookStatus) {
+fn report_hook(status: &hook::HookStatus, target: HookTarget, command: &str) {
     match status {
         hook::HookStatus::Created(path) => {
             println!("==> configured the Wright edit hook in {}", path.display());
-            println!("delete its `wright agent hook` entry to remove it");
         }
         hook::HookStatus::Replaced(path) => {
             println!("==> replaced the Wright edit hook in {}", path.display());
@@ -256,8 +255,22 @@ fn report_hook(status: &hook::HookStatus) {
         }
         hook::HookStatus::DryRun(path) => {
             println!("would configure the Wright edit hook in {}", path.display());
+            return;
         }
     }
+    println!("next steps:");
+    match target {
+        HookTarget::Claude => println!(
+            "  1. start a new Claude Code session in this project, or review the hook with `/hooks`"
+        ),
+        HookTarget::Codex => println!(
+            "  1. trust this project in Codex and approve the hook; Codex runs project hooks only for a trusted project\n  2. start a new Codex session in this project"
+        ),
+    }
+    println!(
+        "  verify: run `echo '{{}}' | {command}` from the project; exit 0 with no output means the stored input and options load the project; any output, or exit 2, is a failure"
+    );
+    println!("  remove: delete its `wright agent hook` entry");
 }
 
 pub(crate) fn run(args: &AgentArgs) -> Result<u8, AgentError> {
@@ -301,8 +314,12 @@ pub(crate) fn run(args: &AgentArgs) -> Result<u8, AgentError> {
             if let Some(status) = &server {
                 report_mcp(status);
             }
-            if let Some(status) = &hook {
-                report_hook(status);
+            if let Some((status, command)) = &hook {
+                report_hook(
+                    status,
+                    install_args.hook.expect("hook was installed"),
+                    command,
+                );
             }
             Ok(exit::SUCCESS)
         }

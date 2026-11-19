@@ -48,6 +48,7 @@ result.
 | `wright serve [INPUT] [--transport T] [--kind K] [--profile P] [--lint-config YAML] [--rule-file PATH] [--disable-rule ID] [--rule-severity ID:SEV]` | Serve `wright-agent/v1` over stdio, JSON-RPC 2.0, or MCP | one structured response per request |
 | `wright completion <SHELL>` | Generate static completion script for bash, zsh, fish, or powershell | the generated completion script |
 | `wright completion install [SHELL]` | Install generated completion into standard user-local directory | installation progress and guidance |
+| `wright completion refresh` | Regenerate the completion files already installed; `wright update` runs it from the new binary | refreshed files and a reload instruction |
 | `wright update [self\|provider [NAME]]` | Update Wright-managed components: a standalone installation and installed first-party providers | update progress (text only) |
 | `wright agent install` | Install the canonical Wright agent guide into the project's agent skills directory | installation progress and guidance |
 | `wright agent tools [--format messages\|json-schema]` | Emit the advertised operations as client tool definitions for code-executing agents | `wright-agent/v1` tool-definition document (JSON) |
@@ -240,7 +241,8 @@ wright agent install --hook claude -- src/main.opy --kind opy --locale zh-CN
 
 Install loads the program once with the stored input and options, as `--mcp`
 does, using the same code. When the program cannot be loaded, install names
-the load diagnostic and the `--` form, writes nothing, and exits 1; `--force`
+the load diagnostic and the `--` form, writes nothing, and exits 1; when the
+diagnostic names a locale, the suggested form adds `--locale zh-CN`. `--force`
 skips only the load, never option validation. With `--mcp` and `--hook` together,
 every registration is validated before any file is written, so a refusal
 writes nothing. Re-running reports up to date; a different Wright hook is
@@ -300,6 +302,24 @@ Sources: the [Codex hooks reference](https://developers.openai.com/codex/hooks)
 and a payload captured from `codex exec` 0.169.0. A live `codex exec` session on
 an OPY project showed the model receiving the `unknown-member` diagnostic after
 an edit that broke the program.
+
+#### Activation and verification (#1119)
+
+A successful `--hook` install prints the remaining steps and a verification
+command. `echo '{}' | <stored command>`, run from the project, exits 0 with no
+output when the stored input and options load the project. A failure shows as
+output: Claude Code exits 2 with the diagnostic on stderr; Codex exits 0 with
+`additionalContext` JSON on stdout. The check does not prove the harness runs
+the hook. The activation step differs by harness:
+
+| Harness | Config file | Remaining step |
+| --- | --- | --- |
+| Claude Code | `.claude/settings.local.json` | Start a new session in the project; `/hooks` lists the entry |
+| Codex | `.codex/hooks.json` | Trust the project and approve the hook, then start a new session |
+
+A refused install (load failure, different existing hook, wrong file shape)
+prints the cause and the next action, writes nothing, and prints no next steps.
+`wright agent --help` lists this setup path.
 
 ## `wright agent tools`: client tool definitions (#535)
 

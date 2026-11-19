@@ -7,7 +7,7 @@ use wright_driver::result::exit;
 
 use super::AgentError;
 use super::config_file::{ensure_not_linked, read_config, write_config};
-use super::stored::{Stored, load_failure, session_config};
+use super::stored::{Stored, load_failure, load_rejection, session_config};
 use crate::cli::HookTarget;
 use crate::present::RenderContext;
 
@@ -137,15 +137,20 @@ pub(crate) fn install(
     check: &[String],
     force: bool,
     dry_run: bool,
-) -> Result<HookStatus, AgentError> {
+) -> Result<(HookStatus, String), AgentError> {
     let spec = spec(target, root)?;
     let stored = Stored::new(&spec.input, root, check);
     let config = stored.session_config()?;
     if !force && let Some(failure) = load_failure(config) {
-        return Err(AgentError::Rejected(format!(
-            "the Wright edit hook would not load the project ({failure}); pass its input and options after `--`, for example `wright agent install --hook {} -- src/main.opy --kind opy`, or pass --force to register it anyway",
-            target.to_possible_value().expect("not skipped").get_name()
-        )));
+        return Err(load_rejection(
+            "the Wright edit hook",
+            &format!(
+                "--hook {}",
+                target.to_possible_value().expect("not skipped").get_name()
+            ),
+            &failure,
+            check,
+        ));
     }
     let path = root.join(spec.file);
     ensure_not_linked(root, &path)?;
@@ -168,6 +173,7 @@ pub(crate) fn install(
         .as_array_mut()
         .ok_or_else(wrong_shape)?;
     let hook = generated_hook(&spec, &stored);
+    let command = hook["command"].as_str().unwrap_or_default().to_string();
     let mut ours = Vec::new();
     for (group_index, group) in groups.iter_mut().enumerate() {
         let matcher_matches = group.get("matcher").and_then(Value::as_str) == Some(spec.matcher);
@@ -182,7 +188,7 @@ pub(crate) fn install(
         }
     }
     if let [(_, _, true)] = ours[..] {
-        return Ok(HookStatus::UpToDate(path));
+        return Ok((HookStatus::UpToDate(path), command));
     }
     if !ours.is_empty() && !force {
         return Err(AgentError::Rejected(format!(
@@ -209,14 +215,15 @@ pub(crate) fn install(
         json!({"matcher": spec.matcher, "hooks": [hook]}),
     );
     if dry_run {
-        return Ok(HookStatus::DryRun(path));
+        return Ok((HookStatus::DryRun(path), command));
     }
     write_config(&path, &settings)?;
-    Ok(if replaced {
+    let status = if replaced {
         HookStatus::Replaced(path)
     } else {
         HookStatus::Created(path)
-    })
+    };
+    Ok((status, command))
 }
 
 /// `PostToolUse` cannot undo the edit. Wright's own failures exit 1 on

@@ -101,6 +101,10 @@ fn main() -> ExitCode {
                     }
                 }
             }
+            Some(cli::CompletionSubcommand::Refresh) => {
+                completion::refresh_installed_completions();
+                ExitCode::SUCCESS
+            }
             None => match args.shell {
                 Some(shell) => {
                     let bytes = completion::generate_script(shell);

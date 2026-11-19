@@ -67,7 +67,9 @@ fn update_installs_and_replaces_both_binaries() {
 
     assert_eq!(
         String::from_utf8_lossy(&read(&dir.join("wright"))),
-        format!("#!/bin/sh\necho \"fake wright {RELEASE}\"\n")
+        format!(
+            "#!/bin/sh\nif [ \"$1 $2\" = \"completion refresh\" ] && [ -n \"$WRIGHT_COMPLETION_DIR\" ]; then echo refreshed > \"$WRIGHT_COMPLETION_DIR/refresh-ran\"; fi\necho \"fake wright {RELEASE}\"\n"
+        )
     );
     assert_eq!(
         String::from_utf8_lossy(&read(&dir.join("wright-lsp"))),
@@ -225,9 +227,6 @@ fn update_refreshes_existing_completions() {
     let comp_dir = std::env::temp_dir().join(format!("wright-comp-test-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&comp_dir);
     std::fs::create_dir_all(&comp_dir).unwrap();
-    let comp_file = comp_dir.join("_wright");
-    std::fs::write(&comp_file, b"old completion content").unwrap();
-
     let mut env = server.env();
     env.push((
         "WRIGHT_COMPLETION_DIR",
@@ -241,14 +240,8 @@ fn update_refreshes_existing_completions() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("refreshed") || stdout.contains("installed"),
-        "{stdout}"
-    );
-
-    let new_content = std::fs::read(&comp_file).unwrap();
-    assert_ne!(new_content, b"old completion content");
+    // The installed (new) binary refreshes the files, not the running one.
+    assert!(comp_dir.join("refresh-ran").is_file());
 
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&comp_dir);

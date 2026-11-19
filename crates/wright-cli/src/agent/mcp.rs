@@ -4,7 +4,7 @@ use serde_json::{Map, Value, json};
 
 use super::AgentError;
 use super::config_file::{ensure_not_linked, read_config, write_config};
-use super::stored::{Stored, load_failure};
+use super::stored::{Stored, load_failure, load_rejection};
 use crate::cli::McpTarget;
 
 const SERVER_NAME: &str = "wright";
@@ -96,10 +96,12 @@ pub(crate) fn install(
     let stored = Stored::new(layout.input, root, serve);
     let config = stored.session_config()?;
     if !force && let Some(failure) = load_failure(config) {
-        return Err(AgentError::Rejected(format!(
-            "the Wright MCP server would not load the project ({failure}); pass its input and options after `--`, for example `wright agent install --mcp {} -- src/main.opy --kind opy`, or pass --force to register it anyway",
-            target.name()
-        )));
+        return Err(load_rejection(
+            "the Wright MCP server",
+            &format!("--mcp {}", target.name()),
+            &failure,
+            serve,
+        ));
     }
     let path = root.join(layout.file);
     ensure_not_linked(root, &path)?;
