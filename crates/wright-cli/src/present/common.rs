@@ -177,7 +177,6 @@ pub(crate) fn notable_callers<'a>(
     ranked
 }
 
-/// `(fan-in, fan-out)` name → edge-count maps for a call graph's `edges`.
 pub(crate) fn call_fan_counts(
     edges: &[serde_json::Value],
 ) -> (
@@ -202,7 +201,6 @@ pub(crate) fn cfg_edge_count(blocks: &[serde_json::Value]) -> usize {
         .sum()
 }
 
-/// `(loop headers, wait blocks, call sites)` counts for a CFG block list.
 pub(crate) fn cfg_block_stats(blocks: &[serde_json::Value]) -> (usize, usize, usize) {
     let loops = blocks
         .iter()
@@ -216,7 +214,6 @@ pub(crate) fn cfg_block_stats(blocks: &[serde_json::Value]) -> (usize, usize, us
     (loops, waits, calls)
 }
 
-/// Flag names a CFG block carries (`waits`, `calls`); the join differs per renderer.
 pub(crate) fn block_flags(block: &serde_json::Value) -> Vec<&'static str> {
     let mut flags = Vec::new();
     if block["waits"].as_bool().unwrap_or(false) {
@@ -346,7 +343,6 @@ pub(crate) fn finding_record(finding: &Value, severity: Severity) -> String {
     format!("finding: {}", items.join(" "))
 }
 
-/// The one evidence class every finding shares, when they all agree.
 pub(crate) fn uniform_evidence(findings: &[&Value]) -> Option<String> {
     let mut classes = findings
         .iter()

@@ -28,7 +28,6 @@ pub(crate) fn finding_location_span(finding: &Value) -> Option<Value> {
     Some(serde_json::json!({"path":path,"start":{"line":line,"col":col}}))
 }
 
-/// The group's spans that point at real source files, in order.
 pub(crate) fn renderable_group_spans<'v>(group: &[&'v Value]) -> Vec<&'v Value> {
     group
         .iter()
@@ -42,7 +41,6 @@ pub(crate) fn renderable_group_spans<'v>(group: &[&'v Value]) -> Vec<&'v Value> 
         .collect()
 }
 
-/// Print the `span`'s location line and optional source frame.
 pub(crate) fn render_finding_location(
     span: &Value,
     ctx: &RenderContext<'_>,
@@ -65,8 +63,6 @@ pub(crate) fn render_finding_location(
     }
 }
 
-/// Resolve the `span`'s reported path to (display, readable) spellings
-/// under `source_base` — `None` when the path names no real source file.
 pub(crate) fn finding_location(
     span: &Value,
     source_base: Option<&Path>,
@@ -93,8 +89,6 @@ pub(crate) fn finding_location(
     Some((display_location_path(path), None))
 }
 
-/// The group's pseudo-path positions (`<stdin>` etc.) that carry no real
-/// source file, as (path, line, col) triples.
 pub(crate) fn unmapped_positions(group: &[&Value]) -> Vec<(String, u64, u64)> {
     group
         .iter()
@@ -113,7 +107,6 @@ pub(crate) fn unmapped_positions(group: &[&Value]) -> Vec<(String, u64, u64)> {
         .collect()
 }
 
-/// The `at <path>:line:col …` note covering every unmapped position.
 pub(crate) fn unmapped_positions_note(positions: &[(String, u64, u64)]) -> Option<String> {
     let first_path = &positions.first()?.0;
     let shared = positions.iter().all(|(path, ..)| path == first_path);

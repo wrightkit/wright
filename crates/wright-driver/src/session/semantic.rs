@@ -359,8 +359,6 @@ pub(crate) fn merge_references(usage: &mut serde_json::Value, mut references: se
     }
 }
 
-/// The program's live action counts: actions in non-disabled rules, and
-/// how many of them are `wait` calls.
 pub(crate) fn live_action_counts(program: &workshop_rs::Program) -> (usize, usize) {
     let mut actions = 0usize;
     let mut waits = 0usize;

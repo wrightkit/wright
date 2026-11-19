@@ -241,7 +241,6 @@ impl DeclarativeRule {
                 findings.push(self.finding(matched, anchor, rule, anchor_action, None));
                 continue;
             }
-            // `values`: search every value tree of the scope for target nodes.
             let mut matches: Vec<(Option<Span>, Option<usize>, Option<usize>)> = Vec::new();
             for root in &roots {
                 let mut path = Vec::new();

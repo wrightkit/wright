@@ -31,7 +31,6 @@ fn first_party_error_severity_requires_runtime_validated_evidence() {
             "{evidence:?} with severity error: {result:?}"
         );
         if result.is_ok() {
-            // Re-load under a fresh registry for the next rejected case.
             registry = LintRegistry::default();
         }
     }

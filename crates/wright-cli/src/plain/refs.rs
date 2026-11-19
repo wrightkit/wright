@@ -1,5 +1,3 @@
-//! The plain-text report of `inspect refs`.
-
 use super::*;
 
 impl PlainReport for RefsResult {

@@ -583,9 +583,7 @@ mod tests {
     /// path (the selector is a user-supplied argument).
     #[test]
     fn documented_codes_keep_their_exit_class() {
-        // (code, class at creation, expected exit)
         let cases: &[(&str, ExitClass, u8)] = &[
-            // usage
             ("output-exists", ExitClass::Usage, 2),
             ("output-is-input", ExitClass::Usage, 2),
             ("output-unnamed", ExitClass::Usage, 2),
@@ -594,11 +592,9 @@ mod tests {
             ("lint-package-source", ExitClass::Usage, 2),
             // the decided change: SOURCE_ERROR -> USAGE
             ("invalid-selection", ExitClass::Usage, 2),
-            // unsupported
             ("adapter-stdin-unsupported", ExitClass::Unsupported, 3),
             ("source-provider-unsupported", ExitClass::Unsupported, 3),
             ("capability-unavailable", ExitClass::Unsupported, 3),
-            // internal
             ("provider-spawn", ExitClass::Internal, 4),
             ("provider-timeout", ExitClass::Internal, 4),
             ("provider-exited", ExitClass::Internal, 4),
@@ -615,7 +611,6 @@ mod tests {
             ("lint-package-rate-limited", ExitClass::Internal, 4),
             ("lint-package-remote", ExitClass::Internal, 4),
             ("lint-package-install", ExitClass::Internal, 4),
-            // source/user error
             ("parse-error", ExitClass::SourceError, 1),
             ("project-load-failed", ExitClass::SourceError, 1),
             ("provider-refusal", ExitClass::SourceError, 1),

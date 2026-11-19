@@ -596,8 +596,6 @@ for line in sys.stdin:
     cleanup(dir);
 }
 
-/// Records one line per spawn in `starts`; exits on the first `lpp/compile`
-/// (marker file `died`).
 #[cfg(unix)]
 const DEATH_PROVIDER: &str = r#"#!/usr/bin/env python3
 import json, sys, os, pathlib
