@@ -12,7 +12,7 @@ use wright_lpp::{Capability, DiagnosticSeverity, LanguageProvider};
 
 use crate::document::{Document, DocumentStore, Position, Range, line_col_position, uri_to_path};
 use opy::OpyProviderState;
-use workshop::WorkshopAnalysis;
+use workshop::WorkshopCache;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SourceDiagnostic {
@@ -100,8 +100,7 @@ pub struct LanguageService {
     config: SessionConfig,
     session: Option<CompilerSession>,
     opy: OpyProviderState,
-    workshop: Option<WorkshopAnalysis>,
-    workshop_builds: usize,
+    workshop: WorkshopCache,
 }
 
 impl LanguageService {
@@ -120,8 +119,7 @@ impl LanguageService {
             config,
             session: None,
             opy: OpyProviderState::Pending,
-            workshop: None,
-            workshop_builds: 0,
+            workshop: WorkshopCache::default(),
         }
     }
 
@@ -151,7 +149,7 @@ impl LanguageService {
     /// stable count across requests proves the `(uri, version)` cache
     /// reuses one session and index; a `didChange` bump adds one.
     pub fn workshop_build_count(&self) -> usize {
-        self.workshop_builds
+        self.workshop.builds
     }
 
     /// Diagnostics for the open buffer at `uri`.
@@ -191,16 +189,15 @@ impl LanguageService {
         if !is_workshop_document(document) {
             return Vec::new();
         }
-        let document = document.clone();
-        match self.workshop_analysis(uri) {
+        match self.workshop.get_or_build(&self.config, document) {
             Ok(analysis) => analysis
                 .session
                 .check()
                 .diagnostics
                 .iter()
-                .map(|diagnostic| source_diagnostic(&document, diagnostic))
+                .map(|diagnostic| source_diagnostic(document, diagnostic))
                 .collect(),
-            Err(diagnostic) => vec![source_diagnostic(&document, &diagnostic)],
+            Err(diagnostic) => vec![source_diagnostic(document, &diagnostic)],
         }
     }
 
@@ -276,9 +273,9 @@ impl LanguageService {
     /// reports — over the occurrence that matched. Anything that is not an
     /// identifier occurrence, or a document that fails to load, is `None`.
     pub fn hover(&mut self, uri: &str, position: Position) -> Option<HoverInfo> {
-        let document = self.workshop_document(uri)?.clone();
-        let analysis = self.workshop_analysis(&document.uri).ok()?;
-        let (symbol, occurrence) = symbol_at(&analysis.index, &document, position)?;
+        let document = workshop_document(&self.store, uri)?;
+        let analysis = self.workshop.get_or_build(&self.config, document).ok()?;
+        let (symbol, occurrence) = symbol_at(&analysis.index, document, position)?;
         Some(HoverInfo {
             contents: format!("`{} {}`", symbol.kind.as_str(), symbol.name),
             range: document.from_span(&occurrence),
@@ -335,9 +332,9 @@ impl LanguageService {
                 .ok()
                 .map(|result| result.locations.iter().map(source_location).collect());
         }
-        let document = self.workshop_document(uri)?.clone();
-        let analysis = self.workshop_analysis(&document.uri).ok()?;
-        let (symbol, _) = symbol_at(&analysis.index, &document, position)?;
+        let document = workshop_document(&self.store, uri)?;
+        let analysis = self.workshop.get_or_build(&self.config, document).ok()?;
+        let (symbol, _) = symbol_at(&analysis.index, document, position)?;
         let span = symbol.span.or(symbol.occurrence)?;
         Some(vec![SourceLocation {
             uri: document.uri.clone(),
@@ -371,9 +368,9 @@ impl LanguageService {
                 .ok()
                 .map(|result| result.locations.iter().map(source_location).collect());
         }
-        let document = self.workshop_document(uri)?.clone();
-        let analysis = self.workshop_analysis(&document.uri).ok()?;
-        let (symbol, _) = symbol_at(&analysis.index, &document, position)?;
+        let document = workshop_document(&self.store, uri)?;
+        let analysis = self.workshop.get_or_build(&self.config, document).ok()?;
+        let (symbol, _) = symbol_at(&analysis.index, document, position)?;
         let mut seen = BTreeSet::new();
         Some(
             analysis
@@ -508,14 +505,6 @@ impl LanguageService {
         RenameOutcome::Applied(applied)
     }
 
-    fn workshop_document(&self, uri: &str) -> Option<&Document> {
-        let document = self.store.document(uri)?;
-        if source_language_id(uri).is_some() || !is_workshop_document(document) {
-            return None;
-        }
-        Some(document)
-    }
-
     /// The shared session, built lazily on the first provider request so a
     /// service that only serves Workshop documents never constructs one. A
     /// construction failure is Wright's own diagnostic, not a provider
@@ -602,6 +591,11 @@ fn source_language_id(uri: &str) -> Option<String> {
         id if PENDING_PROVIDER_LANGUAGES.contains(&id) => Some(id.to_string()),
         _ => None,
     }
+}
+
+fn workshop_document<'a>(store: &'a DocumentStore, uri: &str) -> Option<&'a Document> {
+    let document = store.document(uri)?;
+    (source_language_id(uri).is_none() && is_workshop_document(document)).then_some(document)
 }
 
 fn is_workshop_document(document: &Document) -> bool {

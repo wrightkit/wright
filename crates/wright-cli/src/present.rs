@@ -12,7 +12,7 @@ use wright_driver::config::OutputFormat;
 use wright_driver::progress::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit};
 use wright_driver::result::{
     CallGraphResult, CfgResult, CheckResult, CompileResult, ConvertResult, CostResult, Envelope,
-    EssentialResult, LintResult, RefsResult, RulesResult, SymbolsResult,
+    EssentialResult, FindingMeta, LintResult, RefsResult, RulesResult, SymbolsResult,
 };
 
 use crate::cli::{ColorArg, CommonArgs, OutputFormatArg, RendererArg};
@@ -437,7 +437,7 @@ fn render_github<T: serde::Serialize + ResultPresentation + plain::PlainReport>(
         .filter_map(diagnostic_annotation)
         .collect();
     for (finding, severity) in envelope.result.github_findings() {
-        if let Some(annotation) = finding_annotation(&finding, severity) {
+        if let Some(annotation) = finding_annotation(finding, severity) {
             annotations.push(annotation);
         }
     }
@@ -455,14 +455,16 @@ fn render_github<T: serde::Serialize + ResultPresentation + plain::PlainReport>(
         "::group::{}",
         escape_workflow_data(&format!("wright {} — {status}{headline}", envelope.command))
     );
-    if let Some(artifact) = envelope.result.artifact() {
+    let report = if let Some(artifact) = envelope.result.artifact() {
         print!("{artifact}");
+        None
     } else {
         let (out, err) = plain::render_lines(envelope, ctx);
-        for line in out.iter().chain(err.iter()) {
+        for line in out.iter().chain(&err) {
             eprintln!("{line}");
         }
-    }
+        Some((out, err))
+    };
     eprintln!("::endgroup::");
     if withheld > 0 {
         eprintln!(
@@ -472,7 +474,7 @@ fn render_github<T: serde::Serialize + ResultPresentation + plain::PlainReport>(
             ))
         );
     }
-    emit_summary(envelope, ctx, &annotations);
+    emit_summary(envelope, ctx, &annotations, report);
 }
 
 fn diagnostic_annotation(diagnostic: &wright_driver::Diagnostic) -> Option<GithubAnnotation> {
@@ -518,28 +520,16 @@ fn finding_annotation(finding: &serde_json::Value, severity: Severity) -> Option
         Severity::Warning => "warning",
         Severity::Info => return None,
     };
-    let located;
-    let finding = match finding_location_span(finding) {
-        Some(span) => {
-            located = {
-                let mut located = finding.clone();
-                located["span"] = span;
-                located
-            };
-            &located
-        }
-        None => finding,
-    };
-    let span = finding.get("span").filter(|span| span.is_object())?;
+    let span = finding_location_span(finding)?;
     let path = span
         .get("path")
         .and_then(serde_json::Value::as_str)
         .filter(|path| is_real_source_path(path))
         .map(display_location_path)?;
-    let line = span_position(span, "start", "line").unwrap_or(1);
-    let col = span_position(span, "start", "col").unwrap_or(1);
-    let end_line = span_position(span, "end", "line").unwrap_or(line);
-    let end_col = span_position(span, "end", "col").unwrap_or(col);
+    let line = span_position(&span, "start", "line").unwrap_or(1);
+    let col = span_position(&span, "start", "col").unwrap_or(1);
+    let end_line = span_position(&span, "end", "line").unwrap_or(line);
+    let end_col = span_position(&span, "end", "col").unwrap_or(col);
     let code = finding
         .get("code")
         .and_then(serde_json::Value::as_str)
@@ -617,6 +607,18 @@ fn max_finding_severity(
     }
 }
 
+fn findings_with_severity<'a>(
+    findings: &'a serde_json::Value,
+    meta: &'a [FindingMeta],
+) -> impl Iterator<Item = (&'a serde_json::Value, Severity)> {
+    findings
+        .as_array()
+        .into_iter()
+        .flatten()
+        .zip(meta)
+        .map(|(finding, meta)| (finding, meta.severity))
+}
+
 pub(crate) trait ResultPresentation {
     fn metadata(&self) -> Option<String> {
         None
@@ -626,8 +628,8 @@ pub(crate) trait ResultPresentation {
         None
     }
     /// The result's findings paired with their typed severities (#1001).
-    fn github_findings(&self) -> Vec<(serde_json::Value, Severity)> {
-        Vec::new()
+    fn github_findings(&self) -> impl Iterator<Item = (&serde_json::Value, Severity)> {
+        std::iter::empty()
     }
     fn max_finding_severity(&self) -> Option<Severity> {
         None
@@ -698,15 +700,8 @@ impl ResultPresentation for LintResult {
         }
         Some(metadata)
     }
-    fn github_findings(&self) -> Vec<(serde_json::Value, Severity)> {
-        self.findings
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .zip(&self.findings_meta)
-            .map(|(finding, meta)| (finding, meta.severity))
-            .collect()
+    fn github_findings(&self) -> impl Iterator<Item = (&serde_json::Value, Severity)> {
+        findings_with_severity(&self.findings, &self.findings_meta)
     }
     fn max_finding_severity(&self) -> Option<Severity> {
         max_finding_severity(&self.findings_meta, &self.selection)
@@ -755,19 +750,12 @@ fn essential_metadata(value: &serde_json::Value) -> String {
 }
 
 impl ResultPresentation for EssentialResult {
-    fn github_findings(&self) -> Vec<(serde_json::Value, Severity)> {
+    fn github_findings(&self) -> impl Iterator<Item = (&serde_json::Value, Severity)> {
         let key = match self.command {
             wright_driver::result::EssentialCommand::Analyze => "risks",
             _ => "findings",
         };
-        self.result[key]
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .zip(&self.findings_meta)
-            .map(|(finding, meta)| (finding, meta.severity))
-            .collect()
+        findings_with_severity(&self.result[key], &self.findings_meta)
     }
 
     fn metadata(&self) -> Option<String> {
@@ -903,15 +891,8 @@ impl ResultPresentation for CostResult {
             count(exact, "waitActions"),
         ))
     }
-    fn github_findings(&self) -> Vec<(serde_json::Value, Severity)> {
-        self.result["findings"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .zip(&self.findings_meta)
-            .map(|(finding, meta)| (finding, meta.severity))
-            .collect()
+    fn github_findings(&self) -> impl Iterator<Item = (&serde_json::Value, Severity)> {
+        findings_with_severity(&self.result["findings"], &self.findings_meta)
     }
     fn max_finding_severity(&self) -> Option<Severity> {
         max_finding_severity(&self.findings_meta, &self.selection)
@@ -969,10 +950,11 @@ pub(crate) fn summary_status<T: serde::Serialize + ResultPresentation>(
     status.as_str()
 }
 
-fn emit_summary<T: serde::Serialize + ResultPresentation + plain::PlainReport>(
+fn emit_summary<T: serde::Serialize + ResultPresentation>(
     envelope: &Envelope<T>,
     ctx: &RenderContext<'_>,
     annotations: &[GithubAnnotation],
+    lines: Option<(Vec<String>, Vec<String>)>,
 ) {
     let status = summary_status(envelope);
     let input = ctx
@@ -1024,10 +1006,7 @@ fn emit_summary<T: serde::Serialize + ResultPresentation + plain::PlainReport>(
     if !annotations.is_empty() {
         section.push('\n');
     }
-    if envelope.result.artifact().is_some() {
-        section.push_str("The command's artifact streamed to stdout.\n");
-    } else {
-        let (out, err) = plain::render_lines(envelope, ctx);
+    if let Some((out, err)) = lines {
         let mut report = String::new();
         let mut shown = 0usize;
         let total = out.len() + err.len();
@@ -1046,6 +1025,8 @@ fn emit_summary<T: serde::Serialize + ResultPresentation + plain::PlainReport>(
         section.push_str(&format!(
             "<details><summary>Full report</summary>\n\n```text\n{report}```\n\n</details>\n"
         ));
+    } else {
+        section.push_str("The command's artifact streamed to stdout.\n");
     }
     if let Some(path) = std::env::var_os("GITHUB_STEP_SUMMARY") {
         let result = std::fs::OpenOptions::new()

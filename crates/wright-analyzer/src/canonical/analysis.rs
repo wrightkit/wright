@@ -784,14 +784,13 @@ enum OccurrenceOrigin {
     BodyAction(usize),
 }
 
-#[derive(Default)]
-struct Collected<'a> {
-    values: Vec<&'a Value>,
-    parents: Vec<Option<usize>>,
-    spans: Vec<Option<Span>>,
-    paths: Vec<Vec<usize>>,
-    arguments: Vec<usize>,
-    origins: Vec<OccurrenceOrigin>,
+struct Occurrence<'a> {
+    value: &'a Value,
+    parent: Option<usize>,
+    span: Option<Span>,
+    path: Vec<usize>,
+    argument: usize,
+    origin: OccurrenceOrigin,
 }
 
 fn repeated_value_findings(
@@ -806,12 +805,11 @@ fn repeated_value_findings(
     let body_start = body_range.start;
     let body = &rule.actions[body_range.clone()];
     let body_dead = &dead[body_range];
-    let mut collected = Collected::default();
+    let mut collected = Vec::new();
     if let Action::While { condition } = &rule.actions[loop_action] {
         collect_value_tree(
             condition,
             0,
-            None,
             &mut |path| program.action_argument_value_span(rule_id, loop_action, 0, path),
             &mut collected,
             OccurrenceOrigin::LoopCondition,
@@ -837,7 +835,6 @@ fn repeated_value_findings(
             collect_value_tree(
                 value,
                 argument,
-                None,
                 &mut |path| program.action_argument_value_span(rule_id, action_id, argument, path),
                 &mut collected,
                 OccurrenceOrigin::BodyAction(action),
@@ -846,12 +843,12 @@ fn repeated_value_findings(
         action += 1;
     }
 
-    duplicated_value_families(&collected.values, &collected.parents)
+    duplicated_value_families(&collected)
         .into_iter()
         .map(|family| {
-            let first = family[0];
-            let member_span = family.iter().find_map(|&member| collected.spans[member]);
-            let expression = value_text(collected.values[first]);
+            let first = &collected[family[0]];
+            let member_span = family.iter().find_map(|&member| collected[member].span);
+            let expression = value_text(first.value);
             let mut message = format!(
                 "`{}` is evaluated {} times within the same loop scope",
                 expression,
@@ -870,7 +867,7 @@ fn repeated_value_findings(
                 rule: rule_id,
                 action: Some(loop_action),
                 value: value_ids
-                    .get(&(collected.values[first] as *const Value as usize))
+                    .get(&(first.value as *const Value as usize))
                     .copied(),
                 evidence: REPEATED_VALUE.evidence,
                 boundedness: None,
@@ -943,15 +940,14 @@ fn value_text(value: &Value) -> String {
 fn collect_value_tree<'a>(
     value: &'a Value,
     argument: usize,
-    parent: Option<usize>,
     span_at: &mut impl FnMut(&[usize]) -> Option<Span>,
-    collected: &mut Collected<'a>,
+    collected: &mut Vec<Occurrence<'a>>,
     origin: OccurrenceOrigin,
 ) {
     collect_value_at(
         value,
         argument,
-        parent,
+        None,
         &mut Vec::new(),
         span_at,
         collected,
@@ -965,7 +961,7 @@ fn collect_value_at<'a>(
     parent: Option<usize>,
     path: &mut Vec<usize>,
     span_at: &mut impl FnMut(&[usize]) -> Option<Span>,
-    collected: &mut Collected<'a>,
+    collected: &mut Vec<Occurrence<'a>>,
     origin: OccurrenceOrigin,
 ) {
     if matches!(value, Value::Call { name, .. } if name == "evaluateOnce") {
@@ -976,13 +972,15 @@ fn collect_value_at<'a>(
     } else {
         origin
     };
-    let index = collected.values.len();
-    collected.values.push(value);
-    collected.parents.push(parent);
-    collected.spans.push(span_at(path));
-    collected.paths.push(path.clone());
-    collected.arguments.push(argument);
-    collected.origins.push(origin);
+    let index = collected.len();
+    collected.push(Occurrence {
+        value,
+        parent,
+        span: span_at(path),
+        path: path.clone(),
+        argument,
+        origin,
+    });
     let parent = Some(index);
     for (child_index, child) in value_children(value).into_iter().enumerate() {
         path.push(child_index);
@@ -997,38 +995,34 @@ fn evaluate_once_fix(
     loop_action: ActionId,
     body_start: usize,
     body: &[Action],
-    collected: &Collected,
+    collected: &[Occurrence<'_>],
     family: &[usize],
 ) -> Option<LintFix> {
     let catalog = Catalog::builtin_ref().ok()?;
     let mut occurrences = Vec::new();
     let mut unwrappable = 0usize;
     for &member in family {
-        let (action, wrappable) = match collected.origins[member] {
+        let occurrence = &collected[member];
+        let (action, wrappable) = match occurrence.origin {
             OccurrenceOrigin::LoopCondition | OccurrenceOrigin::Reevaluating => {
                 (loop_action, false)
             }
             OccurrenceOrigin::BodyAction(index) => (
                 body_start + index,
-                !action_argument_reevaluates(catalog, &body[index], collected.arguments[member])
-                    && !contains_update_every_frame(collected.values[member]),
+                !action_argument_reevaluates(catalog, &body[index], occurrence.argument)
+                    && !contains_update_every_frame(occurrence.value),
             ),
         };
         let extent = wrappable.then(|| {
-            let file = collected.spans[member]?.file;
+            let file = occurrence.span?.file;
             let scan = SourceScan::new(program.source(file)?, file);
-            let base = &collected.paths[member];
+            let base = &occurrence.path;
             let extent = expr_extent_bytes(
-                collected.values[member],
+                occurrence.value,
                 &mut |path| {
                     let mut full = base.clone();
                     full.extend_from_slice(path);
-                    program.action_argument_value_span(
-                        rule_id,
-                        action,
-                        collected.arguments[member],
-                        &full,
-                    )
+                    program.action_argument_value_span(rule_id, action, occurrence.argument, &full)
                 },
                 &scan,
             )?;
@@ -1085,50 +1079,51 @@ fn action_argument_reevaluates(catalog: &Catalog, action: &Action, argument: usi
     })
 }
 
-fn duplicated_value_families(values: &[&Value], parents: &[Option<usize>]) -> Vec<Vec<usize>> {
-    let mut families: Vec<(usize, Vec<usize>)> = Vec::new();
-    for (position, value) in values.iter().enumerate() {
-        if let Some((_, family)) = families
+fn duplicated_value_families(occurrences: &[Occurrence<'_>]) -> Vec<Vec<usize>> {
+    let mut families: Vec<Vec<usize>> = Vec::new();
+    for (position, occurrence) in occurrences.iter().enumerate() {
+        if let Some(family) = families
             .iter_mut()
-            .find(|(_, family)| values_equal(values[family[0]], value))
+            .find(|family| values_equal(occurrences[family[0]].value, occurrence.value))
         {
             family.push(position);
         } else {
-            families.push((position, vec![position]));
+            families.push(vec![position]);
         }
     }
 
     let candidates: Vec<usize> = families
         .iter()
         .enumerate()
-        .filter(|(_, (_, family))| family.len() >= 2 && value_call_count(values[family[0]]) >= 2)
+        .filter(|(_, family)| {
+            family.len() >= 2 && value_call_count(occurrences[family[0]].value) >= 2
+        })
         .map(|(index, _)| index)
         .collect();
-    let mut member_family = vec![None; values.len()];
+    let mut member_family = vec![None; occurrences.len()];
     for &family in &candidates {
-        for &member in &families[family].1 {
+        for &member in &families[family] {
             member_family[member] = Some(family);
         }
     }
-    let mut reported: Vec<usize> = candidates
+    let reported: Vec<usize> = candidates
         .into_iter()
         .filter(|&family| {
-            !families[family].1.iter().any(|&member| {
-                let mut ancestor = parents[member];
+            !families[family].iter().any(|&member| {
+                let mut ancestor = occurrences[member].parent;
                 while let Some(index) = ancestor {
                     if member_family[index].is_some_and(|other| other != family) {
                         return true;
                     }
-                    ancestor = parents[index];
+                    ancestor = occurrences[index].parent;
                 }
                 false
             })
         })
         .collect();
-    reported.sort_by_key(|&family| families[family].0);
     reported
         .into_iter()
-        .map(|family| std::mem::take(&mut families[family].1))
+        .map(|family| std::mem::take(&mut families[family]))
         .collect()
 }
 

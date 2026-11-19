@@ -15,5 +15,4 @@ name = "wright-consumer"
 path = "src/main.rs"
 
 [dependencies]
-serde_json.workspace = true
 wright-driver.workspace = true

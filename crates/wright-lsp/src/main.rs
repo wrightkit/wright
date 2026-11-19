@@ -73,8 +73,8 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
         },
         ..Default::default()
     };
-    let mut root = std::env::current_dir().map_err(|e| e.to_string())?;
-    let mut service = LanguageService::with_config(root.clone(), config.clone());
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let mut service = LanguageService::with_config(root, config.clone());
     let mut ownership: PublicationOwnership = BTreeMap::new();
     let mut lifecycle = Lifecycle::Waiting;
     let mut versioned_workspace_edits = false;
@@ -88,24 +88,23 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
                 continue;
             }
         };
-        let value: Value = match serde_json::from_str(&message) {
-            Ok(value) => value,
+        let mut message = match serde_json::from_str(&message) {
+            Ok(Value::Object(message)) => message,
+            Ok(_) => continue,
             Err(error) => {
                 write_error(&mut writer, None, -32700, &error.to_string(), "parse-error")?;
                 continue;
             }
         };
-        let method = value
-            .get("method")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        let id = value.get("id").cloned();
-        let params = value.get("params").cloned();
-
+        let Some(Value::String(method)) = message.remove("method") else {
+            continue;
+        };
         if method.is_empty() {
             continue;
         }
+        let id = message.remove("id");
+        let params = message.remove("params");
+
         if !matches!(method.as_str(), "initialize" | "shutdown" | "exit")
             && lifecycle != Lifecycle::Running
         {
@@ -141,9 +140,7 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
                     .and_then(|edit| edit.document_changes)
                     .unwrap_or(false);
                 if let Some(resolved) = initialize_root(&init) {
-                    root = resolved;
-                    service = LanguageService::with_config(root.clone(), config.clone());
-                    ownership.clear();
+                    service = LanguageService::with_config(resolved, config.clone());
                 }
                 lifecycle = Lifecycle::Running;
                 let opy_support = service.opy_provider_support();
@@ -185,7 +182,7 @@ fn run(opy_provider: Option<PathBuf>) -> Result<u8, String> {
                 let document = Document::with_version(
                     uri.clone(),
                     params.text_document.text,
-                    root.clone(),
+                    service.root.clone(),
                     params.text_document.version,
                 )
                 .with_language_id(params.text_document.language_id);
