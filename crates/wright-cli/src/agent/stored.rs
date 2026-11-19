@@ -28,7 +28,6 @@ impl Stored {
     }
 }
 
-/// A relative path anchored to `base`; absolute paths stay as given.
 fn anchor(base: &str, path: &str) -> String {
     match path.trim_start_matches("./") {
         _ if Path::new(path).is_absolute() => path.to_string(),

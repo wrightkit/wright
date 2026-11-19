@@ -1,6 +1,3 @@
-//! Terminal rendering of the run-cache or baseline comparison: one
-//! `Cost change` section with the total movement and the changed rules.
-
 use serde_json::Value;
 
 use super::{heading, pad, plural};
