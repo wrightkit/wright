@@ -350,17 +350,8 @@ impl StdioLanguageProvider {
                 return Err(error);
             }
         };
-        let result: InitializeResult = match serde_json::from_value(value) {
-            Ok(result) => result,
-            Err(error) => {
-                self.client.reset_initialize();
-                return Err(ProviderError::Malformed {
-                    detail: format!(
-                        "lpp/initialize result is not a valid LPP v1 response: {error}"
-                    ),
-                });
-            }
-        };
+        let result: InitializeResult = parse_result(value, "lpp/initialize")
+            .inspect_err(|_| self.client.reset_initialize())?;
         if result.protocol_version != protocol_version {
             self.client.reset_initialize();
             return Err(ProviderError::ProtocolVersionMismatch {

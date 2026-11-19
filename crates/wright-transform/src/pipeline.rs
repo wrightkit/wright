@@ -192,25 +192,23 @@ fn fold_value_once(value: &mut workshop_rs::Value, nodes: &mut usize) -> bool {
             if args.len() == 2 {
                 if let (Value::Number(left), Value::Number(right)) = (&args[0], &args[1]) {
                     let result = match name.as_str() {
-                        "+" | "add" => Some(left + right),
-                        "-" | "subtract" => Some(left - right),
-                        "*" | "multiply" => Some(left * right),
-                        "/" | "divide" => Some(left / right),
-                        "==" => Some(if left == right { 1.0 } else { 0.0 }),
-                        "!=" => Some(if left != right { 1.0 } else { 0.0 }),
-                        "<" => Some(if left < right { 1.0 } else { 0.0 }),
-                        "<=" => Some(if left <= right { 1.0 } else { 0.0 }),
-                        ">" => Some(if left > right { 1.0 } else { 0.0 }),
-                        ">=" => Some(if left >= right { 1.0 } else { 0.0 }),
+                        "+" | "add" => Some(Value::Number(left + right)),
+                        "-" | "subtract" => Some(Value::Number(left - right)),
+                        "*" | "multiply" => Some(Value::Number(left * right)),
+                        "/" | "divide" => Some(Value::Number(left / right)),
+                        "==" => Some(Value::Bool(left == right)),
+                        "!=" => Some(Value::Bool(left != right)),
+                        "<" => Some(Value::Bool(left < right)),
+                        "<=" => Some(Value::Bool(left <= right)),
+                        ">" => Some(Value::Bool(left > right)),
+                        ">=" => Some(Value::Bool(left >= right)),
                         _ => None,
                     }
-                    .filter(|result| result.is_finite());
+                    .filter(
+                        |result| !matches!(result, Value::Number(number) if !number.is_finite()),
+                    );
                     if let Some(result) = result {
-                        *value = if matches!(name.as_str(), "==" | "!=" | "<" | "<=" | ">" | ">=") {
-                            Value::Bool(result != 0.0)
-                        } else {
-                            Value::Number(result)
-                        };
+                        *value = result;
                         changed = true;
                     }
                 } else {

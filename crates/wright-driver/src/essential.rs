@@ -73,7 +73,7 @@ fn findings(items: &[Value], meta: &[FindingMeta]) -> Vec<(Value, FindingMeta)> 
         .iter()
         .zip(meta.iter().map(Some).chain(std::iter::repeat(None)))
         .map(|(finding, meta)| {
-            let meta = meta.cloned().unwrap_or(FindingMeta {
+            let meta = meta.cloned().unwrap_or_else(|| FindingMeta {
                 severity: Severity::Warning,
                 code: finding["code"].as_str().unwrap_or_default().to_string(),
                 span_file: None,
@@ -103,74 +103,6 @@ fn findings(items: &[Value], meta: &[FindingMeta]) -> Vec<(Value, FindingMeta)> 
         .collect::<Vec<_>>();
     items.sort_by_key(|(_, meta)| Reverse(meta.severity));
     items
-}
-
-/// `cap` over a finding pair list: truncate rows and metas together and
-/// record the truncation note under `key`, exactly as `cap` does on a
-/// bare array.
-fn cap_pairs(
-    output: &mut Value,
-    pairs: &mut Vec<(Value, FindingMeta)>,
-    key: &str,
-    limit: usize,
-    all: bool,
-) {
-    let total = pairs.len();
-    if all || total <= limit {
-        return;
-    }
-    let by_code = by_code_counts(
-        &pairs
-            .iter()
-            .map(|(item, _)| item.clone())
-            .collect::<Vec<_>>(),
-    );
-    pairs.truncate(limit);
-    let mut note =
-        json!({"total":total,"shown":limit,"truncated":total-limit,"expand":"--all / all: true"});
-    if let Some(by_code) = by_code {
-        note["byCode"] = by_code;
-    }
-    output["truncation"][key] = note;
-}
-
-/// `fit_finding_bytes` over a finding pair list: pop rows and metas
-/// together until the serialized output fits the default budget.
-fn fit_finding_pairs(
-    output: &mut Value,
-    pairs: &mut Vec<(Value, FindingMeta)>,
-    key: &str,
-    total: usize,
-) {
-    let by_code = by_code_counts(
-        &pairs
-            .iter()
-            .map(|(item, _)| item.clone())
-            .collect::<Vec<_>>(),
-    );
-    while serde_json::to_vec(output)
-        .expect("presentation serializes")
-        .len()
-        > DEFAULT_FINDING_BYTES
-    {
-        if pairs.pop().is_none() {
-            break;
-        }
-        output[key] = Value::Array(pairs.iter().map(|(item, _)| item.clone()).collect());
-        let shown = pairs.len();
-        let note = &mut output["truncation"][key];
-        if note["total"].is_null() {
-            note["total"] = json!(total);
-        }
-        if note["byCode"].is_null()
-            && let Some(by_code) = &by_code
-        {
-            note["byCode"] = by_code.clone();
-        }
-        note["shown"] = json!(shown);
-        note["truncated"] = json!(note["total"].as_u64().unwrap_or(total as u64) - shown as u64);
-        note["expand"] = json!("--all / all: true");
-    }
 }
 
 fn cap(result: &mut Value, key: &str, limit: usize, all: bool) {
@@ -229,7 +161,7 @@ fn fit_finding_bytes(output: &mut Value, total: usize) {
 /// stay typed end to end.
 pub fn lint(result: &Value, meta: &[FindingMeta], all: bool) -> (Value, Vec<FindingMeta>) {
     let items = list(result, "findings");
-    let mut pairs = findings(items, meta);
+    let (rows, mut metas): (Vec<_>, Vec<_>) = findings(items, meta).into_iter().unzip();
     let mut output = json!({"counts":{"findings":counts(items, meta)},"expand":"lint --all / all: true; lintRules for effective configuration and rule metadata","next":crate::result::next::LINT});
     for key in ["ok", "exit", "selection", "fixes", "next", "snapshot"] {
         if let Some(value) = result.get(key) {
@@ -242,12 +174,12 @@ pub fn lint(result: &Value, meta: &[FindingMeta], all: bool) -> (Value, Vec<Find
     {
         output["inputIdentity"] = identity.clone();
     }
-    cap_pairs(&mut output, &mut pairs, "findings", DEFAULT_ITEMS, all);
-    output["findings"] = Value::Array(pairs.iter().map(|(item, _)| item.clone()).collect());
+    output["findings"] = Value::Array(rows);
+    cap(&mut output, "findings", DEFAULT_ITEMS, all);
     if !all {
-        fit_finding_pairs(&mut output, &mut pairs, "findings", items.len());
+        fit_finding_bytes(&mut output, items.len());
     }
-    let metas = pairs.into_iter().map(|(_, meta)| meta).collect();
+    metas.truncate(list(&output, "findings").len());
     (output, metas)
 }
 
@@ -342,7 +274,7 @@ pub fn analyze(result: &Value, risks_meta: &[FindingMeta], all: bool) -> (Value,
             .or_default() += 1;
     }
     let object_summary = json!({"total":objects.len(),"byKind":by_kind,"withoutRetainedIdentity":objects.iter().filter(|object|object["identityRetained"]==false).count(),"visibleToAllPlayers":objects.iter().filter(|object|object["visibility"]=="all-players").count()});
-    let mut risk_pairs = findings(risks, risks_meta);
+    let (rows, mut metas): (Vec<_>, Vec<_>) = findings(risks, risks_meta).into_iter().unzip();
     let mut output = json!({"program":result["program"],"cost":facts["cost"],"complexity":complexity,"hotspots":hotspots,"conditionTrees":trees,"variables":variables,"persistentObjects":object_summary,"counts":{"risks":counts(risks, risks_meta),"persistentObjects":list(facts,"persistentObjects").len()},"expand":"--all / all: true; inspect symbols, refs, cfg, callgraph, cost for detail","next":crate::result::next::ANALYZE});
     if let Some(selection) = result.get("selection") {
         output["selection"] = selection.clone();
@@ -350,9 +282,9 @@ pub fn analyze(result: &Value, risks_meta: &[FindingMeta], all: bool) -> (Value,
     for (key, limit) in [("hotspots", 5), ("conditionTrees", 3), ("variables", 5)] {
         cap(&mut output, key, limit, all);
     }
-    cap_pairs(&mut output, &mut risk_pairs, "risks", 5, all);
-    output["risks"] = Value::Array(risk_pairs.iter().map(|(item, _)| item.clone()).collect());
-    let metas = risk_pairs.into_iter().map(|(_, meta)| meta).collect();
+    output["risks"] = Value::Array(rows);
+    cap(&mut output, "risks", 5, all);
+    metas.truncate(list(&output, "risks").len());
     (output, metas)
 }
 
@@ -548,8 +480,19 @@ mod tests {
                 json!({"code":format!("risk-{}",id%2),"severity":"error","message":"long actionable evidence ".repeat(120)})
             })
             .collect::<Vec<_>>();
-        let meta = vec![meta(Severity::Error); 6];
-        let (result, _) = lint(&json!({"findings": findings}), &meta, false);
+        let meta: Vec<_> = findings
+            .iter()
+            .enumerate()
+            .map(|(file, finding)| FindingMeta {
+                code: finding["code"].as_str().unwrap().to_string(),
+                span_file: Some(file),
+                ..meta(Severity::Error)
+            })
+            .collect();
+        let (result, shown_meta) = lint(&json!({"findings": findings}), &meta, false);
+        let shown = list(&result, "findings").len();
+        assert!(shown > 0 && shown < meta.len());
+        assert_eq!(shown_meta, meta[..shown]);
         let note = &result["truncation"]["findings"];
         assert_eq!(note["total"], 6);
         assert_eq!(note["byCode"], json!({"risk-0": 3, "risk-1": 3}));

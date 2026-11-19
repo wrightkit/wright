@@ -8,7 +8,6 @@
 use wright_analyzer::canonical::SemanticIndex;
 use wright_driver::{CompilerSession, InputSpec, SessionConfig, SourceKind};
 
-use super::LanguageService;
 use crate::document::{Document, uri_to_path};
 
 /// The cached Workshop analysis for one open document (#1005): the loaded
@@ -51,27 +50,26 @@ impl WorkshopAnalysis {
     }
 }
 
-impl LanguageService {
-    /// The cached analysis for `uri`, building it when the open
-    /// document's `(uri, version)` key does not match the cache (#1005).
-    /// `store.document` re-validates the caller's document each time so a
-    /// stale in-flight change can never be served an out-of-version index.
-    pub(super) fn workshop_analysis(
+#[derive(Default)]
+pub(super) struct WorkshopCache {
+    analysis: Option<WorkshopAnalysis>,
+    pub(super) builds: usize,
+}
+
+impl WorkshopCache {
+    pub(super) fn get_or_build(
         &mut self,
-        uri: &str,
+        config: &SessionConfig,
+        document: &Document,
     ) -> Result<&mut WorkshopAnalysis, wright_driver::Diagnostic> {
-        let document = self
-            .store
-            .document(uri)
-            .expect("callers resolve the document before analyzing");
         let current = self
-            .workshop
+            .analysis
             .as_ref()
             .is_some_and(|analysis| analysis.matches(document));
         if !current {
-            self.workshop = Some(WorkshopAnalysis::build(&self.config, document)?);
-            self.workshop_builds += 1;
+            self.analysis = Some(WorkshopAnalysis::build(config, document)?);
+            self.builds += 1;
         }
-        Ok(self.workshop.as_mut().expect("analysis is populated"))
+        Ok(self.analysis.as_mut().expect("analysis is populated"))
     }
 }
