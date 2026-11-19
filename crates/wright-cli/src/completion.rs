@@ -393,36 +393,60 @@ pub(crate) fn run_install(
     Ok(exit::SUCCESS)
 }
 
-pub(crate) fn refresh_installed_completions() -> Result<usize, String> {
-    let mut refreshed = 0;
+/// Regenerates every installed completion file and tells the user how a
+/// running shell loads the new definitions: a shell keeps the definitions it
+/// loaded earlier, so a stale list stays until it reloads.
+pub(crate) fn refresh_installed_completions() {
+    let mut reload = Vec::new();
     for shell in ShellArg::ALL {
         let filename = filename_for(shell);
         for dir in candidate_dirs_for(shell) {
             let target_file = dir.join(filename);
-            if target_file.is_file() {
-                match install_for_shell(shell, Some(&dir), false, false) {
-                    Ok(InstallStatus::Updated(path) | InstallStatus::Created(path)) => {
-                        println!(
-                            "==> refreshed {} completion in {}",
-                            shell.as_str(),
-                            path.display()
-                        );
-                        refreshed += 1;
-                    }
-                    Ok(InstallStatus::UpToDate(_) | InstallStatus::DryRun(_)) => {}
-                    Err(error) => {
-                        eprintln!(
-                            "warning: could not refresh {} completion in {}: {}",
-                            shell.as_str(),
-                            target_file.display(),
-                            error.message()
-                        );
-                    }
+            if !target_file.is_file() {
+                continue;
+            }
+            match install_for_shell(shell, Some(&dir), false, false) {
+                Ok(InstallStatus::Updated(path) | InstallStatus::Created(path)) => {
+                    println!(
+                        "==> refreshed {} completion in {}",
+                        shell.as_str(),
+                        path.display()
+                    );
+                    reload.push(shell);
+                }
+                Ok(InstallStatus::UpToDate(_) | InstallStatus::DryRun(_)) => {}
+                Err(error) => {
+                    eprintln!(
+                        "warning: could not refresh {} completion in {}: {}",
+                        shell.as_str(),
+                        target_file.display(),
+                        error.message()
+                    );
                 }
             }
         }
     }
-    Ok(refreshed)
+    reload.dedup();
+    for shell in reload {
+        println!("note: {}", reload_instruction(shell));
+    }
+}
+
+fn reload_instruction(shell: ShellArg) -> &'static str {
+    match shell {
+        ShellArg::Fish => {
+            "running fish sessions keep the old wright completions; run `exec fish` or open a new terminal"
+        }
+        ShellArg::Zsh => {
+            "running zsh sessions keep the old wright completions; run `exec zsh` or open a new terminal"
+        }
+        ShellArg::Bash => {
+            "running bash sessions keep the old wright completions; run `exec bash` or open a new terminal"
+        }
+        ShellArg::PowerShell => {
+            "running PowerShell sessions keep the old wright completions; restart PowerShell"
+        }
+    }
 }
 
 #[cfg(test)]

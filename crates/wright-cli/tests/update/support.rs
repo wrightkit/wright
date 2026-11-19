@@ -40,7 +40,7 @@ fn build_archive(version: &str) -> Vec<u8> {
     for (name, content) in [
         (
             "wright",
-            format!("#!/bin/sh\necho \"fake wright {version}\"\n").into_bytes(),
+            format!("#!/bin/sh\nif [ \"$1 $2\" = \"completion refresh\" ] && [ -n \"$WRIGHT_COMPLETION_DIR\" ]; then echo refreshed > \"$WRIGHT_COMPLETION_DIR/refresh-ran\"; fi\necho \"fake wright {version}\"\n").into_bytes(),
         ),
         (
             "wright-lsp",

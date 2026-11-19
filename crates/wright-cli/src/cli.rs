@@ -403,9 +403,22 @@ pub(crate) struct CompletionArgs {
 pub(crate) enum CompletionSubcommand {
     /// Install generated shell completions into standard user-local directories.
     Install(CompletionInstallArgs),
+    /// Regenerate the completion files already installed, so they match this
+    /// version. `wright update` runs it from the new binary.
+    Refresh,
 }
 
 #[derive(Debug, Args)]
+#[command(after_help = "\
+Setup:
+  wright agent install                              install the agent guide
+  wright agent install --hook claude|codex         also register the edit hook
+  wright agent install --hook codex -- --locale zh-CN
+                                                    store the project's input and locale
+                                                    (the form `wright check` takes)
+The hook runs only after its harness loads it: Claude Code reads
+.claude/settings.local.json; Codex needs the project trusted. Verify with
+`wright agent hook post-edit --help` and the command install prints.")]
 pub(crate) struct AgentArgs {
     #[command(subcommand)]
     pub(crate) subcommand: Option<AgentSubcommand>,

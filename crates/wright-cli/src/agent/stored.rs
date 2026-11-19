@@ -93,3 +93,28 @@ pub(super) fn load_failure(config: wright_driver::SessionConfig) -> Option<Strin
         .and_then(|mut session| session.load().map(drop).map_err(failure))
         .err()
 }
+
+/// The refusal for a registration that would not load the project. A locale
+/// failure names the fix, because the default locale is not the project's.
+pub(super) fn load_rejection(
+    what: &str,
+    flag: &str,
+    failure: &str,
+    given: &[String],
+) -> AgentError {
+    let example = if failure.contains("locale") {
+        let mut args = given.to_vec();
+        args.extend(["--locale".into(), "zh-CN".into()]);
+        format!(
+            "the project may need another locale: pass its input and options after `--`, for example `wright agent install {flag} -- {}`",
+            args.join(" ")
+        )
+    } else {
+        format!(
+            "pass its input and options after `--`, for example `wright agent install {flag} -- src/main.opy --kind opy`"
+        )
+    };
+    AgentError::Rejected(format!(
+        "{what} would not load the project ({failure}); nothing was written; {example}, or pass --force to register it anyway"
+    ))
+}

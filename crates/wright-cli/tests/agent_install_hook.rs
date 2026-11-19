@@ -186,6 +186,42 @@ fn install_refuses_a_program_that_does_not_load_unless_forced() {
 }
 
 #[test]
+fn a_locale_failure_names_the_locale_option_and_success_prints_next_steps() {
+    let project = temp_dir();
+    std::fs::write(
+        project.join("session.ws"),
+        "rule(\"x\") {\n\tevent {\n\t\tOngoing - Global;\n\t}\n\tconditions {\n\t\tCurrent Map == Map(格里姆火山);\n\t}\n\tactions {\n\t\tWait(1, Ignore Condition);\n\t}\n}\n",
+    )
+    .unwrap();
+    let refused = install(&project, &["--", "session.ws", "--kind", "workshop"]);
+    assert_eq!(refused.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(
+        stderr.contains("nothing was written")
+            && stderr.contains("-- session.ws --kind workshop --locale zh-CN"),
+        "{stderr}"
+    );
+    assert!(!project.join(".claude").exists());
+    let args = [
+        "--",
+        "session.ws",
+        "--kind",
+        "workshop",
+        "--locale",
+        "zh-CN",
+    ];
+    let installed = install(&project, &args);
+    assert!(installed.status.success());
+    let stdout = String::from_utf8_lossy(&installed.stdout);
+    assert!(
+        stdout.contains("next steps:")
+            && stdout.contains("verify: run `echo '{}' | wright agent hook post-edit"),
+        "{stdout}"
+    );
+    let _ = std::fs::remove_dir_all(&project);
+}
+
+#[test]
 fn force_replaces_only_the_wright_hook_object() {
     let project = project();
     let given = ["--", "session.ws", "--kind", "workshop"];

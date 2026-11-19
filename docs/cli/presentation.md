@@ -59,9 +59,11 @@ mutating shell startup configuration:
 * **Install and Update integration**:
   - `install.sh` invokes `wright completion install` post-installation and
     reports non-fatal guidance if automatic completion installation cannot run.
-  - `wright update` refreshes existing Wright completion files in conventional
-    locations upon replacing the binaries so completions stay aligned with the
-    installed command model.
+  - `wright update` runs `wright completion refresh` from the newly installed
+    binary, which rewrites existing Wright completion files in conventional
+    locations so completions match the installed command model. A running shell
+    keeps the definitions it already loaded, so refresh prints the reload
+    command (for example `exec fish`).
 * **Package-manager boundaries**: Homebrew, Scoop, and WinGet packaging
   consume `wright completion <shell>` generation using native package conventions
   rather than maintaining hand-written completion scripts.
