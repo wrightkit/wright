@@ -102,11 +102,21 @@ pub(super) fn load_rejection(
     failure: &str,
     given: &[String],
 ) -> AgentError {
-    let example = if failure.contains("locale") {
-        let mut args = given.to_vec();
+    let example = if failure.starts_with("unknown-enum-member") {
+        let mut args = Vec::new();
+        let mut skip = false;
+        for arg in given {
+            if std::mem::take(&mut skip) || arg.starts_with("--locale=") {
+                continue;
+            }
+            skip = arg == "--locale";
+            if !skip {
+                args.push(arg.clone());
+            }
+        }
         args.extend(["--locale".into(), "zh-CN".into()]);
         format!(
-            "the project may need another locale: pass its input and options after `--`, for example `wright agent install {flag} -- {}`",
+            "the project may need another locale (a spelling is not in the current one): pass its input and options after `--`, for example `wright agent install {flag} -- {}`",
             args.join(" ")
         )
     } else {

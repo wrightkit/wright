@@ -307,8 +307,10 @@ an edit that broke the program.
 
 A successful `--hook` install prints the remaining steps and a verification
 command. `echo '{}' | <stored command>`, run from the project, exits 0 with no
-output when the stored input and options load the project; a load failure
-exits 1 with the diagnostic on stderr. The activation step differs by harness:
+output when the stored input and options load the project. A failure shows as
+output: Claude Code exits 2 with the diagnostic on stderr; Codex exits 0 with
+`additionalContext` JSON on stdout. The check does not prove the harness runs
+the hook. The activation step differs by harness:
 
 | Harness | Config file | Remaining step |
 | --- | --- | --- |

@@ -268,7 +268,7 @@ fn report_hook(status: &hook::HookStatus, target: HookTarget, command: &str) {
         ),
     }
     println!(
-        "  verify: run `echo '{{}}' | {command}` from the project; exit 0 with no output means the hook loads the project"
+        "  verify: run `echo '{{}}' | {command}` from the project; exit 0 with no output means the stored input and options load the project; any output, or exit 2, is a failure"
     );
     println!("  remove: delete its `wright agent hook` entry");
 }

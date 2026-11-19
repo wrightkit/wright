@@ -45,9 +45,14 @@ pub(super) fn install_version(
     // completions for the new one.
     let refreshed = Process::new(install_dir.join(platform.exe("wright")))
         .args(["completion", "refresh"])
-        .status();
-    if !refreshed.is_ok_and(|status| status.success()) {
-        eprintln!("warning: could not refresh shell completions; run `wright completion refresh`");
+        .output();
+    match refreshed {
+        Ok(output) if output.status.success() => {
+            print!("{}", String::from_utf8_lossy(&output.stdout));
+        }
+        _ => eprintln!(
+            "warning: could not refresh shell completions; run `wright completion install --force` for your shell"
+        ),
     }
     Ok(())
 }
