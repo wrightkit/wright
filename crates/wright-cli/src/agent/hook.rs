@@ -12,6 +12,7 @@ use crate::cli::HookTarget;
 use crate::present::RenderContext;
 
 const COMMAND: &str = "wright agent hook post-edit ";
+const CLAUDE_PROJECT_DIR: &str = "${CLAUDE_PROJECT_DIR:-.}";
 const TIMEOUT_SECONDS: u64 = 60;
 
 /// What differs between harnesses at install time. Both register a
@@ -24,8 +25,7 @@ struct Spec {
     /// literal path below it.
     input: String,
     matcher: &'static str,
-    /// The command's prefix up to the input and options.
-    command: &'static str,
+    command_suffix: &'static str,
 }
 
 fn spec(target: HookTarget, root: &Path) -> Result<Spec, AgentError> {
@@ -33,10 +33,10 @@ fn spec(target: HookTarget, root: &Path) -> Result<Spec, AgentError> {
         // https://code.claude.com/docs/en/hooks
         HookTarget::Claude => Spec {
             file: ".claude/settings.local.json",
-            variable: "${CLAUDE_PROJECT_DIR:-.}",
-            input: "${CLAUDE_PROJECT_DIR:-.}".into(),
+            variable: CLAUDE_PROJECT_DIR,
+            input: CLAUDE_PROJECT_DIR.into(),
             matcher: "Edit|Write",
-            command: "wright agent hook post-edit --",
+            command_suffix: "--",
         },
         // https://developers.openai.com/codex/hooks (redirects to
         // learn.chatgpt.com/docs/hooks): project hooks live in
@@ -50,7 +50,7 @@ fn spec(target: HookTarget, root: &Path) -> Result<Spec, AgentError> {
             variable: GIT_TOPLEVEL,
             input: git_anchor(root)?,
             matcher: "apply_patch",
-            command: "wright agent hook post-edit --harness codex --",
+            command_suffix: "--harness codex --",
         },
     })
 }
@@ -80,12 +80,10 @@ fn git_anchor(root: &Path) -> Result<String, AgentError> {
     if !output.status.success() {
         return Err(refused());
     }
-    let top = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
-    let below = std::fs::canonicalize(root)
-        .ok()
-        .zip(std::fs::canonicalize(top).ok())
-        .and_then(|(root, top)| root.strip_prefix(top).ok().map(Path::to_path_buf))
-        .ok_or_else(refused)?;
+    let root = std::fs::canonicalize(root).map_err(|_| refused())?;
+    let top = String::from_utf8_lossy(&output.stdout);
+    let top = std::fs::canonicalize(top.trim()).map_err(|_| refused())?;
+    let below = root.strip_prefix(&top).map_err(|_| refused())?;
     Ok(match below.to_string_lossy() {
         below if below.is_empty() => GIT_TOPLEVEL.to_string(),
         below => format!("{GIT_TOPLEVEL}/{below}"),
@@ -115,15 +113,11 @@ fn shell_word(variable: &str, input: &str, token: &str) -> String {
 }
 
 fn generated_hook(spec: &Spec, stored: &Stored) -> Value {
-    let command = std::iter::once(spec.command.to_string())
-        .chain(
-            stored
-                .tokens
-                .iter()
-                .map(|token| shell_word(spec.variable, &spec.input, token)),
-        )
-        .collect::<Vec<_>>()
-        .join(" ");
+    let mut command = format!("{COMMAND}{}", spec.command_suffix);
+    for token in &stored.tokens {
+        command.push(' ');
+        command.push_str(&shell_word(spec.variable, &spec.input, token));
+    }
     json!({"type": "command", "command": command, "timeout": TIMEOUT_SECONDS})
 }
 
@@ -176,7 +170,7 @@ pub(crate) fn install(
     let hook = generated_hook(&spec, &stored);
     let mut ours = Vec::new();
     for (group_index, group) in groups.iter_mut().enumerate() {
-        let matcher_matches = group.get("matcher") == Some(&json!(spec.matcher));
+        let matcher_matches = group.get("matcher").and_then(Value::as_str) == Some(spec.matcher);
         for (hook_index, existing) in hooks_of(group).into_iter().flatten().enumerate() {
             if is_wright_hook(existing) {
                 ours.push((
@@ -251,10 +245,11 @@ fn edited_files(harness: HookTarget, event: &Value) -> Vec<String> {
                 .as_str()
                 .into_iter()
                 .flat_map(str::lines)
+                .filter_map(|line| line.strip_prefix("*** "))
                 .filter_map(|line| {
                     ["Add File: ", "Update File: ", "Delete File: ", "Move to: "]
                         .iter()
-                        .find_map(|header| line.strip_prefix("*** ")?.strip_prefix(header))
+                        .find_map(|header| line.strip_prefix(header))
                 })
                 .map(|file| cwd.join(file.trim()).to_string_lossy().into_owned())
                 .collect()
@@ -275,7 +270,6 @@ pub(crate) fn post_edit(harness: HookTarget, check: &[String]) -> u8 {
     let Ok(event) = serde_json::from_str::<Value>(&input) else {
         return failed("the hook input is not JSON");
     };
-    let files = edited_files(harness, &event);
     let mut config = match session_config(check) {
         Ok(config) => config,
         Err(error) => return failed(error.message()),
@@ -302,39 +296,44 @@ pub(crate) fn post_edit(harness: HookTarget, check: &[String]) -> u8 {
             source_base: base.as_deref(),
             subject: None,
         };
-        let (out, err) = crate::plain::render_lines(&envelope, &ctx);
-        out.into_iter().chain(err).collect::<Vec<_>>().join("\n")
+        let (mut out, err) = crate::plain::render_lines(&envelope, &ctx);
+        out.extend(err);
+        out.join("\n")
     };
-    match envelope.exit {
-        exit::USAGE | exit::UNSUPPORTED | exit::INTERNAL => failed(&report()),
-        _ if envelope.diagnostics.is_empty() => exit::SUCCESS,
-        // When the program did not load, its membership is unknown and the
-        // load failure is the likely effect of the edit.
-        _ if !files.is_empty()
-            && files
-                .iter()
-                .all(|file| session.program_contains(file) == Some(false)) =>
-        {
+    if matches!(
+        envelope.exit,
+        exit::USAGE | exit::UNSUPPORTED | exit::INTERNAL
+    ) {
+        return failed(&report());
+    }
+    if envelope.diagnostics.is_empty() {
+        return exit::SUCCESS;
+    }
+    let files = edited_files(harness, &event);
+    if !files.is_empty()
+        && files
+            .iter()
+            .all(|file| session.program_contains(file) == Some(false))
+    {
+        return exit::SUCCESS;
+    }
+    match harness {
+        HookTarget::Claude => {
+            eprintln!("{}", report());
+            exit::USAGE
+        }
+        HookTarget::Codex => {
+            // https://developers.openai.com/codex/hooks: PostToolUse
+            // `hookSpecificOutput.additionalContext` is added as developer
+            // context; the answer is verified by the live run in #1109.
+            println!(
+                "{}",
+                json!({"hookSpecificOutput": {
+                    "hookEventName": "PostToolUse",
+                    "additionalContext": report(),
+                }})
+            );
             exit::SUCCESS
         }
-        _ => match harness {
-            HookTarget::Claude => {
-                eprintln!("{}", report());
-                exit::USAGE
-            }
-            HookTarget::Codex => {
-                // https://developers.openai.com/codex/hooks: PostToolUse
-                // `hookSpecificOutput.additionalContext` is added as developer
-                // context; the answer is verified by the live run in #1109.
-                println!(
-                    "{}",
-                    json!({"hookSpecificOutput": {
-                        "hookEventName": "PostToolUse",
-                        "additionalContext": report(),
-                    }})
-                );
-                exit::SUCCESS
-            }
-        },
     }
 }
