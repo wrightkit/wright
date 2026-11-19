@@ -1,7 +1,3 @@
-//! The Workshop-text load: detect the locale, then parse, canonicalize, and
-//! validate a resolved Workshop input. Split from `session.rs` to keep that
-//! file under the size budget.
-
 use workshop_rs::Program;
 
 use super::CompilerSession;

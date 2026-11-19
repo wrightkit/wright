@@ -496,7 +496,6 @@ fn check_surfaces_every_failure_kind_with_its_code_and_exit_class() {
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 
-    // `session-config-changed` — the fixed-config refusal.
     {
         let dir = temp_dir("check-config");
         let entry = opy_entry(&dir);
@@ -524,7 +523,6 @@ fn check_surfaces_every_failure_kind_with_its_code_and_exit_class() {
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 
-    // The loader's `source-provider-*` refusal kinds.
     let stub_failures: &[(
         &str,
         Result<SourceCompilation, SourceProviderError>,
