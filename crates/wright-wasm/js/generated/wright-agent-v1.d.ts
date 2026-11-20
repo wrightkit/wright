@@ -1290,8 +1290,19 @@ export interface LookupEntry {
   kind: string
   spelling: string
   displayName: string
+  /**
+   * Owner description in the requested locale, or its primary-locale fallback.
+   */
+  description?: string
   signature?: string
   callable?: {
+    parameters?: {
+      /**
+       * Owner parameter description in the requested locale, or its primary-locale fallback.
+       */
+      description?: string
+      [k: string]: unknown
+    }[]
     /**
      * Optional: the owner-declared return type of a value, in the same vocabulary as parameter types.
      */
@@ -1306,6 +1317,7 @@ export interface LookupEntry {
     [k: string]: unknown
   }
   parameter?: {
+    description?: string
     [k: string]: unknown
   }
   setting?: {

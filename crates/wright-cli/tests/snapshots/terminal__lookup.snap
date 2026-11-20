@@ -4,8 +4,9 @@ expression: transcript(&out)
 ---
 exit: 0
 --- stdout ---
- LOOKUP
-  2 entries
-  Stop All Damage Over Time(player: Player|Array) [action]  stopAllDamageOverTime
-  Stop All Damage Modifications() [action]  stopAllDamageModifications
+action Stop All Damage Over Time
+  Stops all damage over time started by start damage over time for one or more players.
+  Stop All Damage Over Time(player: Player|Array)
+  player: The player or players whose scripted damage over time will stop.
+action Stop All Damage Modifications()
 --- stderr ---

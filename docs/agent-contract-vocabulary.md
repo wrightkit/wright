@@ -20,22 +20,25 @@ request's `language` selects the owner (`workshop` or `opy`, the ids
   prefix. The result then lists its members, parameters, or child segments,
   which is how a caller enumerates an enum's accepted member spellings or
   a callable's parameters.
-* `locale`: the Workshop display-name locale (session configuration, then
-  the catalog's primary locale when omitted).
+* `locale`: the Workshop display-name and description locale (session
+  configuration, then the catalog's primary locale when omitted). Missing
+  descriptions fall back to the catalog's primary locale when available.
 * `limit`: default 3, maximum 10. A `limit` outside that range is a
   `malformed-request` refusal, never a silent clamp (#783).
 
 Each entry carries its owner `identity`, `kind`, accepted `spelling`, and
 `displayName`, plus the owner fact that describes it (`callable`, `enum`,
-`parameter`, or `setting`). The `callable` fact holds the ordered
+`parameter`, or `setting`). A Workshop builtin also carries an optional
+owner `description` string. The `callable` fact holds the ordered
 `parameters`; when the owner declares them it also carries `returns`, the
 callable's return type in the same vocabulary as parameter `type`s (a
 Workshop `value` such as `distance` declares one; actions carry none),
 and `variadic: true` when the last parameter repeats for extra arguments.
 Each `parameters[]` member carries `name`, `type`, `required`, an
 optional `default`, an optional `enum` `{domain, members}` fact, an
-optional `displayName` (the editor's localized label), and an optional
-`content` fact describing the `rule-content-v1` argument the parameter
+optional `displayName` (the editor's localized label), an optional owner
+`description` string, and an optional `content` fact describing the
+`rule-content-v1` argument the parameter
 supplies: `fold {call, arg}` for a surface parameter folded into a
 variable-target call, `operations` for the modify-operation call ids the
 position accepts. A scoped `parameter` entry carries the same fact minus
@@ -57,9 +60,11 @@ project cannot load.
 
 `wright lookup [QUERY]` exposes the same request on the CLI
 (`--language`, `--only`, `--within`, `--locale`, `--limit`): text mode
-prints one signature or spelling per line, and `-f json` prints this
-result payload. Text `check`/`compile` output points at the command after
-an `unknown-*` diagnostic; structured payloads are unchanged.
+presents the first entry as a card and further entries on one line, as
+[the command reference](cli/commands.md#wright-lookup-owner-name-and-signature-lookup-529)
+describes. `-f json` prints this result payload. Text `check`/`compile`
+output points at the command after an `unknown-*` diagnostic; structured
+payloads are unchanged.
 
 ## Listing vocabulary (ADR-0031)
 

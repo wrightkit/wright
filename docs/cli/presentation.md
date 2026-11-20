@@ -106,7 +106,7 @@ except the leading verdict line, which is `<STATUS> <command>
 [key=value …]`. The status shares the renderers' tag set: `PASS`, `WARN`,
 `FAIL` (a raised `--fail-on` verdict), `ERROR` (a genuine failure), `USAGE`
 and `UNSUPPORTED` for exit 2/3 envelopes; a clean query command (`inspect`,
-`rules`, `symbols`, `refs`, `cfg`, `callgraph`, `cost`, `lookup`, and the
+`rules`, `symbols`, `refs`, `cfg`, `callgraph`, `cost`, and the
 read-only `package-search`, `package-list`, `package-outdated`) shows its
 uppercase name in place of a vacuous `PASS`. Verdict fields carry the input
 `root=` plus program `kind=`/`locale=` when the result reports an origin.
@@ -119,10 +119,10 @@ after their JSON fields (`errors=`, `warnings=`, `notes=`/`findings=`,
 `fan-out:`, `share:`, `statement:`, `byNode:`, `hotspot:`, `tree:`,
 `complexity:`, `variable:`, `objects:`, `cost:`, `output:` (written-path
 plus `sha256=`), `fix:`/`patch:`/`refusal:` for `lint --fix`,
-`package:` records for `lint package` (`source=`/`status=` lead, then
+and `package:` records for `lint package` (`source=`/`status=` lead, then
 `sha=`/`remote=`/`dir=`/`rules=`/`downloaded=`/`code=`/`message=`/
-`description=` as the row carries them), and `entry:`
-records for `lookup`. `diagnostic:` records render envelope diagnostics on
+`description=` as the row carries them). `lookup` prints a card for its
+first entry and one line per other entry. `diagnostic:` records render envelope diagnostics on
 stderr; result records stay on stdout, and artifacts keep byte-exact
 stdout ownership. A failed analysis result is the exception: its verdict,
 summary, and `diagnostic:` records all go to stdout, and stderr carries
@@ -218,7 +218,7 @@ the verdict tag (#795, ADR-0030 decision 4). The tag word maps to the exit
 code: `PASS` or `WARN` for clean results, `FAIL` for a `--fail-on`-gated
 result, `USAGE` for exit 2, `UNSUPPORTED` for exit 3, and `ERROR` for
 other failures; a successful query command shows its own name (`INSPECT`,
-`SYMBOLS`, `CFG`, `COST`, `LOOKUP`, `PACKAGE-SEARCH`, `PACKAGE-LIST`,
+`SYMBOLS`, `CFG`, `COST`, `PACKAGE-SEARCH`, `PACKAGE-LIST`,
 `PACKAGE-OUTDATED`, …) rather than a judging word. A
 status word names the command after it (` WARN  lint`); a query tag
 stands alone. Colour is semantic and drawn from the eight ANSI hues only —

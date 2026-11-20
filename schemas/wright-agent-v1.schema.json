@@ -787,17 +787,28 @@
         "kind": { "type": "string" },
         "spelling": { "type": "string" },
         "displayName": { "type": "string" },
+        "description": { "type": "string", "description": "Owner description in the requested locale, or its primary-locale fallback." },
         "signature": { "type": "string" },
         "callable": {
           "type": "object",
           "properties": {
+            "parameters": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "description": { "type": "string", "description": "Owner parameter description in the requested locale, or its primary-locale fallback." }
+                },
+                "additionalProperties": true
+              }
+            },
             "returns": { "type": "string", "description": "Optional: the owner-declared return type of a value, in the same vocabulary as parameter types." },
             "variadic": { "type": "boolean", "description": "Optional: present as true when the callable's last parameter repeats for extra arguments." }
           },
           "additionalProperties": true
         },
         "enum": { "type": "object" },
-        "parameter": { "type": "object" },
+        "parameter": { "type": "object", "properties": { "description": { "type": "string" } }, "additionalProperties": true },
         "setting": { "type": "object" }
       },
       "additionalProperties": true

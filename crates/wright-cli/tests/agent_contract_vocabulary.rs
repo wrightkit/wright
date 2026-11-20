@@ -56,6 +56,41 @@ fn lookup_result_schema_covers_callable_returns_and_variadic() {
 }
 
 #[test]
+fn lookup_descriptions_are_schema_checked() {
+    let mut document: Value = serde_json::from_str(
+        &std::fs::read_to_string(workspace_root().join("schemas/wright-agent-v1.schema.json"))
+            .unwrap(),
+    )
+    .unwrap();
+    document["$ref"] = Value::String("#/$defs/LookupResult".to_string());
+    let schema = validator_for(&document).expect("result schema compiles");
+    let ToolResponse::Ok { mut result } = service_response(&ToolRequest::Lookup {
+        language: "workshop".to_string(),
+        query: Some("Start Damage Modification".to_string()),
+        kind: None,
+        within: None,
+        locale: None,
+        limit: None,
+    }) else {
+        panic!("lookup failed");
+    };
+    assert!(result["entries"][0]["description"].is_string());
+    assert!(
+        result["entries"][0]["callable"]["parameters"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|param| param["description"].is_string())
+    );
+    assert!(schema.is_valid(&result));
+    result["entries"][0]["description"] = json!(false);
+    assert!(!schema.is_valid(&result));
+    result["entries"][0]["description"] = json!("description");
+    result["entries"][0]["callable"]["parameters"][0]["description"] = json!(42);
+    assert!(!schema.is_valid(&result));
+}
+
+#[test]
 fn list_entries_request_and_result_validate_against_the_committed_schema() {
     let schema: Value = serde_json::from_str(
         &std::fs::read_to_string(workspace_root().join("schemas/wright-agent-v1.schema.json"))
