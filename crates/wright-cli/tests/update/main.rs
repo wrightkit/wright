@@ -52,6 +52,24 @@ fn check_with_pinned_version_reports_availability_without_network() {
 }
 
 #[test]
+fn check_with_an_older_pinned_version_reports_a_downgrade() {
+    let dir = install_dir("check-downgrade");
+    let output = run_update(
+        &dir,
+        &["update", "--check", "self", "--version", "0.0.1"],
+        &[("WRIGHT_INSTALL_BASE_URL", "http://127.0.0.1:1".to_string())],
+    );
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("downgrade available")
+            && stdout.contains("wright update self --version 0.0.1"),
+        "{stdout}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn update_installs_and_replaces_both_binaries() {
     let server = MockServer::new(release(RELEASE).files);
     let dir = install_dir("update-ok");
