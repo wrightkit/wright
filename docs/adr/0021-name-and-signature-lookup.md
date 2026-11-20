@@ -75,8 +75,9 @@ across kinds. Workshop descriptions follow the requested locale and owner
 fallback. OverPy uses the same layout with the facts its provider supplies.
 The JSON result retains its existing fields and adds available Workshop entry
 and callable parameter descriptions. Signature rendering in the structured
-result remains as described in decision 4; the card uses the structured facts
-so optional types and complete enum members remain visible.
+result remains as described in decision 4; the card derives its call form from
+that string, adds types to optional parameters, and lists each enum's complete
+member set once.
 
 ## Alternatives considered
 

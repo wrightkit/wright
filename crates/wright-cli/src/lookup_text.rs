@@ -81,7 +81,9 @@ pub(crate) fn print(result: &serde_json::Value, language: &str) {
             let mut signature = signature.to_string();
             for (_, members) in &enum_lines {
                 if !members.is_empty() {
-                    signature = signature.replace(&format!("({})", members.join("|")), "");
+                    signature = signature
+                        .replace(&format!("({})", members.join("|")), "")
+                        .replace(&format!("({} members)", members.len()), "");
                 }
             }
             for param in params {

@@ -286,3 +286,9 @@ for line in sys.stdin:
     assert_eq!(terminal, text);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn large_enum_call_forms_do_not_show_a_member_count() {
+    let text = lookup(&["Play Effect"]);
+    assert!(!text.contains(" members)"), "{text}");
+}
