@@ -315,7 +315,7 @@ the hook. The activation step differs by harness:
 | Harness | Config file | Remaining step |
 | --- | --- | --- |
 | Claude Code | `.claude/settings.local.json` | Start a new session in the project; `/hooks` lists the entry |
-| Codex | `.codex/hooks.json` | Trust the project and approve the hook, then start a new session |
+| Codex | `.codex/hooks.json` | Trust the project, then trust the hook (`Review hooks` or `Trust all`). Codex skips the hook until both are done. Start a new session |
 
 A refused install (load failure, different existing hook, wrong file shape)
 prints the cause and the next action, writes nothing, and prints no next steps.
