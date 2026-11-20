@@ -106,7 +106,7 @@ except the leading verdict line, which is `<STATUS> <command>
 [key=value …]`. The status shares the renderers' tag set: `PASS`, `WARN`,
 `FAIL` (a raised `--fail-on` verdict), `ERROR` (a genuine failure), `USAGE`
 and `UNSUPPORTED` for exit 2/3 envelopes; a clean query command (`inspect`,
-`rules`, `symbols`, `refs`, `cfg`, `callgraph`, `cost`, `lookup`, and the
+`rules`, `symbols`, `refs`, `cfg`, `callgraph`, `cost`, and the
 read-only `package-search`, `package-list`, `package-outdated`) shows its
 uppercase name in place of a vacuous `PASS`. Verdict fields carry the input
 `root=` plus program `kind=`/`locale=` when the result reports an origin.
