@@ -52,6 +52,24 @@ fn check_with_pinned_version_reports_availability_without_network() {
 }
 
 #[test]
+fn check_with_an_older_pinned_version_reports_a_downgrade() {
+    let dir = install_dir("check-downgrade");
+    let output = run_update(
+        &dir,
+        &["update", "--check", "self", "--version", "0.0.1"],
+        &[("WRIGHT_INSTALL_BASE_URL", "http://127.0.0.1:1".to_string())],
+    );
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("downgrade available")
+            && stdout.contains("wright update self --version 0.0.1"),
+        "{stdout}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn update_installs_and_replaces_both_binaries() {
     let server = MockServer::new(release(RELEASE).files);
     let dir = install_dir("update-ok");
@@ -362,25 +380,38 @@ fn unwritable_install_directory_fails_with_guidance() {
 }
 
 #[test]
-fn downgrade_is_refused() {
-    let dir = install_dir("update-downgrade");
+fn a_bare_update_does_not_downgrade() {
+    let server = MockServer::new(release("0.0.1").files);
+    let dir = install_dir("update-no-downgrade");
     let before = read(&dir.join("wright"));
-    let output = run_update(
-        &dir,
-        &["update", "self", "--version", "0.0.1"],
-        &[("WRIGHT_INSTALL_BASE_URL", "http://127.0.0.1:1".to_string())],
-    );
+    let output = run_update(&dir, &["update", "self"], &server.env());
     assert_eq!(
         output.status.code(),
         Some(1),
         "a refused downgrade is a user error"
     );
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("refusing to downgrade"),
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("pass --version"), "{stderr}");
+    assert_eq!(read(&dir.join("wright")), before);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_explicit_older_version_installs() {
+    let server = MockServer::new(release("0.0.1").files);
+    let dir = install_dir("update-explicit-downgrade");
+    let output = run_update(
+        &dir,
+        &["update", "self", "--version", "0.0.1"],
+        &server.env(),
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(0),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(read(&dir.join("wright")), before);
+    assert!(String::from_utf8_lossy(&read(&dir.join("wright"))).contains("fake wright 0.0.1"));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -510,20 +541,19 @@ fn terminal_update_closes_with_the_verdict_tag() {
 
 #[test]
 fn terminal_update_reports_failures_under_the_tag() {
+    let server = MockServer::new(release("0.0.1").files);
     let dir = install_dir("terminal-error");
     let output = run_update(
         &dir,
         &[
             "update",
             "self",
-            "--version",
-            "0.0.1",
             "--renderer",
             "terminal",
             "--color",
             "never",
         ],
-        &[("WRIGHT_INSTALL_BASE_URL", "http://127.0.0.1:1".to_string())],
+        &server.env(),
     );
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -532,7 +562,7 @@ fn terminal_update_reports_failures_under_the_tag() {
         "the error tag leads: {stderr}"
     );
     assert!(
-        stderr.contains("refusing to downgrade"),
+        stderr.contains("pass --version"),
         "the rejection reason hangs under it: {stderr}"
     );
     let _ = std::fs::remove_dir_all(&dir);

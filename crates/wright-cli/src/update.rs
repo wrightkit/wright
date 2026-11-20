@@ -269,7 +269,9 @@ fn self_update(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateEr
             println!("wright {current} is already at version {target_version}");
             return Ok(exit::SUCCESS);
         }
-        Ordering::Greater => {
+        // A bare update never moves backwards; an explicit `--version` is the
+        // user's choice, so an older release installs like a newer one.
+        Ordering::Greater if requested.is_none() => {
             if check_only {
                 println!(
                     "installed wright {current} is newer than requested {target_version}; no update is needed"
@@ -277,10 +279,10 @@ fn self_update(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateEr
                 return Ok(exit::SUCCESS);
             }
             return Err(UpdateError::rejected(format!(
-                "requested version {target_version} is older than the installed version {current}; refusing to downgrade"
+                "the latest release {target_version} is older than the installed version {current}; pass --version to install it anyway"
             )));
         }
-        Ordering::Less => {}
+        Ordering::Greater | Ordering::Less => {}
     }
 
     if check_only {
@@ -288,7 +290,12 @@ fn self_update(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateEr
             Some(_) => format!("wright update self --version {target_version}"),
             None => "wright update".to_string(),
         };
-        println!("update available: {current} -> {target_version} (run `{hint}` to install)");
+        let kind = if current_version > parsed_target {
+            "downgrade"
+        } else {
+            "update"
+        };
+        println!("{kind} available: {current} -> {target_version} (run `{hint}` to install)");
         return Ok(exit::SUCCESS);
     }
 

@@ -23,7 +23,12 @@ workflow, so it is text-only and produces no `wright-result/v1` envelope.
   then `wright` and `wright-lsp` are swapped atomically as a matched pair and
   smoke-checked against the new version. `--check` reports availability
   without modifying anything, `--version` installs an exact version instead
-  of the latest stable release and refuses a downgrade (exit 1).
+  of the latest stable release. An explicit `--version` older than the installed
+  version installs it (`--check` reports `downgrade available`); a bare update
+  never moves backwards and exits 1 when the latest release is older than the
+  installed version. A target that predates `wright completion refresh` leaves
+  completion files as they are and prints a warning. R2 retention and the
+  GitHub Release fallback bound which older versions exist.
 * `wright update provider [--check]`: update installed first-party providers
   only.
 * `wright update provider <NAME> [--check] [--version <VERSION>]`: install or
