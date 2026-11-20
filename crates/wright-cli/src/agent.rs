@@ -264,7 +264,7 @@ fn report_hook(status: &hook::HookStatus, target: HookTarget, command: &str) {
             "  1. start a new Claude Code session in this project, or review the hook with `/hooks`"
         ),
         HookTarget::Codex => println!(
-            "  1. open this project in Codex: Codex asks twice, to trust the project and to trust the hook (`Review hooks` or `Trust all`); the hook runs only after both\n  2. a Codex session that was already open needs a restart"
+            "  1. trust this project in Codex, then trust the hook (`Review hooks` or `Trust all`); Codex runs the hook only after both\n  2. start a new Codex session in this project"
         ),
     }
     println!(
