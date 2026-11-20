@@ -572,7 +572,7 @@ fn opy_lookup(
     let mut provider = match session.connect_provider(
         opy_provider::OPY_LANGUAGE_ID,
         &client,
-        wright_lpp::LPP_LOOKUP_PROTOCOL_VERSION,
+        wright_lpp::LPP_LOOKUP_DESCRIPTIONS_PROTOCOL_VERSION,
         Some(crate::ConnectFloor::Entry),
     ) {
         Ok(connected) => connected.provider,

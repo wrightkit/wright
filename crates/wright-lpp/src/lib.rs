@@ -30,6 +30,10 @@ pub const LPP_LOOKUP_PROTOCOL_VERSION: &str = "1.5";
 /// declaration on `lpp/compile`.
 pub const LPP_COMPILE_INPUTS_PROTOCOL_VERSION: &str = "1.7";
 
+/// The LPP 1.8 version that adds the optional `description` and `aliases`
+/// fields to `lpp/lookup` entries.
+pub const LPP_LOOKUP_DESCRIPTIONS_PROTOCOL_VERSION: &str = "1.8";
+
 /// Every protocol version this client implements, in ascending order —
 /// the client's side of the highest-mutual-version computation LPP §19.2
 /// requires after a `protocolVersionMismatch` (#638). 1.6 is excluded:
@@ -42,6 +46,7 @@ pub const LPP_SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &[
     LPP_ARTIFACT_NEGOTIATION_PROTOCOL_VERSION,
     LPP_LOOKUP_PROTOCOL_VERSION,
     LPP_COMPILE_INPUTS_PROTOCOL_VERSION,
+    LPP_LOOKUP_DESCRIPTIONS_PROTOCOL_VERSION,
 ];
 
 /// Whether `version` is at least `minimum` in `major.minor` order. LPP

@@ -1294,6 +1294,10 @@ export interface LookupEntry {
    * Owner description in the requested locale, or its primary-locale fallback.
    */
   description?: string
+  /**
+   * Other spellings the language accepts for the same construct; absent when none or when the provider predates LPP 1.8.
+   */
+  aliases?: string[]
   signature?: string
   callable?: {
     parameters?: {

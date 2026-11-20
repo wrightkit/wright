@@ -456,7 +456,7 @@ fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
                     if pres.is_terminal() && result.get("unavailable").is_some() {
                         present::terminal::lookup_unavailable(&result, pres);
                     } else {
-                        lookup_text::print(&result, args.language.as_str());
+                        lookup_text::print(&result, args.language.as_str(), args.query.as_deref());
                     }
                 }
             }

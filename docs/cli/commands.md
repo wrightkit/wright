@@ -513,10 +513,13 @@ prints a one-line hint after each `unknown-*` diagnostic pointing here
   complete enum members. Further entries have one line each with kind and
   signature or spelling. An identity is shown only when returned entries share
   a spelling across different kinds. Both text renderers use this layout;
-  OverPy descriptions are not yet supplied by its provider.
+  OverPy descriptions and aliases come from an LPP 1.8 provider; `wright
+  lookup` requests 1.8 and falls back to an older mutual version, where the
+  card simply has no description. When the query is an alias of the first
+  entry, the card names the canonical spelling.
   `-f json` prints the same `result` payload `serve` returns
   (`language`, `owner`, `entries[]`, or `unavailable`), including available
-  Workshop entry and callable parameter descriptions.
+  entry and callable parameter descriptions and OverPy `aliases`.
 
 ## The structured Workshop editor
 

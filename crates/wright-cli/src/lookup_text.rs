@@ -3,7 +3,7 @@
 
 use crate::plain;
 
-pub(crate) fn print(result: &serde_json::Value, language: &str) {
+pub(crate) fn print(result: &serde_json::Value, language: &str, query: Option<&str>) {
     if let Some(unavailable) = result.get("unavailable") {
         println!("UNSUPPORTED lookup {}", plain::field("language", language));
         eprintln!(
@@ -37,6 +37,15 @@ pub(crate) fn print(result: &serde_json::Value, language: &str) {
         }
 
         println!("{kind} {spelling}{identity}");
+        // The query names this entry through an alias: say which spelling is canonical.
+        if let Some(query) = query.filter(|query| {
+            *query != spelling
+                && entry["aliases"]
+                    .as_array()
+                    .is_some_and(|aliases| aliases.iter().any(|alias| alias == query))
+        }) {
+            println!("  {query} is an alias of {spelling}");
+        }
         if let Some(description) = entry["description"].as_str() {
             println!("  {description}");
         }
