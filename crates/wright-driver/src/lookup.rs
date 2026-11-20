@@ -249,6 +249,7 @@ pub(crate) fn workshop_entry(
             kind,
             display_name,
             signature,
+            description,
             ..
         } => {
             let head = display_name.unwrap_or_else(|| identity.clone());
@@ -258,6 +259,9 @@ pub(crate) fn workshop_entry(
                 "spelling": head.clone(),
                 "displayName": head,
             });
+            if let Some(description) = description {
+                entry["description"] = json!(description.text);
+            }
             if let Some(signature) = signature {
                 entry["callable"] = callable_facts(&signature);
                 entry["signature"] = json!(render_signature(
@@ -397,6 +401,9 @@ fn callable_facts(signature: &workshop_rs::lookup::Signature) -> Value {
 }
 
 fn param_facts(param: &SignatureParam, fact: &mut Value) {
+    if let Some(description) = &param.description {
+        fact["description"] = json!(description.text);
+    }
     if let Some(content) = &param.content {
         let mut wire = json!({});
         if let Some(fold) = &content.fold {
