@@ -788,6 +788,7 @@
         "spelling": { "type": "string" },
         "displayName": { "type": "string" },
         "description": { "type": "string", "description": "Owner description in the requested locale, or its primary-locale fallback." },
+        "aliases": { "type": "array", "items": { "type": "string" }, "description": "Other spellings the language accepts for the same construct; absent when none or when the provider predates LPP 1.8." },
         "signature": { "type": "string" },
         "callable": {
           "type": "object",

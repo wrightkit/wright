@@ -28,8 +28,9 @@ request's `language` selects the owner (`workshop` or `opy`, the ids
 
 Each entry carries its owner `identity`, `kind`, accepted `spelling`, and
 `displayName`, plus the owner fact that describes it (`callable`, `enum`,
-`parameter`, or `setting`). A Workshop builtin also carries an optional
-owner `description` string. The `callable` fact holds the ordered
+`parameter`, or `setting`). A Workshop builtin or an LPP 1.8 provider entry also carries an
+optional owner `description` string, and an OverPy entry an optional
+`aliases` list of its other accepted spellings. The `callable` fact holds the ordered
 `parameters`; when the owner declares them it also carries `returns`, the
 callable's return type in the same vocabulary as parameter `type`s (a
 Workshop `value` such as `distance` declares one; actions carry none),
