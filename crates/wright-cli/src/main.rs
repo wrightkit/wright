@@ -8,6 +8,7 @@ mod compile;
 mod completion;
 mod essential;
 mod lint;
+mod lookup_text;
 mod mcp;
 mod plain;
 mod present;
@@ -451,16 +452,13 @@ fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
                     "{}",
                     serde_json::to_string(&result).expect("result serializes")
                 ),
-                OutputFormatArg::Text if pres.is_terminal() => {
-                    if result.get("unavailable").is_some()
-                        || result["entries"]
-                            .as_array()
-                            .is_some_and(|entries| !entries.is_empty())
-                    {
-                        present::terminal::lookup(&result, pres);
+                OutputFormatArg::Text => {
+                    if pres.is_terminal() && result.get("unavailable").is_some() {
+                        present::terminal::lookup_unavailable(&result, pres);
+                    } else {
+                        lookup_text::print(&result, args.language.as_str());
                     }
                 }
-                OutputFormatArg::Text => print_lookup_text(&result, args.language.as_str()),
             }
             if result.get("unavailable").is_some() {
                 return ExitCode::from(exit::UNSUPPORTED);
@@ -510,49 +508,6 @@ fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
             }
             ExitCode::from(error.class.exit_code())
         }
-    }
-}
-
-fn print_lookup_text(result: &serde_json::Value, language: &str) {
-    if let Some(unavailable) = result.get("unavailable") {
-        println!("UNSUPPORTED lookup {}", plain::field("language", language));
-        eprintln!(
-            "unavailable: {} {}",
-            plain::field("owner", result["owner"].as_str().unwrap_or_default()),
-            plain::field(
-                "message",
-                unavailable["message"].as_str().unwrap_or_default()
-            )
-        );
-        return;
-    }
-    let entries = result["entries"].as_array().map_or(&[][..], Vec::as_slice);
-    let word = if entries.is_empty() {
-        "ERROR"
-    } else {
-        "LOOKUP"
-    };
-    println!(
-        "{word} lookup {} {}",
-        plain::field("language", language),
-        plain::field("query", result["query"].as_str().unwrap_or_default())
-    );
-    println!("summary: entries={}", entries.len());
-    for entry in entries {
-        let spelling = entry["spelling"].as_str().unwrap_or_default();
-        let mut items = vec![entry["kind"].as_str().unwrap_or("entry").to_string()];
-        items.push(plain::field("name", spelling));
-        if let Some(signature) = entry["signature"].as_str().filter(|s| *s != spelling) {
-            items.push(plain::field("signature", signature));
-        }
-        let identity = entry["identity"].as_str().unwrap_or_default();
-        if identity != spelling {
-            items.push(plain::field("identity", identity));
-        }
-        if let Some(display) = entry["displayName"].as_str().filter(|d| *d != spelling) {
-            items.push(plain::field("display", display));
-        }
-        println!("entry: {}", items.join(" "));
     }
 }
 

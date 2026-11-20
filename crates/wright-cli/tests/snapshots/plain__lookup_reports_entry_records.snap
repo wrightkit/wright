@@ -4,10 +4,13 @@ expression: "transcript(&run_in(&dir, &[\"lookup\", \"wait\"]))"
 ---
 exit 0
 == stdout
-LOOKUP lookup language=workshop query=""
-summary: entries=3
-entry: action name=Wait signature="Wait(time: Any, waitBehavior=Ignore Condition)" identity=wait
-entry: enum name=Wait
-entry: action name="Wait Until" signature="Wait Until(continueCondition: Boolean|Number, timeout: Number)" identity=waitUntil
+action Wait [wait]
+  Pauses the execution of the action list. Unless the wait is interrupted, the remainder of the actions will execute after the pause.
+  Wait(time: Any, waitBehavior: Wait=Ignore Condition)
+  time: The duration of the pause.
+  waitBehavior: Specifies if and how the wait can be interrupted. If the condition list is ignored, the wait will not be interrupted. Otherwise, the condition list will determine if and when the action list will abort or restart.
+  Wait: Ignore Condition | Abort When False | Restart When True
+enum Wait [Wait]
+action Wait Until(continueCondition: Boolean|Number, timeout: Number)
 
 == stderr

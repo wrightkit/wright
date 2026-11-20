@@ -2907,7 +2907,7 @@ fn lookup_never_reads_stdin() {
     let output = child.wait_with_output().expect("child output");
     assert!(output.status.success(), "{output:?}");
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("createHudText"), "{stdout}");
+    assert!(stdout.starts_with("action "), "{stdout}");
 }
 
 #[test]

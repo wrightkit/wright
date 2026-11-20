@@ -95,7 +95,7 @@ so optional types and complete enum members remain visible.
 - An agent can find the valid spelling, signature, enum members, and settings keys for a construct in one bounded call instead of guessing, mining the binary, or fetching external documentation.
 - Names and signatures stay with their owners. Wright cannot drift from them because it keeps no copy.
 - The MCP tool set grows by one tool, and its schema is part of every session's context. Keep the request schema small.
-- Cost is dominated by what stays in the agent's context: in the stage 1 benchmark every tool result was re-read each turn, so a result's size counts once per remaining turn. This is why the default `limit` is small and why enum members are listed only where the agent cannot omit the argument.
+- Cost is dominated by what stays in the agent's context: in the stage 1 benchmark every tool result was re-read each turn, so a result's size counts once per remaining turn. The default entry limit stays small. The structured signature keeps its bounded inline enum rule, while the first-entry text card includes complete enum members and descriptions so they can be read in one call.
 - Ranking and match quality become visible product behavior and must be measured, not assumed.
 - Diagnostic candidates are free text in the owner's message, so their format is an owner choice and Wright cannot parse them.
 - Follow-up work: owner implementations (`wrightkit/workshop-rs#377`, `wrightkit/opy-rs#465`); an LPP capability decision in `wrightkit/language-provider-protocol`; the Wright operation, MCP tool, and contract documentation; and the benchmark prerequisites `wrightkit/wright#526` and `wrightkit/benchmark-suite#2`.

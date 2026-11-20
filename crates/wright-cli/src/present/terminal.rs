@@ -1258,7 +1258,7 @@ fn cost_rule_body(result: &Value, ctx: &RenderContext<'_>) {
     }
 }
 
-pub(crate) fn lookup(result: &Value, pres: Presentation) {
+pub(crate) fn lookup_unavailable(result: &Value, pres: Presentation) {
     if let Some(unavailable) = result.get("unavailable") {
         eprintln!("{} lookup", tag("UNSUPPORTED", pres.color));
         eprintln!(
@@ -1266,25 +1266,6 @@ pub(crate) fn lookup(result: &Value, pres: Presentation) {
             unavailable["message"].as_str().unwrap_or_default(),
             result["owner"].as_str().unwrap_or_default()
         );
-        return;
-    }
-    let entries = result["entries"].as_array().map_or(&[][..], Vec::as_slice);
-    println!("{}", tag("LOOKUP", pres.color).trim_end());
-    println!("  {}", plural(entries.len(), "entry", "entries"));
-    for entry in entries {
-        let spelling = entry["spelling"].as_str().unwrap_or_default();
-        let head = entry["signature"].as_str().unwrap_or(spelling);
-        let mut line = format!("{head} [{}]", entry["kind"].as_str().unwrap_or_default());
-        let identity = entry["identity"].as_str().unwrap_or_default();
-        if identity != spelling {
-            line.push_str(&format!("  {identity}"));
-        }
-        if let Some(display) = entry["displayName"].as_str()
-            && display != spelling
-        {
-            line.push_str(&format!("  — {display}"));
-        }
-        println!("  {line}");
     }
 }
 
