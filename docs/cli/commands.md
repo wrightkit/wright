@@ -44,7 +44,7 @@ result.
 | `wright inspect cfg <RULE> [INPUT] [--only KIND] [--max N]` | Control-flow graph of one rule, addressed by name | block/edge listing |
 | `wright inspect callgraph [INPUT] [--caller RULE] [--callee SUBROUTINE] [--max N]` | Subroutine call graph (caller rules to callee subroutines) | call edges |
 | `wright inspect cost [INPUT] [--rule RULE] [--no-cache] [--baseline NAME] [--save-baseline NAME] [--max-total N]` | Exact generated-resource counts plus static findings; `--rule` drills into one rule's element cost, and by default the run compares against the previous run's element cost | resource counts and findings plus the change against the previous run or named baseline, or the rule's statements and node-name shares |
-| `wright lookup [QUERY]` | Resolve a Workshop or OverPy display name, near spelling, or guess to the owner-accepted spelling and signature (#529); takes no input | one line per entry: signature or spelling, kind, identity |
+| `wright lookup [QUERY]` | Resolve a Workshop or OverPy display name, near spelling, or guess to the owner-accepted spelling and signature (#529); takes no input | first entry as a card, then one line per additional entry |
 | `wright serve [INPUT] [--transport T] [--kind K] [--profile P] [--lint-config YAML] [--rule-file PATH] [--disable-rule ID] [--rule-severity ID:SEV]` | Serve `wright-agent/v1` over stdio, JSON-RPC 2.0, or MCP | one structured response per request |
 | `wright completion <SHELL>` | Generate static completion script for bash, zsh, fish, or powershell | the generated completion script |
 | `wright completion install [SHELL]` | Install generated completion into standard user-local directory | installation progress and guidance |
@@ -504,12 +504,19 @@ prints a one-line hint after each `unknown-*` diagnostic pointing here
 * `--within <IDENTITY>` lists what an identity contains: an enum domain's
   members, a callable's parameters, or a settings path's child segments.
   An unmatched scope identity refuses with `lookup.unknownWithin`.
-* `--locale <LOCALE>` selects the Workshop display-name locale;
-  `--limit <N>` bounds the entry count (default 3, maximum 10).
-* Text mode prints one line per entry, the rendered signature for a
-  callable or otherwise the accepted spelling, with its kind and owner identity.
+* `--locale <LOCALE>` selects Workshop display names and descriptions;
+  the owner falls back to its primary locale when a description is unavailable.
+  `--limit <N>` bounds the entry count (default 3, maximum 10), not the
+  members shown in a card.
+* Text mode presents the first entry as a card: kind and name, available
+  description, call form with parameter types, parameter descriptions, and
+  complete enum members. Further entries have one line each with kind and
+  signature or spelling. An identity is shown only when returned entries share
+  a spelling across different kinds. Both text renderers use this layout;
+  OverPy descriptions are not yet supplied by its provider.
   `-f json` prints the same `result` payload `serve` returns
-  (`language`, `owner`, `entries[]`, or `unavailable`).
+  (`language`, `owner`, `entries[]`, or `unavailable`), including available
+  Workshop entry and callable parameter descriptions.
 
 ## The structured Workshop editor
 

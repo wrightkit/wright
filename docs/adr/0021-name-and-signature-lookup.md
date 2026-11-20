@@ -35,7 +35,7 @@ Reaching the owners differs by language. Raw Workshop is in-process through `wor
    - `limit` (optional): the default is 3 and the maximum is 10. Both are defined by this contract and do not depend on `capabilities`, which carries no per-operation metadata.
 
 3. **Result.** `entries` and `unavailable`.
-   - Each entry has an owner-issued `identity`, `kind`, `spelling`, `displayName` for the locale, and, for a callable, `signature`. The result names the owner once, not per entry, and entry order is the ranking, so entries carry no per-entry `owner` or `match` field.
+   - Each entry has an owner-issued `identity`, `kind`, `spelling`, `displayName` for the locale, and, for a callable, `signature` and structured `callable` facts. Enum, parameter, and setting facts are included when applicable. Workshop entries and callable parameters also carry available owner descriptions. The result names the owner once, not per entry, and entry order is the ranking, so entries carry no per-entry `owner` or `match` field.
    - `spelling` is the bare spelling in the requested language, as the owner defines it. It stays stable and is never a rendered signature, so a Workshop display name queried with `language: opy` returns the OverPy spelling the agent will write.
    - `signature` is a single string that Wright renders from owner facts. It is a presentation of those facts, not a second copy of them.
    - Results are ranked and bounded. The service never returns a whole catalog or settings table.
@@ -64,13 +64,27 @@ Reaching the owners differs by language. Raw Workshop is in-process through `wor
 
 11. **ADR-0017 is reconciled in this change.** It was approved when #323 closed on 2026-09-14 and `docs/architecture/domain-intelligence.md` was merged as the current contract, but its status stayed `Proposed`. This change marks it `Accepted`, so the design authority this ADR relies on is unambiguous. `lookup` entries use the owner's opaque identity. Where an owner issues a canonical identity, it is the identity ADR-0017's canonical selector accepts. For an OverPy-specific entry with no canonical identity, the identity is owner-specific and Wright invents no cross-language identity.
 
+## Amendment: first-entry card
+
+Text output presents the first entry as a card containing its kind, name,
+owner description where available, typed call form, parameter descriptions,
+and every member of each referenced enum. An enum entry lists all its members
+regardless of the entry limit. Further entries are one line with kind and
+signature or name; identities appear only for returned entries sharing a name
+across kinds. Workshop descriptions follow the requested locale and owner
+fallback. OverPy uses the same layout with the facts its provider supplies.
+The JSON result retains its existing fields and adds available Workshop entry
+and callable parameter descriptions. Signature rendering in the structured
+result remains as described in decision 4; the card uses the structured facts
+so optional types and complete enum members remain visible.
+
 ## Alternatives considered
 
 - **Fold lookup into `domainIntelligence`:** rejected for now because it couples a small resolver to the `domainIntelligence` result model, which is accepted but not implemented. Revisit when `domainIntelligence` ships.
 - **Extend `targetMetadata`:** rejected for the reason ADR-0017 gives. It is a bulk summary, and growing it would return the catalog to the agent in one payload.
 - **Accept aliases in OverPy:** rejected. Workspace principle 7 makes the upstream compiler the executable specification, and accepting non-upstream spellings would make `check` pass source the reference compiler rejects.
 - **Ship a name list or manual in a skill:** rejected. It would be a shadow semantic authority that can drift from the owners, and skills are optional.
-- **A structured per-parameter signature in the result (`name`, `type`, `default` objects):** rejected. For `hudText` it is about 204 tokens against about 74 for the rendered string, and no agent consumer needs the breakdown. Owners still supply structured facts to Wright; only the result carries the string.
+- **A structured per-parameter signature in the result (`name`, `type`, `default` objects):** initially rejected for token cost. The current result carries structured `callable` facts alongside the rendered signature; the card uses those facts to show parameter descriptions and complete enum domains.
 - **Owners render the signature string:** rejected. It would copy Wright's token-budget policy into two owners and let the string drift from `spelling`.
 - **Return the whole name index in one tool result:** rejected for token cost. Bounded, ranked results answer the question the agent has.
 - **Typed or AST-style authoring, or Wright-enforced constrained generation:** deferred. Wright does not control the agent's decoding. A machine-readable vocabulary export by the owners could serve harnesses that do, and `lookup` entries should stay derivable from such an export.
