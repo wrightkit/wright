@@ -289,6 +289,10 @@ pub(crate) fn post_edit(harness: HookTarget, check: &[String]) -> u8 {
         Ok(session) => session,
         Err(diagnostic) => return failed(&diagnostic.message),
     };
+    // A broken lint policy is a Wright failure, not a finding report.
+    if let Err(diagnostic) = session.validate_lint_policy() {
+        return failed(&diagnostic.message);
+    }
     let envelope = session.check();
     let report = || {
         let presentation = crate::present::Presentation::from_output(
