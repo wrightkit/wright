@@ -86,8 +86,8 @@ impl CompilerSession {
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn convert_opy(&mut self, loaded: &Loaded) -> Result<String, ()> {
         let locale = Self::locale_for(loaded);
-        let artifact =
-            workshop_rs::emitter::emit(&loaded.program, self.catalog, &locale).map_err(|e| {
+        let artifact = workshop_rs::emitter::emit(&loaded.program, self.catalog(), &locale)
+            .map_err(|e| {
                 self.diagnostics.push(Diagnostic::error(
                     "workshop-emission",
                     Stage::Emission,

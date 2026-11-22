@@ -266,9 +266,9 @@ impl CompilerSession {
                 self.trace.in_span("parse", || {
                     workshop_rs::parser::parse_with_context(
                         &workshop_text,
-                        self.catalog,
+                        self.catalog(),
                         &locale,
-                        self.catalog,
+                        self.catalog(),
                     )
                 })
             },

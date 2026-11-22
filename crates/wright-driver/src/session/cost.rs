@@ -9,7 +9,7 @@ use crate::diag::{Diagnostic, Severity, Stage, class_for_stage, source_span};
 
 impl CompilerSession {
     pub(crate) fn cost_snapshot(&self, loaded: &Loaded) -> Option<cache::CostSnapshot> {
-        let report = loaded.program.element_count(self.catalog).ok()?;
+        let report = loaded.program.element_count(self.catalog()).ok()?;
         Some(Self::snapshot_of(&report, loaded))
     }
 
@@ -64,7 +64,7 @@ impl CompilerSession {
     #[allow(unsafe_code)] // hotpath 0.28 emits `#[unsafe(export_name)]` statics
     pub(super) fn attach_target_limits(&mut self, loaded: &Loaded) -> Option<cache::CostSnapshot> {
         let report = match hotpath::measure_block!("compile::element_count", {
-            loaded.program.element_count(self.catalog)
+            loaded.program.element_count(self.catalog())
         }) {
             Ok(report) => report,
             Err(error) => {

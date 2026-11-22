@@ -102,6 +102,24 @@ file contents changing on disk under the configured input (the #471
 disk-refresh lifecycle), and request-local `ToolRequest`
 parameters/documents.
 
+### Construction cost and lint policy errors
+
+`CompilerSession::new` does not compose the lint registry and does not wait
+for the built-in Workshop catalog. On native targets it starts the catalog
+load on a background thread, so the load overlaps the provider start; on
+`wasm32` there are no threads and the load is synchronous. The registry (first-party rules,
+pinned lint packages, `--rule-file` paths, rule policy, and finding selection)
+is composed once, on first use. A composition error (`invalid-selection`,
+`lint-rule-error`, `lint-package-*`) therefore surfaces from the first
+workflow that loads a program (`load`, `compile`, `check`, `lint`, and the
+others), as that workflow's error, with the same code, class, and message as
+before. A long-lived host can call `CompilerSession::validate_lint_policy` to
+compose it at startup. `ToolService::new` and the language service do, so
+`wright serve`, `wright lookup`, and language requests still refuse a bad
+policy up front with the same diagnostic. A failed built-in catalog load is a build defect and panics
+with `cannot load the built-in Workshop catalog`; it no longer produces a
+`catalog-error` diagnostic from the session.
+
 ## Session-aware tool service
 
 `ToolService::new(&mut session)` loads the configured project when it can and

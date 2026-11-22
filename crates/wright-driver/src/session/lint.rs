@@ -18,7 +18,7 @@ impl CompilerSession {
         self.progress(ProgressEvent::new(ProgressPhase::Linting));
         let findings = {
             let _span = self.trace.span("lint");
-            self.lint_registry.run(&loaded.program, &self.config.lint)
+            self.lint_registry().run(&loaded.program, &self.config.lint)
         };
         for finding in findings {
             let mut diagnostic = crate::Diagnostic::carried_error(

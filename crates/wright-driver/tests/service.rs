@@ -157,14 +157,14 @@ fn an_unknown_rule_id_in_the_lint_policy_is_a_usage_error() {
         .unwrap(),
     ] {
         lint.disable("min-wait-loop");
-        let error = CompilerSession::new(SessionConfig {
+        let mut s = CompilerSession::new(SessionConfig {
             input: InputSpec::Path(workshop_path()),
             kind: SourceKind::Workshop,
             lint,
             ..SessionConfig::default()
         })
-        .err()
-        .expect("an unknown policy id must not construct a session");
+        .unwrap();
+        let error = ToolService::new(&mut s).err().unwrap();
         assert_eq!(error.code, "invalid-selection");
         assert!(
             error.message.contains("not-a-rule"),

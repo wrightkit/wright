@@ -282,6 +282,13 @@ fn lint_rule_ids(service: &mut ToolService<'_>) -> Vec<String> {
     }
 }
 
+/// Pinned packages activate when the lint policy is composed, on first use
+/// (#1068): construction succeeds and the service start reports the error.
+fn activation_error(config: SessionConfig, expectation: &str) -> wright_driver::Diagnostic {
+    let mut session = CompilerSession::new(config).expect("construction does not activate");
+    ToolService::new(&mut session).err().expect(expectation)
+}
+
 #[test]
 fn pinned_package_rules_lint_the_project_under_project_policy() {
     let dir = TestDir::new("lint");
@@ -321,6 +328,7 @@ fn a_missing_package_is_fetched_by_its_sha_on_activation() {
         "packages:\n  - repo: community/rules\n    sha: {SHA_A}\n"
     ));
     let mut session = CompilerSession::new(session_config(lint, dir.path(), &server)).unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
     assert_eq!(
         server.find("/community/rules/tar.gz/").len(),
         1,
@@ -334,7 +342,6 @@ fn a_missing_package_is_fetched_by_its_sha_on_activation() {
             .join("rules/rule.yaml")
             .is_file()
     );
-    let mut service = ToolService::new(&mut session).unwrap();
     assert!(
         lint_findings(&mut service)
             .iter()
@@ -351,12 +358,12 @@ fn an_intact_store_entry_activates_without_a_download() {
         "packages:\n  - repo: community/rules\n    sha: {SHA_A}\n"
     ));
     let mut session = CompilerSession::new(session_config(lint, dir.path(), &server)).unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
     assert!(
         server.find("/").is_empty(),
         "an intact store entry makes no request: {:?}",
         server.find("/")
     );
-    let mut service = ToolService::new(&mut session).unwrap();
     assert!(
         lint_findings(&mut service)
             .iter()
@@ -371,9 +378,10 @@ fn an_unfetchable_sha_fails_with_an_explicit_diagnostic_and_no_findings() {
     let lint = pinned_config(&format!(
         "packages:\n  - repo: community/rules\n    sha: {SHA_A}\n"
     ));
-    let error = CompilerSession::new(session_config(lint, dir.path(), &server))
-        .err()
-        .expect("an unfetchable pinned SHA must not construct a session");
+    let error = activation_error(
+        session_config(lint, dir.path(), &server),
+        "an unfetchable pinned SHA must not construct a session",
+    );
     assert_eq!(error.code, "lint-package-not-found");
     assert!(error.message.contains("community/rules"), "{error:?}");
 }
@@ -396,9 +404,10 @@ fn a_duplicate_rule_id_across_two_packages_is_refused() {
     let lint = pinned_config(&format!(
         "packages:\n  - repo: community/one\n    sha: {SHA_A}\n  - repo: community/two\n    sha: {SHA_B}\n"
     ));
-    let error = CompilerSession::new(session_config(lint, dir.path(), &server))
-        .err()
-        .expect("a cross-package rule ID collision must not construct a session");
+    let error = activation_error(
+        session_config(lint, dir.path(), &server),
+        "a cross-package rule ID collision must not construct a session",
+    );
     assert_eq!(error.code, "lint-rule-error");
     assert!(error.message.contains("community/dup"), "{error:?}");
 }
@@ -417,9 +426,10 @@ fn a_bare_id_community_package_is_refused() {
     let lint = pinned_config(&format!(
         "packages:\n  - repo: community/rules\n    sha: {SHA_A}\n"
     ));
-    let error = CompilerSession::new(session_config(lint, dir.path(), &server))
-        .err()
-        .expect("a non-first-party bare ID must be refused");
+    let error = activation_error(
+        session_config(lint, dir.path(), &server),
+        "a non-first-party bare ID must be refused",
+    );
     assert_eq!(error.code, "lint-package-invalid");
     assert!(error.message.contains("bare-rule"), "{error:?}");
 }
@@ -512,9 +522,10 @@ fn a_pin_must_name_a_full_sha_without_a_url_ref() {
             "packages:\n  - repo: https://github.com/community/rules/tree/main\n    sha: {SHA_A}\n"
         ),
     ] {
-        let error = CompilerSession::new(session_config(pinned_config(&yaml), dir.path(), &server))
-            .err()
-            .expect("a non-SHA or ref-carrying pin must not construct a session");
+        let error = activation_error(
+            session_config(pinned_config(&yaml), dir.path(), &server),
+            "a non-SHA or ref-carrying pin must not construct a session",
+        );
         assert_eq!(error.code, "lint-package-source", "{error:?}");
     }
     assert!(
