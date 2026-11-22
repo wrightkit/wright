@@ -511,7 +511,11 @@ impl LanguageService {
     /// refusal: it surfaces with its own code (#1004).
     fn session(&mut self) -> Result<&CompilerSession, wright_driver::Diagnostic> {
         if self.session.is_none() {
-            self.session = Some(CompilerSession::new(self.config.clone())?);
+            let session = CompilerSession::new(self.config.clone())?;
+            // The lint policy is composed on first use; this host refuses a
+            // bad one up front, as construction did before (#1068).
+            session.validate_lint_policy()?;
+            self.session = Some(session);
         }
         Ok(self.session.as_ref().expect("session built above"))
     }

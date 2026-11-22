@@ -30,7 +30,20 @@ fn session_construction_exits_follow_the_diagnostic_class() {
     let missing = dir.join("missing.yaml");
     let invalid = dir.join("invalid.yaml");
     std::fs::write(&invalid, "id: [unclosed\n").unwrap();
-    for command in [&["check"][..], &["lookup", "wait"][..], &["serve"][..]] {
+    // `check` composes the lint policy on first use, so it needs an input to
+    // reach that point (#1068); `lookup` and `serve` refuse at startup.
+    let input = dir.join("input.ws");
+    std::fs::write(
+        &input,
+        std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/fixtures/workshop/synthetic/basic-rule.ws"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let check = ["check", input.to_str().unwrap()];
+    for command in [&check[..], &["lookup", "wait"][..], &["serve"][..]] {
         for (rule_file, code) in [(&missing, 2), (&invalid, 1)] {
             let args: Vec<String> = command
                 .iter()

@@ -381,7 +381,7 @@ fn lookup_surfaces_every_failure_kind_with_its_code_and_exit_class() {
     }
 
     // The session machinery's own failure kinds at the service
-    // boundary: construction diagnostics keep their own code and class,
+    // boundary: lint-policy diagnostics (refused by `ToolService::new`) keep their own code and class,
     // and `session-config-changed` refuses `ToolService::new` itself.
     let session_failures: &[(&str, &str, ExitClass)] = &[
         ("invalid-selection", "invalid-selection", ExitClass::Usage),
@@ -417,23 +417,27 @@ fn lookup_surfaces_every_failure_kind_with_its_code_and_exit_class() {
                 diagnostic
             }
             "invalid-selection" => {
-                let Err(diagnostic) = CompilerSession::new(SessionConfig {
+                let mut session = CompilerSession::new(SessionConfig {
                     selection: FindingSelection {
                         rule: Some("no-such-rule".to_string()),
                         ..FindingSelection::default()
                     },
                     ..SessionConfig::default()
-                }) else {
+                })
+                .expect("a bad lint policy does not refuse construction");
+                let Err(diagnostic) = ToolService::new(&mut session) else {
                     panic!("an unknown rule must refuse the session");
                 };
                 diagnostic
             }
             "lint-rule-error:missing" => {
                 let dir = temp_dir("lookup-rule-file");
-                let Err(diagnostic) = CompilerSession::new(SessionConfig {
+                let mut session = CompilerSession::new(SessionConfig {
                     lint_rule_paths: vec![dir.join("missing.yaml")],
                     ..SessionConfig::default()
-                }) else {
+                })
+                .expect("a bad lint policy does not refuse construction");
+                let Err(diagnostic) = ToolService::new(&mut session) else {
                     panic!("a missing --rule-file must refuse the session");
                 };
                 std::fs::remove_dir_all(&dir).expect("cleanup");
@@ -443,10 +447,12 @@ fn lookup_surfaces_every_failure_kind_with_its_code_and_exit_class() {
                 let dir = temp_dir("lookup-rule-file");
                 let path = dir.join("invalid.yaml");
                 std::fs::write(&path, "id: [unclosed\n").expect("write file");
-                let Err(diagnostic) = CompilerSession::new(SessionConfig {
+                let mut session = CompilerSession::new(SessionConfig {
                     lint_rule_paths: vec![path],
                     ..SessionConfig::default()
-                }) else {
+                })
+                .expect("a bad lint policy does not refuse construction");
+                let Err(diagnostic) = ToolService::new(&mut session) else {
                     panic!("an invalid --rule-file must refuse the session");
                 };
                 std::fs::remove_dir_all(&dir).expect("cleanup");

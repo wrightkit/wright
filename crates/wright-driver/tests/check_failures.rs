@@ -3,8 +3,8 @@
 //! `lookup` keeps its own table in `lookup_failures.rs` and the
 //! language-service diagnostic surface keeps its own in
 //! `wright-language`. Every row drives the boundary that surfaces the
-//! diagnostic — `CompilerSession::new` for the session-construction
-//! rows, `session.check()` end to end for the rest — and pins the error
+//! diagnostic — `session.check()` end to end (the lint-policy rows compose
+//! on first use, #1068) — and pins the error
 //! diagnostic's `code`, its `class`, and the `exit` code the class
 //! resolves to: a wrapper that re-classifies a failure
 //! — a refusal reported as `unavailable`, a session diagnostic relabeled
@@ -13,7 +13,7 @@
 //!
 //! "Provider failure kinds" are the `wright_lpp::ProviderError`
 //! taxonomy; "session failure kinds" are the session machinery's own
-//! refusals — `CompilerSession::new` diagnostics, `session-config-changed`,
+//! refusals — lint-policy composition diagnostics, `session-config-changed`,
 //! and the `source-provider-*` load refusals. Input-resolution
 //! diagnostics (`input-*`, `stdin-*`, `hidden-only`, `cwd-io`) belong to
 //! the input layer's own contract and stay out of this table.
@@ -198,14 +198,34 @@ impl SourceProvider for StubSourceProvider {
     }
 }
 
+/// The lint policy is composed on first use (#1068): construction succeeds
+/// and the first `check()` reports the composition error with its original
+/// code and class.
+fn first_use_refusal(config: SessionConfig) -> wright_driver::Diagnostic {
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/fixtures/workshop/synthetic/basic-rule.ws"),
+        ),
+        kind: SourceKind::Workshop,
+        ..config
+    })
+    .expect("a bad lint policy does not refuse construction");
+    let envelope = session.check();
+    envelope
+        .diagnostics
+        .into_iter()
+        .find(|d| d.severity == Severity::Error)
+        .expect("the first use reports the composition error")
+}
+
 fn opy_entry(dir: &Path) -> PathBuf {
     write_file(dir, "main.opy", "rule 'x': pass\n")
 }
 
 /// `check`'s failure table: every provider failure kind and every
 /// session failure kind that reaches the `session.check()` envelope,
-/// plus the session-construction refusals observed at
-/// `CompilerSession::new`, pinned by the error diagnostic's `code`, its
+/// plus the lint-policy refusals observed at first use, pinned by the error diagnostic's `code`, its
 /// `class`, and the `exit` code the class resolves to.
 #[test]
 fn check_surfaces_every_failure_kind_with_its_code_and_exit_class() {
@@ -452,41 +472,35 @@ fn check_surfaces_every_failure_kind_with_its_code_and_exit_class() {
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 
-    // The session machinery's own refusal kinds: construction
-    // diagnostics (observed as the session boundary's `Err`), the
+    // The session machinery's own refusal kinds: lint-policy
+    // diagnostics (observed on the first `check()`), the
     // fixed-config refusal, and the `source-provider-*` load refusals.
-    let Err(diagnostic) = CompilerSession::new(SessionConfig {
+    let diagnostic = first_use_refusal(SessionConfig {
         selection: FindingSelection {
             rule: Some("no-such-rule".to_string()),
             ..FindingSelection::default()
         },
         ..SessionConfig::default()
-    }) else {
-        panic!("an unknown rule must refuse session construction");
-    };
+    });
     assert_eq!(diagnostic.code, "invalid-selection");
     assert_eq!(diagnostic.class, ExitClass::Usage);
     assert_eq!(diagnostic.class.exit_code(), ExitClass::Usage.exit_code());
 
     {
         let dir = temp_dir("check-rule-file");
-        let Err(diagnostic) = CompilerSession::new(SessionConfig {
+        let diagnostic = first_use_refusal(SessionConfig {
             lint_rule_paths: vec![dir.join("missing.yaml")],
             ..SessionConfig::default()
-        }) else {
-            panic!("a missing --rule-file must refuse session construction");
-        };
+        });
         assert_eq!(diagnostic.code, "lint-rule-error");
         assert_eq!(diagnostic.class, ExitClass::Usage);
         assert_eq!(diagnostic.class.exit_code(), ExitClass::Usage.exit_code());
 
         let invalid = write_file(&dir, "invalid.yaml", "id: [unclosed\n");
-        let Err(diagnostic) = CompilerSession::new(SessionConfig {
+        let diagnostic = first_use_refusal(SessionConfig {
             lint_rule_paths: vec![invalid],
             ..SessionConfig::default()
-        }) else {
-            panic!("an invalid --rule-file must refuse session construction");
-        };
+        });
         assert_eq!(diagnostic.code, "lint-rule-error");
         assert_eq!(diagnostic.class, ExitClass::SourceError);
         assert_eq!(

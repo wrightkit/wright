@@ -19,7 +19,7 @@ impl CompilerSession {
         let locale = hotpath::measure_block!("load::detect_locale", {
             workshop_rs::detect::resolve_locale(
                 &resolved.text,
-                self.catalog,
+                self.catalog(),
                 override_locale.as_ref(),
             )
         })
@@ -28,9 +28,9 @@ impl CompilerSession {
             hotpath::measure_block!("load::parse", {
                 workshop_rs::parser::parse_with_context(
                     &resolved.text,
-                    self.catalog,
+                    self.catalog(),
                     &locale,
-                    self.catalog,
+                    self.catalog(),
                 )
             })
             .map_err(|error| workshop_diag(error, resolved))
@@ -45,7 +45,7 @@ impl CompilerSession {
                 .map_err(|error| workshop_diag(error, resolved))?;
             hotpath::measure_block!(
                 "load::validate_canonical",
-                canonical.validate_canonical_ids_tolerating_residuals(self.catalog)
+                canonical.validate_canonical_ids_tolerating_residuals(self.catalog())
             )
             .map_err(|error| workshop_diag(error, resolved))
         })?;

@@ -80,9 +80,16 @@ fn project_lint_policy_and_cli_overrides_match_lint() {
     for command in ["compile", "check"] {
         let output = run(command, &input, &["--disable-rule", "unknown-lint-rule"]);
         assert_eq!(output.status.code(), Some(2), "{output:?}");
-        assert!(output.stdout.is_empty());
+        // The policy is composed on first use, so the refusal rides the
+        // workflow envelope instead of failing session construction (#1068).
+        let envelope = json(&output);
+        let diagnostic = &envelope["diagnostics"][0];
+        assert_eq!(diagnostic["code"], "invalid-selection");
         assert!(
-            String::from_utf8_lossy(&output.stderr).contains("unknown rule id 'unknown-lint-rule'")
+            diagnostic["message"]
+                .as_str()
+                .unwrap()
+                .contains("unknown rule id 'unknown-lint-rule'")
         );
     }
 }

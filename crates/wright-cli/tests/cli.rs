@@ -1312,7 +1312,7 @@ fn an_unknown_rule_id_in_a_selection_is_a_usage_error() {
             Some(2),
             "{command} --rule-id not-a-rule must be a usage error"
         );
-        assert!(output.stdout.is_empty(), "usage errors write stderr only");
+        // First-use refusal (#1068): the envelope reaches stdout.
         assert!(
             String::from_utf8_lossy(&output.stderr).contains("not-a-rule"),
             "the message names the unknown id"
@@ -1343,7 +1343,7 @@ fn an_unknown_rule_id_in_the_lint_policy_is_a_usage_error() {
             Some(2),
             "lint {args:?} must be a usage error"
         );
-        assert!(output.stdout.is_empty(), "usage errors write stderr only");
+        // First-use refusal (#1068): the envelope reaches stdout.
         assert!(
             String::from_utf8_lossy(&output.stderr).contains("not-a-rule"),
             "the message names the unknown id"

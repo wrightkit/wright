@@ -10,8 +10,15 @@ use crate::result::{Envelope, version_info};
 impl CompilerSession {
     pub(crate) fn finish<T: serde::Serialize>(&mut self, command: &str, result: T) -> Envelope<T> {
         let diagnostics = std::mem::take(&mut self.diagnostics);
-        let (diagnostics, selection, exit) =
+        let (mut diagnostics, selection, exit) =
             crate::select::envelope_diagnostics(&self.config, self.loaded.as_ref(), diagnostics);
+        // A selection filters diagnostics by finding identity and would drop
+        // the refusal that names its own invalid rule id.
+        if let Some(Err(refusal)) = self.lint_registry.get()
+            && !diagnostics.contains(refusal)
+        {
+            diagnostics.push(refusal.clone());
+        }
         let mut envelope = Envelope {
             wright: version_info(),
             command: command.to_string(),

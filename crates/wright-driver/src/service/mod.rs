@@ -76,7 +76,7 @@ impl<'a> ToolService<'a> {
     /// until the project heals.
     #[hotpath::measure]
     pub fn new(session: &'a mut CompilerSession) -> Result<ToolService<'a>, Diagnostic> {
-        session.verify_fixed_config()?;
+        session.validate_lint_policy()?;
         let mut service = ToolService {
             session,
             slot: Slot::Empty,
