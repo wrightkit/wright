@@ -388,60 +388,32 @@ fn dead_branch_fix(
         .or_else(|| program.action_span(rule_id, action_id))?
         .file;
     let scan = SourceScan::new(program.source(file)?, file);
-    if let Some(range) = marker_branch_range(program, rule_id, rule, action_id, boundary, &scan) {
-        return dead_branch_span(&scan, range.start, range.end)
-            .map(|span| LintFix::RemoveDeadBranch { span });
+    let chain = chain_if_index(&rule.actions, action_id)?;
+    let head = marker_start(program, rule_id, chain, &scan)?;
+    let start = marker_start(program, rule_id, action_id, &scan)?;
+    let end = marker_start(program, rule_id, boundary, &scan)?;
+    if !(head < start && start < end) {
+        return None;
     }
-    let condition_end = scan.byte(
-        program
-            .action_argument_value_extent(rule_id, action_id, 0, &[])?
-            .end,
-    )?;
-    let start = chain_marker_start(&scan, condition_end, "If")?;
-    let end = match &rule.actions[boundary] {
-        Action::ElseIf { .. } => {
-            let end = scan.byte(
-                program
-                    .action_argument_value_extent(rule_id, boundary, 0, &[])?
-                    .end,
-            )?;
-            chain_marker_start(&scan, end, "If")?
-        }
-        Action::Else => {
-            let anchor = program.action_span(rule_id, boundary + 1)?;
-            let anchor = scan.byte(anchor.start)?;
-            keyword_marker_start(&scan, "Else", anchor)?
-        }
-        Action::End => {
-            let chain = chain_if_index(&rule.actions, action_id)?;
-            let anchor = program.action_span(rule_id, chain)?;
-            let (start, end) = word_back(&scan, scan.byte(anchor.end)?)?;
-            (&scan.document.text()[start..end] == "End").then_some(start)?
-        }
-        _ => return None,
-    };
     dead_branch_span(&scan, start, end).map(|span| LintFix::RemoveDeadBranch { span })
 }
 
-fn marker_branch_range(
+/// The byte offset where an action's chain marker begins. Raw programs record
+/// the marker keyword; a mapped program records the marker as the action's
+/// span. A position with neither yields `None`, never a guess.
+fn marker_start(
     program: &Program,
     rule_id: RuleId,
-    rule: &Rule,
-    marker: usize,
-    boundary: usize,
+    action_id: ActionId,
     scan: &SourceScan,
-) -> Option<Range<usize>> {
-    let chain = chain_if_index(&rule.actions, marker)?;
-    let start = program.action_span(rule_id, marker)?;
-    let end = program.action_span(rule_id, boundary)?;
-    let head = program.action_span(rule_id, chain)?;
-    if start.file != scan.file || end.file != scan.file || head.file != scan.file {
+) -> Option<usize> {
+    let span = program
+        .action_marker_span(rule_id, action_id)
+        .or_else(|| program.action_span(rule_id, action_id))?;
+    if span.file != scan.file {
         return None;
     }
-    let head = scan.byte(head.start)?;
-    let start = scan.byte(start.start)?;
-    let end = scan.byte(end.start)?;
-    (head < start && start < end).then_some(start..end)
+    scan.byte(span.start)
 }
 
 fn dead_branch_span(scan: &SourceScan, marker: usize, boundary: usize) -> Option<Span> {
@@ -515,16 +487,12 @@ fn contains_volatile_call(catalog: &Catalog, value: &Value) -> bool {
 
 struct SourceScan<'a> {
     document: &'a SourceDocument,
-    comments: Vec<Range<usize>>,
     line_starts: Vec<usize>,
     file: FileId,
 }
 
 impl<'a> SourceScan<'a> {
     fn new(document: &'a SourceDocument, file: FileId) -> Self {
-        let mut comments: Vec<Range<usize>> =
-            document.comments().map(|comment| comment.range()).collect();
-        comments.sort_by_key(|comment| comment.start);
         let mut line_starts = vec![0];
         line_starts.extend(
             document
@@ -534,7 +502,6 @@ impl<'a> SourceScan<'a> {
         );
         SourceScan {
             document,
-            comments,
             line_starts,
             file,
         }
@@ -544,49 +511,6 @@ impl<'a> SourceScan<'a> {
         self.document
             .byte_range(Span::new(self.file, position, position))
             .map(|range| range.start)
-    }
-
-    fn next(&self, mut pos: usize) -> Option<(usize, char)> {
-        let text = self.document.text();
-        loop {
-            if let Some(comment) = self
-                .comments
-                .iter()
-                .find(|comment| comment.start <= pos && pos < comment.end)
-            {
-                pos = comment.end;
-                continue;
-            }
-            let c = text.get(pos..)?.chars().next()?;
-            if c.is_whitespace() {
-                pos += c.len_utf8();
-                continue;
-            }
-            return Some((pos, c));
-        }
-    }
-
-    fn prev(&self, mut pos: usize) -> Option<(usize, char)> {
-        let text = self.document.text();
-        loop {
-            if pos == 0 {
-                return None;
-            }
-            if let Some(comment) = self
-                .comments
-                .iter()
-                .find(|comment| comment.start < pos && pos <= comment.end)
-            {
-                pos = comment.start;
-                continue;
-            }
-            let c = text.get(..pos)?.chars().next_back()?;
-            if c.is_whitespace() {
-                pos -= c.len_utf8();
-                continue;
-            }
-            return Some((pos - c.len_utf8(), c));
-        }
     }
 
     fn position(&self, byte: usize) -> Position {
@@ -609,80 +533,6 @@ impl<'a> SourceScan<'a> {
     fn span(&self, start: usize, end: usize) -> Span {
         Span::new(self.file, self.position(start), self.position(end))
     }
-}
-
-fn chain_marker_start(scan: &SourceScan, condition_end: usize, phrase: &str) -> Option<usize> {
-    let mut pos = condition_end;
-    let semi = loop {
-        let (index, char) = scan.next(pos)?;
-        match char {
-            ')' => pos = index + 1,
-            ';' => break index,
-            _ => return None,
-        }
-    };
-    let (close, ')') = scan.prev(semi)? else {
-        return None;
-    };
-    let open = paren_match_back(scan, close)?;
-    let (phrase_start, phrase_end) = word_back(scan, open)?;
-    if &scan.document.text()[phrase_start..phrase_end] != phrase {
-        return None;
-    }
-    let (else_start, else_end) = word_back(scan, phrase_start)?;
-    (&scan.document.text()[else_start..else_end] == "Else").then_some(else_start)
-}
-
-fn keyword_marker_start(scan: &SourceScan, keyword: &str, anchor: usize) -> Option<usize> {
-    let (semi, ';') = scan.prev(anchor)? else {
-        return None;
-    };
-    let (start, end) = word_back(scan, semi)?;
-    (&scan.document.text()[start..end] == keyword).then_some(start)
-}
-
-const PAREN_SCAN_BOUNDARY: &[char] = &['"', ';', '{', '}'];
-
-fn paren_match_back(scan: &SourceScan, close: usize) -> Option<usize> {
-    let mut depth = 0usize;
-    let mut pos = close + 1;
-    loop {
-        let (index, char) = scan.prev(pos)?;
-        match char {
-            ')' => depth += 1,
-            '(' => {
-                depth = depth.checked_sub(1)?;
-                if depth == 0 {
-                    return Some(index);
-                }
-            }
-            c if PAREN_SCAN_BOUNDARY.contains(&c) => return None,
-            _ => {}
-        }
-        pos = index;
-    }
-}
-
-fn word_back(scan: &SourceScan, pos: usize) -> Option<(usize, usize)> {
-    let text = scan.document.text();
-    let (end_pos, c) = scan.prev(pos)?;
-    if !c.is_alphabetic() {
-        return None;
-    }
-    let end = end_pos + c.len_utf8();
-    let mut start = end_pos;
-    while start > 0
-        && text[..start]
-            .chars()
-            .next_back()
-            .is_some_and(|c| c.is_alphanumeric() || c == '_')
-    {
-        start = text[..start]
-            .chars()
-            .next_back()
-            .map_or(start, |c| start - c.len_utf8());
-    }
-    Some((start, end))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

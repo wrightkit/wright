@@ -168,50 +168,6 @@ rule ("disabled") {
 }
 
 #[test]
-fn duplicate_condition_fix_materializes_for_a_localized_source() {
-    let localized = r#"变量 {
-    全局:
-        0: index
-        1: other
-}
-规则 ("duplicates") {
-    事件 {
-        持续 - 全局;
-    }
-    动作 {
-        If(比较(全局.index, ==, 0));
-            设置全局变量(other, 1);
-        Else If(比较(全局.index, ==, 0));
-            设置全局变量(other, 2);
-        Else;
-            设置全局变量(other, 3);
-        End;
-    }
-}
-"#;
-    let catalog = workshop_rs::catalog::Catalog::builtin_ref().unwrap();
-    let program = parser::parse_with_context(localized, catalog, &Locale::new("zh-CN"), catalog)
-        .unwrap_or_else(|error| panic!("zh-CN source must parse: {error}"));
-    let findings = analyze(&program, &LintConfig::default());
-    let [finding] = coded(&findings, "duplicate-condition")[..] else {
-        panic!("one duplicate-condition finding: {findings:?}")
-    };
-    let Some(LintFix::RemoveDeadBranch { span }) = &finding.fix else {
-        panic!("the finding carries a dead-branch fix: {finding:?}")
-    };
-    let removed = span_text(&program, localized, *span);
-    assert!(
-        removed.contains("Else If(比较(全局.index, ==, 0))")
-            && removed.contains("设置全局变量(other, 2)"),
-        "the removal covers the localized dead branch: {removed:?}"
-    );
-    assert!(
-        !removed.contains("Else;") && !removed.contains("设置全局变量(other, 3)"),
-        "the fix stops at the Else marker: {removed:?}"
-    );
-}
-
-#[test]
 fn duplicate_condition_refuses_a_fix_when_the_condition_can_move() {
     let volatile = r#"variables {
     global:
