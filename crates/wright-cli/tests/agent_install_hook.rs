@@ -30,8 +30,12 @@ fn project() -> PathBuf {
 }
 
 fn install(project: &Path, args: &[&str]) -> Output {
+    install_for(project, "claude", args)
+}
+
+fn install_for(project: &Path, hook: &str, args: &[&str]) -> Output {
     Command::new(wright())
-        .args(["agent", "install", "--hook", "claude", "--no-guide"])
+        .args(["agent", "install", "--hook", hook, "--no-guide"])
         .args(args)
         .current_dir(project)
         .stdin(Stdio::null())
@@ -221,40 +225,94 @@ fn a_locale_failure_names_the_locale_option_and_success_prints_next_steps() {
     let _ = std::fs::remove_dir_all(&project);
 }
 
+const LOCALE_RULE: &str = "rule(\"x\") {\n\tevent {\n\t\tOngoing - Global;\n\t}\n\tconditions {\n\t\tCurrent Map == Map(格里姆火山);\n\t}\n\tactions {\n\t\tWait(1, Ignore Condition);\n\t}\n}\n";
+
+/// Refuses an install that needs `zh-CN`, then runs the printed retry
+/// literally through `sh` and checks what it stored.
+fn assert_retry_runs(hook: &str, config: &str, anchor: &str, name: &str, kind: &str) {
+    let project = temp_dir();
+    if kind == "opy" {
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/opy/locale-hook");
+        for entry in std::fs::read_dir(&fixture).unwrap() {
+            let entry = entry.unwrap();
+            std::fs::copy(entry.path(), project.join(entry.file_name())).unwrap();
+        }
+        std::fs::rename(project.join("main.opy"), project.join(name)).unwrap();
+    } else {
+        std::fs::write(project.join(name), LOCALE_RULE).unwrap();
+    }
+    let git = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&project)
+        .status()
+        .unwrap();
+    assert!(git.success());
+    let refused = install_for(&project, hook, &["--", name, "--kind", kind]);
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(!project.join(config).exists());
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    let retry = stderr
+        .split('`')
+        .find(|part| part.starts_with("wright agent install"))
+        .unwrap_or_else(|| panic!("no retry in {stderr}"));
+    let retry = retry.replacen("wright", &format!("'{}'", wright()), 1);
+    let ran = Command::new("sh")
+        .args(["-c", &retry])
+        .current_dir(&project)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        ran.status.success(),
+        "{retry}: {}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    let text = std::fs::read_to_string(project.join(config)).unwrap();
+    let stored: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let command = stored.to_string();
+    assert!(command.contains("--locale zh-CN"), "{text}");
+    let anchored = format!("{anchor}/{name}");
+    assert!(command.contains(&anchored), "{anchored} not in {text}");
+    let _ = std::fs::remove_dir_all(&project);
+}
+
 #[test]
 fn the_printed_locale_retry_runs_in_a_shell_for_an_input_with_a_space_or_quote() {
-    for name in ["main mode.ws", "it's.ws"] {
-        let project = temp_dir();
-        std::fs::write(
-            project.join(name),
-            "rule(\"x\") {\n\tevent {\n\t\tOngoing - Global;\n\t}\n\tconditions {\n\t\tCurrent Map == Map(格里姆火山);\n\t}\n\tactions {\n\t\tWait(1, Ignore Condition);\n\t}\n}\n",
-        )
-        .unwrap();
-        let refused = install(&project, &["--", name, "--kind", "workshop"]);
-        assert_eq!(refused.status.code(), Some(1));
-        assert!(!project.join(".claude").exists());
-        let stderr = String::from_utf8_lossy(&refused.stderr);
-        let retry = stderr
-            .split('`')
-            .find(|part| part.starts_with("wright agent install"))
-            .unwrap_or_else(|| panic!("no retry in {stderr}"));
-        let retry = retry.replacen("wright", &format!("'{}'", wright()), 1);
-        let ran = Command::new("sh")
-            .args(["-c", &retry])
-            .current_dir(&project)
-            .stdin(Stdio::null())
-            .output()
-            .unwrap();
-        assert!(
-            ran.status.success(),
-            "{retry}: {}",
-            String::from_utf8_lossy(&ran.stderr)
-        );
-        let text = settings(&project).to_string();
-        assert!(text.contains("--locale zh-CN"), "{text}");
-        assert!(text.contains(name), "{text}");
-        let _ = std::fs::remove_dir_all(&project);
+    let claude = ".claude/settings.local.json";
+    let claude_anchor = "${CLAUDE_PROJECT_DIR:-.}";
+    let codex_anchor = "$(git rev-parse --show-toplevel)";
+    assert_retry_runs("claude", claude, claude_anchor, "main mode.ws", "workshop");
+    assert_retry_runs("claude", claude, claude_anchor, "it's.ws", "workshop");
+    assert_retry_runs(
+        "codex",
+        ".codex/hooks.json",
+        codex_anchor,
+        "main mode.ws",
+        "workshop",
+    );
+}
+
+#[test]
+fn the_printed_locale_retry_runs_in_a_shell_for_an_opy_input_with_a_space() {
+    let installed = wright_driver::OpyProviderConfig::default()
+        .installed()
+        .expect("local provider inventory");
+    assert!(
+        installed.is_some() || std::env::var_os("CI").is_none(),
+        "CI must install the OPY provider before this suite"
+    );
+    if installed.is_none() {
+        eprintln!("SKIPPED: no installed OPY provider");
+        return;
     }
+    assert_retry_runs(
+        "claude",
+        ".claude/settings.local.json",
+        "${CLAUDE_PROJECT_DIR:-.}",
+        "main mode.opy",
+        "opy",
+    );
 }
 
 #[test]

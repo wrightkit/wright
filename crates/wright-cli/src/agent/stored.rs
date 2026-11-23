@@ -94,8 +94,10 @@ pub(super) fn load_failure(config: wright_driver::SessionConfig) -> Option<Strin
         .err()
 }
 
-/// A POSIX shell and fish word that reads back as `token`: the token itself
-/// when every character is plain, else single-quoted.
+/// A word that reads back as `token` in POSIX shells: the token itself when
+/// every character is plain, else single-quoted. fish also treats `\'` and
+/// `\\` inside single quotes as escapes, so it agrees only for tokens without
+/// a backslash.
 pub(super) fn shell_quote(token: &str) -> String {
     let safe = |c: char| c.is_ascii_alphanumeric() || "-_./=:,@%+".contains(c);
     if !token.is_empty() && token.chars().all(safe) {

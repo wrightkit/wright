@@ -240,10 +240,10 @@ same `-- INPUT [OPTIONS]` form as `--mcp`, with the same anchoring to
 wright agent install --hook claude -- src/main.opy --kind opy --locale zh-CN
 ```
 
-Install loads the program once with the stored input and options, as `--mcp`
-does. When the program cannot be loaded, install names the load diagnostic and
+Install loads the program once with the stored input and options, as `--mcp`.
+When the program cannot be loaded, install names the load diagnostic and
 the `--` form, writes nothing, and exits 1; for a locale diagnostic the form
-adds `--locale zh-CN`, quoted so `sh` and fish run it as printed. `--force`
+adds `--locale zh-CN`, quoted for `sh` (fish: no backslash). `--force`
 skips only the load, never option validation. With `--mcp` and `--hook` together,
 every registration is validated before any file is written, so a refusal
 writes nothing. Re-running reports up to date; a different Wright hook is
