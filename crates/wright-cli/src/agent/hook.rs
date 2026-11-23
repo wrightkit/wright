@@ -15,32 +15,62 @@ const COMMAND: &str = "wright agent hook post-edit ";
 const CLAUDE_PROJECT_DIR: &str = "${CLAUDE_PROJECT_DIR:-.}";
 const TIMEOUT_SECONDS: u64 = 60;
 
+/// What differs between harnesses at install time. Claude Code and Codex
+/// register a `PostToolUse` group that holds command hooks. Cursor and VS Code
+/// register a flat `postToolUse` command hook.
 struct Spec {
     file: &'static str,
+    event: &'static str,
+    /// The shell expression for the harness's project directory, when the
+    /// harness sets one.
     variable: Option<&'static str>,
+    /// The text stored tokens are anchored to: the expression, then any
+    /// literal path below it.
     input: String,
+    /// The matcher of the group the hook sits in; `None` for a flat hook.
     group_matcher: Option<&'static str>,
 }
 
 fn spec(target: HookTarget, root: &Path) -> Result<Spec, AgentError> {
     Ok(match target {
+        // https://code.claude.com/docs/en/hooks
         HookTarget::Claude => Spec {
             file: ".claude/settings.local.json",
+            event: "PostToolUse",
             variable: Some(CLAUDE_PROJECT_DIR),
             input: CLAUDE_PROJECT_DIR.into(),
             group_matcher: Some("Edit|Write"),
         },
+        // https://developers.openai.com/codex/hooks (redirects to
+        // learn.chatgpt.com/docs/hooks): project hooks live in
+        // `.codex/hooks.json` and load only for a trusted project. Edits go
+        // through `apply_patch`. A command runs in the session's working
+        // directory and no project variable is set, so the input anchors to
+        // the repository root, as the page's own example does, plus the
+        // project's path below it.
         HookTarget::Codex => Spec {
             file: ".codex/hooks.json",
+            event: "PostToolUse",
             variable: Some(GIT_TOPLEVEL),
             input: git_anchor(root)?,
             group_matcher: Some("apply_patch"),
         },
-        HookTarget::Cursor | HookTarget::Vscode => Spec {
-            file: match target {
-                HookTarget::Cursor => ".cursor/hooks.json",
-                _ => ".github/copilot/settings.local.json",
-            },
+        // https://cursor.com/docs/agent/hooks (read 2026-11-23): project
+        // hooks run from the project root, so the input anchors to `.`.
+        HookTarget::Cursor => Spec {
+            file: ".cursor/hooks.json",
+            event: "postToolUse",
+            variable: None,
+            input: ".".into(),
+            group_matcher: None,
+        },
+        // https://docs.github.com/en/copilot/reference/hooks-reference (read
+        // 2026-11-23): the Copilot harness reads an inline `hooks` block from
+        // `.github/copilot/settings.local.json`; the hook's `cwd` is the
+        // repository root, so the input anchors to `.`.
+        HookTarget::Vscode => Spec {
+            file: ".github/copilot/settings.local.json",
+            event: "postToolUse",
             variable: None,
             input: ".".into(),
             group_matcher: None,
@@ -83,13 +113,12 @@ fn git_anchor(root: &Path) -> Result<String, AgentError> {
     })
 }
 
+/// A shell word for the entry's command line. A token that starts with the
+/// project directory keeps `variable` expandable; every other character of
+/// the word stays literal.
 fn shell_word(spec: &Spec, token: &str) -> String {
-    let powershell = cfg!(windows) && spec.variable.is_none();
     let safe = |c: char| c.is_ascii_alphanumeric() || "-_./=:,@%+".contains(c);
-    if !token.is_empty()
-        && token.chars().all(safe)
-        && !(powershell && (token.starts_with('@') || token == "--%"))
-    {
+    if !token.is_empty() && token.chars().all(safe) {
         return token.to_string();
     }
     if let Some(variable) = spec.variable
@@ -104,17 +133,6 @@ fn shell_word(spec: &Spec, token: &str) -> String {
             quoted.push(c);
         }
         return format!("\"{variable}{quoted}\"");
-    }
-    if powershell {
-        let mut quoted = String::from("'");
-        for c in token.chars() {
-            if matches!(c, '\'' | '‘' | '’' | '‚' | '‛') {
-                quoted.push(c);
-            }
-            quoted.push(c);
-        }
-        quoted.push('\'');
-        return quoted;
     }
     format!("'{}'", token.replace('\'', r"'\''"))
 }
@@ -139,11 +157,16 @@ fn command_hook(target: HookTarget, command: &str) -> Value {
         HookTarget::Claude | HookTarget::Codex => {
             json!({"type": "command", "command": command, "timeout": TIMEOUT_SECONDS})
         }
+        // `Write` is the matcher value of the file-edit tool.
         HookTarget::Cursor => json!({
             "type": "command", "command": command, "matcher": "Write", "timeout": TIMEOUT_SECONDS,
         }),
+        // The edit tools the reference lists, plus the `str_replace_editor`
+        // and `apply_patch` names it maps to `Edit`. The matcher is a regex
+        // tested against the whole `toolName`.
         HookTarget::Vscode => json!({
-            "type": "command", "command": command, "matcher": "create|edit|str_replace_editor|apply_patch",
+            "type": "command", "command": command,
+            "matcher": "create|edit|str_replace_editor|apply_patch",
             "cwd": ".", "timeoutSec": TIMEOUT_SECONDS,
         }),
     }
@@ -179,11 +202,7 @@ pub(crate) fn install(
     let path = root.join(spec.file);
     ensure_not_linked(root, &path)?;
     let mut config = read_config(&path)?.unwrap_or_else(|| json!({}));
-    let event = if spec.group_matcher.is_some() {
-        "PostToolUse"
-    } else {
-        "postToolUse"
-    };
+    let event = spec.event;
     let wrong_shape = || {
         AgentError::Rejected(format!(
             "{} does not hold a JSON object with a `hooks.{event}` list; fix it by hand",
@@ -306,10 +325,20 @@ fn edited_files(harness: HookTarget, event: &Value) -> Vec<String> {
                 .map(|file| cwd.join(file.trim()).to_string_lossy().into_owned())
                 .collect()
         }
+        // Neither harness documents the edited path in its `postToolUse`
+        // payload (Cursor's `afterFileEdit` does, but has no documented
+        // output). The check runs without the membership filter.
         HookTarget::Cursor | HookTarget::Vscode => Vec::new(),
     }
 }
 
+/// Checks the program after an edit and answers in the harness's feedback
+/// form: Claude Code gets exit 2 with the program's errors on stderr; the
+/// others get exit 0 and the errors in the JSON field their reference names
+/// (Codex `hookSpecificOutput.additionalContext`, Cursor `additional_context`,
+/// VS Code `additionalContext`). Nothing is said when there are no errors or
+/// no edited file is in the program. When the payload names no file, the
+/// membership filter does not apply.
 pub(crate) fn post_edit(harness: HookTarget, check: &[String]) -> u8 {
     let input = match std::io::read_to_string(std::io::stdin()) {
         Ok(input) => input,
@@ -374,6 +403,8 @@ pub(crate) fn post_edit(harness: HookTarget, check: &[String]) -> u8 {
             eprintln!("{}", report());
             return exit::USAGE;
         }
+        // https://developers.openai.com/codex/hooks: added as developer
+        // context; confirmed by the live run in #1109.
         HookTarget::Codex => json!({"hookSpecificOutput": {
             "hookEventName": "PostToolUse",
             "additionalContext": report(),

@@ -223,10 +223,11 @@ refused; writes replace the file atomically.
 To remove the server, delete the `wright` entry from the config file (and the
 guide directory if installed); to update, re-run with `--force`.
 
-### Edit hook (`--hook`)
+### Edit hook (`--hook`, #1098, #1109, #1110)
 
-`--hook` takes `claude`, `codex`, `cursor`, or `vscode`. The same
-install rules apply to all targets.
+`--hook` takes `claude`, `codex`, `cursor`, or `vscode`. The install rules
+below are the same for all of them; the differences are in
+[Codex](#codex-hook), [Cursor](#cursor-hook), and [VS Code](#vs-code-hook).
 
 `wright agent install --hook claude` adds one `PostToolUse` entry with the
 matcher `Edit|Write` to `.claude/settings.local.json`, so Claude Code checks the
@@ -248,11 +249,8 @@ every registration is validated before any file is written, so a refusal
 writes nothing. Re-running reports up to date; a different Wright hook is
 refused unless `--force` replaces it. `--force` replaces only the Wright hook
 object: other hooks, including ones in the same group, and other settings are
-preserved. The file is handled like the `--mcp` config. `--dry-run` reports
-the destination without writing it. To remove the hook, delete its entry.
-
-When Wright itself fails, including when the lint policy is invalid, the hook
-exits 1 with `wright: <message>` on stderr and no model feedback.
+preserved. The file is handled like the `--mcp` config. To remove the hook,
+delete its entry.
 
 The entry runs `wright agent hook post-edit -- INPUT [OPTIONS]`, which reads
 Claude Code's hook JSON from stdin and takes `tool_input.file_path`:
@@ -308,55 +306,60 @@ an edit that broke the program.
 
 #### Cursor hook
 
-`wright agent install --hook cursor` adds a flat `postToolUse` command with
-matcher `Write` to `.cursor/hooks.json`. Wright sets `version` to `1` when
-absent. Cursor documents one project hook file for the whole workspace.
-Run install from the project root. Cursor runs project hooks from that
-directory, so the stored input and path options are relative to it.
+`wright agent install --hook cursor` adds one flat `postToolUse` command hook
+with the matcher `Write` to `.cursor/hooks.json` and sets `"version": 1` when
+the file has none; an existing `version` that is not a positive integer is
+refused. Cursor runs project hooks from the project root, so the stored input
+and anchored paths are relative (`./session.ws`).
 
-Cursor injects the stdout JSON field `additional_context` into the conversation
-after the tool result. The `postToolUse` payload has no documented edited-path
-field. `afterFileEdit` documents `file_path` but offers no documented output for
-the model. [Cursor hooks reference](https://cursor.com/docs/hooks) (read
-2026-11-23).
+The entry runs `wright agent hook post-edit --harness cursor -- INPUT
+[OPTIONS]`. When the check reports errors, the hook exits 0 and prints JSON
+with `additional_context` holding them, which Cursor injects into the
+conversation after the tool result. Otherwise it prints nothing; a Wright
+failure or non-JSON input exits 1 with the failure on stderr. The `postToolUse`
+payload documents no edited-path field (`afterFileEdit` has `file_path` but no
+documented output), so the check runs without the file filter, and an edit
+outside a program that has errors reports them. Source:
+[Cursor hooks](https://cursor.com/docs/agent/hooks), read 2026-11-23.
 
 #### VS Code hook
 
-`wright agent install --hook vscode` adds a flat `postToolUse` command to the
-inline `hooks` in `.github/copilot/settings.local.json`. Install from the
-repository root. The hook sets `cwd` to `.` relative to that root, and the
-stored input and path options resolve there. The matcher covers Copilot's
-`create`, `edit`, `str_replace_editor`, and `apply_patch` tool names.
+`wright agent install --hook vscode` adds one flat `postToolUse` command hook to
+the inline `hooks` block of `.github/copilot/settings.local.json`, read by the
+Copilot hook runtime that VS Code, the Copilot app, and the Copilot CLI share.
+The matcher `create|edit|str_replace_editor|apply_patch` is tested against the
+whole tool name. The hook's `cwd` is `.`, the repository root, so the stored
+input and anchored paths are relative. The Local session target has a separate
+hook contract and is not supported.
 
-In a **Copilot** session, the top-level stdout JSON field `additionalContext`
-is appended to the tool result for the model. The camelCase `postToolUse`
-payload provides `toolArgs` without a documented edited-path field. The legacy
-**Local** session target uses a separate payload and response contract.
-[VS Code hook setup](https://code.visualstudio.com/docs/agent-customization/hooks)
-and [Copilot hooks reference](https://docs.github.com/en/copilot/reference/hooks-reference)
-(read 2026-11-23).
-
-For Cursor and VS Code, the stored command passes `--harness cursor` or
-`--harness vscode` to `post-edit`. After a matching tool call, Wright checks
-the configured program without filtering by file. A clean program exits 0
-silently. If the program has errors, the hook exits 0 with the error report in
-the harness's JSON field, even after an edit outside the program.
+The entry runs `wright agent hook post-edit --harness vscode -- INPUT
+[OPTIONS]`. When the check reports errors, the hook exits 0 and prints JSON
+with the top-level `additionalContext` holding them, which VS Code appends to
+the tool result. Otherwise it prints nothing; a Wright failure or non-JSON
+input exits 1 with the failure on stderr. The reference types `toolArgs` as
+unknown and shows no edit-tool arguments, so the check runs without the file
+filter. Sources: [VS Code
+hooks](https://code.visualstudio.com/docs/agent-customization/hooks) and the
+[Copilot hooks reference](https://docs.github.com/en/copilot/reference/hooks-reference),
+read 2026-11-23. The VS Code pages list no tool names; the matcher uses the
+reference's.
 
 #### Activation and verification (#1119)
 
 A successful `--hook` install prints the remaining steps and a verification
-command. Make sure the harness can find `wright` on `PATH`. Run `echo '{}' | <stored command>` from the project. Exit 0 with no
-output means the check found no errors. The hook reports errors in the form
-documented for its target. To verify the harness, start a session, ask the
-agent to make an edit that breaks the program, and check that the hook runs
-and the model receives the error.
+command. `echo '{}' | <stored command>`, run from the project, exits 0 with no
+output when the stored input and options load the project. A failure shows as
+output: Claude Code exits 2 with the diagnostic on stderr; Codex, Cursor, and
+VS Code exit 0 with the JSON field their harness reads on stdout. The check
+does not prove the harness runs the hook. The activation step differs by
+harness:
 
 | Harness | Config file | Remaining step |
 | --- | --- | --- |
-| Claude Code | `.claude/settings.local.json` | Start a new session in the project. `/hooks` lists the entry |
+| Claude Code | `.claude/settings.local.json` | Start a new session in the project; `/hooks` lists the entry |
 | Codex | `.codex/hooks.json` | Trust the project, then trust the hook (`Review hooks` or `Trust all`). Codex skips the hook until both are done. Start a new session |
-| Cursor | `.cursor/hooks.json` | Open a trusted workspace and start a new Agent chat. Check Customize > Hooks |
-| VS Code | `.github/copilot/settings.local.json` | Trust the workspace, select **Copilot** as the Session Target, and start a new chat. Check `/hooks` |
+| Cursor | `.cursor/hooks.json` | Open the project as a trusted workspace and start a new Agent chat. The Hooks tab in Customize and the Hooks output channel show the hook |
+| VS Code | `.github/copilot/settings.local.json` | Use the Copilot session target and start a new chat. `/hooks` lists the entry |
 
 A refused install (load failure, different existing hook, wrong file shape)
 prints the cause and the next action, writes nothing, and prints no next steps.

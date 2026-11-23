@@ -411,12 +411,16 @@ pub(crate) enum CompletionSubcommand {
 #[derive(Debug, Args)]
 #[command(after_help = "\
 Setup:
-  wright agent install                                  install the agent guide
-  wright agent install --hook claude|codex|cursor|vscode register the edit hook
+  wright agent install                              install the agent guide
+  wright agent install --hook claude|codex|cursor|vscode
+                                                    also register the edit hook
   wright agent install --hook codex -- --locale zh-CN
-                                                        store the project's input and locale
-                                                        (the form `wright check` takes)
-Follow the activation steps and run the verification command printed by install.")]
+                                                    store the project's input and locale
+                                                    (the form `wright check` takes)
+The hook runs only after its harness loads it: Claude Code reads
+.claude/settings.local.json; Codex needs the project trusted; Cursor needs a
+trusted workspace; VS Code needs the Copilot session target. Verify with
+`wright agent hook post-edit --help` and the command install prints.")]
 pub(crate) struct AgentArgs {
     #[command(subcommand)]
     pub(crate) subcommand: Option<AgentSubcommand>,
@@ -442,12 +446,14 @@ pub(crate) struct AgentHookArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum AgentHookEvent {
-    /// Check the program after an edit tool call, reading the hook JSON from
-    /// stdin. For findings, Claude Code gets stderr (exit 2). Codex gets
-    /// `hookSpecificOutput.additionalContext`, Cursor gets `additional_context`,
-    /// and VS Code gets `additionalContext` as JSON on stdout (exit 0).
-    /// A clean check, or a known edit outside the program, exits 0 silently.
-    /// A Wright failure exits 1 with a message on stderr.
+    /// Check the program after an edit tool call. Reads the harness's
+    /// post-tool-use JSON from stdin. Claude Code: exits 2 with the program's
+    /// errors on stderr. Codex, Cursor and VS Code: exit 0 with the errors in
+    /// the JSON field the harness reads (`hookSpecificOutput.additionalContext`,
+    /// `additional_context`, `additionalContext`) on stdout. All: exit 0 with
+    /// no output when there are no errors or the edited file is known not to
+    /// be in the program, and exit 1 when Wright itself fails. Cursor and VS
+    /// Code payloads name no edited file, so they are checked unfiltered.
     PostEdit(AgentHookCheckArgs),
 }
 
@@ -496,9 +502,10 @@ pub(crate) enum HookTarget {
     Claude,
     /// Codex CLI: `.codex/hooks.json`, loaded for trusted projects only.
     Codex,
-    /// Cursor: `.cursor/hooks.json`, loaded in trusted workspaces.
+    /// Cursor: `.cursor/hooks.json`, loaded for trusted workspaces only.
     Cursor,
-    /// VS Code (Copilot session target): `.github/copilot/settings.local.json`.
+    /// VS Code, Copilot session target:
+    /// `.github/copilot/settings.local.json`.
     Vscode,
 }
 
@@ -526,8 +533,10 @@ pub(crate) struct AgentInstallArgs {
     #[arg(long, value_enum, value_name = "TARGET")]
     pub(crate) mcp: Option<McpTarget>,
 
-    /// Also register a hook to check the program after agent edits, in this
-    /// harness's project-local settings.
+    /// Also register a hook that checks the program after each edit of the
+    /// agent (`Edit`/`Write` in Claude Code, `apply_patch` in Codex, `Write` in
+    /// Cursor, the edit tools of the Copilot session target in VS Code), in
+    /// this harness's project-local settings (#1098, #1109, #1110).
     #[arg(long, value_enum, value_name = "TARGET")]
     pub(crate) hook: Option<HookTarget>,
 

@@ -1,3 +1,8 @@
+//! `wright agent install --hook cursor|vscode` and `wright agent hook post-edit
+//! --harness cursor|vscode` (#1110). The payloads follow the harnesses'
+//! published references (cursor.com/docs/agent/hooks, the Copilot hooks
+//! reference, read 2026-11-23), not a captured session.
+
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -17,13 +22,13 @@ const TARGETS: [Target; 2] = [
         name: "cursor",
         file: ".cursor/hooks.json",
         feedback_key: "additional_context",
-        activation: "Customize > Hooks",
+        activation: "Hooks output channel",
     },
     Target {
         name: "vscode",
         file: ".github/copilot/settings.local.json",
         feedback_key: "additionalContext",
-        activation: "Copilot as the Session Target",
+        activation: "Copilot as the session target",
     },
 ];
 const GIVEN: [&str; 4] = ["--", "session.ws", "--kind", "workshop"];
@@ -301,5 +306,23 @@ fn editor_hook_targets_are_discoverable() {
         for target in TARGETS {
             assert!(body.contains(target.name), "{option} candidates: {body}");
         }
+    }
+}
+
+#[test]
+fn cursor_keeps_an_existing_config_version_and_adds_one_when_missing() {
+    let target = TARGETS[0];
+    for (existing, version) in [(r#"{"version":2,"hooks":{}}"#, 2), (r#"{"hooks":{}}"#, 1)] {
+        let project = project();
+        let path = project.join(target.file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, existing).unwrap();
+        expect_success(&install(
+            &project,
+            target,
+            &[&["--no-guide"][..], &GIVEN].concat(),
+        ));
+        assert_eq!(settings(&project, target)["version"], version);
+        std::fs::remove_dir_all(project).unwrap();
     }
 }
