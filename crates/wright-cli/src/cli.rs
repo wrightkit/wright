@@ -409,18 +409,22 @@ pub(crate) enum CompletionSubcommand {
 }
 
 #[derive(Debug, Args)]
-#[command(after_help = "\
+#[command(after_help = format!("\
 Setup:
   wright agent install                              install the agent guide
-  wright agent install --hook claude|codex|cursor|vscode
-                                                    also register the edit hook
+  wright agent install --hook claude                 also register the Claude Code edit hook
+  wright agent install --hook codex                  also register the Codex edit hook
+  wright agent install --hook cursor|vscode          also register the editor edit hook
   wright agent install --hook codex -- --locale zh-CN
                                                     store the project's input and locale
                                                     (the form `wright check` takes)
 The hook runs only after its harness loads it: Claude Code reads
-.claude/settings.local.json; Codex needs the project trusted; Cursor needs a
-trusted workspace; VS Code needs the Copilot session target. Verify with
-`wright agent hook post-edit --help` and the command install prints.")]
+.claude/settings.local.json; Cursor needs a trusted workspace; VS Code needs
+the Copilot session target.
+Codex activation:
+{}
+Verify with `wright agent hook post-edit --help` and the command install prints.",
+    crate::agent::CODEX_HOOK_ACTIVATION))]
 pub(crate) struct AgentArgs {
     #[command(subcommand)]
     pub(crate) subcommand: Option<AgentSubcommand>,

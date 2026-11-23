@@ -100,7 +100,7 @@ fn registers_one_flat_hook_and_preserves_foreign_entries() {
             "{stdout}"
         );
         assert!(
-            stdout.contains(&format!("echo '{{}}' | {command}")),
+            stdout.contains(&format!("echo '{{}}' | sh -c '{command}'")),
             "{stdout}"
         );
         let hook = if target.name == "cursor" {
