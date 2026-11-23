@@ -231,6 +231,8 @@ fn the_printed_locale_retry_runs_in_a_shell_for_an_input_with_a_space_or_quote()
         )
         .unwrap();
         let refused = install(&project, &["--", name, "--kind", "workshop"]);
+        assert_eq!(refused.status.code(), Some(1));
+        assert!(!project.join(".claude").exists());
         let stderr = String::from_utf8_lossy(&refused.stderr);
         let retry = stderr
             .split('`')
