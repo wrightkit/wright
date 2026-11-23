@@ -348,6 +348,45 @@ fn repeated_value_fix_wraps_each_occurrences_complete_expression() {
 }
 
 #[test]
+fn repeated_value_fix_preserves_nested_condition_extents() {
+    let nested = r#"variables {
+    global:
+        0: index
+}
+rule ("nested condition") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        While(Compare(Global.index, <, 3));
+            If(And(
+                Compare(Distance Between(Position Of(Event Player), Vector(0, 0, 0)), >, 1),
+                Compare(Distance Between(Position Of(Event Player), Vector(0, 0, 0)), >, 2)));
+                Wait(0.016, Ignore Condition);
+            End;
+        End;
+    }
+}
+"#;
+    let (program, findings) = analyze_source(nested);
+    let [finding] = coded(&findings, "repeated-value")[..] else {
+        panic!("one repeated-value finding: {findings:?}")
+    };
+    let Some(LintFix::EvaluateOnce { occurrences }) = &finding.fix else {
+        panic!("both nested occurrences carry a fix: {finding:?}")
+    };
+    assert_eq!(occurrences.len(), 2);
+    for (occurrence, line) in occurrences.iter().zip([12, 13]) {
+        assert_eq!(
+            span_text(&program, nested, *occurrence),
+            "Distance Between(Position Of(Event Player), Vector(0, 0, 0))"
+        );
+        assert_eq!((occurrence.start.line, occurrence.start.col), (line, 25));
+        assert_eq!((occurrence.end.line, occurrence.end.col), (line, 85));
+    }
+}
+
+#[test]
 fn repeated_value_treats_evaluate_once_as_already_resolved() {
     let wrapped = REPEATED.replace(
         "Set Global Variable(index, Distance Between(Position Of(Event Player), Vector(0, 0, 0)))",
