@@ -43,6 +43,10 @@ fn materialize(
     let fix = finding.fix.as_ref()?;
     let edits = match fix {
         LintFix::RemoveDeadBranch { span } => vec![edit(loaded, *span, String::new())?],
+        // A mapped program records node spans but no authored value extents,
+        // so an extent query returns only the node span and `Evaluate Once(..)`
+        // is not OPY syntax.
+        LintFix::EvaluateOnce { .. } if loaded.provenance != Provenance::Source => return None,
         LintFix::EvaluateOnce { occurrences } => {
             let spelling = catalog.spelling(Kind::Value, locale, "evaluateOnce")?;
             occurrences
