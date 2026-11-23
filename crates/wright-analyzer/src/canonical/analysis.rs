@@ -379,7 +379,7 @@ fn dead_branch_fix(
     action_id: ActionId,
     condition: &Value,
 ) -> Option<LintFix> {
-    if contains_volatile_call(condition) {
+    if contains_volatile_call(Catalog::builtin_ref().ok()?, condition) {
         return None;
     }
     let boundary = elseif_branch_end(&rule.actions, action_id)?;
@@ -504,21 +504,12 @@ fn chain_if_index(actions: &[Action], elseif: usize) -> Option<usize> {
     None
 }
 
-fn contains_volatile_call(value: &Value) -> bool {
-    const VOLATILE: &[&str] = &[
-        "randomInteger",
-        "randomReal",
-        "randomValueInArray",
-        "randomizedArray",
-        "getTotalTimeElapsed",
-        "getMatchTime",
-        "getServerLoad",
-        "getAverageServerLoad",
-        "getPeakServerLoad",
-    ];
+fn contains_volatile_call(catalog: &Catalog, value: &Value) -> bool {
     let mut volatile = false;
     visit_value_tree(value, None, &mut |value, _, _| {
-        volatile |= matches!(value, Value::Call { name, .. } if VOLATILE.contains(&name.as_str()));
+        volatile |= matches!(value, Value::Call { name, .. } if catalog
+            .entry(Kind::Value, name)
+            .and_then(|entry| entry.nondeterministic()) == Some(true));
         0
     });
     volatile
@@ -1050,15 +1041,15 @@ fn action_argument_reevaluates(catalog: &Catalog, action: &Action, argument: usi
     let Action::Call { name, args } = action else {
         return false;
     };
-    if matches!(
-        name.as_str(),
-        "waitUntil" | "loopIf" | "loopIfConditionIsTrue" | "__loopIfConditionIsFalse__"
-    ) {
-        return argument == 0;
-    }
     let Some(entry) = catalog.entry(Kind::Action, name) else {
         return false;
     };
+    if entry
+        .action_reevaluated_params()
+        .is_some_and(|params| params.contains(&argument))
+    {
+        return true;
+    }
     (0..entry.param_count()).any(|index| {
         let Some(domain) = entry.param_domain(index) else {
             return false;
@@ -1073,8 +1064,8 @@ fn action_argument_reevaluates(catalog: &Catalog, action: &Action, argument: usi
                 .is_none_or(|coverage| coverage.contains(&argument)),
             Some(_) => true,
             None => entry
-                .param_default(index)
-                .is_none_or(|default| default.rsplit('.').next() != Some("NONE")),
+                .param_default_enum_member(index)
+                .is_none_or(|(_, member)| member != "NONE"),
         }
     })
 }
