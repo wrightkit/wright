@@ -6,7 +6,8 @@ oracle results.
 
 The synthetic Workshop inputs are authored for Wright's analyzer, driver, CLI,
 consumer, and benchmark tests. The `opy/basic-rule.opy` input is a minimal
-provider-boundary and distribution smoke input.
+provider-boundary and distribution smoke input. The `opy/setting-bounds/`
+inputs are minimal settings blocks for the CLI setting-bound test (#1128).
 
 The retained real-project Workshop inputs are generated artifacts kept for
 specific product tests:
