@@ -395,7 +395,9 @@ pub(crate) fn run_install(
 
 /// Regenerates every installed completion file and tells the user how a
 /// running shell loads the new definitions: a shell keeps the definitions it
-/// loaded earlier, so a stale list stays until it reloads.
+/// loaded earlier, so a stale list stays until it reloads. The instruction
+/// appears even when the file was already current, because Wright cannot see
+/// what a running shell loaded.
 pub(crate) fn refresh_installed_completions() {
     let mut reload = Vec::new();
     for shell in ShellArg::ALL {
@@ -414,7 +416,10 @@ pub(crate) fn refresh_installed_completions() {
                     );
                     reload.push(shell);
                 }
-                Ok(InstallStatus::UpToDate(_) | InstallStatus::DryRun(_)) => {}
+                // The file already matches, but a session that loaded an older
+                // copy still holds the old definitions.
+                Ok(InstallStatus::UpToDate(_)) => reload.push(shell),
+                Ok(InstallStatus::DryRun(_)) => {}
                 Err(error) => {
                     eprintln!(
                         "warning: could not refresh {} completion in {}: {}",
