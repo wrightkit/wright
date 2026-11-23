@@ -15,17 +15,20 @@ const COMMAND: &str = "wright agent hook post-edit ";
 const CLAUDE_PROJECT_DIR: &str = "${CLAUDE_PROJECT_DIR:-.}";
 const TIMEOUT_SECONDS: u64 = 60;
 
-/// What differs between harnesses at install time. Both register a
-/// `PostToolUse` command group in a JSON file.
+/// What differs between harnesses at install time. Claude Code and Codex
+/// register a `PostToolUse` group that holds command hooks. Cursor and VS Code
+/// register a flat `postToolUse` command hook.
 struct Spec {
     file: &'static str,
-    /// The shell expression for the harness's project directory.
-    variable: &'static str,
+    event: &'static str,
+    /// The shell expression for the harness's project directory, when the
+    /// harness sets one.
+    variable: Option<&'static str>,
     /// The text stored tokens are anchored to: the expression, then any
     /// literal path below it.
     input: String,
-    matcher: &'static str,
-    command_suffix: &'static str,
+    /// The matcher of the group the hook sits in; `None` for a flat hook.
+    group_matcher: Option<&'static str>,
 }
 
 fn spec(target: HookTarget, root: &Path) -> Result<Spec, AgentError> {
@@ -33,10 +36,10 @@ fn spec(target: HookTarget, root: &Path) -> Result<Spec, AgentError> {
         // https://code.claude.com/docs/en/hooks
         HookTarget::Claude => Spec {
             file: ".claude/settings.local.json",
-            variable: CLAUDE_PROJECT_DIR,
+            event: "PostToolUse",
+            variable: Some(CLAUDE_PROJECT_DIR),
             input: CLAUDE_PROJECT_DIR.into(),
-            matcher: "Edit|Write",
-            command_suffix: "--",
+            group_matcher: Some("Edit|Write"),
         },
         // https://developers.openai.com/codex/hooks (redirects to
         // learn.chatgpt.com/docs/hooks): project hooks live in
@@ -47,10 +50,30 @@ fn spec(target: HookTarget, root: &Path) -> Result<Spec, AgentError> {
         // project's path below it.
         HookTarget::Codex => Spec {
             file: ".codex/hooks.json",
-            variable: GIT_TOPLEVEL,
+            event: "PostToolUse",
+            variable: Some(GIT_TOPLEVEL),
             input: git_anchor(root)?,
-            matcher: "apply_patch",
-            command_suffix: "--harness codex --",
+            group_matcher: Some("apply_patch"),
+        },
+        // https://cursor.com/docs/agent/hooks (read 2026-11-23): project
+        // hooks run from the project root, so the input anchors to `.`.
+        HookTarget::Cursor => Spec {
+            file: ".cursor/hooks.json",
+            event: "postToolUse",
+            variable: None,
+            input: ".".into(),
+            group_matcher: None,
+        },
+        // https://docs.github.com/en/copilot/reference/hooks-reference (read
+        // 2026-11-23): the Copilot harness reads an inline `hooks` block from
+        // `.github/copilot/settings.local.json`; the hook's `cwd` is the
+        // repository root, so the input anchors to `.`.
+        HookTarget::Vscode => Spec {
+            file: ".github/copilot/settings.local.json",
+            event: "postToolUse",
+            variable: None,
+            input: ".".into(),
+            group_matcher: None,
         },
     })
 }
@@ -93,13 +116,15 @@ fn git_anchor(root: &Path) -> Result<String, AgentError> {
 /// A shell word for the entry's command line. A token that starts with the
 /// project directory keeps `variable` expandable; every other character of
 /// the word stays literal.
-fn shell_word(variable: &str, input: &str, token: &str) -> String {
+fn shell_word(spec: &Spec, token: &str) -> String {
     let safe = |c: char| c.is_ascii_alphanumeric() || "-_./=:,@%+".contains(c);
     if !token.is_empty() && token.chars().all(safe) {
         return token.to_string();
     }
-    if let Some(rest) = token.strip_prefix(input) {
-        let below = input.strip_prefix(variable).unwrap_or_default();
+    if let Some(variable) = spec.variable
+        && let Some(rest) = token.strip_prefix(&spec.input)
+    {
+        let below = spec.input.strip_prefix(variable).unwrap_or_default();
         let mut quoted = String::new();
         for c in below.chars().chain(rest.chars()) {
             if "\\\"$`".contains(c) {
@@ -112,23 +137,45 @@ fn shell_word(variable: &str, input: &str, token: &str) -> String {
     format!("'{}'", token.replace('\'', r"'\''"))
 }
 
-fn generated_hook(spec: &Spec, stored: &Stored) -> Value {
-    let mut command = format!("{COMMAND}{}", spec.command_suffix);
+fn hook_command(target: HookTarget, spec: &Spec, stored: &Stored) -> String {
+    let mut command = COMMAND.to_string();
+    if target != HookTarget::Claude {
+        command.push_str("--harness ");
+        command.push_str(target.to_possible_value().expect("not skipped").get_name());
+        command.push(' ');
+    }
+    command.push_str("--");
     for token in &stored.tokens {
         command.push(' ');
-        command.push_str(&shell_word(spec.variable, &spec.input, token));
+        command.push_str(&shell_word(spec, token));
     }
-    json!({"type": "command", "command": command, "timeout": TIMEOUT_SECONDS})
+    command
+}
+
+fn command_hook(target: HookTarget, command: &str) -> Value {
+    match target {
+        HookTarget::Claude | HookTarget::Codex => {
+            json!({"type": "command", "command": command, "timeout": TIMEOUT_SECONDS})
+        }
+        // `Write` is the matcher value of the file-edit tool.
+        HookTarget::Cursor => json!({
+            "type": "command", "command": command, "matcher": "Write", "timeout": TIMEOUT_SECONDS,
+        }),
+        // The edit tools the reference lists, plus the `str_replace_editor`
+        // and `apply_patch` names it maps to `Edit`. The matcher is a regex
+        // tested against the whole `toolName`.
+        HookTarget::Vscode => json!({
+            "type": "command", "command": command,
+            "matcher": "create|edit|str_replace_editor|apply_patch",
+            "cwd": ".", "timeoutSec": TIMEOUT_SECONDS,
+        }),
+    }
 }
 
 fn is_wright_hook(hook: &Value) -> bool {
     hook.get("command")
         .and_then(Value::as_str)
         .is_some_and(|command| command.starts_with(COMMAND))
-}
-
-fn hooks_of(group: &mut Value) -> Option<&mut Vec<Value>> {
-    group.get_mut("hooks")?.as_array_mut()
 }
 
 pub(crate) fn install(
@@ -154,70 +201,87 @@ pub(crate) fn install(
     }
     let path = root.join(spec.file);
     ensure_not_linked(root, &path)?;
-    let mut settings = read_config(&path)?.unwrap_or_else(|| json!({}));
+    let mut config = read_config(&path)?.unwrap_or_else(|| json!({}));
+    let event = spec.event;
     let wrong_shape = || {
         AgentError::Rejected(format!(
-            "{} does not hold a JSON object with a `hooks.PostToolUse` list; fix it by hand",
+            "{} does not hold a JSON object with a `hooks.{event}` list; fix it by hand",
             path.display()
         ))
     };
-    let groups = settings
-        .as_object_mut()
-        .ok_or_else(wrong_shape)?
+    let settings = config.as_object_mut().ok_or_else(wrong_shape)?;
+    let needs_version = target == HookTarget::Cursor && !settings.contains_key("version");
+    if target == HookTarget::Cursor
+        && settings
+            .get("version")
+            .is_some_and(|version| version.as_u64().is_none_or(|number| number == 0))
+    {
+        return Err(AgentError::Rejected(format!(
+            "{} needs a positive integer hook config `version`; fix it by hand",
+            path.display()
+        )));
+    }
+    let entries = settings
         .entry("hooks")
         .or_insert_with(|| json!({}))
         .as_object_mut()
         .ok_or_else(wrong_shape)?
-        .entry("PostToolUse")
+        .entry(event)
         .or_insert_with(|| json!([]))
         .as_array_mut()
         .ok_or_else(wrong_shape)?;
-    let hook = generated_hook(&spec, &stored);
-    let command = hook["command"].as_str().unwrap_or_default().to_string();
+    let command = hook_command(target, &spec, &stored);
+    let hook = command_hook(target, &command);
     let mut ours = Vec::new();
-    for (group_index, group) in groups.iter_mut().enumerate() {
-        let matcher_matches = group.get("matcher").and_then(Value::as_str) == Some(spec.matcher);
-        for (hook_index, existing) in hooks_of(group).into_iter().flatten().enumerate() {
-            if is_wright_hook(existing) {
-                ours.push((
-                    group_index,
-                    hook_index,
-                    matcher_matches && *existing == hook,
-                ));
-            }
+    for (index, entry) in entries.iter().enumerate() {
+        let (hooks, matcher_matches) = match spec.group_matcher {
+            Some(matcher) => (
+                entry["hooks"].as_array().map_or(&[][..], Vec::as_slice),
+                entry["matcher"].as_str() == Some(matcher),
+            ),
+            None => (std::slice::from_ref(entry), true),
+        };
+        for existing in hooks.iter().filter(|existing| is_wright_hook(existing)) {
+            ours.push((index, matcher_matches && *existing == hook));
         }
     }
-    if let [(_, _, true)] = ours[..] {
+    let current = matches!(ours.as_slice(), [(_, true)]);
+    if current && !needs_version {
         return Ok((HookStatus::UpToDate(path), command));
     }
-    if !ours.is_empty() && !force {
+    let replaced = !ours.is_empty();
+    if !current && replaced && !force {
         return Err(AgentError::Rejected(format!(
             "{} already has a Wright hook that differs from the one `wright agent install` generates; pass --force to replace it, or remove it first",
             path.display()
         )));
     }
-    let replaced = !ours.is_empty();
-    let first = ours.first().map_or(groups.len(), |(group, _, _)| *group);
-    let emptied: Vec<bool> = groups
-        .iter_mut()
-        .map(|group| {
-            hooks_of(group).is_some_and(|hooks| {
-                let before = hooks.len();
-                hooks.retain(|existing| !is_wright_hook(existing));
-                before > 0 && hooks.is_empty()
-            })
-        })
-        .collect();
-    let mut emptied = emptied.into_iter();
-    groups.retain(|_| !emptied.next().unwrap_or(false));
-    groups.insert(
-        first.min(groups.len()),
-        json!({"matcher": spec.matcher, "hooks": [hook]}),
-    );
     if dry_run {
         return Ok((HookStatus::DryRun(path), command));
     }
-    write_config(&path, &settings)?;
+    if !current {
+        let first = ours.first().map_or(entries.len(), |(index, _)| *index);
+        entries.retain_mut(|entry| {
+            if spec.group_matcher.is_none() {
+                return !is_wright_hook(entry);
+            }
+            let Some(hooks) = entry.get_mut("hooks").and_then(Value::as_array_mut) else {
+                return true;
+            };
+            let was_empty = hooks.is_empty();
+            hooks.retain(|existing| !is_wright_hook(existing));
+            was_empty || !hooks.is_empty()
+        });
+        let entry = match spec.group_matcher {
+            Some(matcher) => json!({"matcher": matcher, "hooks": [hook]}),
+            None => hook,
+        };
+        entries.insert(first.min(entries.len()), entry);
+    }
+    if needs_version {
+        settings.insert("version".into(), json!(1));
+    }
+    write_config(&path, &config)?;
     let status = if replaced {
         HookStatus::Replaced(path)
     } else {
@@ -261,14 +325,20 @@ fn edited_files(harness: HookTarget, event: &Value) -> Vec<String> {
                 .map(|file| cwd.join(file.trim()).to_string_lossy().into_owned())
                 .collect()
         }
+        // Neither harness documents the edited path in its `postToolUse`
+        // payload (Cursor's `afterFileEdit` does, but has no documented
+        // output). The check runs without the membership filter.
+        HookTarget::Cursor | HookTarget::Vscode => Vec::new(),
     }
 }
 
 /// Checks the program after an edit and answers in the harness's feedback
-/// form: Claude Code gets exit 2 with the program's errors on stderr; Codex
-/// gets exit 0 with `additionalContext` on stdout. Nothing is said when there
-/// are no errors or no edited file is in the program. When the payload names
-/// no file, the membership filter does not apply.
+/// form: Claude Code gets exit 2 with the program's errors on stderr; the
+/// others get exit 0 and the errors in the JSON field their reference names
+/// (Codex `hookSpecificOutput.additionalContext`, Cursor `additional_context`,
+/// VS Code `additionalContext`). Nothing is said when there are no errors or
+/// no edited file is in the program. When the payload names no file, the
+/// membership filter does not apply.
 pub(crate) fn post_edit(harness: HookTarget, check: &[String]) -> u8 {
     let input = match std::io::read_to_string(std::io::stdin()) {
         Ok(input) => input,
@@ -328,23 +398,20 @@ pub(crate) fn post_edit(harness: HookTarget, check: &[String]) -> u8 {
     {
         return exit::SUCCESS;
     }
-    match harness {
+    let response = match harness {
         HookTarget::Claude => {
             eprintln!("{}", report());
-            exit::USAGE
+            return exit::USAGE;
         }
-        HookTarget::Codex => {
-            // https://developers.openai.com/codex/hooks: PostToolUse
-            // `hookSpecificOutput.additionalContext` is added as developer
-            // context; the answer is verified by the live run in #1109.
-            println!(
-                "{}",
-                json!({"hookSpecificOutput": {
-                    "hookEventName": "PostToolUse",
-                    "additionalContext": report(),
-                }})
-            );
-            exit::SUCCESS
-        }
-    }
+        // https://developers.openai.com/codex/hooks: added as developer
+        // context; confirmed by the live run in #1109.
+        HookTarget::Codex => json!({"hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": report(),
+        }}),
+        HookTarget::Cursor => json!({"additional_context": report()}),
+        HookTarget::Vscode => json!({"additionalContext": report()}),
+    };
+    println!("{response}");
+    exit::SUCCESS
 }

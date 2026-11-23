@@ -266,6 +266,12 @@ fn report_hook(status: &hook::HookStatus, target: HookTarget, command: &str) {
         HookTarget::Codex => println!(
             "  1. trust this project in Codex, then trust the hook (`Review hooks` or `Trust all`); Codex runs the hook only after both\n  2. start a new Codex session in this project"
         ),
+        HookTarget::Cursor => println!(
+            "  1. open this project as a trusted Cursor workspace; Cursor reloads `.cursor/hooks.json` on save, and the Hooks tab in Customize and the Hooks output channel show whether the hook ran\n  2. start a new Agent chat in this project"
+        ),
+        HookTarget::Vscode => println!(
+            "  1. select Copilot as the session target; its hook runtime reads this file\n  2. start a new chat in this project; `/hooks` lists the entry"
+        ),
     }
     println!(
         "  verify: run `echo '{{}}' | {command}` from the project; exit 0 with no output means the stored input and options load the project; any output, or exit 2, is a failure"
