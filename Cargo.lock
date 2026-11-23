@@ -2751,7 +2751,6 @@ dependencies = [
 name = "wright-wasm"
 version = "0.46.0"
 dependencies = [
- "serde",
  "serde_json",
  "wright-driver",
 ]

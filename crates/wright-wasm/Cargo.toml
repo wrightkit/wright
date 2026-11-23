@@ -18,6 +18,5 @@ name = "wright-core-parity"
 path = "src/bin/wright_core_parity.rs"
 
 [dependencies]
-serde.workspace = true
 serde_json.workspace = true
 wright-driver.workspace = true

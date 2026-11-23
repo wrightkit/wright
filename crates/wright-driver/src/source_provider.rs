@@ -436,26 +436,27 @@ mod tests {
                 message: "diag".to_string(),
             }],
         };
+        let quiet = wright_lpp::DocumentDiagnostics {
+            uri: "file:///project/0.opy".to_string(),
+            version: 0,
+            diagnostics: Vec::new(),
+        };
         let diagnostics = lpp::provider_diagnostics(
-            vec![doc("file:///project/b.opy"), doc("file:///project/a.opy")],
+            vec![
+                doc("file:///project/b.opy"),
+                quiet,
+                doc("file:///project/a.opy"),
+                doc("file:///project/b.opy"),
+            ],
             None,
         );
-        assert_eq!(diagnostics.len(), 2);
-        for (span, code) in diagnostics
-            .iter()
-            .map(|d| (d.span.as_ref().expect("span"), &d.code))
-        {
-            match code.as_str() {
-                "d-file:///project/a.opy" => {
-                    assert_eq!(span.file, 0);
-                    assert!(span.path.ends_with("a.opy"));
-                }
-                "d-file:///project/b.opy" => {
-                    assert_eq!(span.file, 1);
-                    assert!(span.path.ends_with("b.opy"));
-                }
-                other => panic!("unexpected diagnostic code {other}"),
-            }
+        let expected = [("b.opy", 2), ("a.opy", 1), ("b.opy", 2)];
+        assert_eq!(diagnostics.len(), expected.len());
+        for (diagnostic, (name, file)) in diagnostics.iter().zip(expected) {
+            let span = diagnostic.span.as_ref().expect("span");
+            assert_eq!(span.file, file);
+            assert!(span.path.ends_with(name));
+            assert_eq!(diagnostic.code, format!("d-file:///project/{name}"));
         }
     }
 

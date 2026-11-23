@@ -1,6 +1,6 @@
 use crate::diag::Position;
 
-pub(super) fn provider_position(pos: wright_lpp::Position, lines: &[String]) -> Position {
+pub(super) fn provider_position(pos: wright_lpp::Position, lines: &[&str]) -> Position {
     let col = lines
         .get(pos.line as usize)
         .and_then(|line| crate::provider_edit::utf16_to_char_column(line, pos.character))

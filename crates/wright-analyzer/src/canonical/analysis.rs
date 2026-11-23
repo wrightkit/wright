@@ -127,14 +127,7 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
                     repeated: None,
                 });
             }
-            if config.is_enabled(REPEATED_VALUE.id)
-                && matches!(
-                    action,
-                    Action::While { .. }
-                        | Action::ForGlobalVariable { .. }
-                        | Action::ForPlayerVariable { .. }
-                )
-            {
+            if config.is_enabled(REPEATED_VALUE.id) {
                 findings.extend(repeated_value_findings(
                     program,
                     rule_id,
@@ -789,7 +782,6 @@ fn repeated_value_findings(
                 fix: evaluate_once_fix(
                     program,
                     rule_id,
-                    loop_action,
                     body_start,
                     body,
                     &collected,
@@ -907,7 +899,6 @@ fn collect_value_at<'a>(
 fn evaluate_once_fix(
     program: &Program,
     rule_id: RuleId,
-    loop_action: ActionId,
     body_start: usize,
     body: &[Action],
     collected: &[Occurrence<'_>],
@@ -918,27 +909,22 @@ fn evaluate_once_fix(
     let mut unwrappable = 0usize;
     for &member in family {
         let occurrence = &collected[member];
-        let (action, wrappable) = match occurrence.origin {
-            OccurrenceOrigin::LoopCondition | OccurrenceOrigin::Reevaluating => {
-                (loop_action, false)
-            }
-            OccurrenceOrigin::BodyAction(index) => (
-                body_start + index,
-                !action_argument_reevaluates(catalog, &body[index], occurrence.argument)
-                    && !contains_update_every_frame(occurrence.value),
-            ),
-        };
-        let extent = wrappable.then(|| {
+        let extent = if let OccurrenceOrigin::BodyAction(index) = occurrence.origin
+            && !action_argument_reevaluates(catalog, &body[index], occurrence.argument)
+            && !contains_update_every_frame(occurrence.value)
+        {
             program.action_argument_value_extent(
                 rule_id,
-                action,
+                body_start + index,
                 occurrence.argument,
                 &occurrence.path,
             )
-        });
+        } else {
+            None
+        };
         match extent {
-            Some(Some(span)) => occurrences.push(span),
-            _ => unwrappable += 1,
+            Some(span) => occurrences.push(span),
+            None => unwrappable += 1,
         }
     }
     (unwrappable <= 1 && !occurrences.is_empty()).then_some(LintFix::EvaluateOnce { occurrences })

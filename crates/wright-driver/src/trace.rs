@@ -197,6 +197,7 @@ impl Trace {
         Some(id)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn record_child(
         &self,
         parent: usize,
