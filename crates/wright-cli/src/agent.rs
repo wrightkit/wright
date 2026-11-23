@@ -266,10 +266,18 @@ fn report_hook(status: &hook::HookStatus, target: HookTarget, command: &str) {
         HookTarget::Codex => println!(
             "  1. trust this project in Codex, then trust the hook (`Review hooks` or `Trust all`); Codex runs the hook only after both\n  2. start a new Codex session in this project"
         ),
+        HookTarget::Cursor => println!(
+            "  1. open this folder as a trusted Cursor workspace and start a new Agent chat. Review the registration in Customize > Hooks"
+        ),
+        HookTarget::Vscode => println!(
+            "  1. open and trust this repository in VS Code, select Copilot as the Session Target, and start a new chat. Use `/hooks` to inspect the registration"
+        ),
     }
+    println!("  make sure `wright` is on the harness's PATH");
     println!(
-        "  verify: run `echo '{{}}' | {command}` from the project; exit 0 with no output means the stored input and options load the project; any output, or exit 2, is a failure"
+        "  verify: run `echo '{{}}' | {command}` from the project. Expect exit 0 with no output on a clean program"
     );
+    println!("  verify in the harness: ask the agent to edit the program and check the hook logs");
     println!("  remove: delete its `wright agent hook` entry");
 }
 
