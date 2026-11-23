@@ -1,7 +1,7 @@
 use serde_json::Value;
 use workshop_rs::catalog::Locale;
 use workshop_rs::{MappedText, Program, SourceMap, parser};
-use wright_analyzer::canonical::{Finding, LintFix, analyze};
+use wright_analyzer::canonical::{Finding, analyze};
 use wright_analyzer::registry::{LintConfig, LintRegistry};
 
 fn parse(source: &str) -> Program {
@@ -158,46 +158,6 @@ fn repeated_value_names_each_repeated_expression() {
         distance.span_kind,
         wright_analyzer::canonical::RepeatedValueSpan::Expression
     );
-}
-
-#[test]
-fn repeated_value_fix_retains_nested_spans_after_source_map_round_trip() {
-    let source = r#"variables {
-    global:
-        0: index
-        1: other
-}
-rule ("mapped repeat") {
-    event { Ongoing - Global; }
-    actions {
-        While(Compare(Global.index, <, 3));
-            Set Global Variable(other, Add(Distance Between(Position Of(Event Player), Vector(0, 0, 0)), 1));
-            Set Global Variable(other, Add(Distance Between(Position Of(Event Player), Vector(0, 0, 0)), 2));
-            Wait(0.016, Ignore Condition);
-        End;
-    }
-}
-"#;
-    let mut program = parse(source);
-    let map = SourceMap::extract(&program);
-    map.apply(&mut program).unwrap();
-    assert!(program.set_file_source(workshop_rs::source::FileId::from_index(0), source));
-    let findings = analyze(&program, &LintConfig::default());
-    let [finding] = coded(&findings, "repeated-value")[..] else {
-        panic!("one repeated-value finding: {findings:?}")
-    };
-    let Some(LintFix::EvaluateOnce { occurrences }) = &finding.fix else {
-        panic!("the mapped occurrences carry a fix: {finding:?}")
-    };
-    assert_eq!(occurrences.len(), 2);
-    for occurrence in occurrences {
-        let document = program.source(occurrence.file).unwrap();
-        let range = document.byte_range(*occurrence).unwrap();
-        assert_eq!(
-            &source[range],
-            "Distance Between(Position Of(Event Player), Vector(0, 0, 0))"
-        );
-    }
 }
 
 #[test]

@@ -392,21 +392,19 @@ fn dead_branch_fix(
         return dead_branch_span(&scan, range.start, range.end)
             .map(|span| LintFix::RemoveDeadBranch { span });
     }
-    let condition_end = expr_extent_bytes(
-        condition,
-        &mut |path| program.action_argument_value_span(rule_id, action_id, 0, path),
-        &scan,
-    )?
-    .end;
+    let condition_end = scan.byte(
+        program
+            .action_argument_value_extent(rule_id, action_id, 0, &[])?
+            .end,
+    )?;
     let start = chain_marker_start(&scan, condition_end, "If")?;
     let end = match &rule.actions[boundary] {
-        Action::ElseIf { condition } => {
-            let end = expr_extent_bytes(
-                condition,
-                &mut |path| program.action_argument_value_span(rule_id, boundary, 0, path),
-                &scan,
-            )?
-            .end;
+        Action::ElseIf { .. } => {
+            let end = scan.byte(
+                program
+                    .action_argument_value_extent(rule_id, boundary, 0, &[])?
+                    .end,
+            )?;
             chain_marker_start(&scan, end, "If")?
         }
         Action::Else => {
@@ -611,80 +609,6 @@ impl<'a> SourceScan<'a> {
     fn span(&self, start: usize, end: usize) -> Span {
         Span::new(self.file, self.position(start), self.position(end))
     }
-}
-
-fn expr_extent_bytes(
-    value: &Value,
-    span_of: &mut dyn FnMut(&[usize]) -> Option<Span>,
-    scan: &SourceScan,
-) -> Option<Range<usize>> {
-    let node = scan.document.byte_range(span_of(&[])?)?;
-    let children = value_children(value);
-    let mut kids = Vec::with_capacity(children.len());
-    for (index, child) in children.iter().enumerate() {
-        let extent = expr_extent_bytes(
-            child,
-            &mut |path| {
-                let mut full = Vec::with_capacity(path.len() + 1);
-                full.push(index);
-                full.extend_from_slice(path);
-                span_of(&full)
-            },
-            scan,
-        )?;
-        kids.push(extent);
-    }
-    let infix = kids.iter().any(|kid| kid.start < node.start);
-    let start = if infix {
-        expr_start_anchor(scan, kids.iter().map(|kid| kid.start).min()?)?
-    } else {
-        node.start
-    };
-    let contains_children = kids
-        .iter()
-        .all(|kid| kid.start >= node.start && kid.end <= node.end);
-    let closer = match value {
-        Value::Call { .. } | Value::Vector { .. } | Value::PlayerVariable { .. } => ')',
-        Value::Array(_) => ']',
-        _ => return (start < node.end).then_some(start..node.end),
-    };
-    let end = if children.is_empty() {
-        let (index, char) = scan.next(node.end)?;
-        if char == '(' {
-            let (close, ')') = scan.next(index + 1)? else {
-                return None;
-            };
-            close + 1
-        } else {
-            node.end
-        }
-    } else if contains_children {
-        node.end
-    } else if infix {
-        kids.iter().map(|kid| kid.end).max()?.max(node.end)
-    } else {
-        let (index, char) = scan.next(kids.last()?.end)?;
-        (char == closer).then_some(index + 1)?
-    };
-    (start < end).then_some(start..end)
-}
-
-fn expr_start_anchor(scan: &SourceScan, mut pos: usize) -> Option<usize> {
-    let text = scan.document.text();
-    loop {
-        pos = scan.prev(pos)?.0;
-        if text[pos..].chars().next().is_some_and(is_member_path_char) {
-            continue;
-        }
-        return match text[pos..].chars().next()? {
-            '(' | ',' => Some(scan.next(pos + 1)?.0),
-            _ => None,
-        };
-    }
-}
-
-fn is_member_path_char(c: char) -> bool {
-    c.is_alphanumeric() || matches!(c, '_' | '.')
 }
 
 fn chain_marker_start(scan: &SourceScan, condition_end: usize, phrase: &str) -> Option<usize> {
@@ -1005,19 +929,12 @@ fn evaluate_once_fix(
             ),
         };
         let extent = wrappable.then(|| {
-            let file = occurrence.span?.file;
-            let scan = SourceScan::new(program.source(file)?, file);
-            let base = &occurrence.path;
-            let extent = expr_extent_bytes(
-                occurrence.value,
-                &mut |path| {
-                    let mut full = base.clone();
-                    full.extend_from_slice(path);
-                    program.action_argument_value_span(rule_id, action, occurrence.argument, &full)
-                },
-                &scan,
-            )?;
-            Some(scan.span(extent.start, extent.end))
+            program.action_argument_value_extent(
+                rule_id,
+                action,
+                occurrence.argument,
+                &occurrence.path,
+            )
         });
         match extent {
             Some(Some(span)) => occurrences.push(span),
