@@ -265,6 +265,60 @@ fn update_refreshes_existing_completions() {
     let _ = std::fs::remove_dir_all(&comp_dir);
 }
 
+#[cfg(unix)]
+#[test]
+fn update_warns_when_a_completion_file_is_read_only() {
+    use std::os::unix::fs::PermissionsExt;
+    // The new binary is the real one, so the refresh that runs is the real one.
+    let wright = format!(
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then echo \"wright {RELEASE}\"; exit 0; fi\nexec {} \"$@\"\n",
+        env!("CARGO_BIN_EXE_wright")
+    );
+    let server = MockServer::new(release_with_wright(RELEASE, wright).files);
+    let dir = install_dir("update-readonly-completion");
+    let comp_dir = dir.join("completions");
+    std::fs::create_dir_all(&comp_dir).unwrap();
+    let file = comp_dir.join("wright.fish");
+    std::fs::write(&file, "stale").unwrap();
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o444)).unwrap();
+    if std::fs::OpenOptions::new().append(true).open(&file).is_ok() {
+        return; // permissions do not bind this user (root)
+    }
+    let mut env = server.env();
+    env.push((
+        "WRIGHT_COMPLETION_DIR",
+        comp_dir.to_str().unwrap().to_string(),
+    ));
+
+    let output = run_update(&dir, &["update"], &env);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "stale");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(file.to_str().unwrap()), "{stderr}");
+    assert!(stderr.contains("wright completion refresh"), "{stderr}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn update_to_a_target_without_completion_refresh_names_the_install_command() {
+    let wright = format!(
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then echo \"wright {RELEASE}\"; exit 0; fi\nexit 2\n"
+    );
+    let server = MockServer::new(release_with_wright(RELEASE, wright).files);
+    let dir = install_dir("update-no-refresh");
+
+    let output = run_update(&dir, &["update"], &server.env());
+    assert_eq!(output.status.code(), Some(0));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("wright completion install --force"),
+        "{stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn update_already_at_latest_reports_up_to_date() {
     let current = wright_analyzer::VERSION;

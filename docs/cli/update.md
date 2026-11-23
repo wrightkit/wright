@@ -26,7 +26,9 @@ workflow, so it is text-only and produces no `wright-result/v1` envelope.
   of the latest stable release. An explicit `--version` older than the installed
   version installs it (`--check` reports `downgrade available`); a bare update
   never moves backwards and exits 1 when the latest release is older than the
-  installed version. A target that predates `wright completion refresh` leaves
+  installed version. A completion file that cannot be written stays as it is,
+  and the update still succeeds with a warning on stderr that names the file
+  and the fix. A target that predates `wright completion refresh` leaves
   completion files as they are and prints a warning. R2 retention and the
   GitHub Release fallback bound which older versions exist.
 * `wright update provider [--check]`: update installed first-party providers
