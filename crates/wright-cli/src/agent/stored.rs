@@ -106,6 +106,28 @@ pub(super) fn shell_quote(token: &str) -> String {
     format!("'{}'", token.replace('\'', r"'\''"))
 }
 
+/// Quotes `text` as one word that sh and fish read alike. Fish treats `\'` and
+/// `\\` inside single quotes as escapes, so a quote or backslash stays outside them.
+pub(super) fn paste_quote(text: &str) -> String {
+    let mut word = String::new();
+    let mut open = false;
+    for c in text.chars() {
+        let outside = matches!(c, '\'' | '\\');
+        if outside == open {
+            word.push('\'');
+            open = !open;
+        }
+        if outside {
+            word.push('\\');
+        }
+        word.push(c);
+    }
+    if open {
+        word.push('\'');
+    }
+    word
+}
+
 /// The refusal for a registration that would not load the project. A locale
 /// failure names the fix, because the default locale is not the project's.
 pub(super) fn load_rejection(

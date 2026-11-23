@@ -268,7 +268,7 @@ fn printed_probe_runs_in_supported_shells_and_preserves_harness_feedback() {
     {
         shells.push("fish");
     }
-    for hook in ["claude", "codex"] {
+    for hook in ["claude", "codex", "cursor", "vscode"] {
         let project = git_project();
         let name = "session's mode.ws";
         let session = project.join(name);
@@ -295,17 +295,13 @@ fn printed_probe_runs_in_supported_shells_and_preserves_harness_feedback() {
         std::fs::write(&session, format!("{original}\nrule(\"x\") {{ broken\n")).unwrap();
         for shell in &shells {
             let broken = run_probe(&project, shell, probe);
-            if hook == "codex" {
-                assert_eq!(broken.status.code(), Some(0), "{shell}: {broken:?}");
+            if hook != "claude" {
+                assert_eq!(broken.status.code(), Some(0), "{hook} {shell}: {broken:?}");
                 assert!(broken.stderr.is_empty(), "{broken:?}");
                 let answer: serde_json::Value = serde_json::from_slice(&broken.stdout).unwrap();
-                assert_eq!(answer["hookSpecificOutput"]["hookEventName"], "PostToolUse");
                 assert!(
-                    answer["hookSpecificOutput"]["additionalContext"]
-                        .as_str()
-                        .unwrap()
-                        .contains("error unknown-rule-section"),
-                    "{answer}"
+                    answer.to_string().contains("error unknown-rule-section"),
+                    "{hook}: {answer}"
                 );
             } else {
                 assert_eq!(broken.status.code(), Some(2), "{shell}: {broken:?}");

@@ -278,7 +278,7 @@ fn report_hook(status: &hook::HookStatus, target: HookTarget, command: &str, dry
             "  1. select Copilot as the session target; its hook runtime reads this file\n  2. start a new chat in this project; `/hooks` lists the entry"
         ),
     }
-    let command = stored::shell_quote(command);
+    let command = stored::paste_quote(command);
     println!(
         "  verify: run `echo '{{}}' | sh -c {command}` from the project; exit 0 with no output means the stored input and options load the project; any output, or exit 2, is a failure"
     );
