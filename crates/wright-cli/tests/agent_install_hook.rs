@@ -222,6 +222,40 @@ fn a_locale_failure_names_the_locale_option_and_success_prints_next_steps() {
 }
 
 #[test]
+fn the_printed_locale_retry_runs_in_a_shell_for_an_input_with_a_space_or_quote() {
+    for name in ["main mode.ws", "it's.ws"] {
+        let project = temp_dir();
+        std::fs::write(
+            project.join(name),
+            "rule(\"x\") {\n\tevent {\n\t\tOngoing - Global;\n\t}\n\tconditions {\n\t\tCurrent Map == Map(格里姆火山);\n\t}\n\tactions {\n\t\tWait(1, Ignore Condition);\n\t}\n}\n",
+        )
+        .unwrap();
+        let refused = install(&project, &["--", name, "--kind", "workshop"]);
+        let stderr = String::from_utf8_lossy(&refused.stderr);
+        let retry = stderr
+            .split('`')
+            .find(|part| part.starts_with("wright agent install"))
+            .unwrap_or_else(|| panic!("no retry in {stderr}"));
+        let retry = retry.replacen("wright", &format!("'{}'", wright()), 1);
+        let ran = Command::new("sh")
+            .args(["-c", &retry])
+            .current_dir(&project)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(
+            ran.status.success(),
+            "{retry}: {}",
+            String::from_utf8_lossy(&ran.stderr)
+        );
+        let text = settings(&project).to_string();
+        assert!(text.contains("--locale zh-CN"), "{text}");
+        assert!(text.contains(name), "{text}");
+        let _ = std::fs::remove_dir_all(&project);
+    }
+}
+
+#[test]
 fn force_replaces_only_the_wright_hook_object() {
     let project = project();
     let given = ["--", "session.ws", "--kind", "workshop"];

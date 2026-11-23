@@ -94,6 +94,16 @@ pub(super) fn load_failure(config: wright_driver::SessionConfig) -> Option<Strin
         .err()
 }
 
+/// A POSIX shell and fish word that reads back as `token`: the token itself
+/// when every character is plain, else single-quoted.
+pub(super) fn shell_quote(token: &str) -> String {
+    let safe = |c: char| c.is_ascii_alphanumeric() || "-_./=:,@%+".contains(c);
+    if !token.is_empty() && token.chars().all(safe) {
+        return token.to_string();
+    }
+    format!("'{}'", token.replace('\'', r"'\''"))
+}
+
 /// The refusal for a registration that would not load the project. A locale
 /// failure names the fix, because the default locale is not the project's.
 pub(super) fn load_rejection(
@@ -111,7 +121,7 @@ pub(super) fn load_rejection(
             }
             skip = arg == "--locale";
             if !skip {
-                args.push(arg.clone());
+                args.push(shell_quote(arg));
             }
         }
         args.extend(["--locale".into(), "zh-CN".into()]);
