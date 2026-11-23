@@ -346,13 +346,11 @@ reference's.
 
 #### Activation and verification (#1119)
 
-A successful `--hook` install prints the remaining steps and a verification
-command. `echo '{}' | <stored command>`, run from the project, exits 0 with no
-output when the stored input and options load the project. A failure shows as
-output: Claude Code exits 2 with the diagnostic on stderr; Codex, Cursor, and
-VS Code exit 0 with the JSON field their harness reads on stdout. The check
-does not prove the harness runs the hook. The activation step differs by
-harness:
+Successful `--hook` installs print activation steps and a probe:
+`echo '{}' | sh -c '<quoted stored command>'`, pasteable from the project in
+fish or sh. Quoting preserves the stored shell expressions. A clean program
+exits 0 silently; errors reach Claude Code on stderr at exit 2, or Codex,
+Cursor, and VS Code as JSON at exit 0. To activate the hook in its harness:
 
 | Harness | Config file | Remaining step |
 | --- | --- | --- |
@@ -361,9 +359,10 @@ harness:
 | Cursor | `.cursor/hooks.json` | Open the project as a trusted workspace and start a new Agent chat. The Hooks tab in Customize and the Hooks output channel show the hook |
 | VS Code | `.github/copilot/settings.local.json` | Use the Copilot session target and start a new chat. `/hooks` lists the entry |
 
-A refused install (load failure, different existing hook, wrong file shape)
-prints the cause and the next action, writes nothing, and prints no next steps.
-`wright agent --help` lists this setup path.
+A refused install prints its cause and next action, writes nothing, and omits
+next steps. `--dry-run` reports planned writes and omits activation and
+verification, even for an up-to-date hook. `wright agent --help` lists both
+install commands and the same Codex activation steps.
 
 ## `wright agent tools`: client tool definitions (#535)
 

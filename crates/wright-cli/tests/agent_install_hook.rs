@@ -219,9 +219,162 @@ fn a_locale_failure_names_the_locale_option_and_success_prints_next_steps() {
     let stdout = String::from_utf8_lossy(&installed.stdout);
     assert!(
         stdout.contains("next steps:")
-            && stdout.contains("verify: run `echo '{}' | wright agent hook post-edit"),
+            && stdout.contains("verify: run `echo '{}' | sh -c 'wright agent hook post-edit"),
         "{stdout}"
     );
+    let _ = std::fs::remove_dir_all(&project);
+}
+
+fn git_project() -> PathBuf {
+    let project = project();
+    assert!(
+        Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&project)
+            .status()
+            .unwrap()
+            .success()
+    );
+    project
+}
+
+fn run_probe(project: &Path, shell: &str, probe: &str) -> Output {
+    let binary_dir = Path::new(wright()).parent().unwrap();
+    let path = std::env::join_paths([binary_dir.to_owned()].into_iter().chain(
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+    ))
+    .unwrap();
+    let mut command = Command::new(shell);
+    if shell == "fish" {
+        command.arg("--no-config");
+    }
+    command
+        .args(["-c", probe])
+        .env("PATH", path)
+        .env_remove("CLAUDE_PROJECT_DIR")
+        .current_dir(project)
+        .stdin(Stdio::null())
+        .output()
+        .expect("shell runs")
+}
+
+#[test]
+fn printed_probe_runs_in_supported_shells_and_preserves_harness_feedback() {
+    let mut shells = vec!["sh"];
+    if Command::new("fish")
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success())
+    {
+        shells.push("fish");
+    }
+    for hook in ["claude", "codex", "cursor", "vscode"] {
+        let project = git_project();
+        let name = "session's mode.ws";
+        let session = project.join(name);
+        std::fs::rename(project.join("session.ws"), &session).unwrap();
+        let installed = install_for(&project, hook, &["--", name, "--kind", "workshop"]);
+        assert!(installed.status.success(), "{installed:?}");
+        let stdout = String::from_utf8(installed.stdout).unwrap();
+        let probe = stdout
+            .lines()
+            .find_map(|line| line.strip_prefix("  verify: run `"))
+            .and_then(|line| line.split_once("` from the project;"))
+            .unwrap()
+            .0;
+        assert!(probe.starts_with("echo '{}' | sh -c '"), "{probe}");
+        for shell in &shells {
+            let clean = run_probe(&project, shell, probe);
+            assert_eq!(clean.status.code(), Some(0), "{hook} {shell}: {clean:?}");
+            assert!(
+                clean.stdout.is_empty() && clean.stderr.is_empty(),
+                "{clean:?}"
+            );
+        }
+        let original = std::fs::read_to_string(&session).unwrap();
+        std::fs::write(&session, format!("{original}\nrule(\"x\") {{ broken\n")).unwrap();
+        for shell in &shells {
+            let broken = run_probe(&project, shell, probe);
+            if hook != "claude" {
+                assert_eq!(broken.status.code(), Some(0), "{hook} {shell}: {broken:?}");
+                assert!(broken.stderr.is_empty(), "{broken:?}");
+                let answer: serde_json::Value = serde_json::from_slice(&broken.stdout).unwrap();
+                assert!(
+                    answer.to_string().contains("error unknown-rule-section"),
+                    "{hook}: {answer}"
+                );
+            } else {
+                assert_eq!(broken.status.code(), Some(2), "{shell}: {broken:?}");
+                assert!(broken.stdout.is_empty(), "{broken:?}");
+                assert!(
+                    String::from_utf8_lossy(&broken.stderr).contains("error unknown-rule-section"),
+                    "{broken:?}"
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(&project);
+    }
+}
+
+#[test]
+fn agent_help_and_install_share_codex_activation_steps() {
+    let project = git_project();
+    let installed = install_for(
+        &project,
+        "codex",
+        &["--", "session.ws", "--kind", "workshop"],
+    );
+    assert!(installed.status.success(), "{installed:?}");
+    let install = String::from_utf8(installed.stdout).unwrap();
+    let help = Command::new(wright())
+        .args(["agent", "--help"])
+        .output()
+        .unwrap();
+    assert!(help.status.success(), "{help:?}");
+    let help = String::from_utf8(help.stdout).unwrap();
+    for command in [
+        "wright agent install --hook claude",
+        "wright agent install --hook codex",
+    ] {
+        assert!(help.contains(command), "{help}");
+    }
+    let (_, next) = install.split_once("next steps:\n").unwrap();
+    let (steps, _) = next.split_once("  verify:").unwrap();
+    assert!(help.contains(steps), "{help}");
+    for text in [
+        "trust this project in Codex",
+        "trust the hook",
+        "start a new Codex session in this project",
+    ] {
+        assert_eq!(help.matches(text).count(), 1, "{help}");
+        assert_eq!(install.matches(text).count(), 1, "{install}");
+    }
+    let _ = std::fs::remove_dir_all(&project);
+}
+
+#[test]
+fn hook_dry_run_omits_activation_and_verification_even_when_up_to_date() {
+    let project = git_project();
+    for hook in ["claude", "codex", "cursor", "vscode"] {
+        let given = ["--", "session.ws", "--kind", "workshop"];
+        let args = [&["--dry-run"][..], &given].concat();
+        for installed in [false, true] {
+            let dry = install_for(&project, hook, &args);
+            assert!(dry.status.success(), "{dry:?}");
+            let stdout = String::from_utf8_lossy(&dry.stdout);
+            assert!(
+                !stdout.contains("next steps:")
+                    && !stdout.contains("verify:")
+                    && !stdout.contains("trust "),
+                "{hook}: {stdout}"
+            );
+            assert!(dry.stderr.is_empty(), "{dry:?}");
+            if !installed {
+                assert!(stdout.contains("would configure"), "{stdout}");
+                assert!(install_for(&project, hook, &given).status.success());
+            }
+        }
+    }
     let _ = std::fs::remove_dir_all(&project);
 }
 
