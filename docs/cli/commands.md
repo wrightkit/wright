@@ -48,7 +48,7 @@ result.
 | `wright serve [INPUT] [--transport T] [--kind K] [--profile P] [--lint-config YAML] [--rule-file PATH] [--disable-rule ID] [--rule-severity ID:SEV]` | Serve `wright-agent/v1` over stdio, JSON-RPC 2.0, or MCP | one structured response per request |
 | `wright completion <SHELL>` | Generate static completion script for bash, zsh, fish, or powershell | the generated completion script |
 | `wright completion install [SHELL]` | Install generated completion into standard user-local directory | installation progress and guidance |
-| `wright completion refresh` | Regenerate the completion files already installed; `wright update` runs it from the new binary | refreshed files and a reload instruction |
+| `wright completion refresh` | Regenerate the completion files already installed; `wright update` runs it from the new binary | refreshed files and a reload instruction for each shell with an installed file |
 | `wright update [self\|provider [NAME]]` | Update Wright-managed components: a standalone installation and installed first-party providers | update progress (text only) |
 | `wright agent install` | Install the canonical Wright agent guide into the project's agent skills directory | installation progress and guidance |
 | `wright agent tools [--format messages\|json-schema]` | Emit the advertised operations as client tool definitions for code-executing agents | `wright-agent/v1` tool-definition document (JSON) |

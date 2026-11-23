@@ -63,7 +63,9 @@ mutating shell startup configuration:
     binary, which rewrites existing Wright completion files in conventional
     locations so completions match the installed command model. A running shell
     keeps the definitions it already loaded, so refresh prints the reload
-    command (for example `exec fish`).
+    command (for example `exec fish`) for every shell that has an installed
+    file, including a file that was already current. Shells without an
+    installed file produce no output.
 * **Package-manager boundaries**: Homebrew, Scoop, and WinGet packaging
   consume `wright completion <shell>` generation using native package conventions
   rather than maintaining hand-written completion scripts.
