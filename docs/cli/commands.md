@@ -48,7 +48,7 @@ result.
 | `wright serve [INPUT] [--transport T] [--kind K] [--profile P] [--lint-config YAML] [--rule-file PATH] [--disable-rule ID] [--rule-severity ID:SEV]` | Serve `wright-agent/v1` over stdio, JSON-RPC 2.0, or MCP | one structured response per request |
 | `wright completion <SHELL>` | Generate static completion script for bash, zsh, fish, or powershell | the generated completion script |
 | `wright completion install [SHELL]` | Install generated completion into standard user-local directory | installation progress and guidance |
-| `wright completion refresh` | Regenerate the completion files already installed; `wright update` runs it from the new binary | refreshed files and a reload instruction |
+| `wright completion refresh` | Regenerate the completion files already installed; `wright update` runs it from the new binary | refreshed files and a reload instruction for each shell with an installed file |
 | `wright update [self\|provider [NAME]]` | Update Wright-managed components: a standalone installation and installed first-party providers | update progress (text only) |
 | `wright agent install` | Install the canonical Wright agent guide into the project's agent skills directory | installation progress and guidance |
 | `wright agent tools [--format messages\|json-schema]` | Emit the advertised operations as client tool definitions for code-executing agents | `wright-agent/v1` tool-definition document (JSON) |
@@ -223,10 +223,11 @@ refused; writes replace the file atomically.
 To remove the server, delete the `wright` entry from the config file (and the
 guide directory if installed); to update, re-run with `--force`.
 
-### Edit hook (`--hook`, #1098, #1109)
+### Edit hook (`--hook`, #1098, #1109, #1110)
 
-`--hook` takes `claude` or `codex`. The install rules below are the same for
-both; the differences are in [Codex](#codex-hook).
+`--hook` takes `claude`, `codex`, `cursor`, or `vscode`. The install rules
+below are the same for all of them; the differences are in
+[Codex](#codex-hook), [Cursor](#cursor-hook), and [VS Code](#vs-code-hook).
 
 `wright agent install --hook claude` adds one `PostToolUse` entry with the
 matcher `Edit|Write` to `.claude/settings.local.json`, so Claude Code checks the
@@ -303,19 +304,62 @@ and a payload captured from `codex exec` 0.169.0. A live `codex exec` session on
 an OPY project showed the model receiving the `unknown-member` diagnostic after
 an edit that broke the program.
 
+#### Cursor hook
+
+`wright agent install --hook cursor` adds one flat `postToolUse` command hook
+with the matcher `Write` to `.cursor/hooks.json` and sets `"version": 1` when
+the file has none; an existing `version` that is not a positive integer is
+refused. Cursor runs project hooks from the project root, so the stored input
+and anchored paths are relative (`./session.ws`).
+
+The entry runs `wright agent hook post-edit --harness cursor -- INPUT
+[OPTIONS]`. When the check reports errors, the hook exits 0 and prints JSON
+with `additional_context` holding them, which Cursor injects into the
+conversation after the tool result. Otherwise it prints nothing; a Wright
+failure or non-JSON input exits 1 with the failure on stderr. The `postToolUse`
+payload documents no edited-path field (`afterFileEdit` has `file_path` but no
+documented output), so the check runs without the file filter, and an edit
+outside a program that has errors reports them. Source:
+[Cursor hooks](https://cursor.com/docs/agent/hooks), read 2026-11-23.
+
+#### VS Code hook
+
+`wright agent install --hook vscode` adds one flat `postToolUse` command hook to
+the inline `hooks` block of `.github/copilot/settings.local.json`, read by the
+Copilot hook runtime that VS Code, the Copilot app, and the Copilot CLI share.
+The matcher `create|edit|str_replace_editor|apply_patch` is tested against the
+whole tool name. The hook's `cwd` is `.`, the repository root, so the stored
+input and anchored paths are relative. The Local session target has a separate
+hook contract and is not supported.
+
+The entry runs `wright agent hook post-edit --harness vscode -- INPUT
+[OPTIONS]`. When the check reports errors, the hook exits 0 and prints JSON
+with the top-level `additionalContext` holding them, which VS Code appends to
+the tool result. Otherwise it prints nothing; a Wright failure or non-JSON
+input exits 1 with the failure on stderr. The reference types `toolArgs` as
+unknown and shows no edit-tool arguments, so the check runs without the file
+filter. Sources: [VS Code
+hooks](https://code.visualstudio.com/docs/agent-customization/hooks) and the
+[Copilot hooks reference](https://docs.github.com/en/copilot/reference/hooks-reference),
+read 2026-11-23. The VS Code pages list no tool names; the matcher uses the
+reference's.
+
 #### Activation and verification (#1119)
 
 A successful `--hook` install prints the remaining steps and a verification
 command. `echo '{}' | <stored command>`, run from the project, exits 0 with no
 output when the stored input and options load the project. A failure shows as
-output: Claude Code exits 2 with the diagnostic on stderr; Codex exits 0 with
-`additionalContext` JSON on stdout. The check does not prove the harness runs
-the hook. The activation step differs by harness:
+output: Claude Code exits 2 with the diagnostic on stderr; Codex, Cursor, and
+VS Code exit 0 with the JSON field their harness reads on stdout. The check
+does not prove the harness runs the hook. The activation step differs by
+harness:
 
 | Harness | Config file | Remaining step |
 | --- | --- | --- |
 | Claude Code | `.claude/settings.local.json` | Start a new session in the project; `/hooks` lists the entry |
 | Codex | `.codex/hooks.json` | Trust the project, then trust the hook (`Review hooks` or `Trust all`). Codex skips the hook until both are done. Start a new session |
+| Cursor | `.cursor/hooks.json` | Open the project as a trusted workspace and start a new Agent chat. The Hooks tab in Customize and the Hooks output channel show the hook |
+| VS Code | `.github/copilot/settings.local.json` | Use the Copilot session target and start a new chat. `/hooks` lists the entry |
 
 A refused install (load failure, different existing hook, wrong file shape)
 prints the cause and the next action, writes nothing, and prints no next steps.

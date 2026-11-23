@@ -63,9 +63,14 @@ mutating shell startup configuration:
     binary, which rewrites existing Wright completion files in conventional
     locations so completions match the installed command model. A running shell
     keeps the definitions it already loaded, so refresh prints the reload
-    command (for example `exec fish`). `wright update` forwards both streams of
-    the refresh, so a file that could not be written is reported on stderr with
-    its path and the command to run again; the update still succeeds.
+    command (for example `exec fish`) for every shell that has an installed
+    file, including a file that was already current. Shells without an
+    installed file produce no output. When the refresh exits 0, `wright update`
+    forwards its stdout and stderr, so a file that could not be written is
+    reported on stderr with its path and the command to run again, and the
+    update still succeeds. When the refresh exits non-zero or cannot start
+    (for example a target without `completion refresh`), its output is dropped
+    and `wright update` prints `wright completion install --force` instead.
 * **Package-manager boundaries**: Homebrew, Scoop, and WinGet packaging
   consume `wright completion <shell>` generation using native package conventions
   rather than maintaining hand-written completion scripts.
