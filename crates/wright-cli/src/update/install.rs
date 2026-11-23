@@ -49,6 +49,8 @@ pub(super) fn install_version(
     match refreshed {
         Ok(output) if output.status.success() => {
             print!("{}", String::from_utf8_lossy(&output.stdout));
+            // A file that could not be written is a warning on stderr with exit 0.
+            eprint!("{}", String::from_utf8_lossy(&output.stderr));
         }
         _ => eprintln!(
             "warning: could not refresh shell completions; run `wright completion install --force` for your shell"

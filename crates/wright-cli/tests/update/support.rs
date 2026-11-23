@@ -19,7 +19,17 @@ pub(crate) struct Release {
 }
 
 pub(crate) fn release(version: &str) -> Release {
-    let archive = build_archive(version);
+    release_with_wright(
+        version,
+        format!(
+            "#!/bin/sh\nif [ \"$1 $2\" = \"completion refresh\" ] && [ -n \"$WRIGHT_COMPLETION_DIR\" ]; then echo refreshed > \"$WRIGHT_COMPLETION_DIR/refresh-ran\"; fi\necho \"fake wright {version}\"\n"
+        ),
+    )
+}
+
+/// A release whose `wright` is the given script instead of the stock fake.
+pub(crate) fn release_with_wright(version: &str, wright: String) -> Release {
+    let archive = build_archive(version, wright);
     let name = format!("wright-{version}-{TRIPLE}.tar.gz");
     let mut files = HashMap::new();
     files.insert(
@@ -34,14 +44,11 @@ pub(crate) fn release(version: &str) -> Release {
     Release { files }
 }
 
-fn build_archive(version: &str) -> Vec<u8> {
+fn build_archive(version: &str, wright: String) -> Vec<u8> {
     let dir = format!("wright-{version}-{TRIPLE}");
     let mut builder = tar::Builder::new(Vec::new());
     for (name, content) in [
-        (
-            "wright",
-            format!("#!/bin/sh\nif [ \"$1 $2\" = \"completion refresh\" ] && [ -n \"$WRIGHT_COMPLETION_DIR\" ]; then echo refreshed > \"$WRIGHT_COMPLETION_DIR/refresh-ran\"; fi\necho \"fake wright {version}\"\n").into_bytes(),
-        ),
+        ("wright", wright.into_bytes()),
         (
             "wright-lsp",
             format!("#!/bin/sh\necho \"fake wright-lsp {version}\"\n").into_bytes(),

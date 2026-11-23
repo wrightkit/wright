@@ -417,7 +417,7 @@ pub(crate) fn refresh_installed_completions() {
                 Ok(InstallStatus::UpToDate(_) | InstallStatus::DryRun(_)) => {}
                 Err(error) => {
                     eprintln!(
-                        "warning: could not refresh {} completion in {}: {}",
+                        "warning: could not refresh {} completion in {}: {}; fix the file permissions, then run `wright completion refresh`",
                         shell.as_str(),
                         target_file.display(),
                         error.message()
