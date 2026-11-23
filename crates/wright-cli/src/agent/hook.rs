@@ -7,7 +7,7 @@ use wright_driver::result::exit;
 
 use super::AgentError;
 use super::config_file::{ensure_not_linked, read_config, write_config};
-use super::stored::{Stored, load_failure, load_rejection, session_config};
+use super::stored::{Stored, load_failure, load_rejection, session_config, shell_quote};
 use crate::cli::HookTarget;
 use crate::present::RenderContext;
 
@@ -117,9 +117,9 @@ fn git_anchor(root: &Path) -> Result<String, AgentError> {
 /// project directory keeps `variable` expandable; every other character of
 /// the word stays literal.
 fn shell_word(spec: &Spec, token: &str) -> String {
-    let safe = |c: char| c.is_ascii_alphanumeric() || "-_./=:,@%+".contains(c);
-    if !token.is_empty() && token.chars().all(safe) {
-        return token.to_string();
+    let word = shell_quote(token);
+    if word == token {
+        return word;
     }
     if let Some(variable) = spec.variable
         && let Some(rest) = token.strip_prefix(&spec.input)
@@ -134,7 +134,7 @@ fn shell_word(spec: &Spec, token: &str) -> String {
         }
         return format!("\"{variable}{quoted}\"");
     }
-    format!("'{}'", token.replace('\'', r"'\''"))
+    word
 }
 
 fn hook_command(target: HookTarget, spec: &Spec, stored: &Stored) -> String {
