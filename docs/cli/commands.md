@@ -357,7 +357,7 @@ Cursor, and VS Code as JSON at exit 0. To activate the hook in its harness:
 | Claude Code | `.claude/settings.local.json` | Start a new session in the project; `/hooks` lists the entry |
 | Codex | `.codex/hooks.json` | Trust the project, then trust the hook (`Review hooks` or `Trust all`). Codex skips the hook until both are done. Start a new session |
 | Cursor | `.cursor/hooks.json` | Open the project as a trusted workspace and start a new Agent chat. The Hooks tab in Customize and the Hooks output channel show the hook |
-| VS Code | `.github/copilot/settings.local.json` | Use the Copilot session target and start a new chat. `/hooks` lists the entry |
+| VS Code | `.github/copilot/settings.local.json` | Start a Copilot chat. Verify with an invalid edit in a test copy |
 
 A refused install prints its cause and next action, writes nothing, and omits
 next steps. `--dry-run` reports planned writes and omits activation and
