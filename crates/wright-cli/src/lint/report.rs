@@ -1,8 +1,8 @@
 use wright_driver::result::{Envelope, LintPackageResult, LintPackageRow};
 
 use crate::plain::{PlainReport, expand_all, field, truncated_record};
-use crate::present::terminal::{TerminalReport, heading, line, next, note, plural};
-use crate::present::{RenderContext, ResultPresentation};
+use crate::present::terminal::{TerminalReport, heading, line, note, plural};
+use crate::present::{RenderContext, ResultPresentation, render_next};
 
 fn status_counts(result: &LintPackageResult) -> Vec<(String, usize)> {
     const ORDER: &[&str] = &[
@@ -55,6 +55,10 @@ fn metadata(result: &LintPackageResult) -> String {
 }
 
 impl ResultPresentation for LintPackageResult {
+    fn next_commands(&self) -> impl Iterator<Item = &str> {
+        self.next.iter().map(String::as_str)
+    }
+
     fn metadata(&self) -> Option<String> {
         Some(metadata(self))
     }
@@ -185,7 +189,6 @@ impl TerminalReport for LintPackageResult {
                 ),
             );
         }
-        let value = serde_json::to_value(self).unwrap_or_default();
-        next(ctx, &value);
+        render_next(ctx, self.next_commands().map(Some));
     }
 }

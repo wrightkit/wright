@@ -8,10 +8,10 @@ use workshop_rs::source::{FileId, Position, SourceDocument, Span};
 use workshop_rs::{Action, Event, ModifyOp, Program, Rule, Value};
 
 use super::cfg::{is_wait, matching_end};
-use super::symbols::{ActionId, RuleId, ValueId, value_identity_map};
+use super::symbols::{ActionId, RuleId, ValueId, ValueIds, value_identity_map};
 use super::traversal::{
     dead_actions, live_actions, opens_block, subroutine_callee, unwrapped, value_children,
-    visit_action_roots, visit_value_tree,
+    values_equal, visit_action_roots, visit_value_tree,
 };
 use crate::analysis::{Boundedness, EvidenceClass, Severity};
 use crate::registry::{
@@ -82,7 +82,15 @@ pub enum LintFix {
 }
 
 pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
-    let value_ids = value_identity_map(program);
+    analyze_with_value_ids(program, config, &ValueIds::new())
+}
+
+pub(crate) fn analyze_with_value_ids(
+    program: &Program,
+    config: &LintConfig,
+    value_ids: &ValueIds,
+) -> Vec<Finding> {
+    let value_ids = value_ids.get_or_init(|| value_identity_map(program));
     let mut findings = Vec::new();
     for (rule_id, rule) in program.rules.iter().enumerate() {
         if rule.disabled {
@@ -91,7 +99,7 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
         let dead = dead_actions(&rule.actions);
         if config.is_enabled(ONGOING_CONDITION_HOT_PATH.id) {
             findings.extend(ongoing_condition_findings(
-                program, rule_id, rule, &value_ids,
+                program, rule_id, rule, value_ids,
             ));
         }
         for (action_id, action) in rule.actions.iter().enumerate() {
@@ -135,13 +143,13 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
                     action_id,
                     start..end,
                     &dead,
-                    &value_ids,
+                    value_ids,
                 ));
             }
         }
         if config.is_enabled(DUPLICATE_CONDITION.id) {
             findings.extend(duplicate_condition_findings(
-                program, rule_id, rule, &dead, &value_ids,
+                program, rule_id, rule, &dead, value_ids,
             ));
         }
     }
@@ -166,56 +174,6 @@ fn loop_body(rule: &Rule, action: usize) -> Option<(usize, usize)> {
     }
     let end = matching_end(&rule.actions, action)?;
     Some((action + 1, end))
-}
-fn values_equal(left: &Value, right: &Value) -> bool {
-    match (left, right) {
-        (Value::Number(a), Value::Number(b)) => a == b,
-        (Value::String(a), Value::String(b))
-        | (Value::LocalizedString(a), Value::LocalizedString(b))
-        | (Value::GlobalVariable(a), Value::GlobalVariable(b))
-        | (Value::Subroutine(a), Value::Subroutine(b)) => a == b,
-        (Value::Bool(a), Value::Bool(b)) => a == b,
-        (Value::Null, Value::Null) | (Value::EventPlayer, Value::EventPlayer) => true,
-        (Value::Array(a), Value::Array(b)) => {
-            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| values_equal(a, b))
-        }
-        (Value::Call { name: an, args: aa }, Value::Call { name: bn, args: ba }) => {
-            an == bn && aa.len() == ba.len() && aa.iter().zip(ba).all(|(a, b)| values_equal(a, b))
-        }
-        (
-            Value::Vector {
-                x: ax,
-                y: ay,
-                z: az,
-            },
-            Value::Vector {
-                x: bx,
-                y: by,
-                z: bz,
-            },
-        ) => values_equal(ax, bx) && values_equal(ay, by) && values_equal(az, bz),
-        (
-            Value::Enum {
-                value_type: at,
-                value: av,
-            },
-            Value::Enum {
-                value_type: bt,
-                value: bv,
-            },
-        ) => at == bt && av == bv,
-        (
-            Value::PlayerVariable {
-                player: ap,
-                variable: av,
-            },
-            Value::PlayerVariable {
-                player: bp,
-                variable: bv,
-            },
-        ) => av == bv && values_equal(ap, bp),
-        _ => false,
-    }
 }
 
 fn condition_value_or_ancestor_span(

@@ -1,19 +1,11 @@
-use std::cell::OnceCell;
-use std::collections::HashMap;
-
 use workshop_rs::catalog::{Catalog, Kind, Locale};
 use workshop_rs::source::Span;
 use workshop_rs::{Action as PublicAction, Program as PublicProgram, Value as PublicValue};
 
 use crate::analysis::{EvidenceClass, Severity};
 use crate::canonical::{
-    Finding, ValueId, dead_actions, matching_end, value_identity_map, visit_action_roots,
+    Finding, ValueIds, dead_actions, matching_end, value_identity_map, visit_action_roots,
 };
-
-/// The program's value-identity map, built on the first value match and
-/// shared by every rule run over one program: building it walks the whole
-/// program, so per-rule construction made a lint run O(rules × program).
-pub(crate) type ValueIds = OnceCell<HashMap<usize, ValueId>>;
 
 mod error;
 mod pattern;

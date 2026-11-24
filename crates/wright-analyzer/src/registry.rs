@@ -445,12 +445,13 @@ impl LintRegistry {
             }
         }
 
+        let value_ids = crate::canonical::ValueIds::new();
         let mut findings = hotpath::measure_block!("analyzer::lint_analyze", {
-            crate::canonical::analyze(program, config)
+            crate::canonical::analyze_with_value_ids(program, config, &value_ids)
         });
         findings.retain(|finding| self.native_owns(&finding.code));
         findings.extend(hotpath::measure_block!("analyzer::lint_custom", {
-            self.run_canonical_custom(program, config)
+            self.run_canonical_custom_with_value_ids(program, config, &value_ids)
         }));
         findings.retain(|finding| available.get(finding.rule).copied().unwrap_or(false));
         let order: HashMap<_, _> = self
@@ -476,8 +477,20 @@ impl LintRegistry {
         program: &workshop_rs::Program,
         config: &LintConfig,
     ) -> Vec<Finding> {
+        self.run_canonical_custom_with_value_ids(
+            program,
+            config,
+            &crate::canonical::ValueIds::new(),
+        )
+    }
+
+    fn run_canonical_custom_with_value_ids(
+        &self,
+        program: &workshop_rs::Program,
+        config: &LintConfig,
+        value_ids: &crate::canonical::ValueIds,
+    ) -> Vec<Finding> {
         let mut findings = Vec::new();
-        let value_ids = crate::declarative::ValueIds::new();
         for rule in 0..program.rules.len() {
             for entry in &self.entries {
                 let RegistryEntry::Declarative {
@@ -492,7 +505,7 @@ impl LintRegistry {
                 let mut rule_findings = declarative.run_canonical(
                     program,
                     rule,
-                    &value_ids,
+                    value_ids,
                     config.options(declarative.id()).min_matches,
                     config.options(declarative.id()).max_matches,
                 );
