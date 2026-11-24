@@ -275,7 +275,7 @@ fn report_hook(status: &hook::HookStatus, target: HookTarget, command: &str, dry
             "  1. open this project as a trusted Cursor workspace; Cursor reloads `.cursor/hooks.json` on save, and the Hooks tab in Customize and the Hooks output channel show whether the hook ran\n  2. start a new Agent chat in this project"
         ),
         HookTarget::Vscode => println!(
-            "  1. select Copilot as the session target; its hook runtime reads this file\n  2. start a new chat in this project; `/hooks` lists the entry"
+            "  1. select Copilot as the session target; its hook runtime reads this file\n  2. start a new chat in this project\n  3. in a disposable copy with the hook installed, ask the agent to make an invalid source edit. Expect a Wright diagnostic in the tool result. If it is missing, inspect Agent Debug Logs"
         ),
     }
     let command = stored::paste_quote(command);
