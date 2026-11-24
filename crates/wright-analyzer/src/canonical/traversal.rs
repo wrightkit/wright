@@ -148,6 +148,57 @@ fn visit_value_tree_at<'a>(
     }
 }
 
+pub(super) fn values_equal(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Number(a), Value::Number(b)) => a == b,
+        (Value::String(a), Value::String(b))
+        | (Value::LocalizedString(a), Value::LocalizedString(b))
+        | (Value::GlobalVariable(a), Value::GlobalVariable(b))
+        | (Value::Subroutine(a), Value::Subroutine(b)) => a == b,
+        (Value::Bool(a), Value::Bool(b)) => a == b,
+        (Value::Null, Value::Null) | (Value::EventPlayer, Value::EventPlayer) => true,
+        (Value::Array(a), Value::Array(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| values_equal(a, b))
+        }
+        (Value::Call { name: an, args: aa }, Value::Call { name: bn, args: ba }) => {
+            an == bn && aa.len() == ba.len() && aa.iter().zip(ba).all(|(a, b)| values_equal(a, b))
+        }
+        (
+            Value::Vector {
+                x: ax,
+                y: ay,
+                z: az,
+            },
+            Value::Vector {
+                x: bx,
+                y: by,
+                z: bz,
+            },
+        ) => values_equal(ax, bx) && values_equal(ay, by) && values_equal(az, bz),
+        (
+            Value::Enum {
+                value_type: at,
+                value: av,
+            },
+            Value::Enum {
+                value_type: bt,
+                value: bv,
+            },
+        ) => at == bt && av == bv,
+        (
+            Value::PlayerVariable {
+                player: ap,
+                variable: av,
+            },
+            Value::PlayerVariable {
+                player: bp,
+                variable: bv,
+            },
+        ) => av == bv && values_equal(ap, bp),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

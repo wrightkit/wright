@@ -200,12 +200,8 @@ fn status_label(status: Status) -> &'static str {
     }
 }
 
-fn next_commands<T: serde::Serialize>(envelope: &Envelope<T>) -> Vec<String> {
-    let mut commands = Vec::new();
-    let result = serde_json::to_value(&envelope.result).unwrap_or_default();
-    if let Some(next) = result.get("next").and_then(Value::as_array) {
-        commands.extend(next.iter().filter_map(Value::as_str).map(str::to_string));
-    }
+fn next_commands<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) -> Vec<String> {
+    let mut commands: Vec<_> = envelope.result.next_commands().map(str::to_owned).collect();
     match envelope.command.as_str() {
         "inspect" | "analyze" if commands.is_empty() => {
             for cmd in DETAIL_COMMANDS {

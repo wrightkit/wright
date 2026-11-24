@@ -6,6 +6,7 @@ mod service;
 mod symbols;
 mod traversal;
 
+pub(crate) use analysis::analyze_with_value_ids;
 pub use analysis::{Finding, LintFix, RepeatedValue, RepeatedValueSpan, analyze};
 pub use cfg::BLOCK_KINDS;
 pub(crate) use cfg::matching_end;

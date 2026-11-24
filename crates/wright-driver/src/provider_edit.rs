@@ -100,8 +100,9 @@ fn rename_result(
             )]);
         }
         let identity = crate::input_identity(&document.text);
+        let lines: Vec<_> = document.text.split('\n').collect();
         for text_edit in &doc_edits.text_edits {
-            let range = match to_edit_range(&document.text, text_edit.range) {
+            let range = match to_edit_range(&lines, text_edit.range) {
                 Ok(r) => r,
                 Err(diag) => return refusal(vec![diag]),
             };
@@ -212,9 +213,10 @@ fn validate_pipeline(
                 ),
             )]));
         };
+        let lines: Vec<_> = document.text.split('\n').collect();
         let mut text_edits = Vec::new();
         for edit in edits {
-            let te = match to_text_edit(&document.text, edit) {
+            let te = match to_text_edit(&lines, edit) {
                 Ok(te) => te,
                 Err(d) => return Some(refusal(vec![d])),
             };
@@ -253,22 +255,19 @@ fn validate_pipeline(
 
     let mut edited = wright_lpp::DocumentSet::new();
     for (uri, document) in documents {
-        let edited_text = previews
-            .iter()
-            .find(|p| p.source == *uri)
-            .map(|p| p.new_text.clone());
-        let text = edited_text.clone().unwrap_or_else(|| document.text.clone());
+        let preview = previews.iter().find(|preview| preview.source == *uri);
+        let text = preview.map_or(&document.text, |preview| &preview.new_text);
         edited.insert(
             uri.clone(),
             wright_lpp::Document {
                 uri: uri.clone(),
                 language_id: document.language_id.clone(),
-                version: if edited_text.is_some() {
+                version: if preview.is_some() {
                     document.version + 1
                 } else {
                     document.version
                 },
-                text,
+                text: text.clone(),
             },
         );
     }
@@ -329,10 +328,9 @@ fn refusal(diagnostics: Vec<Diagnostic>) -> ProviderMutation {
     }
 }
 
-fn to_edit_range(text: &str, range: wright_lpp::Range) -> Result<EditRange, Diagnostic> {
-    let lines: Vec<&str> = text.split('\n').collect();
-    let start = position_to_column(&lines, range.start, "range start")?;
-    let end = position_to_column(&lines, range.end, "range end")?;
+fn to_edit_range(lines: &[&str], range: wright_lpp::Range) -> Result<EditRange, Diagnostic> {
+    let start = position_to_column(lines, range.start, "range start")?;
+    let end = position_to_column(lines, range.end, "range end")?;
     if (start.0, start.1) > (end.0, end.1) {
         return Err(Diagnostic::error(
             "edit-invalid-range",
@@ -351,10 +349,9 @@ fn to_edit_range(text: &str, range: wright_lpp::Range) -> Result<EditRange, Diag
     })
 }
 
-fn to_text_edit(text: &str, edit: &SourceEdit) -> Result<wright_lpp::TextEdit, Diagnostic> {
-    let lines: Vec<&str> = text.split('\n').collect();
-    let start = column_to_position(&lines, edit.range.start_line, edit.range.start_col)?;
-    let end = column_to_position(&lines, edit.range.end_line, edit.range.end_col)?;
+fn to_text_edit(lines: &[&str], edit: &SourceEdit) -> Result<wright_lpp::TextEdit, Diagnostic> {
+    let start = column_to_position(lines, edit.range.start_line, edit.range.start_col)?;
+    let end = column_to_position(lines, edit.range.end_line, edit.range.end_col)?;
     Ok(wright_lpp::TextEdit {
         range: wright_lpp::Range { start, end },
         new_text: edit.new_text.clone(),
@@ -557,7 +554,8 @@ mod tests {
                 character: 9,
             },
         };
-        let wright = to_edit_range(text, lpp).expect("converts");
+        let lines: Vec<_> = text.split('\n').collect();
+        let wright = to_edit_range(&lines, lpp).expect("converts");
         assert_eq!(
             wright,
             EditRange {
@@ -568,7 +566,7 @@ mod tests {
             }
         );
         let back = to_text_edit(
-            text,
+            &lines,
             &SourceEdit {
                 edit_kind: "rename".to_string(),
                 source: URI.to_string(),
@@ -583,9 +581,8 @@ mod tests {
 
     #[test]
     fn utf16_offset_inside_a_supplementary_character_refuses() {
-        let text = "puzzle 𝕏 {";
         let error = to_edit_range(
-            text,
+            &["puzzle 𝕏 {"],
             wright_lpp::Range {
                 start: wright_lpp::Position {
                     line: 0,
@@ -603,9 +600,8 @@ mod tests {
 
     #[test]
     fn position_at_end_of_line_is_valid() {
-        let text = "ab\ncd";
         let wright = to_edit_range(
-            text,
+            &["ab", "cd"],
             wright_lpp::Range {
                 start: wright_lpp::Position {
                     line: 0,

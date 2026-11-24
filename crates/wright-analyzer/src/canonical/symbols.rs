@@ -1,3 +1,4 @@
+use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 
 use workshop_rs::source::Span;
@@ -8,6 +9,7 @@ use super::traversal::{visit_action_roots, visit_value_tree};
 pub type RuleId = usize;
 pub type ActionId = usize;
 pub type ValueId = usize;
+pub(crate) type ValueIds = OnceCell<HashMap<usize, ValueId>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SymbolId(pub usize);

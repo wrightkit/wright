@@ -13,9 +13,9 @@ use super::{
     finding_location_line, finding_location_span, finding_section, fix_status_counts,
     fix_status_parts, is_real_source_path, lint_finding_failure, lint_footer, location_suffix,
     lookup_hint_args, meta_severity_counts, normalize_finding_spans, notable_callers,
-    persistent_object_summary, query_items, render_diff_lines, render_node, rule_address,
-    rule_name, shown_diagnostics, shown_of, sorted_findings, source_context, span_suffix,
-    summary_status, symbol_kind_heading, tree_rule, uniform_evidence,
+    persistent_object_summary, query_items, render_diff_lines, render_next, render_node,
+    rule_address, rule_name, shown_diagnostics, shown_of, sorted_findings, source_context,
+    span_suffix, summary_status, symbol_kind_heading, tree_rule, uniform_evidence,
 };
 
 mod comparison;
@@ -380,21 +380,6 @@ fn withheld_note(ctx: &RenderContext<'_>, value: &Value, noun: &str) {
     }
 }
 
-pub(crate) fn next(ctx: &RenderContext<'_>, value: &Value) {
-    let Some(commands) = value["next"]
-        .as_array()
-        .filter(|commands| !commands.is_empty())
-    else {
-        return;
-    };
-    heading(ctx, "Next");
-    for item in commands {
-        if let Some(command) = item.as_str().or_else(|| item["command"].as_str()) {
-            line(ctx, 1, command);
-        }
-    }
-}
-
 fn program_overview(ctx: &RenderContext<'_>, program: &Value, persistent_objects: Option<usize>) {
     heading(ctx, "Program overview");
     let mut parts = vec![
@@ -420,11 +405,10 @@ fn program_overview(ctx: &RenderContext<'_>, program: &Value, persistent_objects
 
 impl TerminalReport for CheckResult {
     fn body(&self, ctx: &RenderContext<'_>) {
-        let value = serde_json::to_value(self).unwrap_or_default();
-        if let Some(program) = value.get("program").filter(|program| program.is_object()) {
+        if let Some(program) = self.program.as_ref().filter(|program| program.is_object()) {
             program_overview(ctx, program, None);
         }
-        next(ctx, &value);
+        render_next(ctx, self.next_commands().map(Some));
     }
 }
 
@@ -476,7 +460,7 @@ impl TerminalReport for LintResult {
         if let Some(fixes) = &self.fixes {
             lint_fixes(ctx, fixes);
         }
-        next(ctx, &serde_json::to_value(self).unwrap_or_default());
+        render_next(ctx, self.next_commands().map(Some));
     }
 }
 
@@ -600,7 +584,14 @@ impl TerminalReport for EssentialResult {
         if let Some(expand) = value["expand"].as_str() {
             note(ctx, 1, &expand.replace(" / all: true", ""));
         }
-        next(ctx, value);
+        render_next(
+            ctx,
+            value["next"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|item| item.as_str().or_else(|| item["command"].as_str())),
+        );
     }
 }
 
