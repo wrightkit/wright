@@ -315,8 +315,7 @@ pub(crate) fn run(args: &AgentArgs) -> Result<u8, AgentError> {
                     .transpose()?;
                 Ok((server, hook))
             };
-            if !install_args.dry_run {
-                // Validate every registration before writing any of them.
+            if !install_args.dry_run && install_args.mcp.is_some() && install_args.hook.is_some() {
                 register(true)?;
             }
             let (server, hook) = register(install_args.dry_run)?;

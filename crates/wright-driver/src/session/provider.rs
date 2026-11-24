@@ -28,7 +28,7 @@ use crate::source_provider::{
 /// recreated, so it stays (`docs/embedding.md`).
 pub(super) struct ProviderSlot {
     provider: Box<dyn SourceProvider>,
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    #[cfg(not(target_arch = "wasm32"))]
     spawned: bool,
 }
 
@@ -36,6 +36,7 @@ impl ProviderSlot {
     pub(super) fn injected(provider: Box<dyn SourceProvider>) -> Self {
         Self {
             provider,
+            #[cfg(not(target_arch = "wasm32"))]
             spawned: false,
         }
     }

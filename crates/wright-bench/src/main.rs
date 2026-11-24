@@ -9,16 +9,12 @@ use wright_driver::config::{InputSpec, SessionConfig, SourceKind};
 use wright_driver::service::{ToolRequest, ToolResponse, ToolService};
 
 const BENCH_CONTRACT: &str = "wright-bench/v1";
-const BENCH_CONFIG: &str = r#"{
-  "iterations": 5,
-  "warmup": 1,
-  "semanticQueryRepeats": 5,
-  "thresholds": {
-    "maxMeanLatencyMs": 500.0,
-    "maxEmittedBytes": 200000,
-    "maxRssMb": 1024.0
-  }
-}"#;
+const ITERATIONS: usize = 5;
+const WARMUP: usize = 1;
+const SEMANTIC_QUERY_REPEATS: usize = 5;
+const MAX_MEAN_LATENCY_MS: f64 = 500.0;
+const MAX_EMITTED_BYTES: usize = 200_000;
+const MAX_RSS_MB: f64 = 1024.0;
 
 #[hotpath::main(limit = 0)]
 fn main() -> ExitCode {
@@ -105,10 +101,6 @@ struct SemanticQueryReport {
 }
 
 fn run() -> Result<bool, String> {
-    let config: serde_json::Value =
-        serde_json::from_str(BENCH_CONFIG).map_err(|e| format!("invalid bench config: {e}"))?;
-    let iterations = config["iterations"].as_u64().unwrap_or(5) as usize;
-    let warmup = config["warmup"].as_u64().unwrap_or(1) as usize;
     let root = workspace_root().join("tests/fixtures/workshop");
 
     let mut reports = Vec::new();
@@ -117,7 +109,7 @@ fn run() -> Result<bool, String> {
     for (id, path) in benchmark_cases() {
         let source = std::fs::read_to_string(&path)
             .map_err(|e| format!("cannot read fixture '{id}': {e}"))?;
-        for _ in 0..warmup {
+        for _ in 0..WARMUP {
             compile(&source, id, &root)?;
         }
 
@@ -125,7 +117,7 @@ fn run() -> Result<bool, String> {
         let mut last_output = None;
         let mut last_nodes = (0, 0, 0);
 
-        for _ in 0..iterations {
+        for _ in 0..ITERATIONS {
             let start = Instant::now();
             let (output, nodes) = compile(&source, id, &root)?;
             latencies.push(start.elapsed());
@@ -146,18 +138,10 @@ fn run() -> Result<bool, String> {
             wir_actions,
             wir_rules,
         };
-        if mean_ms
-            > config["thresholds"]["maxMeanLatencyMs"]
-                .as_f64()
-                .unwrap_or(f64::MAX)
-        {
+        if mean_ms > MAX_MEAN_LATENCY_MS {
             regressions.push(format!("{id}: latency {mean_ms:.1}ms exceeds threshold"));
         }
-        if emitted_bytes as f64
-            > config["thresholds"]["maxEmittedBytes"]
-                .as_f64()
-                .unwrap_or(f64::MAX)
-        {
+        if emitted_bytes > MAX_EMITTED_BYTES {
             regressions.push(format!(
                 "{id}: emitted {emitted_bytes} bytes exceeds threshold"
             ));
@@ -165,18 +149,10 @@ fn run() -> Result<bool, String> {
         reports.push(report);
     }
 
-    let semantic_queries = benchmark_semantic_queries(
-        iterations,
-        warmup,
-        config["semanticQueryRepeats"].as_u64().unwrap_or(5) as usize,
-    )?;
+    let semantic_queries = benchmark_semantic_queries(ITERATIONS, WARMUP, SEMANTIC_QUERY_REPEATS)?;
 
     let rss_mb = peak_rss_mb();
-    if rss_mb
-        > config["thresholds"]["maxRssMb"]
-            .as_f64()
-            .unwrap_or(f64::MAX)
-    {
+    if rss_mb > MAX_RSS_MB {
         regressions.push(format!("peak RSS {rss_mb:.1} MB exceeds threshold"));
     }
 
@@ -184,20 +160,21 @@ fn run() -> Result<bool, String> {
         contract: BENCH_CONTRACT,
         version: wright_driver::result::DRIVER_VERSION,
         profile: Profile::Compat.as_str(),
-        iterations,
-        thresholds: config["thresholds"].clone(),
+        iterations: ITERATIONS,
+        thresholds: serde_json::json!({
+            "maxMeanLatencyMs": MAX_MEAN_LATENCY_MS,
+            "maxEmittedBytes": MAX_EMITTED_BYTES,
+            "maxRssMb": MAX_RSS_MB,
+        }),
         fixtures: reports,
         semantic_queries,
         summary: serde_json::json!({ "peakRssMb": rss_mb, "regressions": regressions }),
     };
     let out = workspace_root().join("target");
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
-    std::fs::write(
-        out.join("wright-bench-report.json"),
-        serde_json::to_string_pretty(&report).unwrap(),
-    )
-    .map_err(|e| e.to_string())?;
-    println!("{}", serde_json::to_string_pretty(&report).unwrap());
+    let report = serde_json::to_string_pretty(&report).unwrap();
+    std::fs::write(out.join("wright-bench-report.json"), &report).map_err(|e| e.to_string())?;
+    println!("{report}");
     Ok(regressions.is_empty())
 }
 

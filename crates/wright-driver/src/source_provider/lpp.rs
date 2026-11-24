@@ -226,46 +226,52 @@ pub(super) fn provider_diagnostics(
     documents: Vec<wright_lpp::DocumentDiagnostics>,
     locale: Option<&str>,
 ) -> Vec<Diagnostic> {
-    let mut arena: Vec<String> = documents
+    let paths: Vec<_> = documents
         .iter()
         .map(|doc| provider_uri_path(&doc.uri))
         .collect();
-    arena.sort();
+    let mut arena: Vec<_> = paths.iter().map(String::as_str).collect();
+    arena.sort_unstable();
     arena.dedup();
-    documents
-        .into_iter()
-        .flat_map(|doc| {
-            let path = provider_uri_path(&doc.uri);
-            let file = arena.iter().position(|entry| *entry == path).unwrap_or(0);
-            let lines: Vec<String> = std::fs::read_to_string(&path)
-                .map(|text| text.split('\n').map(str::to_owned).collect())
-                .unwrap_or_default();
-            doc.diagnostics.into_iter().map(move |d| {
-                let severity = match d.severity {
-                    wright_lpp::DiagnosticSeverity::Error => Severity::Error,
-                    wright_lpp::DiagnosticSeverity::Warning => Severity::Warning,
-                    _ => Severity::Info,
-                };
-                Diagnostic {
-                    code: d.code.unwrap_or_else(|| "provider-diagnostic".to_string()),
-                    stage: Stage::Frontend,
-                    severity,
-                    class: crate::diag::class_for_stage(Stage::Frontend),
-                    message: d.message.clone(),
-                    status: None,
-                    span: Some(SourceSpan {
-                        file,
-                        path: path.clone(),
-                        start: columns::provider_position(d.range.start, &lines),
-                        end: columns::provider_position(d.range.end, &lines),
-                    }),
-                    source: Some(Origin {
-                        kind: SourceLanguage::Opy.as_str().to_string(),
-                        locale: locale.map(str::to_owned),
-                    }),
-                    fields: Default::default(),
-                }
-            })
-        })
-        .collect()
+    let mut diagnostics = Vec::new();
+    for (doc, path) in documents.into_iter().zip(paths.iter().map(String::as_str)) {
+        if doc.diagnostics.is_empty() {
+            continue;
+        }
+        let file = arena
+            .binary_search(&path)
+            .expect("document path is in the arena");
+        let text = std::fs::read_to_string(path).ok();
+        let lines: Vec<_> = text
+            .as_deref()
+            .map(|text| text.split('\n').collect())
+            .unwrap_or_default();
+        for d in doc.diagnostics {
+            let severity = match d.severity {
+                wright_lpp::DiagnosticSeverity::Error => Severity::Error,
+                wright_lpp::DiagnosticSeverity::Warning => Severity::Warning,
+                _ => Severity::Info,
+            };
+            diagnostics.push(Diagnostic {
+                code: d.code.unwrap_or_else(|| "provider-diagnostic".to_string()),
+                stage: Stage::Frontend,
+                severity,
+                class: crate::diag::class_for_stage(Stage::Frontend),
+                message: d.message,
+                status: None,
+                span: Some(SourceSpan {
+                    file,
+                    path: path.to_string(),
+                    start: columns::provider_position(d.range.start, &lines),
+                    end: columns::provider_position(d.range.end, &lines),
+                }),
+                source: Some(Origin {
+                    kind: SourceLanguage::Opy.as_str().to_string(),
+                    locale: locale.map(str::to_owned),
+                }),
+                fields: Default::default(),
+            });
+        }
+    }
+    diagnostics
 }

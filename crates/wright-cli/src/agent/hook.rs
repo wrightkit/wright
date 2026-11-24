@@ -117,10 +117,6 @@ fn git_anchor(root: &Path) -> Result<String, AgentError> {
 /// project directory keeps `variable` expandable; every other character of
 /// the word stays literal.
 fn shell_word(spec: &Spec, token: &str) -> String {
-    let word = shell_quote(token);
-    if word == token {
-        return word;
-    }
     if let Some(variable) = spec.variable
         && let Some(rest) = token.strip_prefix(&spec.input)
     {
@@ -134,7 +130,7 @@ fn shell_word(spec: &Spec, token: &str) -> String {
         }
         return format!("\"{variable}{quoted}\"");
     }
-    word
+    shell_quote(token)
 }
 
 fn hook_command(target: HookTarget, spec: &Spec, stored: &Stored) -> String {
@@ -232,8 +228,9 @@ pub(crate) fn install(
         .ok_or_else(wrong_shape)?;
     let command = hook_command(target, &spec, &stored);
     let hook = command_hook(target, &command);
-    let mut ours = Vec::new();
-    for (index, entry) in entries.iter().enumerate() {
+    let mut first = None;
+    let mut duplicate = false;
+    'entries: for (index, entry) in entries.iter().enumerate() {
         let (hooks, matcher_matches) = match spec.group_matcher {
             Some(matcher) => (
                 entry["hooks"].as_array().map_or(&[][..], Vec::as_slice),
@@ -242,14 +239,18 @@ pub(crate) fn install(
             None => (std::slice::from_ref(entry), true),
         };
         for existing in hooks.iter().filter(|existing| is_wright_hook(existing)) {
-            ours.push((index, matcher_matches && *existing == hook));
+            if first.is_some() {
+                duplicate = true;
+                break 'entries;
+            }
+            first = Some((index, matcher_matches && *existing == hook));
         }
     }
-    let current = matches!(ours.as_slice(), [(_, true)]);
+    let current = !duplicate && matches!(first, Some((_, true)));
     if current && !needs_version {
         return Ok((HookStatus::UpToDate(path), command));
     }
-    let replaced = !ours.is_empty();
+    let replaced = first.is_some();
     if !current && replaced && !force {
         return Err(AgentError::Rejected(format!(
             "{} already has a Wright hook that differs from the one `wright agent install` generates; pass --force to replace it, or remove it first",
@@ -260,7 +261,7 @@ pub(crate) fn install(
         return Ok((HookStatus::DryRun(path), command));
     }
     if !current {
-        let first = ours.first().map_or(entries.len(), |(index, _)| *index);
+        let first = first.map_or(entries.len(), |(index, _)| index);
         entries.retain_mut(|entry| {
             if spec.group_matcher.is_none() {
                 return !is_wright_hook(entry);
@@ -276,7 +277,7 @@ pub(crate) fn install(
             Some(matcher) => json!({"matcher": matcher, "hooks": [hook]}),
             None => hook,
         };
-        entries.insert(first.min(entries.len()), entry);
+        entries.insert(first, entry);
     }
     if needs_version {
         settings.insert("version".into(), json!(1));
